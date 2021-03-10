@@ -1,0 +1,13 @@
+name: wormlab3d
+
+channels:
+  - conda-forge
+  - pytorch
+
+dependencies:
+  - python = 3.9
+  - numpy = 1.19
+  - pytorch = 1.7
+  - matplotlib = 3.3
+  - pymongo = 3.11
+  - mongoengine = 0.22

@@ -1,0 +1,7 @@
+__pycache__
+.idea
+tmp
+logs
+*.egg-info
+.eggs
+data/db
