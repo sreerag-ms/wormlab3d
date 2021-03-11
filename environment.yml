@@ -11,3 +11,4 @@ dependencies:
   - matplotlib = 3.3
   - pymongo = 3.11
   - mongoengine = 0.22
+  - opencv = 4.5
