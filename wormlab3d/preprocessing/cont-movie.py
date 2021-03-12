@@ -1,39 +1,18 @@
-#!/usr/bin/env mypython
-# (couldn't make project work with python2)
+#!/usr/bin/env python
 
-# SGE_TASK_ID=11 ./sil_movies.sh 000000 bgu
-
-from error import except_bad, eprint
-import math
-from .trace import incomplete, untested
-from math import pi, sin, cos
-from matplotlib import pyplot as plt
-from matplotlib import gridspec
-import matplotlib.animation as animation
+# from error import eprint
+# from .trace import incomplete, untested
 import numpy as np
-from numpy.linalg import norm
-from matplotlib.backend_bases import NavigationToolbar2, Event
-import matplotlib.image as mpimg
-import xml.etree.ElementTree
 import sys
 from sys import argv
 import os
 import getopt
 import cv2
 
-from .error import eprint
-from .worm_parse import pvdparse
-from .worm import worm
-
-from .util import tail
-from .pvdTD import total_displacement
-from .pvdSD import self_dist_min
-from .worm_util import worm_length
-from .project import project32
+# from .error import eprint
 
 # this is incomplete. use getopt below.
 import parameters
-import matplotlib.animation as manimation
 from cv2 import VideoCapture
 
 fps=25
@@ -45,7 +24,7 @@ class VideoIterator:
 	def __iter__(self):
 		return self
 	def __init__(self, fn):
-		untested()
+		# untested()
 
 		self._vc = VideoCapture(fn)
 		if(not self._vc.isOpened()):
@@ -55,7 +34,7 @@ class VideoIterator:
 	def fps(self):
 		return self._vc.get(cv2.CAP_PROP_FPS)
 	def frameSize(self):
-		incomplete()
+		# incomplete()
 		return (2048,2048)
 
 #count = [vidcap[i].get(cv2.CAP_PROP_FRAME_COUNT) for i in range(3) ]
@@ -63,7 +42,7 @@ class VideoIterator:
 	def __next__(self):
 		s, f = self._vc.read()
 		if not s:
-			untested()
+			# untested()
 			raise StopIteration()
 
 		im = cv2.cvtColor(f, cv2.COLOR_BGR2GRAY)
@@ -95,7 +74,7 @@ def contour_mask(im, thresh=50, maxval=255, min_area=100):
 	#thresh = cv2.adaptiveThreshold(im,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,\
  	#		            cv2.THRESH_BINARY,blocksize,2)
 
-	im2, contours, hierarchy = cv2.findContours(_thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+	contours, hierarchy = cv2.findContours(_thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 #	contours = sorted(contours, key=cv2.contourArea, reverse=True)
 
 	mask = np.zeros_like(im)
@@ -121,8 +100,6 @@ parameters = parameters.parser(argv)
 
 pvdDirname = parameters.pvd_dir + '/'
 wpDirname = parameters.pvd_dir + '/'
-
-from colormaps import phasecolor
 
 skipnogait = True
 
@@ -205,33 +182,14 @@ for o, a in opts:
 	elif o in ("--tagsfile"):
 		tagsfile = a
 
-from frame_tags import make_frame_tags
-tags=make_frame_tags(tagsfile)
-
-eprint("epvdDirname", pvdDirname)
-
 # strip the last character
 videoName = os.path.basename(pvdDirname)
-eprint("videoName", pvdDirname)
+# eprint("videoName", pvdDirname)
 
 # Set up axes and plot some awesome science
 
 nCam = 3
 camRange = range( 0, nCam )
-
-def setupAxis( cam, ax, i ):
-	if cam < 0:
-		ax3d.set_xlabel( 'mm' )
-		ax3d.set_ylabel( 'mm' )
-		ax3d.set_zlabel( 'mm' )
-		# ax.view_init(elev=20., azim=70 + i)
-		# ax.grid(False)
-	else:
-		ax.set_title( str(cam) )
-		ax.set_xlabel( 'Pixels' )
-		ax.set_ylabel( 'Pixels' )
-		# ax.set_title( "Camera View {0}".format(cam+1), fontsize=9 )
-
 
 class VideoData:
 	def __init__(self, filename):
@@ -303,7 +261,7 @@ clipnumber = 0;
 i=0
 clipfile = outdir + "/" + stem + mode +"_sil.mp4"
 
-from .img_util import to_range
+from img_util import to_range
 
 # util?
 def selcrop(center, framesize, cropSize):
@@ -352,7 +310,6 @@ skip_md = False
 
 def extract_stuff(img, cropSize, backGround, prev_img=None):
 	img = img.copy()
-	from .img_util import maxBrightness
 	img1 = cv2.subtract( backGround, img )
 	maxb = img1.max()
 	print("maxb", maxb, "/255")
@@ -403,13 +360,13 @@ def do_it():
 	##################
 	fps = videoData.fps()
 	outSize = videoData.frameSize()
-	eprint("read", bgfn)
+	# eprint("read", bgfn)
 	backGround = cv2.imread(bgfn, cv2.IMREAD_GRAYSCALE)
 	if(backGround is None):
 		raise IOError("cannot open " + bgfn)
 	assert(backGround is not None)
-	eprint("read", bgfn, type(backGround))
-	eprint("read", bgfn, backGround.shape)
+	# eprint("read", bgfn, type(backGround))
+	# eprint("read", bgfn, backGround.shape)
 
 	format="MJPG"
 	fourcc = cv2.VideoWriter_fourcc(*format)
