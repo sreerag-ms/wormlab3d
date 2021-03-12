@@ -49,3 +49,16 @@ rule generate_background:
         ./wormlab3d/preprocessing/create_bg_lp.py {input.raw_2} {output.background_2}
         ./wormlab3d/preprocessing/create_bg_lp.py {input.raw_3} {output.background_3}
         """
+
+rule compress_video:
+    """
+    Regenerate a video with a static background and use lossless compression.
+    """
+    input:
+        raw=config["cam1"]["raw"],
+        background=config["cam1"]["background"]
+    output:
+        video=config["cam1"]["video"]
+    shell:
+        """
+        """
