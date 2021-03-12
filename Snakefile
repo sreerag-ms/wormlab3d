@@ -5,6 +5,9 @@ rule all:
         config["cam1"]["background"],
         config["cam2"]["background"],
         config["cam3"]["background"],
+        config["cam1"]["video"],
+        config["cam2"]["video"],
+        config["cam3"]["video"],
         config['calibration']['output']
 
 rule calibration:
@@ -53,16 +56,32 @@ rule generate_background:
 rule compress_video:
     """
     Regenerate a video with a static background and use lossless compression.
+    TODO This should be independent of the cam-id
+    TODO This file needs a proper tidy up
     """
     input:
-        raw=config["cam1"]["raw"],
-        background=config["cam1"]["background"]
+        raw_1=config['cam1']["raw"],
+        background_1=config['cam1']["background"],
+        raw_2=config['cam2']["raw"],
+        background_2=config['cam2']["background"],
+        raw_3=config['cam3']["raw"],
+        background_3=config['cam3']["background"],
     output:
-        video=config["cam1"]["video"]
+        video_1=config['cam1']["video"],
+        video_2=config['cam2']["video"],
+        video_3=config['cam3']["video"],
     shell:
         """
         ./wormlab3d/preprocessing/cont-movie.py \
-          --if={input.raw} \
-          --bg={input.background} \
-          --of={output.video}
+            --if={input.raw_1} \
+            --bg={input.background_1} \
+            --of={output.video_1}
+        ./wormlab3d/preprocessing/cont-movie.py \
+            --if={input.raw_2} \
+            --bg={input.background_2} \
+            --of={output.video_2}
+        ./wormlab3d/preprocessing/cont-movie.py \
+            --if={input.raw_3} \
+            --bg={input.background_3} \
+            --of={output.video_3}
         """
