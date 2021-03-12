@@ -61,4 +61,8 @@ rule compress_video:
         video=config["cam1"]["video"]
     shell:
         """
+        ./wormlab3d/preprocessing/cont-movie.py \
+          --if={input.raw} \
+          --bg={input.background} \
+          --of={output.video}
         """
