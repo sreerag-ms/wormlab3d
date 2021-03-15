@@ -1,10 +1,7 @@
 from mongoengine import *
 
 from wormlab3d.data.model.experiment import Experiment
-
-
-class File(EmbeddedDocument):
-    location = StringField(required=True)
+from wormlab3d.data.model.frame import Frame
 
 
 class Trial(Document):
@@ -15,6 +12,14 @@ class Trial(Document):
     quality = FloatField()
     temperature = FloatField(min_value=0)
     comments = StringField()
-    files = ListField(EmbeddedDocumentField(File))
-    legacy_id = StringField(unique=True)
+    camera_1_avi = StringField(required=True)
+    camera_2_avi = StringField(required=True)
+    camera_3_avi = StringField(required=True)
+    legacy_id = IntField(unique=True)
     legacy_data = DictField()
+
+    def get_frame(self, frame_num) -> Frame:
+        return Frame.objects.get(
+            trial=self,
+            frame_num=frame_num
+        )
