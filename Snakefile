@@ -8,7 +8,7 @@ rule all:
         config["cam1"]["video"],
         config["cam2"]["video"],
         config["cam3"]["video"],
-        config['calibration']['output']
+        config["calibration"]["output"]
 
 rule calibration:
     """
@@ -20,10 +20,10 @@ rule calibration:
     TODO: where to put tests data and test parameters
     """
     input:
-        calibration_grid_directory=config['calibration']['directory'],
-        calibration_parameter_file=config['calibration']['parameters']
+        calibration_grid_directory=config["calibration"]["directory"],
+        calibration_parameter_file=config["calibration"]["parameters"]
     output:
-        output_file=config['calibration']['output']
+        output_file=config["calibration"]["output"]
     shell:
         """
         calibration -f \
@@ -60,16 +60,16 @@ rule compress_video:
     TODO This file needs a proper tidy up
     """
     input:
-        raw_1=config['cam1']["raw"],
-        background_1=config['cam1']["background"],
-        raw_2=config['cam2']["raw"],
-        background_2=config['cam2']["background"],
-        raw_3=config['cam3']["raw"],
-        background_3=config['cam3']["background"],
+        raw_1=config["cam1"]["raw"],
+        background_1=config["cam1"]["background"],
+        raw_2=config["cam2"]["raw"],
+        background_2=config["cam2"]["background"],
+        raw_3=config["cam3"]["raw"],
+        background_3=config["cam3"]["background"],
     output:
-        video_1=config['cam1']["video"],
-        video_2=config['cam2']["video"],
-        video_3=config['cam3']["video"],
+        video_1=config["cam1"]["video"],
+        video_2=config["cam2"]["video"],
+        video_3=config["cam3"]["video"],
     shell:
         """
         ./wormlab3d/preprocessing/cont-movie.py \
