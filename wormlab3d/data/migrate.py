@@ -4,18 +4,21 @@ import os
 from typing import List
 
 import numpy as np
+import scipy.io as sio
 from mongoengine import DoesNotExist
 
 from wormlab3d.data.model.experiment import Experiment
 from wormlab3d.data.model.frame import Frame
 from wormlab3d.data.model.midline2d import Midline2D
 from wormlab3d.data.model.midline3d import Midline3D
+from wormlab3d.data.model.tag import Tag
 from wormlab3d.data.model.trial import Trial
 
 HOME_DIR = os.path.expanduser('~')
 DATA_DIR = HOME_DIR + '/projects/worm_data'
 VIDEO_DIR = 'video'
 MIDLINES_2D_DIR = DATA_DIR + '/midlines'
+TAGS_MAT_PATH = '../../data/Behavior_Dictionary.mat'
 
 fields = [
     '#id',
@@ -54,6 +57,7 @@ def print_runinfo_data():
 
 
 def clear_db():
+    Tag.drop_collection()
     Experiment.drop_collection()
     Trial.drop_collection()
     Frame.drop_collection()
@@ -161,6 +165,30 @@ def find_or_create_midline() -> Midline3D:
     return midline
 
 
+def migrate_tags():
+    # Map Omer's ontology matlab table
+    mat = sio.loadmat(TAGS_MAT_PATH)
+
+    key_map = {
+        'ID': 'id',
+        'Name': 'name',
+        'Tag': 'short_name',
+        'Symbol': 'symbol',
+        'Definition': 'description',
+    }
+
+    for row in mat['Behavior_Dictionary'][0]:
+        tag = Tag()
+        for key_from, key_to in key_map.items():
+            val = row[key_from].squeeze()
+            if key_from == 'ID':
+                val = int(val)
+            else:
+                val = str(val).strip()
+            setattr(tag, key_to, val)
+        tag.save()
+
+
 def migrate_runinfo():
     skipped_rows = []
 
@@ -240,5 +268,6 @@ def migrate_midlines2d():
 if __name__ == '__main__':
     clear_db()
     # print_runinfo_data()
+    migrate_tags()
     migrate_runinfo()
     migrate_midlines2d()
