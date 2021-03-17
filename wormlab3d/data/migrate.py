@@ -9,6 +9,7 @@ from mongoengine import DoesNotExist
 from wormlab3d.data.model.experiment import Experiment
 from wormlab3d.data.model.frame import Frame
 from wormlab3d.data.model.midline2d import Midline2D
+from wormlab3d.data.model.midline3d import Midline3D
 from wormlab3d.data.model.trial import Trial
 
 HOME_DIR = os.path.expanduser('~')
@@ -56,7 +57,8 @@ def clear_db():
     Experiment.drop_collection()
     Trial.drop_collection()
     Frame.drop_collection()
-    Midline.drop_collection()
+    Midline2D.drop_collection()
+    Midline3D.drop_collection()
 
 
 def find_or_create_experiment(row: dict) -> Experiment:
@@ -148,9 +150,9 @@ def find_or_create_frames(trial: Trial) -> List[Frame]:
     return frames
 
 
-def find_or_create_midline() -> Midline:
+def find_or_create_midline() -> Midline3D:
     # Create new midline
-    midline = Midline()
+    midline = Midline3D()
 
     midline.base_3d = np.array([-1, 5, 2.], dtype=np.float32)
 

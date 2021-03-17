@@ -22,6 +22,6 @@ class Frame(Document):
                 'fields': ['trial', 'frame_num'],
                 'unique': True
             }
-        ]
+        ],
+        'ordering': ['+trial', '+frame_num']
     }
-
