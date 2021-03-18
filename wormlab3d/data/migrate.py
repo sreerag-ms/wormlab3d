@@ -1,14 +1,20 @@
 import csv
 import datetime
 import os
+from typing import List
 
+import numpy as np
 from mongoengine import DoesNotExist
 
 from wormlab3d.data.model.experiment import Experiment
+from wormlab3d.data.model.frame import Frame
+from wormlab3d.data.model.midline2d import Midline2D
 from wormlab3d.data.model.trial import Trial
 
 HOME_DIR = os.path.expanduser('~')
 DATA_DIR = HOME_DIR + '/projects/worm_data'
+VIDEO_DIR = 'video'
+MIDLINES_2D_DIR = DATA_DIR + '/midlines'
 
 fields = [
     '#id',
@@ -46,6 +52,13 @@ def print_runinfo_data():
         print(values[k])
 
 
+def clear_db():
+    Experiment.drop_collection()
+    Trial.drop_collection()
+    Frame.drop_collection()
+    Midline.drop_collection()
+
+
 def find_or_create_experiment(row: dict) -> Experiment:
     id_old = int(row['exp_id'])
     try:
@@ -74,7 +87,7 @@ def find_or_create_experiment(row: dict) -> Experiment:
 
 
 def find_or_create_trial(row: dict, experiment: Experiment) -> Trial:
-    id_old = row['legacy_id']
+    id_old = int(row['#id'])
     try:
         # Try to find existing trial
         trial = Trial.objects.get(legacy_id=id_old)
@@ -84,7 +97,8 @@ def find_or_create_trial(row: dict, experiment: Experiment) -> Trial:
 
     # Create new trial
     trial = Trial()
-    trial.date = datetime.datetime(year=int(id_old[:4]), month=int(id_old[4:6]), day=int(id_old[6:8]))
+    long_id = row['legacy_id']
+    trial.date = datetime.datetime(year=int(long_id[:4]), month=int(long_id[4:6]), day=int(long_id[6:8]))
     trial.experiment = experiment
     trial.legacy_id = id_old
     if row['num_frames'] not in ['', '?']:
@@ -101,36 +115,128 @@ def find_or_create_trial(row: dict, experiment: Experiment) -> Trial:
         'time_sync': row['time_sync'],
         'magnification': row['magnification'],
         'trial_id': row['trial_id'],
-        '#id': row['#id']
+        'legacy_id': row['legacy_id']
     }
-    # todo: files = ListField(EmbeddedDocumentField(File))
+
+    # Look for video files like 025_01.avi
+    for cam_num in range(3):
+        location = f'{VIDEO_DIR}/{int(row["#id"]):03d}_{cam_num}.avi'
+        vid_path = DATA_DIR + '/' + location
+        if os.path.exists(vid_path) or os.path.lexists(vid_path):
+            setattr(trial, f'camera_{cam_num + 1}_avi', f'$WORM_DATA$/{location}')
+        else:
+            raise RuntimeError(f'Video file not present "{vid_path}"')
 
     trial.save()
 
     return trial
 
 
+def find_or_create_frames(trial: Trial) -> List[Frame]:
+    if trial.num_frames == 0:
+        return
+
+    frames = []
+    for i in range(trial.num_frames):
+        frame = Frame()
+        frame.trial = trial
+        frame.experiment = trial.experiment
+        frame.frame_num = i
+        frames.append(frame)
+    Frame.objects.insert(frames)
+
+    return frames
+
+
+def find_or_create_midline() -> Midline:
+    # Create new midline
+    midline = Midline()
+
+    midline.base_3d = np.array([-1, 5, 2.], dtype=np.float32)
+
+    midline.save()
+
+    return midline
+
+
 def migrate_runinfo():
-    Experiment.drop_collection()
-    Trial.drop_collection()
     skipped_rows = []
 
     with open(DATA_DIR + '/run_info.csv') as f:
-        # reader = csv.reader(f)
         reader = csv.DictReader(f)
 
         for row in reader:
             print(row)
 
-            if row['comments'] == 'ignore' or row['exp_id'] in ['', '  ']:
-                # skip these dummy experiments
-                skipped_rows.append(row)
+            # Skip dummy entries
+            if row['comments'] == 'ignore':
+                skipped_rows.append((row, 'comment set to "ignore"'))
+                continue
+            elif row['exp_id'] in ['', '  ']:
+                skipped_rows.append((row, 'missing exp_id'))
                 continue
 
-            experiment = find_or_create_experiment(row)
-            trial = find_or_create_trial(row, experiment)
+            try:
+                experiment = find_or_create_experiment(row)
+                trial = find_or_create_trial(row, experiment)
+                frames = find_or_create_frames(trial)
+            except RuntimeError as e:
+                skipped_rows.append((row, str(e)))
+
+    print(f'\n\n==== skipped_rows ({len(skipped_rows)}) ====')
+    for r, e in skipped_rows:
+        print(f'\n{e}:')
+        print(r)
+
+
+def migrate_midlines2d():
+    midlines = []
+    files = os.listdir(MIDLINES_2D_DIR)
+    failed = []
+    print(f'{len(files)} files found.')
+    for i, filename in enumerate(files):
+        print(f'Processing file {i + 1}/{len(files)}: {filename}')
+        if not filename.endswith('.csv'):
+            continue
+        midline = Midline2D()
+
+        # Get frame
+        clip_num, cam_num, frame_num = (int(p) for p in filename.strip('.csv').split('_'))
+        try:
+            trial = Trial.objects.get(legacy_id=clip_num)
+            midline.frame = trial.get_frame(frame_num)
+        except DoesNotExist:
+            failed.append(filename)
+            continue
+        midline.camera = cam_num + 1
+
+        # Parse annotated midlines
+        with open(MIDLINES_2D_DIR + '/' + filename) as f:
+            X = []
+            for line in f.readlines():
+                if '# author:' in line:
+                    midline.user = line[9:].strip()
+                if line[0] == '#':
+                    continue
+                coords = np.array(list(float(c) for c in line.split(',')), dtype=np.float32)
+                if len(coords) == 2:
+                    X.append(coords)
+            X = np.stack(X)
+            midline.X = X
+            midline.validate()
+            midlines.append(midline)
+
+    # Bulk insert
+    Midline2D.objects.insert(midlines)
+
+    # Show any failures
+    if len(failed):
+        print('\n\n=== FAILED ===')
+        print(failed)
 
 
 if __name__ == '__main__':
+    clear_db()
     # print_runinfo_data()
     migrate_runinfo()
+    migrate_midlines2d()
