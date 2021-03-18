@@ -1,29 +1,38 @@
 import logging
 import os
 import sys
+import time
+from pathlib import Path
 
-LOGS_DIR = 'logs'
-LOG_LEVEL = 'debug'
+# todo: config from env vars
+ROOT_PATH = str(Path(__file__).parent.parent)
+SCRIPT_PATH = os.path.dirname(sys.argv[0])
+LOGS_PATH = ROOT_PATH + '/logs' + SCRIPT_PATH[len(ROOT_PATH):]
+LOG_LEVEL = 'DEBUG'
+WRITE_LOG_FILES = False
 
 # Set formatting
-logging.basicConfig(
-    format='[%(levelname)s %(asctime)s]: %(message)s',
-)
+formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
 
 # Create a logger with the name corresponding to the script being executed
 script_name = os.path.basename(sys.argv[0])[:-3]
 logger = logging.getLogger(script_name)
 logger.setLevel(LOG_LEVEL)
-logger.addHandler(logging.StreamHandler(sys.stdout))
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.setFormatter(formatter)
+logger.addHandler(stream_handler)
 
 # Setup handlers
-print('log path', f'{LOGS_DIR}/{script_name}.log')
-os.makedirs(LOGS_DIR, exist_ok=True)
-logger.addHandler(logging.FileHandler(f'{LOGS_DIR}/{script_name}.log', mode='a'))
+if WRITE_LOG_FILES:
+    LOG_FILENAME = f'{script_name}_{time.strftime("%Y-%m-%d_%H%M%S")}.log'
+    print(f'Writing logs to: {LOGS_PATH}/{LOG_FILENAME}')
+    os.makedirs(LOGS_PATH, exist_ok=True)
+    file_handler = logging.FileHandler(f'{LOGS_PATH}/{LOG_FILENAME}', mode='w')
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
 
 # Don't propagate logs to the root logger as this causes duplicate entries
 logger.propagate = False
-
 
 # Handle uncaught exceptions
 def handle_exception(exc_type, exc_value, exc_traceback):
