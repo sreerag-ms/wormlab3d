@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# TODO use pims https://github.com/soft-matter/pims for norpix
 import cv2
 import getopt
 import numpy as np
