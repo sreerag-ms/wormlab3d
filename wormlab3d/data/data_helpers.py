@@ -5,6 +5,7 @@ import math
 import os
 import time
 from datetime import timedelta
+from typing import Tuple
 
 import numpy as np
 import scipy.io as sio
@@ -576,7 +577,7 @@ def generate_or_load_data(
     loaded = False
     if not rebuild_dataset:
         try:
-            ds = TrajectoryDataset.objects.get(
+            DS = TrajectoryDataset.objects.get(
                 data_type=data_type,
                 train_test_split_target=train_test_split,
                 n_frames=n_frames,
@@ -594,7 +595,7 @@ def generate_or_load_data(
 
     if not loaded:
         print(f'Generating new dataset...')
-        ds_all, ds_train, ds_test, meta_all, meta_train, meta_test, inv_results_train, inv_results_test = generate_dataset(
+        DS = generate_dataset(
             ds_path,
             data_type,
             train_test_split=train_test_split,
@@ -608,7 +609,7 @@ def generate_or_load_data(
             inv_opt_params=inv_opt_params,
         )
 
-    return ds
+    return DS
 
 
 def get_data_loaders(
@@ -624,8 +625,8 @@ def get_data_loaders(
         train_test_split=0.8,
         augment=False,
         n_workers=4,
-):
-    ds = generate_or_load_data(
+) -> Tuple[TrajectoryDataset, torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
+    DS = generate_or_load_data(
         data_type,
         rebuild_dataset=rebuild_dataset,
         train_test_split=train_test_split,
@@ -637,14 +638,6 @@ def get_data_loaders(
         inv_opt_params=inv_opt_params
     )
 
-    ds_args = {
-        'ds_id': ds_id,
-        'n_frames': n_frames,
-        'restrict_classes': restrict_classes,
-        'include_mirrors': include_mirrors,
-        'augment': augment,
-    }
-
     if data_type == 'xyz':
         cls = XYZDataset
     elif data_type == 'xyz_inv':
@@ -653,27 +646,12 @@ def get_data_loaders(
         cls = BishopDataset
     elif 'cpca' in data_type:
         cls = CPCADataset
-        ds_args['n_components'] = n_cpca_components
     else:
         raise Exception(f'Data type "{data_type}" not recognised')
 
     loaders = {}
     for tt in ['train', 'test']:
-        # if 'inv' not in data[tt]:
-        #     data[tt]['inv'] = None
-
-        # dataset = cls(
-        #     data=data[tt]['ds'],
-        #     meta=data[tt]['meta'],
-        #     inverse_data=data[tt]['inv'],
-        #     **ds_args
-        # )
-        dataset = cls(
-            data=data[tt]['ds'],
-            meta=data[tt]['meta'],
-            inverse_data=data[tt]['inv'],
-            **ds_args
-        )
+        dataset = cls(DS, tt)
         loaders[tt] = torch.utils.data.DataLoader(
             dataset,
             batch_size=batch_size,
@@ -682,4 +660,4 @@ def get_data_loaders(
             drop_last=True
         )
 
-    return loaders['train'], loaders['test']
+    return DS, loaders['train'], loaders['test']
