@@ -1,0 +1,17 @@
+cam1:
+  raw: "test-data/Cam1_firstsec.avi"
+  background: "intermediate-data/Cam1_bg.png"
+  video: "intermediate-data/Cam1.avi"
+cam2:
+  raw: "test-data/Cam2_firstsec.avi"
+  background: "intermediate-data/Cam2_bg.png"
+  video: "intermediate-data/Cam2.avi"
+cam3:
+  raw: "test-data/Cam3_firstsec.avi"
+  background: "intermediate-data/Cam3_bg.png"
+  video: "intermediate-data/Cam3.avi"
+
+calibration:
+  directory: "test-data/calibration-images"
+  parameters: "test-data/calibration-parameters"
+  output: "intermediate-data/calibration.xml"

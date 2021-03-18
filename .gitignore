@@ -5,3 +5,5 @@ logs
 *.egg-info
 .eggs
 data/db
+.snakemake
+intermediate-data
