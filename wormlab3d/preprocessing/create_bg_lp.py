@@ -36,7 +36,7 @@ class Accumulate:
 
 if __name__ == "__main__":
     seqfile = open_file(sys.argv[1])
-    frame_size = seqfile.frameSize()
+    frame_size = seqfile.frameSize
 
     of = sys.argv[2]
 
