@@ -1,53 +1,18 @@
 import sys
 import numpy as np
 import cv2
+from video_reader import open_file
 
 MAXFRAMES = -1
-r = 2048
-
-
-class VideoIterator:
-    """
-    wrapper for opencv video reader
-    """
-
-    def __init__(self, fn):
-        # untested()
-
-        self._vc = cv2.VideoCapture(fn)
-        assert(self._vc.isOpened())
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        s, f = self._vc.read()
-        if not s:
-            # untested()
-            raise StopIteration()
-
-        return f, 0.
-
-
-def open_file(fn):
-    if fn[-4:] == ".seq":
-        # TODO where is this file?
-        # from .norpix import norpix
-        seqfile = norpix.SeqFile(fn)
-        image_data, timestamp = seqfile[0]
-        return seqfile
-    else:
-        return VideoIterator(fn)
-
 
 class Accumulate:
     """
     Implementation of low pass filter.
     """
 
-    def __init__(self):
-        self._run = np.ones([r, r], dtype=np.uint16)  # * 256*128
-        self._output = np.ones([r, r], dtype=np.uint16)  # * 256*128
+    def __init__(self, frame_size: tuple):
+        self._run = np.ones(frame_size, dtype=np.uint16)
+        self._output = np.ones(frame_size, dtype=np.uint16)
 
     def push(self, x):
 
@@ -69,16 +34,16 @@ class Accumulate:
 
 if __name__ == "__main__":
     seqfile = open_file(sys.argv[1])
-    # trace("input", sys.argv[1])
+    frame_size = seqfile.frameSize
 
     of = sys.argv[2]
 
-    a = Accumulate()
+    a = Accumulate(frame_size)
 
-    for k, (i, t) in enumerate(seqfile):
+    for k, image in enumerate(seqfile):
         if k == MAXFRAMES:
             break
-        a.push(i)
+        a.push(image)
 
     bg = a.get()
     print("done", k, bg.dtype, bg.max())

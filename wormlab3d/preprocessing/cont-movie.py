@@ -1,54 +1,14 @@
 #!/usr/bin/env python
-# TODO use pims https://github.com/soft-matter/pims for norpix
 import cv2
 import getopt
 import numpy as np
 import sys
 from typing import Optional
+from video_reader import open_file
 
 def usage():
         #TODO
         print(f'{sys.argv[0]}' + ' --if={input.raw} --bg={input.background} --of={output.video_1}')
-
-class VideoIterator:
-    def __iter__(self):
-        return self
-    def __init__(self, fn):
-        # untested()
-
-        self._vc = cv2.VideoCapture(fn)
-        if(not self._vc.isOpened()):
-            print("not open >%s<" % fn)
-        assert(self._vc.isOpened())
-
-    def fps(self):
-        return self._vc.get(cv2.CAP_PROP_FPS)
-
-    @staticmethod
-    def frameSize():
-        # incomplete()
-        return (2048,2048)
-
-    def __next__(self):
-        s, f = self._vc.read()
-        if not s:
-            # untested()
-            raise StopIteration()
-
-        im = cv2.cvtColor(f, cv2.COLOR_BGR2GRAY)
-        return im
-
-def open_file(fn: str) -> VideoIterator:
-    if fn[-4:] == ".seq":
-        videoData = VideoData(fn)
-#        seqfile = norpix.SeqFile(fn)
-#        image_data, timestamp = seqfile[0]
-#        print(type(image_data))
-#        print(type(timestamp))
-#        return seqfile
-        return videoData
-    else:
-                return VideoIterator(fn)
 
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
@@ -84,16 +44,16 @@ def contour_mask(im: np.array,
     return mask
 
 
-def extract_stuff(img: np.array,
-                  backGround: np.array,
-                  prev_img: Optional[np.array] = None):
+def extract_stuff(img: np.ndarray,
+                  backGround: np.ndarray,
+                  prev_img: Optional[np.ndarray] = None):
     """
     Create output image of backGround plus masked input image.
     The mask is determined as a dilated combination of background subtraction and motion filters.
     """
 
     img = img.copy()
-    img1 = cv2.subtract( backGround, img )
+    img1 = cv2.subtract(backGround, img)
     maxb = img1.max()
 
     # contour of background-removed inverted image
@@ -133,8 +93,8 @@ def extract_stuff(img: np.array,
 def do_it(ifile: str, bgfn: str, ofile: str):
     # load video
     videoData = open_file(ifile)
-    fps = videoData.fps()
-    outSize = videoData.frameSize()
+    fps = videoData.fps
+    outSize = videoData.frameSize
 
     # load background
     backGround = cv2.imread(bgfn, cv2.IMREAD_GRAYSCALE)
