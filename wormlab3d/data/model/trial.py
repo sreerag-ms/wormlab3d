@@ -4,6 +4,10 @@ from mongoengine import *
 
 from wormlab3d.data.model.experiment import Experiment
 from wormlab3d.data.model.frame import Frame
+from wormlab3d.data.util import fix_path
+from wormlab3d.preprocessing.video_reader import VideoReader
+
+CAMERA_IDXS = [1, 2, 3]    # todo: should this start from 0?
 
 
 class Trial(Document):
@@ -17,6 +21,9 @@ class Trial(Document):
     camera_1_avi = StringField(required=True)
     camera_2_avi = StringField(required=True)
     camera_3_avi = StringField(required=True)
+    camera_1_background = StringField()
+    camera_2_background = StringField()
+    camera_3_background = StringField()
     legacy_id = IntField(unique=True)
     legacy_data = DictField()
 
@@ -26,21 +33,21 @@ class Trial(Document):
             frame_num=frame_num
         )
 
-    def get_frames(self, filter=None) -> List[Frame]:
-        if filter is None:
-            filter = {}
-        return Frame.objects.get(
+    def get_frames(self, filters: Dict = None) -> List[Frame]:
+        if filters is None:
+            filters = {}
+        return Frame.objects(
             trial=self,
-            **filter
+            **filters
         )
 
-    def get_clips(self, filter: Dict=None) -> List[List[Frame]]:
+    def get_clips(self, filters: Dict = None) -> List[List[Frame]]:
         """
         Return a list of clips (frame-sequences) where frames in each clip match the given filter.
         Ensures that the tags are consistent through the clip.
         If no filter is provided this should just return a single clip.
         """
-        frames = self.get_frames(filter)
+        frames = self.get_frames(filters)
         clips = []
         clip = []
         prev_num = -1
@@ -57,3 +64,13 @@ class Trial(Document):
                 prev_tags = f.tags
 
         return clips
+
+    def get_video_reader(self, camera_idx: int) -> VideoReader:
+        assert camera_idx in CAMERA_IDXS
+        vid_path = fix_path(getattr(self, f'camera_{camera_idx}_avi'))
+        bg_path = fix_path(getattr(self, f'camera_{camera_idx}_background'))
+
+        return VideoReader(
+            video_path=vid_path,
+            background_image_path=bg_path
+        )

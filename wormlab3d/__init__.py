@@ -11,6 +11,10 @@ LOGS_PATH = ROOT_PATH + '/logs' + SCRIPT_PATH[len(ROOT_PATH):]
 LOG_LEVEL = 'DEBUG'
 WRITE_LOG_FILES = False
 
+# Data paths
+DATA_PATH = ROOT_PATH + '/data'
+WORM_DATA_PATH = str(Path(__file__).parent.parent.parent) + '/worm_data'
+
 # Set formatting
 formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
 

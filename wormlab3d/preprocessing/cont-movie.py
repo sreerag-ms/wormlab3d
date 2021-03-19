@@ -1,14 +1,17 @@
-#!/usr/bin/env python
-import cv2
 import getopt
-import numpy as np
 import sys
 from typing import Optional
-from video_reader import open_file
+
+import cv2
+import numpy as np
+
+from video_reader import VideoReader
+
 
 def usage():
-        #TODO
-        print(f'{sys.argv[0]}' + ' --if={input.raw} --bg={input.background} --of={output.video_1}')
+    # TODO
+    print(f'{sys.argv[0]}' + ' --if={input.raw} --bg={input.background} --of={output.video_1}')
+
 
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
@@ -22,7 +25,7 @@ def contour_mask(im: np.array,
     Create mask from threshold contour.
     """
     # find contours by threshold
-    thresh=int(thresh)
+    thresh = int(thresh)
     _, _thresh = cv2.threshold(im, thresh, maxval, 0)
     contours, _ = cv2.findContours(_thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -31,13 +34,13 @@ def contour_mask(im: np.array,
 
     pc = nc = 0
     for c in contours:
-            nc+=1
-            area = cv2.contourArea(c)
-            if area < min_area:
-                    pass
-            else:
-                    cv2.drawContours(mask, [c], 0, 255, -1)
-                    pc += 1
+        nc += 1
+        area = cv2.contourArea(c)
+        if area < min_area:
+            pass
+        else:
+            cv2.drawContours(mask, [c], 0, 255, -1)
+            pc += 1
 
     print(pc, "out of", nc, "contours, thresh=", thresh)
 
@@ -57,28 +60,28 @@ def extract_stuff(img: np.ndarray,
     maxb = img1.max()
 
     # contour of background-removed inverted image
-    mask = contour_mask(img1, thresh=max(3,maxb*.05), maxval=maxb)
+    mask = contour_mask(img1, thresh=max(3, maxb * .05), maxval=maxb)
 
     # create motion mask
     if prev_img is None:
-            pass
+        pass
     else:
-            prev_img = prev_img.astype(np.longlong)
-            delta = (prev_img - img.astype(np.longlong))**2
-            delta = np.sqrt(delta)
-            maxd = delta.max()
-            mask2 = contour_mask(delta.astype(np.uint8), maxval=maxd, thresh=max(3,maxd*.5), min_area=10)
+        prev_img = prev_img.astype(np.longlong)
+        delta = (prev_img - img.astype(np.longlong))**2
+        delta = np.sqrt(delta)
+        maxd = delta.max()
+        mask2 = contour_mask(delta.astype(np.uint8), maxval=maxd, thresh=max(3, maxd * .5), min_area=10)
 
-            # merge contour and motion masks
-            mask = cv2.bitwise_or(mask, mask2)
+        # merge contour and motion masks
+        mask = cv2.bitwise_or(mask, mask2)
 
     # dilate mask
     mask_dil = cv2.dilate(mask, None, iterations=10)
 
     # contour mask again
-    print("final mask from", np.sum(mask_dil)/255, "pixels")
+    print("final mask from", np.sum(mask_dil) / 255, "pixels")
     mask = contour_mask(mask_dil, maxval=255, thresh=127, min_area=1000)
-    print("has", np.sum(mask)/255, "pixels")
+    print("has", np.sum(mask) / 255, "pixels")
 
     # dilate mask
     mask = cv2.dilate(mask, None, iterations=10)
@@ -90,29 +93,30 @@ def extract_stuff(img: np.ndarray,
 
     return img
 
+
 def do_it(ifile: str, bgfn: str, ofile: str):
     # load video
-    videoData = open_file(ifile)
+    videoData = VideoReader(ifile)
     fps = videoData.fps
-    outSize = videoData.frameSize
+    outSize = videoData.frame_size
 
     # load background
     backGround = cv2.imread(bgfn, cv2.IMREAD_GRAYSCALE)
-    if(backGround is None):
+    if (backGround is None):
         raise IOError("cannot open " + bgfn)
-    assert(backGround is not None)
+    assert (backGround is not None)
 
     # open output video
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
 
     try:
         vidout = cv2.VideoWriter(ofile, apiPreference=0, fourcc=fourcc, fps=fps,
-                                          frameSize=outSize, isColor=False)
+                                 frameSize=outSize, isColor=False)
     except TypeError:
         print("somethings wrong with VideoWriter")
         vidout = cv2.VideoWriter(ofile, fourcc=fourcc, fps=fps,
-                                          frameSize=outSize, isColor=False)
-    assert(vidout.isOpened())
+                                 frameSize=outSize, isColor=False)
+    assert (vidout.isOpened())
 
     # create output video frames and save
     img1 = None
@@ -120,26 +124,27 @@ def do_it(ifile: str, bgfn: str, ofile: str):
         iout = extract_stuff(img, backGround, img1)
         img1 = img.copy()
 
-        assert(outSize==img.shape)
+        assert (outSize == img.shape)
         vidout.write(iout)
 
     vidout.release()
     print(f'{ofile} complete')
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     # process arguments
     try:
-            opts, args = getopt.getopt(sys.argv[1:], "",
-                                       ["if=", "of=",
-                                        "bg=",
-                                        ])
-            print("opts", opts, "args", args)
+        opts, args = getopt.getopt(sys.argv[1:], "",
+                                   ["if=", "of=",
+                                    "bg=",
+                                    ])
+        print("opts", opts, "args", args)
     except getopt.getopterror as err:
-            #incomplete
-            # print(help information and exit:
-            eprint(str(err))  # will print something like "option -a not recognized"
-            usage()
-            sys.exit(2)
+        # incomplete
+        # print(help information and exit:
+        eprint(str(err))  # will print something like "option -a not recognized"
+        usage()
+        sys.exit(2)
 
     ifile = ""
     ofile = ""
@@ -147,12 +152,12 @@ if __name__=="__main__":
 
     for o, a in opts:
         if o == "-v":
-                verbose = True
+            verbose = True
         elif o in ("--of"):
-                ofile = a
+            ofile = a
         elif o in ("--if"):
-                ifile = a
+            ifile = a
         elif o in ("--bg"):
-                bgfile = a
+            bgfile = a
 
     do_it(ifile=ifile, ofile=ofile, bgfn=bgfile)
