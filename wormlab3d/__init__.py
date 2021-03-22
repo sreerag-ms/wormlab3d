@@ -13,7 +13,8 @@ WRITE_LOG_FILES = False
 
 # Data paths
 DATA_PATH = ROOT_PATH + '/data'
-WORM_DATA_PATH = str(Path(__file__).parent.parent.parent) + '/worm_data'
+ANNEX_PATH = str(Path(__file__).parent.parent.parent) + '/worm_data'
+WT3D_PATH = str(Path(__file__).parent.parent.parent) + '/3DWT_Data'
 
 # Set formatting
 formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')

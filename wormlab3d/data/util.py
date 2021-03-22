@@ -1,7 +1,7 @@
-from wormlab3d import WORM_DATA_PATH, DATA_PATH
+from wormlab3d import ANNEX_PATH, DATA_PATH
 
 DATA_PATH_PLACEHOLDER = '$DATA_PATH$'
-WORM_DATA_PATH_PLACEHOLDER = '$WORM_DATA$'
+ANNEX_PATH_PLACEHOLDER = '$ANNEX$'
 
 
 def fix_path(path: str) -> str:
@@ -12,7 +12,7 @@ def fix_path(path: str) -> str:
         return
     if DATA_PATH_PLACEHOLDER in path:
         path = path.replace(DATA_PATH_PLACEHOLDER, DATA_PATH)
-    if WORM_DATA_PATH_PLACEHOLDER in path:
-        path = path.replace(WORM_DATA_PATH_PLACEHOLDER, WORM_DATA_PATH)
+    if ANNEX_PATH_PLACEHOLDER in path:
+        path = path.replace(ANNEX_PATH_PLACEHOLDER, ANNEX_PATH)
 
     return path

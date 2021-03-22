@@ -6,6 +6,7 @@ STRAIN_CHOICES = [None, 'N2', 'UL4207', 'CB540', 'COP2029']
 
 
 class Experiment(Document):
+    id = SequenceField(primary_key=True)
     user = StringField()
     strain = StringField(choices=STRAIN_CHOICES, null=True, default=None)
     sex = StringField(choices=SEX_CHOICES)

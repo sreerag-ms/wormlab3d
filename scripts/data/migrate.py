@@ -7,12 +7,14 @@ import numpy as np
 import scipy.io as sio
 from mongoengine import DoesNotExist
 
+from wormlab3d import WT3D_PATH
 from wormlab3d.data.model.experiment import Experiment
 from wormlab3d.data.model.frame import Frame
 from wormlab3d.data.model.midline2d import Midline2D
 from wormlab3d.data.model.midline3d import Midline3D
 from wormlab3d.data.model.tag import Tag
 from wormlab3d.data.model.trial import Trial
+from wormlab3d.data.util import ANNEX_PATH_PLACEHOLDER
 
 HOME_DIR = os.path.expanduser('~')
 DATA_DIR = HOME_DIR + '/projects/worm_data'
@@ -130,7 +132,7 @@ def find_or_create_trial(row: dict, experiment: Experiment) -> Trial:
         location = f'{VIDEO_DIR}/{int(row["#id"]):03d}_{cam_num}.avi'
         vid_path = DATA_DIR + '/' + location
         if os.path.exists(vid_path) or os.path.lexists(vid_path):
-            setattr(trial, f'camera_{cam_num + 1}_avi', f'$WORM_DATA$/{location}')
+            setattr(trial, f'camera_{cam_num + 1}_avi', f'{ANNEX_PATH_PLACEHOLDER}/{location}')
         else:
             raise RuntimeError(f'Video file not present "{vid_path}"')
 
@@ -139,7 +141,7 @@ def find_or_create_trial(row: dict, experiment: Experiment) -> Trial:
         location = f'{BACKGROUND_IMAGES_DIR}/{int(row["#id"]):03d}_{cam_num}.avi'
         bg_path = DATA_DIR + '/' + location
         if os.path.exists(bg_path) or os.path.lexists(bg_path):
-            setattr(trial, f'camera_{cam_num + 1}_background', f'$WORM_DATA$/{location}')
+            setattr(trial, f'camera_{cam_num + 1}_background', f'{ANNEX_PATH_PLACEHOLDER}/{location}')
 
     trial.save()
 
@@ -273,9 +275,106 @@ def migrate_midlines2d():
         print(failed)
 
 
+def migrate_WT3D():
+    # Project *.mat files
+    path = WT3D_PATH + '/Project_Files'
+
+    files = os.listdir(path)
+    for i, filename in enumerate(files):
+        print(f'Processing file {i + 1}/{len(files)}: {filename}')
+        if not filename.endswith('.mat'):
+            continue
+        mat = sio.loadmat(path + '/' + filename)
+        mat = mat['Project_3DWT']
+
+        # Top level keys: 'Camera_Parameters', 'Tracing_Parameters', 'Trace', 'Behavior', 'Info'
+
+        # Find trial and experiment
+        filename_parts = filename.split('_')
+        legacy_id = filename_parts[2] + '_' + filename_parts[3][:-4]
+        trial = Trial.objects.get(legacy_data__legacy_id=legacy_id)
+        experiment = trial.experiment
+
+        # todo: verify other trial info all matches up
+
+        # Tags (Behavior)
+        if 1:
+            tag_entries = mat['Behavior'][0][0]
+            n_entries = tag_entries.shape[1]
+            if n_entries > 0:
+                for j in range(n_entries):
+                    # Get tag objects
+                    tags = []
+                    tag_ids = tag_entries[0]['Tags'][j][0]
+                    for tag_id in tag_ids:
+                        tags.append(Tag.objects.get(id=tag_id))
+
+                    # Attach tags to all frames in range
+                    first_frame = tag_entries[0]['First_Frame'][j][0][0]
+                    last_frame = tag_entries[0]['Last_Frame'][j][0][0]
+                    print(
+                        f'Migrating {j + 1}/{n_entries} tag entries. Adding {len(tags)} tags to frames {first_frame} - {last_frame}.')
+                    Frame.objects(
+                        trial=trial,
+                        frame_num__gte=first_frame,
+                        frame_num__lte=last_frame
+                    ).update(
+                        set__tags=tags
+                    )
+
+        # 2D midline annotations are stored in the camera parameters as annotations
+        if 0:
+            annotations = mat['Camera_Parameters'][0][0]['Calib'][0][0]['Annotations']
+
+            print(
+                mat['Camera_Parameters'].shape,
+                mat['Camera_Parameters'][0].shape,
+                mat['Camera_Parameters'][0][0].shape,
+                mat['Camera_Parameters'][0][0]['Calib'].shape,
+                mat['Camera_Parameters'][0][0]['Calib'][0].shape,
+                mat['Camera_Parameters'][0][0]['Calib'][0][0].shape,
+                mat['Camera_Parameters'][0][0]['Calib'][0][0]['Annotations'].shape,
+            )
+            n_midlines = annotations.shape[-1]
+            print(f'n_midlines={n_midlines}')
+
+            # Annotation keys: 'Frame_Number', 'X', 'Y', 'Intrinsic_Matrix', 'Radial_Distortion_Vector', 'Tangential_Distortion_Vector', 'Extrinsic_Matrix'
+            for n in range(n_midlines):
+                annotation = annotations[0][n]
+                x = annotation['X'][0][0][0]
+                y = annotation['Y'][0][0][0]
+                X = np.stack([x, y]).T
+                # print(X.shape)
+                # print(np.isnan(X.any()))
+
+                # Get frame
+                frame_num = annotation['Frame_Number'][0][0][0][0]
+                frame = trial.get_frame(frame_num)
+
+                # Get any existing annotations
+                exists = False
+                existing = frame.get_midlines2d(manual_only=True)
+                for mid in existing:
+                    if np.allclose(X, mid.X):
+                        # Midline matches existing record
+                        exists = True
+                        break
+
+                if not exists:
+                    midline = Midline2D()
+                    midline.frame = frame
+                    midline.camera = '?'
+                    midline.user = 'YO'
+                    midline.X = X
+                    # midline.save()
+
+
+
 if __name__ == '__main__':
-    clear_db()
+    # clear_db()
     # print_runinfo_data()
-    migrate_tags()
-    migrate_runinfo()
-    migrate_midlines2d()
+    # migrate_tags()
+    # migrate_runinfo()
+    # migrate_midlines2d()
+
+    migrate_WT3D()

@@ -7,10 +7,11 @@ from wormlab3d.data.model.frame import Frame
 from wormlab3d.data.util import fix_path
 from wormlab3d.preprocessing.video_reader import VideoReader
 
-CAMERA_IDXS = [1, 2, 3]    # todo: should this start from 0?
+CAMERA_IDXS = [1, 2, 3]  # todo: should this start from 0?
 
 
 class Trial(Document):
+    id = SequenceField(primary_key=True)
     experiment = ReferenceField(Experiment)
     date = DateTimeField(required=True)
     num_frames = IntField(required=True, default=0)
