@@ -17,6 +17,7 @@ from wormlab3d.data.model.trial import Trial
 HOME_DIR = os.path.expanduser('~')
 DATA_DIR = HOME_DIR + '/projects/worm_data'
 VIDEO_DIR = 'video'
+BACKGROUND_IMAGES_DIR = 'background'
 MIDLINES_2D_DIR = DATA_DIR + '/midlines'
 TAGS_MAT_PATH = '../../data/Behavior_Dictionary.mat'
 
@@ -124,7 +125,7 @@ def find_or_create_trial(row: dict, experiment: Experiment) -> Trial:
         'legacy_id': row['legacy_id']
     }
 
-    # Look for video files like 025_01.avi
+    # Look for video files like 025_1.avi
     for cam_num in range(3):
         location = f'{VIDEO_DIR}/{int(row["#id"]):03d}_{cam_num}.avi'
         vid_path = DATA_DIR + '/' + location
@@ -132,6 +133,13 @@ def find_or_create_trial(row: dict, experiment: Experiment) -> Trial:
             setattr(trial, f'camera_{cam_num + 1}_avi', f'$WORM_DATA$/{location}')
         else:
             raise RuntimeError(f'Video file not present "{vid_path}"')
+
+    # Look for background image files like 025_1.png
+    for cam_num in range(3):
+        location = f'{BACKGROUND_IMAGES_DIR}/{int(row["#id"]):03d}_{cam_num}.avi'
+        bg_path = DATA_DIR + '/' + location
+        if os.path.exists(bg_path) or os.path.lexists(bg_path):
+            setattr(trial, f'camera_{cam_num + 1}_background', f'$WORM_DATA$/{location}')
 
     trial.save()
 
