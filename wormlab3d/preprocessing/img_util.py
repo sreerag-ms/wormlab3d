@@ -68,7 +68,7 @@ def my_imshow(x, annotate=None, wait=None):
         x = cv2.circle(x.copy(), tuple(annotate), 7, (0, 0, 0), -1)
 
     try:
-        y = cv2.resize(x, (1800, 1800))
+        y = cv2.resize(x, (800, 800))
     except TypeError:
         print("type", type(x))
 
@@ -78,3 +78,5 @@ def my_imshow(x, annotate=None, wait=None):
         cv2.waitKey()
     else:
         cv2.waitKey(wait)
+
+    cv2.destroyWindow('frame0')

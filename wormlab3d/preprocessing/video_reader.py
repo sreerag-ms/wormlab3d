@@ -83,12 +83,15 @@ class VideoReader:
     @staticmethod
     @pims.pipeline
     def _as_grey(frame: pims.Frame) -> pims.Frame:
-        # todo: where do these numbers come from?
-        red = frame[:, :, 0]
-        green = frame[:, :, 1]
-        blue = frame[:, :, 2]
-        grey = 0.2125 * red + 0.7154 * green + 0.0721 * blue
-        return grey.astype(frame.dtype)
+        dtype = frame.dtype
+        frame = pims.as_grey(frame)
+        return frame.astype(dtype)
+
+    @staticmethod
+    @pims.pipeline
+    def _invert(frame: pims.Frame) -> pims.Frame:
+        frame.data = np.invert(frame.data)
+        return frame
 
     def find_contours(self, subtract_background: bool = True) -> List[np.ndarray]:
         """
@@ -97,13 +100,17 @@ class VideoReader:
         image = self.video[self.current_frame]
         image = self._as_grey(image)
 
-        # Subtract background image
+        # Invert image (white worms on black background)
+        image = self._invert(image)
+
+        # Subtract background
         if subtract_background:
             if self.background is None:
                 raise ValueError('No background image available to subtract.')
             if self.background.shape != image.shape:
                 raise ValueError('Image size from video does not match background image size!')
-            image = cv2.subtract(self.background, image.copy())
+            bg_inv = self._invert(self.background)
+            image = cv2.subtract(image.copy(), bg_inv)
 
         # Get max brightness
         max_brightness = image.max()
@@ -120,7 +127,10 @@ class VideoReader:
                 min_area=CONT_MIN_AREA
             )
             mask_dil = cv2.dilate(mask, None, iterations=10)
-            contours = find_contours(mask_dil)
+            contours = find_contours(
+                image=mask_dil,
+                min_area=CONT_MIN_AREA
+            )
 
             # If no contours found, decrease the threshold and try again
             if len(contours) == 0:

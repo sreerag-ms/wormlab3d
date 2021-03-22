@@ -3,6 +3,8 @@ from typing import List
 import cv2
 import numpy as np
 
+from wormlab3d import logger
+
 CONT_MIN_AREA = 300
 CONT_THRESH_DEFAULT = .4
 MAX_CONTOURING_ATTEMPTS = 5
@@ -19,15 +21,16 @@ def find_contours(
     The image is first thresholded using `thresh` and `maxval` arguments before all contours are found.
     The possible contours are then filtered to remove any smaller than `min_area`.
     """
+    logger.debug(f'Finding contours (thresh={thresh}, maxval={maxval}, min_area={min_area})')
     thresh = int(thresh)
     assert image.dtype == np.uint8
-    # image = np.uint8(image)
 
     # Threshold the image
     _, thresh_img = cv2.threshold(image, thresh, maxval, cv2.THRESH_BINARY)
 
     # Find the contours
     all_contours, hierarchy = cv2.findContours(thresh_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    logger.debug(f'Found {len(all_contours)} contours of sufficient size in thresholded image.')
 
     # Filter the contours so we only take ones larger than min_area
     contours = []
@@ -35,6 +38,7 @@ def find_contours(
         area = cv2.contourArea(c)
         if area >= min_area:
             contours.append(c)
+    logger.debug(f'Found {len(contours)} contours of sufficient size in thresholded image.')
 
     return contours
 
