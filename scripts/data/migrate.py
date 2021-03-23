@@ -3,22 +3,26 @@ import datetime
 import os
 from typing import List
 
+import cv2
+import dateutil
 import numpy as np
 import scipy.io as sio
 from mongoengine import DoesNotExist
 
-from wormlab3d import WT3D_PATH
+from wormlab3d import WT3D_PATH, logger
+from wormlab3d.data.model.cameras import Cameras
 from wormlab3d.data.model.experiment import Experiment
 from wormlab3d.data.model.frame import Frame
 from wormlab3d.data.model.midline2d import Midline2D
 from wormlab3d.data.model.midline3d import Midline3D
 from wormlab3d.data.model.tag import Tag
-from wormlab3d.data.model.trial import Trial
+from wormlab3d.data.model.trial import Trial, CAMERA_IDXS
 from wormlab3d.data.util import ANNEX_PATH_PLACEHOLDER
 
 HOME_DIR = os.path.expanduser('~')
 DATA_DIR = HOME_DIR + '/projects/worm_data'
 VIDEO_DIR = 'video'
+CALIB_DIR = 'calib'
 BACKGROUND_IMAGES_DIR = 'background'
 MIDLINES_2D_DIR = DATA_DIR + '/midlines'
 TAGS_MAT_PATH = '../../data/Behavior_Dictionary.mat'
@@ -55,8 +59,8 @@ def print_runinfo_data():
                 if row[k] not in values[k]:
                     values[k].append(row[k])
     for k in fields:
-        print('\n\n=== ' + k)
-        print(values[k])
+        logger.info('\n\n=== ' + k)
+        logger.info(values[k])
 
 
 def clear_db():
@@ -66,6 +70,7 @@ def clear_db():
     Frame.drop_collection()
     Midline2D.drop_collection()
     Midline3D.drop_collection()
+    Cameras.drop_collection()
 
 
 def find_or_create_experiment(row: dict) -> Experiment:
@@ -78,6 +83,7 @@ def find_or_create_experiment(row: dict) -> Experiment:
         pass
 
     # Create new experiment
+    logger.info(f'Creating experiment (legacy_id={id_old})')
     experiment = Experiment()
     experiment.user = row['user'].strip()
     experiment.sex = row['sex'].strip()
@@ -91,6 +97,38 @@ def find_or_create_experiment(row: dict) -> Experiment:
         experiment.strain = row['strain'].strip()
     experiment.legacy_id = id_old
     experiment.save()
+
+    # Look for calibration file like 025.xml
+    calib_path = f'{DATA_DIR}/{CALIB_DIR}/{int(row["#id"]):03d}.xml'
+    if os.path.exists(calib_path) or os.path.lexists(calib_path):
+        logger.info(f'Found calibration file: {calib_path}')
+        fs = cv2.FileStorage(calib_path, cv2.FILE_STORAGE_READ)
+        cams = Cameras()
+        cams.experiment = experiment
+
+        try:
+            cams.timestamp = dateutil.parser.parse(fs.getNode('calibration_time').string())
+            cams.wormcv_version = fs.getNode('WormCV_Version').string()
+            cams.opencv_version = fs.getNode('OpenCV_Version').string()
+            cams.opencv_contrib_hash = fs.getNode('OpenCV_contrib_hash').string()
+            cams.total_calib_images = int(fs.getNode('total_filenames').real())
+            if cams.total_calib_images == 0 and fs.getNode('image_filenames').size() > 0:
+                cams.total_calib_images = fs.getNode('image_filenames').size()
+            cams.pattern_height = float(fs.getNode('pattern_height').real())
+            cams.pattern_width = float(fs.getNode('pattern_width').real())
+            cams.square_size = float(fs.getNode('square_size').real())
+            cams.flag_value = int(fs.getNode('flag_value').real())
+            cams.n_mini_matches = int(fs.getNode('n_mini_matches').real())
+            cams.n_cameras = int(fs.getNode('nCameras').real())
+            cams.camera_type = int(fs.getNode('camera_type').real())
+            cams.reprojection_error = float(fs.getNode('reprojection_error').real())
+            cams.n_images_used = [int(fs.getNode(f'images_used_{c}').real()) for c in CAMERA_IDXS]
+            cams.pose = [fs.getNode(f'camera_pose_{c}').mat() for c in CAMERA_IDXS]
+            cams.matrix = [fs.getNode(f'camera_matrix_{c}').mat() for c in CAMERA_IDXS]
+            cams.distortion = [fs.getNode(f'camera_distortion_{c}').mat() for c in CAMERA_IDXS]
+            cams.save()
+        except Exception:
+            logger.error(f'Could not parse calibration file: {calib_path}')
 
     return experiment
 
@@ -128,20 +166,20 @@ def find_or_create_trial(row: dict, experiment: Experiment) -> Trial:
     }
 
     # Look for video files like 025_1.avi
-    for cam_num in range(3):
-        location = f'{VIDEO_DIR}/{int(row["#id"]):03d}_{cam_num}.avi'
+    for c in CAMERA_IDXS:
+        location = f'{VIDEO_DIR}/{int(row["#id"]):03d}_{c}.avi'
         vid_path = DATA_DIR + '/' + location
         if os.path.exists(vid_path) or os.path.lexists(vid_path):
-            setattr(trial, f'camera_{cam_num + 1}_avi', f'{ANNEX_PATH_PLACEHOLDER}/{location}')
+            setattr(trial, f'camera_{c}_avi', f'{ANNEX_PATH_PLACEHOLDER}/{location}')
         else:
             raise RuntimeError(f'Video file not present "{vid_path}"')
 
     # Look for background image files like 025_1.png
-    for cam_num in range(3):
-        location = f'{BACKGROUND_IMAGES_DIR}/{int(row["#id"]):03d}_{cam_num}.avi'
+    for c in CAMERA_IDXS:
+        location = f'{BACKGROUND_IMAGES_DIR}/{int(row["#id"]):03d}_{c}.avi'
         bg_path = DATA_DIR + '/' + location
         if os.path.exists(bg_path) or os.path.lexists(bg_path):
-            setattr(trial, f'camera_{cam_num + 1}_background', f'{ANNEX_PATH_PLACEHOLDER}/{location}')
+            setattr(trial, f'camera_{c}_background', f'{ANNEX_PATH_PLACEHOLDER}/{location}')
 
     trial.save()
 
@@ -152,6 +190,13 @@ def find_or_create_frames(trial: Trial) -> List[Frame]:
     if trial.num_frames == 0:
         return
 
+    # Check for existing frames
+    existing = trial.get_frames()
+    if len(existing) > 0:
+        assert len(existing) == trial.num_frames
+        return
+
+    # Create new empty frames
     frames = []
     for i in range(trial.num_frames):
         frame = Frame()
@@ -206,7 +251,7 @@ def migrate_runinfo():
         reader = csv.DictReader(f)
 
         for row in reader:
-            print(row)
+            logger.debug(row)
 
             # Skip dummy entries
             if row['comments'] == 'ignore':
@@ -223,19 +268,19 @@ def migrate_runinfo():
             except RuntimeError as e:
                 skipped_rows.append((row, str(e)))
 
-    print(f'\n\n==== skipped_rows ({len(skipped_rows)}) ====')
+    logger.info(f'\n\n==== skipped_rows ({len(skipped_rows)}) ====')
     for r, e in skipped_rows:
-        print(f'\n{e}:')
-        print(r)
+        logger.info(f'\n{e}:')
+        logger.info(r)
 
 
 def migrate_midlines2d():
     midlines = []
     files = os.listdir(MIDLINES_2D_DIR)
     failed = []
-    print(f'{len(files)} files found.')
+    logger.info(f'{len(files)} files found.')
     for i, filename in enumerate(files):
-        print(f'Processing file {i + 1}/{len(files)}: {filename}')
+        logger.info(f'Processing file {i + 1}/{len(files)}: {filename}')
         if not filename.endswith('.csv'):
             continue
         midline = Midline2D()
@@ -267,12 +312,17 @@ def migrate_midlines2d():
             midlines.append(midline)
 
     # Bulk insert
-    Midline2D.objects.insert(midlines)
+    if len(midlines) > 0:
+        logger.info(f'Inserting {len(midlines)} 2D midlines')
+        Midline2D.objects.insert(midlines)
+    else:
+        logger.error('No 2D midlines could be migrated!')
 
     # Show any failures
     if len(failed):
-        print('\n\n=== FAILED ===')
-        print(failed)
+        logger.error('\n\n=== FAILED ===')
+        logger.error(failed)
+
 
 
 def migrate_WT3D():
@@ -281,7 +331,7 @@ def migrate_WT3D():
 
     files = os.listdir(path)
     for i, filename in enumerate(files):
-        print(f'Processing file {i + 1}/{len(files)}: {filename}')
+        logger.info(f'Processing file {i + 1}/{len(files)}: {filename}')
         if not filename.endswith('.mat'):
             continue
         mat = sio.loadmat(path + '/' + filename)
@@ -298,7 +348,7 @@ def migrate_WT3D():
         # todo: verify other trial info all matches up
 
         # Tags (Behavior)
-        if 1:
+        if 0:
             tag_entries = mat['Behavior'][0][0]
             n_entries = tag_entries.shape[1]
             if n_entries > 0:
@@ -312,8 +362,8 @@ def migrate_WT3D():
                     # Attach tags to all frames in range
                     first_frame = tag_entries[0]['First_Frame'][j][0][0]
                     last_frame = tag_entries[0]['Last_Frame'][j][0][0]
-                    print(
-                        f'Migrating {j + 1}/{n_entries} tag entries. Adding {len(tags)} tags to frames {first_frame} - {last_frame}.')
+                    logger.info(f'Migrating {j + 1}/{n_entries} tag entries. '
+                                f'Adding {len(tags)} tags to frames {first_frame} - {last_frame}.')
                     Frame.objects(
                         trial=trial,
                         frame_num__gte=first_frame,
@@ -326,7 +376,7 @@ def migrate_WT3D():
         if 0:
             annotations = mat['Camera_Parameters'][0][0]['Calib'][0][0]['Annotations']
 
-            print(
+            logger.info(
                 mat['Camera_Parameters'].shape,
                 mat['Camera_Parameters'][0].shape,
                 mat['Camera_Parameters'][0][0].shape,
@@ -336,7 +386,7 @@ def migrate_WT3D():
                 mat['Camera_Parameters'][0][0]['Calib'][0][0]['Annotations'].shape,
             )
             n_midlines = annotations.shape[-1]
-            print(f'n_midlines={n_midlines}')
+            logger.info(f'n_midlines={n_midlines}')
 
             # Annotation keys: 'Frame_Number', 'X', 'Y', 'Intrinsic_Matrix', 'Radial_Distortion_Vector', 'Tangential_Distortion_Vector', 'Extrinsic_Matrix'
             for n in range(n_midlines):
@@ -344,8 +394,8 @@ def migrate_WT3D():
                 x = annotation['X'][0][0][0]
                 y = annotation['Y'][0][0][0]
                 X = np.stack([x, y]).T
-                # print(X.shape)
-                # print(np.isnan(X.any()))
+                # logger.info(X.shape)
+                # logger.info(np.isnan(X.any()))
 
                 # Get frame
                 frame_num = annotation['Frame_Number'][0][0][0][0]
@@ -369,12 +419,11 @@ def migrate_WT3D():
                     # midline.save()
 
 
-
 if __name__ == '__main__':
-    # clear_db()
+    clear_db()
     # print_runinfo_data()
-    # migrate_tags()
-    # migrate_runinfo()
-    # migrate_midlines2d()
+    migrate_tags()
+    migrate_runinfo()
+    migrate_midlines2d()
 
-    migrate_WT3D()
+    # migrate_WT3D()

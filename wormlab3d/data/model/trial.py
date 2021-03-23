@@ -7,7 +7,7 @@ from wormlab3d.data.model.frame import Frame
 from wormlab3d.data.util import fix_path
 from wormlab3d.preprocessing.video_reader import VideoReader
 
-CAMERA_IDXS = [1, 2, 3]  # todo: should this start from 0?
+CAMERA_IDXS = [0, 1, 2]
 
 
 class Trial(Document):
@@ -19,12 +19,12 @@ class Trial(Document):
     quality = FloatField()
     temperature = FloatField(min_value=0)
     comments = StringField()
+    camera_0_avi = StringField(required=True)
     camera_1_avi = StringField(required=True)
     camera_2_avi = StringField(required=True)
-    camera_3_avi = StringField(required=True)
+    camera_0_background = StringField()
     camera_1_background = StringField()
     camera_2_background = StringField()
-    camera_3_background = StringField()
     legacy_id = IntField(unique=True)
     legacy_data = DictField()
 
