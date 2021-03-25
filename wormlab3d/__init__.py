@@ -16,6 +16,9 @@ DATA_PATH = ROOT_PATH + '/data'
 ANNEX_PATH = str(Path(__file__).parent.parent.parent) + '/worm_data'
 WT3D_PATH = str(Path(__file__).parent.parent.parent) + '/3DWT_Data'
 
+# When fetching annexed files on demand, ensure that this much space is always kept free
+MIN_FREE_DISK_SPACE = '100G'
+
 # Set formatting
 formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
 
