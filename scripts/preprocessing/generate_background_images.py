@@ -27,6 +27,7 @@ def generate_background_images(
     # Iterate over matching trials
     for trial in trials:
         logger.info(f'Processing trial id={trial.id}')
+        backgrounds = {}
         for ci in cam_idxs:
             logger.info(f'Processing camera idx={ci}')
 
@@ -42,9 +43,26 @@ def generate_background_images(
             saved = cv2.imwrite(actual_path, bg, [cv2.IMWRITE_PNG_COMPRESSION, 0])
             if saved:
                 logger.info(f'Saving to {output_path} ({actual_path})')
-                setattr(trial, f'camera_{ci}_background', output_path)
+                backgrounds[ci] = output_path
             else:
                 logger.error(f'Error saving to {actual_path}')
+                break
+
+        # Save backgrounds, replacing or updating as needed
+        if len(backgrounds) > 0:
+            if len(backgrounds) == 3:
+                trial.backgrounds = backgrounds
+            else:
+                if len(trial.backgrounds) > 0:
+                    bgs = trial.backgrounds
+                else:
+                    bgs = ['', '', '']
+                for ci, bg in backgrounds.items():
+                    bgs[ci] = bg
+                trial.backgrounds = bgs
+
+        else:
+            logger.error('No backgrounds generated for trial!')
 
         # Update database
         trial.save()
@@ -52,6 +70,6 @@ def generate_background_images(
 
 if __name__ == '__main__':
     generate_background_images(
-        trial_id='605473024e0295b2796d03d1',
+        trial_id=4636,
         camera_idx=1
     )

@@ -1,12 +1,14 @@
+import numpy as np
 from mongoengine import *
 
+from wormlab3d.data.model.cameras import CAMERA_IDXS
 from wormlab3d.data.model.model import Model
 from wormlab3d.data.numpy_field import NumpyField
 
 
 class Midline2D(Document):
     frame = ReferenceField('Frame', required=True)
-    camera = IntField(choices=[1, 2, 3], required=True)
+    camera = IntField(choices=CAMERA_IDXS, required=True)
 
     # Midline coordinates
     X = NumpyField(required=True)
@@ -21,3 +23,13 @@ class Midline2D(Document):
     meta = {
         'collection': 'midline2d'
     }
+
+    def get_image(self) -> np.ndarray:
+        """
+        Get the image associated with this midline annotation from the video.
+        midline -> frame -> trial -> video[c] -> frame[f]
+        """
+        trial = self.frame.trial
+        video = trial.get_video_reader(camera_idx=self.camera)
+        image = video[self.frame.frame_num]
+        return image

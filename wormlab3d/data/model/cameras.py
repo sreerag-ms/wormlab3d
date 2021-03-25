@@ -2,6 +2,7 @@ from mongoengine import *
 
 from wormlab3d.data.model.experiment import Experiment
 from wormlab3d.data.numpy_field import NumpyField
+from wormlab3d.data.triplet_field import TripletField
 
 CAMERA_IDXS = [0, 1, 2]
 
@@ -21,7 +22,7 @@ class Cameras(Document):
     n_cameras = IntField()
     camera_type = IntField()
     reprojection_error = FloatField()
-    n_images_used = ListField(IntField(), required=True)
-    pose = ListField(NumpyField(), required=True)
-    matrix = ListField(NumpyField(), required=True)
-    distortion = ListField(NumpyField(), required=True)
+    n_images_used = TripletField(IntField(), required=True)
+    pose = TripletField(NumpyField(), required=True)
+    matrix = TripletField(NumpyField(), required=True)
+    distortion = TripletField(NumpyField(), required=True)

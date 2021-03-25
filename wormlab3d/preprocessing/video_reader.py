@@ -5,6 +5,7 @@ import numpy as np
 import pims
 
 from wormlab3d import logger
+from wormlab3d.data.annex import fetch_from_annex, is_annexed_file
 from wormlab3d.preprocessing.contour import CONT_THRESH_DEFAULT, contour_mask, CONT_MIN_AREA, find_contours, \
     MAX_CONTOURING_ATTEMPTS, contour_centre
 from wormlab3d.preprocessing.create_bg_lp import Accumulate
@@ -26,6 +27,10 @@ class VideoReader:
             background_image_path: str = None,
             contour_thresh: float = CONT_THRESH_DEFAULT
     ):
+        # If the video is a link try and fetch it from the annex
+        if is_annexed_file(video_path):
+            fetch_from_annex(video_path)
+
         try:
             # standard video reader
             self.video = pims.PyAVReaderTimed(video_path)
@@ -37,6 +42,8 @@ class VideoReader:
 
         # Open background image
         if background_image_path is not None:
+            if is_annexed_file(background_image_path):
+                fetch_from_annex(background_image_path)
             self.background = cv2.imread(background_image_path, cv2.IMREAD_GRAYSCALE)
             if self.background is None:
                 logger.error(f'Cannot open background image: {background_image_path}')
@@ -155,7 +162,7 @@ class VideoReader:
         """
         Create a background image by low-pass filtering the video.
         """
-        logger.debug('Generating background')
+        logger.info('Generating background')
         # Create the filter
         a = Accumulate(self.frame_size)
         self.current_frame = -1

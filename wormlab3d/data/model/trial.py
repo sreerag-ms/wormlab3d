@@ -2,29 +2,26 @@ from typing import List, Dict
 
 from mongoengine import *
 
+from wormlab3d.data.model.cameras import CAMERA_IDXS
 from wormlab3d.data.model.experiment import Experiment
 from wormlab3d.data.model.frame import Frame
+from wormlab3d.data.triplet_field import TripletField
 from wormlab3d.data.util import fix_path
 from wormlab3d.preprocessing.video_reader import VideoReader
-
-CAMERA_IDXS = [0, 1, 2]
 
 
 class Trial(Document):
     id = SequenceField(primary_key=True)
     experiment = ReferenceField(Experiment)
     date = DateTimeField(required=True)
+    trial_num = IntField()
     num_frames = IntField(required=True, default=0)
     fps = FloatField()
     quality = FloatField()
     temperature = FloatField(min_value=0)
     comments = StringField()
-    camera_0_avi = StringField(required=True)
-    camera_1_avi = StringField(required=True)
-    camera_2_avi = StringField(required=True)
-    camera_0_background = StringField()
-    camera_1_background = StringField()
-    camera_2_background = StringField()
+    videos = TripletField(StringField(), required=True)
+    backgrounds = TripletField(StringField())
     legacy_id = IntField(unique=True)
     legacy_data = DictField()
 
@@ -68,8 +65,11 @@ class Trial(Document):
 
     def get_video_reader(self, camera_idx: int) -> VideoReader:
         assert camera_idx in CAMERA_IDXS
-        vid_path = fix_path(getattr(self, f'camera_{camera_idx}_avi'))
-        bg_path = fix_path(getattr(self, f'camera_{camera_idx}_background'))
+        vid_path = fix_path(self.videos[camera_idx])
+        if len(self.backgrounds) > 0:
+            bg_path = fix_path(self.backgrounds[camera_idx])
+        else:
+            bg_path = None
 
         return VideoReader(
             video_path=vid_path,

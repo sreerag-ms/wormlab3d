@@ -10,13 +10,8 @@ import scipy.io as sio
 from mongoengine import DoesNotExist
 
 from wormlab3d import WT3D_PATH, logger
-from wormlab3d.data.model.cameras import Cameras
-from wormlab3d.data.model.experiment import Experiment
-from wormlab3d.data.model.frame import Frame
-from wormlab3d.data.model.midline2d import Midline2D
-from wormlab3d.data.model.midline3d import Midline3D
-from wormlab3d.data.model.tag import Tag
-from wormlab3d.data.model.trial import Trial, CAMERA_IDXS
+from wormlab3d.data import *
+from wormlab3d.data.model.cameras import CAMERA_IDXS
 from wormlab3d.data.util import ANNEX_PATH_PLACEHOLDER
 
 HOME_DIR = os.path.expanduser('~')
@@ -64,13 +59,16 @@ def print_runinfo_data():
 
 
 def clear_db():
-    Tag.drop_collection()
+    Cameras.drop_collection()
     Experiment.drop_collection()
-    Trial.drop_collection()
     Frame.drop_collection()
     Midline2D.drop_collection()
     Midline3D.drop_collection()
-    Cameras.drop_collection()
+    Model.drop_collection()
+    Tag.drop_collection()
+    Trajectory.drop_collection()
+    TrajectoryDataset.drop_collection()
+    Trial.drop_collection()
 
 
 def find_or_create_experiment(row: dict) -> Experiment:
@@ -147,6 +145,7 @@ def find_or_create_trial(row: dict, experiment: Experiment) -> Trial:
     long_id = row['legacy_id']
     trial.date = datetime.datetime(year=int(long_id[:4]), month=int(long_id[4:6]), day=int(long_id[6:8]))
     trial.experiment = experiment
+    trial.trial_num = int(row['trial_id'])
     trial.legacy_id = id_old
     if row['num_frames'] not in ['', '?']:
         trial.num_frames = int(row['num_frames'])
@@ -166,20 +165,29 @@ def find_or_create_trial(row: dict, experiment: Experiment) -> Trial:
     }
 
     # Look for video files like 025_1.avi
+    videos = []
     for c in CAMERA_IDXS:
         location = f'{VIDEO_DIR}/{int(row["#id"]):03d}_{c}.avi'
         vid_path = DATA_DIR + '/' + location
         if os.path.exists(vid_path) or os.path.lexists(vid_path):
-            setattr(trial, f'camera_{c}_avi', f'{ANNEX_PATH_PLACEHOLDER}/{location}')
+            videos.append(f'{ANNEX_PATH_PLACEHOLDER}/{location}')
         else:
             raise RuntimeError(f'Video file not present "{vid_path}"')
+    trial.videos = videos
 
     # Look for background image files like 025_1.png
+    bgs = []
     for c in CAMERA_IDXS:
-        location = f'{BACKGROUND_IMAGES_DIR}/{int(row["#id"]):03d}_{c}.avi'
+        location = f'{BACKGROUND_IMAGES_DIR}/{int(row["#id"]):03d}_{c}.png'
         bg_path = DATA_DIR + '/' + location
         if os.path.exists(bg_path) or os.path.lexists(bg_path):
-            setattr(trial, f'camera_{c}_background', f'{ANNEX_PATH_PLACEHOLDER}/{location}')
+            bgs.append(f'{ANNEX_PATH_PLACEHOLDER}/{location}')
+    if len(bgs) == 3:
+        trial.backgrounds = bgs
+    elif len(bgs) > 0:
+        logger.error(f'Missing some backgrounds, found {len(bgs)}')
+    else:
+        logger.warn('No backgrounds found')
 
     trial.save()
 
@@ -264,7 +272,7 @@ def migrate_runinfo():
             try:
                 experiment = find_or_create_experiment(row)
                 trial = find_or_create_trial(row, experiment)
-                frames = find_or_create_frames(trial)
+                # frames = find_or_create_frames(trial)
             except RuntimeError as e:
                 skipped_rows.append((row, str(e)))
 
@@ -293,7 +301,7 @@ def migrate_midlines2d():
         except DoesNotExist:
             failed.append(filename)
             continue
-        midline.camera = cam_num + 1
+        midline.camera = cam_num
 
         # Parse annotated midlines
         with open(MIDLINES_2D_DIR + '/' + filename) as f:
@@ -320,9 +328,7 @@ def migrate_midlines2d():
 
     # Show any failures
     if len(failed):
-        logger.error('\n\n=== FAILED ===')
-        logger.error(failed)
-
+        logger.error('\n=== FAILED:' + failed + '\n')
 
 
 def migrate_WT3D():
@@ -348,82 +354,85 @@ def migrate_WT3D():
         # todo: verify other trial info all matches up
 
         # Tags (Behavior)
-        if 0:
-            tag_entries = mat['Behavior'][0][0]
-            n_entries = tag_entries.shape[1]
-            if n_entries > 0:
-                for j in range(n_entries):
-                    # Get tag objects
-                    tags = []
-                    tag_ids = tag_entries[0]['Tags'][j][0]
-                    for tag_id in tag_ids:
-                        tags.append(Tag.objects.get(id=tag_id))
+        tag_entries = mat['Behavior'][0][0]
+        n_entries = tag_entries.shape[1]
+        if n_entries > 0:
+            for j in range(n_entries):
+                # Get tag objects
+                tags = []
+                tag_ids = tag_entries[0]['Tags'][j][0]
+                for tag_id in tag_ids:
+                    tags.append(Tag.objects.get(id=tag_id))
 
-                    # Attach tags to all frames in range
-                    first_frame = tag_entries[0]['First_Frame'][j][0][0]
-                    last_frame = tag_entries[0]['Last_Frame'][j][0][0]
-                    logger.info(f'Migrating {j + 1}/{n_entries} tag entries. '
-                                f'Adding {len(tags)} tags to frames {first_frame} - {last_frame}.')
-                    Frame.objects(
-                        trial=trial,
-                        frame_num__gte=first_frame,
-                        frame_num__lte=last_frame
-                    ).update(
-                        set__tags=tags
-                    )
+                # Attach tags to all frames in range
+                first_frame = tag_entries[0]['First_Frame'][j][0][0] - 1
+                last_frame = tag_entries[0]['Last_Frame'][j][0][0] - 1
+                logger.info(f'Migrating {j + 1}/{n_entries} tag entries. '
+                            f'Adding {len(tags)} tags to frames {first_frame} - {last_frame}.')
+                Frame.objects(
+                    trial=trial,
+                    frame_num__gte=first_frame,
+                    frame_num__lte=last_frame
+                ).update(
+                    set__tags=tags
+                )
 
         # 2D midline annotations are stored in the camera parameters as annotations
-        if 0:
-            annotations = mat['Camera_Parameters'][0][0]['Calib'][0][0]['Annotations']
+        annotations = mat['Camera_Parameters'][0][0]['Calib'][0][0]['Annotations']
 
-            logger.info(
-                mat['Camera_Parameters'].shape,
-                mat['Camera_Parameters'][0].shape,
-                mat['Camera_Parameters'][0][0].shape,
-                mat['Camera_Parameters'][0][0]['Calib'].shape,
-                mat['Camera_Parameters'][0][0]['Calib'][0].shape,
-                mat['Camera_Parameters'][0][0]['Calib'][0][0].shape,
-                mat['Camera_Parameters'][0][0]['Calib'][0][0]['Annotations'].shape,
-            )
-            n_midlines = annotations.shape[-1]
-            logger.info(f'n_midlines={n_midlines}')
+        # Annotation keys: 'Frame_Number', 'X', 'Y', 'Intrinsic_Matrix', 'Radial_Distortion_Vector', 'Tangential_Distortion_Vector', 'Extrinsic_Matrix'
 
-            # Annotation keys: 'Frame_Number', 'X', 'Y', 'Intrinsic_Matrix', 'Radial_Distortion_Vector', 'Tangential_Distortion_Vector', 'Extrinsic_Matrix'
-            for n in range(n_midlines):
-                annotation = annotations[0][n]
-                x = annotation['X'][0][0][0]
-                y = annotation['Y'][0][0][0]
+        n_midlines = annotations[0][0].shape[-1]
+        logger.info(f'n_midlines={n_midlines}')
+        for n in range(n_midlines):
+            midlines = []
+
+            for c in CAMERA_IDXS:
+                annotation = annotations[0][c]
+                x = annotation['X'][0][n][0]
+                y = annotation['Y'][0][n][0]
                 X = np.stack([x, y]).T
-                # logger.info(X.shape)
-                # logger.info(np.isnan(X.any()))
 
                 # Get frame
-                frame_num = annotation['Frame_Number'][0][0][0][0]
-                frame = trial.get_frame(frame_num)
+                frame_num = annotation['Frame_Number'][0][n][0][0] - 1
+                try:
+                    frame = trial.get_frame(frame_num)
+                except DoesNotExist:
+                    logger.error('Could not find frame in database.')
+                    continue
 
                 # Get any existing annotations
                 exists = False
-                existing = frame.get_midlines2d(manual_only=True)
+                existing = frame.get_midlines2d(manual_only=True, filters={'camera': c})
                 for mid in existing:
-                    if np.allclose(X, mid.X):
-                        # Midline matches existing record
+                    if X.shape == mid.X.shape and np.allclose(X, mid.X):
+                        # Midline matches existing record so skip it
+                        logger.debug('Midline already exists, skipping.')
                         exists = True
                         break
+                if exists:
+                    continue
 
-                if not exists:
-                    midline = Midline2D()
-                    midline.frame = frame
-                    midline.camera = '?'
-                    midline.user = 'YO'
-                    midline.X = X
-                    # midline.save()
+                midline = Midline2D()
+                midline.frame = frame
+                midline.camera = c
+                midline.user = 'YO'
+                midline.X = X
+                midlines.append(midline)
+
+            if len(midlines) > 0:
+                # Midline annotations should come in triplets, one for each camera view
+                assert len(midlines) == 3
+                for m1, m2 in zip(midlines, midlines):
+                    assert m1.frame.frame_num == m2.frame.frame_num
+                for m in midlines:
+                    m.save()
 
 
 if __name__ == '__main__':
-    clear_db()
     # print_runinfo_data()
+    clear_db()
     migrate_tags()
     migrate_runinfo()
     migrate_midlines2d()
-
-    # migrate_WT3D()
+    migrate_WT3D()
