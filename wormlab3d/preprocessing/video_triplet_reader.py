@@ -39,8 +39,8 @@ class VideoTripletReader:
     def __next__(self) -> List[pims.Frame]:
         try:
             next_frame = self.current_frame + 1
-            imgs = [self.readers[c][next_frame] for c in CAMERA_IDXS]
-            self.current_frame = next_frame
+            imgs = self[next_frame]
+            self.set_frame_num(next_frame)
         except IndexError:
             raise StopIteration()
         return imgs
