@@ -10,7 +10,7 @@ setup(
     setup_requires=['pytest-runner'],
     tests_require=['pytest'],
     install_requires=[
-        'numpy >= 1.19, <1.20',
+        'numpy >= 1.20, < 1.21',
         'torch >= 1.7, <= 1.8',
         'matplotlib >= 3.3',
         'scikit-learn >= 0.24',
