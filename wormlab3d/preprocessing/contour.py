@@ -30,15 +30,17 @@ def find_contours(
 
     # Find the contours
     all_contours, hierarchy = cv2.findContours(thresh_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    logger.debug(f'Found {len(all_contours)} contours of sufficient size in thresholded image.')
 
-    # Filter the contours so we only take ones larger than min_area
+    # Filter the contours to only take ones larger than min_area
     contours = []
     for c in all_contours:
         area = cv2.contourArea(c)
         if area >= min_area:
             contours.append(c)
-    logger.debug(f'Found {len(contours)} contours of sufficient size in thresholded image.')
+    logger.debug(
+        f'Found {len(contours)} contours of sufficient size in thresholded image. '
+        f'({len(all_contours)} total).'
+    )
 
     return contours
 

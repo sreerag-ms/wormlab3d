@@ -14,6 +14,7 @@ def test_find_contours_in_video():
     for image in video:
         contours = video.find_contours()
         for c in contours:
+            # todo: extract reference points to make this into a proper test
             my_imshow(image, contour_centre(c))
             logger.info(f'frame #{video.current_frame}, center = {contour_centre(c)}')
 

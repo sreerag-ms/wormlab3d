@@ -8,6 +8,7 @@ from wormlab3d.data.model.frame import Frame
 from wormlab3d.data.triplet_field import TripletField
 from wormlab3d.data.util import fix_path
 from wormlab3d.preprocessing.video_reader import VideoReader
+from wormlab3d.preprocessing.video_triplet_reader import VideoTripletReader
 
 
 class Trial(Document):
@@ -64,6 +65,9 @@ class Trial(Document):
         return clips
 
     def get_video_reader(self, camera_idx: int) -> VideoReader:
+        """
+        Instantiate a video reader for the recording taken by the target camera.
+        """
         assert camera_idx in CAMERA_IDXS
         vid_path = fix_path(self.videos[camera_idx])
         if len(self.backgrounds) > 0:
@@ -74,4 +78,19 @@ class Trial(Document):
         return VideoReader(
             video_path=vid_path,
             background_image_path=bg_path
+        )
+
+    def get_video_triplet_reader(self) -> VideoTripletReader:
+        """
+        Instantiate a video-triplet reader to read all recordings in sync.
+        """
+        vid_paths = [fix_path(self.videos[c]) for c in CAMERA_IDXS]
+        if len(self.backgrounds) > 0:
+            bg_paths = [fix_path(self.backgrounds[c]) for c in CAMERA_IDXS]
+        else:
+            bg_paths = None
+
+        return VideoTripletReader(
+            video_paths=vid_paths,
+            background_image_paths=bg_paths
         )

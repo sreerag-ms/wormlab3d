@@ -83,8 +83,11 @@ class VideoReader:
         grey = self._as_grey(img)
         return grey
 
+    def __len__(self):
+        return len(self.video)
+
     def set_frame_num(self, idx: int):
-        assert 0 <= idx <= len(self.video)
+        assert 0 <= idx <= len(self)
         self.current_frame = idx
 
     @staticmethod
@@ -97,6 +100,7 @@ class VideoReader:
     @staticmethod
     @pims.pipeline
     def _invert(frame: pims.Frame) -> pims.Frame:
+        frame = frame.copy()
         frame.data = np.invert(frame.data)
         return frame
 
@@ -104,8 +108,7 @@ class VideoReader:
         """
         Find the contours in the image.
         """
-        image = self.video[self.current_frame]
-        image = self._as_grey(image)
+        image = self[self.current_frame].copy()
 
         # Invert image (white worms on black background)
         image = self._invert(image)
@@ -148,7 +151,7 @@ class VideoReader:
 
         return contours
 
-    def find_objects(self) -> List[np.ndarray]:
+    def find_objects(self) -> np.ndarray:
         """
         Finds contours in the current frame and returns the centre point coordinates.
         """
@@ -156,11 +159,13 @@ class VideoReader:
         centres = []
         for c in contours:
             centres.append(contour_centre(c))
+        centres = np.stack(centres)
         return centres
 
     def get_background(self) -> np.ndarray:
         """
         Create a background image by low-pass filtering the video.
+        todo: redo the low-pass filter so it is more understandable
         """
         logger.info('Generating background')
         # Create the filter
