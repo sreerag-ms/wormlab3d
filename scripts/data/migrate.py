@@ -59,6 +59,7 @@ def print_runinfo_data():
 
 
 def clear_db():
+    # Drop collections
     Cameras.drop_collection()
     Experiment.drop_collection()
     Frame.drop_collection()
@@ -69,6 +70,11 @@ def clear_db():
     Trajectory.drop_collection()
     TrajectoryDataset.drop_collection()
     Trial.drop_collection()
+
+    # Reset id sequences / counters
+    Experiment.id.set_next_value(0)
+    Model.id.set_next_value(0)
+    Trial.id.set_next_value(0)
 
 
 def find_or_create_experiment(row: dict) -> Experiment:
@@ -119,11 +125,11 @@ def find_or_create_experiment(row: dict) -> Experiment:
             cams.n_mini_matches = int(fs.getNode('n_mini_matches').real())
             cams.n_cameras = int(fs.getNode('nCameras').real())
             cams.camera_type = int(fs.getNode('camera_type').real())
-            cams.reprojection_error = float(fs.getNode('reprojection_error').real())
+            cams.reprojection_error = float(fs.getNode('meanReprojectError').real())
             cams.n_images_used = [int(fs.getNode(f'images_used_{c}').real()) for c in CAMERA_IDXS]
             cams.pose = [fs.getNode(f'camera_pose_{c}').mat() for c in CAMERA_IDXS]
             cams.matrix = [fs.getNode(f'camera_matrix_{c}').mat() for c in CAMERA_IDXS]
-            cams.distortion = [fs.getNode(f'camera_distortion_{c}').mat() for c in CAMERA_IDXS]
+            cams.distortion = [fs.getNode(f'camera_distortion_{c}').mat()[0] for c in CAMERA_IDXS]
             cams.save()
         except Exception:
             logger.error(f'Could not parse calibration file: {calib_path}')
@@ -272,7 +278,7 @@ def migrate_runinfo():
             try:
                 experiment = find_or_create_experiment(row)
                 trial = find_or_create_trial(row, experiment)
-                # frames = find_or_create_frames(trial)
+                frames = find_or_create_frames(trial)
             except RuntimeError as e:
                 skipped_rows.append((row, str(e)))
 
@@ -328,7 +334,7 @@ def migrate_midlines2d():
 
     # Show any failures
     if len(failed):
-        logger.error('\n=== FAILED:' + failed + '\n')
+        logger.error('\n=== FAILED:' + '\n'.join(failed) + '\n')
 
 
 def migrate_WT3D():
