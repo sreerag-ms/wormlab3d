@@ -10,7 +10,7 @@ import scipy.io as sio
 from mongoengine import DoesNotExist
 
 from wormlab3d import WT3D_PATH, logger
-from wormlab3d.data import *
+from wormlab3d.data.model import *
 from wormlab3d.data.model.cameras import CAMERA_IDXS
 from wormlab3d.data.util import ANNEX_PATH_PLACEHOLDER
 
