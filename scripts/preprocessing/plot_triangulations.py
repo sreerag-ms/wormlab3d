@@ -44,6 +44,6 @@ def plot_triangulations(trial_id, frame_num=1):
 
 if __name__ == '__main__':
     plot_triangulations(
-        trial_id=281,
-        frame_num=97
+        trial_id=4,
+        frame_num=120
     )

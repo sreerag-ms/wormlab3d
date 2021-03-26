@@ -25,4 +25,4 @@ def plot_2d_midline_annotation(midline2d_id: str = None):
 
 
 if __name__ == '__main__':
-    plot_2d_midline_annotation(midline2d_id='605b4e49a281a5b071237829')
+    plot_2d_midline_annotation(midline2d_id='605dbb1ff1f34c19b7ab7422')
