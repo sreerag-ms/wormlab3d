@@ -17,11 +17,12 @@ class PinholeCamera:
         self.rotation = pose[:3, :3]
         self.translation = pose[:3, 3]
 
-    def project_to_2d(self, X: np.ndarray, distort: bool = True, shift: np.ndarray = None):
+    def project_to_2d(self, image_point: np.ndarray, distort: bool = True, shift: np.ndarray = None) -> np.ndarray:
         """
         Project 3D object point down to the 2D image plane.
         """
-        x = np.matmul(self.rotation, X) + self.translation
+        assert image_point.shape == (3,)
+        x = np.matmul(self.rotation, image_point) + self.translation
         x, y = x[0] / x[2], x[1] / x[2]
         fx = self.matrix[0, 0]
         fy = self.matrix[1, 1]
@@ -42,6 +43,6 @@ class PinholeCamera:
         cx = self.matrix[0, 2]
         cy = self.matrix[1, 2]
 
-        out = fx * x + cx, fy * y + cy
+        out = np.array((fx * x + cx, fy * y + cy))
 
         return out

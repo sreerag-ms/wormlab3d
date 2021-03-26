@@ -9,7 +9,12 @@ from wormlab3d import logger
 from wormlab3d.data.model.cameras import CAMERA_IDXS, Cameras
 
 
-def triangulate(image_points: List[np.ndarray], cameras: Cameras, x0=None):
+def triangulate(
+        image_points: List[np.ndarray],
+        cameras: Cameras,
+        x0: np.ndarray = None,
+        matching_threshold: float = 100,
+) -> list:
     """
     Triangulate a list of 2D image points obtained from each camera view to produce a list of 3D object
     points which correspond up to some tolerance.
@@ -18,7 +23,7 @@ def triangulate(image_points: List[np.ndarray], cameras: Cameras, x0=None):
     for pts in image_points:
         assert pts.ndim == 2
         assert pts.shape[1] == 2
-    logger.debug(f'Triangulating. Cameras mean reprojection error={cameras.reprojection_error:.4f}')
+    logger.debug(f'Triangulating. Cameras mean reprojection error={cameras.reprojection_error:.4f}.')
     cams_model = cameras.get_camera_model_triplet()
 
     if x0 is None:
@@ -27,42 +32,52 @@ def triangulate(image_points: List[np.ndarray], cameras: Cameras, x0=None):
     def f(x, pts):
         return np.sqrt(
             sum([
-                np.linalg.norm(cams_model[c].project_to_2d(x) - pts[c])
+                np.linalg.norm(cams_model[c].project_to_2d(x) - pts[c])**2
                 for c in CAMERA_IDXS
             ])
         )
 
-    def f_explicit(x, pts):
-        cam_sum = 0.
-        for c in CAMERA_IDXS:
-            l2 = np.linalg.norm(cams_model[c].project_to_2d(x) - pts[c])
-            cam_sum += l2
-        return cam_sum
-
-    point_combinations = list(itertools.product(*image_points))
-    for points in point_combinations:
+    point_keys = [list(range(len(pts))) for pts in image_points]
+    point_key_combinations = list(itertools.product(*point_keys))
+    res_3d = []
+    for point_key_combination in point_key_combinations:
+        points_2d = [
+            image_points[0][point_key_combination[0]],
+            image_points[1][point_key_combination[1]],
+            image_points[2][point_key_combination[2]],
+        ]
         res = minimize(
-            f_explicit,
+            f,
             x0=x0.copy(),
-            args=(points,),
+            args=(points_2d,),
             method='BFGS',
             options={
-                'maxiter': 10000,  # todo: tidy this up
-                'gtol': 1e-10,
-                'disp': True,
+                'maxiter': 1000,
+                'gtol': 1e-4,
+                # 'disp': LOG_LEVEL == 'DEBUG',
             },
-            tol=cameras.reprojection_error  # probably will never reach this...
+            tol=cameras.reprojection_error  # probably will never reach this
         )
-        logger.debug(res)
 
-    # todo: filter the point combinations
-    point_3d = res.x
-    error = res.fun
+        res_3d.append({
+            'pt': res.x,
+            'error': res.fun,
+            'source_point_idxs': point_key_combination,
+        })
 
-    # Re-project the final 3d object point back to the 2d image points
-    points_2d = [
-        cams_model[c].project_to_2d(point_3d)
-        for c in CAMERA_IDXS
-    ]
+    # Filter out any point combinations with too large of an error
+    res_3d = [r for r in res_3d if r['error'] < matching_threshold]
 
-    return point_3d, points_2d
+    # Assuming any 3d points to be visible from all 3 views, then maximum number of 3d points
+    # is the minimum number of 2d points provided from each views.
+    if len(res_3d) > min([len(image_points[c]) for c in CAMERA_IDXS]):
+        raise ValueError('Found too many 3D points! Maybe adjust the threshold?')
+
+    # Re-project the final 3d object points back to new 2d image points
+    for r in res_3d:
+        r['points_2d'] = [
+            cams_model[c].project_to_2d(r['pt'])
+            for c in CAMERA_IDXS
+        ]
+
+    return res_3d

@@ -57,9 +57,9 @@ class CameraModelTriplet:
 
         image_points = []
         for pts in object_points:
-            image_points.append([
+            image_points.append(np.array([
                 self[c].project_to_2d(pts, distort=distort)  # shift=shifts[k])
                 for c in CAMERA_IDXS
-            ])
+            ]))
 
         return image_points

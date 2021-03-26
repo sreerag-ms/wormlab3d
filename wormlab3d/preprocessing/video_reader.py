@@ -107,6 +107,7 @@ class VideoReader:
     def find_contours(self, subtract_background: bool = True) -> List[np.ndarray]:
         """
         Find the contours in the image.
+        Note - if the background is not subtracted this doesn't work very well.
         """
         image = self[self.current_frame].copy()
 
@@ -133,13 +134,12 @@ class VideoReader:
             mask = contour_mask(
                 image,
                 thresh=max(3, max_brightness * cont_thresh),
-                maxval=max_brightness,
-                min_area=CONT_MIN_AREA
+                maxval=max_brightness
             )
             mask_dil = cv2.dilate(mask, None, iterations=10)
             contours = find_contours(
                 image=mask_dil,
-                min_area=CONT_MIN_AREA
+                max_area=np.inf
             )
 
             # If no contours found, decrease the threshold and try again
