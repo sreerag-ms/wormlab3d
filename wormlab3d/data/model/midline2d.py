@@ -21,7 +21,8 @@ class Midline2D(Document):
 
     # Specify collection name otherwise it puts an underscore in it
     meta = {
-        'collection': 'midline2d'
+        'collection': 'midline2d',
+        'indexes': ['frame']
     }
 
     def get_image(self) -> np.ndarray:
@@ -33,3 +34,11 @@ class Midline2D(Document):
         video = trial.get_video_reader(camera_idx=self.camera)
         image = video[self.frame.frame_num]
         return image
+
+    def get_prepared_image(self) -> np.ndarray:
+        """
+        Fetch the pre-prepared image if available from the frame.
+        """
+        if len(self.frame.images) == 3:
+            return self.frame.images[self.camera]
+        return None
