@@ -72,4 +72,4 @@ def contour_centre(contour: np.ndarray):
     x = int(M['m10'] / M['m00'])
     y = int(M['m01'] / M['m00'])
 
-    return x, y
+    return [x, y]

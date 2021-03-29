@@ -1,3 +1,5 @@
+from typing import Tuple, List
+
 from wormlab3d.data.model.trial import Trial, CAMERA_IDXS
 
 
@@ -5,7 +7,8 @@ def process_args(
         experiment_id=None,
         trial_id=None,
         camera_idx=None,
-):
+        frame_num=None,
+) -> Tuple[List[Trial], list]:
     """
     Resolves any combination of passed experiments, trials and cameras.
     """
@@ -28,5 +31,10 @@ def process_args(
         assert trial_id is not None
         assert camera_idx in cam_idxs
         cam_idxs = [camera_idx]
+
+    # Frame number - only makes sense in combination with a trial_id
+    if frame_num is not None:
+        assert trial_id is not None
+        assert 0 <= frame_num < trial.num_frames
 
     return trials, cam_idxs

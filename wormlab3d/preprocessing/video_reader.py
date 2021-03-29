@@ -6,7 +6,7 @@ import pims
 
 from wormlab3d import logger
 from wormlab3d.data.annex import fetch_from_annex, is_annexed_file
-from wormlab3d.preprocessing.contour import CONT_THRESH_DEFAULT, contour_mask, CONT_MIN_AREA, find_contours, \
+from wormlab3d.preprocessing.contour import CONT_THRESH_DEFAULT, contour_mask, find_contours, \
     MAX_CONTOURING_ATTEMPTS, contour_centre
 from wormlab3d.preprocessing.create_bg_lp import Accumulate
 
@@ -104,15 +104,15 @@ class VideoReader:
         frame.data = np.invert(frame.data)
         return frame
 
-    def find_contours(self, subtract_background: bool = True) -> List[np.ndarray]:
+    def get_image(self, invert: bool = False, subtract_background: bool = False) -> pims.Frame:
         """
-        Find the contours in the image.
-        Note - if the background is not subtracted this doesn't work very well.
+        Fetch the image from the current video frame and optionally invert it and subtract the background.
         """
         image = self[self.current_frame].copy()
 
         # Invert image (white worms on black background)
-        image = self._invert(image)
+        if invert:
+            image = self._invert(image)
 
         # Subtract background
         if subtract_background:
@@ -120,8 +120,18 @@ class VideoReader:
                 raise ValueError('No background image available to subtract.')
             if self.background.shape != image.shape:
                 raise ValueError('Image size from video does not match background image size!')
-            bg_inv = self._invert(self.background)
+            if invert:
+                bg_inv = self._invert(self.background)
             image = cv2.subtract(image.copy(), bg_inv)
+
+        return image
+
+    def find_contours(self, subtract_background: bool = True) -> List[np.ndarray]:
+        """
+        Find the contours in the image.
+        Note - if the background is not subtracted this doesn't work very well.
+        """
+        image = self.get_image(invert=True, subtract_background=subtract_background)
 
         # Get max brightness
         max_brightness = image.max()
@@ -159,7 +169,6 @@ class VideoReader:
         centres = []
         for c in contours:
             centres.append(contour_centre(c))
-        centres = np.stack(centres)
         return centres
 
     def get_background(self) -> np.ndarray:

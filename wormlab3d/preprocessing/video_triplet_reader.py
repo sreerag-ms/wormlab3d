@@ -45,7 +45,7 @@ class VideoTripletReader:
             raise StopIteration()
         return imgs
 
-    def __getitem__(self, idx) -> List[pims.Frame]:
+    def __getitem__(self, idx: int) -> List[pims.Frame]:
         return [self.readers[c][idx] for c in CAMERA_IDXS]
 
     def set_frame_num(self, idx: int):
@@ -54,8 +54,14 @@ class VideoTripletReader:
         for r in self.readers:
             r.current_frame = idx
 
-    def get_images(self) -> List[pims.Frame]:
-        return self[self.current_frame]
+    def get_images(self, invert: bool = False, subtract_background: bool = False) -> List[pims.Frame]:
+        return [
+            self.readers[c].get_image(
+                invert=invert,
+                subtract_background=subtract_background
+            )
+            for c in CAMERA_IDXS
+        ]
 
     def find_contours(self, subtract_background: bool = True) -> List[List[np.ndarray]]:
         contours = []
@@ -65,7 +71,7 @@ class VideoTripletReader:
             )
         return contours
 
-    def find_objects(self) -> List[np.ndarray]:
+    def find_objects(self) -> List[list]:
         centres = []
         for c in CAMERA_IDXS:
             centres.append(

@@ -42,6 +42,7 @@ if WRITE_LOG_FILES:
 # Don't propagate logs to the root logger as this causes duplicate entries
 logger.propagate = False
 
+
 # Handle uncaught exceptions
 def handle_exception(exc_type, exc_value, exc_traceback):
     logger.critical(
