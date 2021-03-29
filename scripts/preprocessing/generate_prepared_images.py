@@ -50,7 +50,8 @@ def generate_prepared_images(
                 crop = crop_image(
                     image=image,
                     centre_2d=frame.centre_3d.reprojected_points_2d[c],
-                    size=PREPARED_IMAGE_SIZE
+                    size=PREPARED_IMAGE_SIZE,
+                    fix_overlaps=True
                 )
 
                 # Normalise to [0-1] with float32 dtype
@@ -65,5 +66,5 @@ def generate_prepared_images(
 if __name__ == '__main__':
     generate_prepared_images(
         trial_id=4,
-        # frame_num=120
+        frame_num=5820
     )

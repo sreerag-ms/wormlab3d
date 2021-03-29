@@ -102,7 +102,40 @@ def test_crop_image_bad_overlap():
             )
 
 
+def test_crop_fix_overlaps():
+    """
+    Generate some crops with overlaps over the edge and check the cropper still centres and return correct size.
+    """
+    logger.info('Test: test_crop_fix_overlaps')
+    test_img = Image.open(TEST_BACKGROUND_PATHS[0])
+    test_img = np.asarray(test_img)
+    size = (100, 100)
+    centres_2d = [
+        np.array([5, 5]),
+        np.array([5, 500]),
+        np.array([5, 2000]),
+        np.array([500, 5]),
+        np.array([2000, 5]),
+    ]
+
+    for centre_2d in centres_2d:
+        logger.debug(f'Testing overlap fixes with centre = {centre_2d}')
+        crop = crop_image(
+            image=test_img,
+            centre_2d=centre_2d,
+            size=size,
+            fix_overlaps=True
+        )
+        assert crop.shape == size
+
+        # Check the centre points match up, but give a +/- 1 pixel buffer
+        img_centre_pt = test_img[centre_2d[0], centre_2d[1]]
+        crop_centre_pts = crop[int(size[0] / 2):int(size[0] / 2) + 2, int(size[1] / 2):int(size[1] / 2) + 2]
+        assert (img_centre_pt == crop_centre_pts).any()
+
+
 if __name__ == '__main__':
     test_crop_image()
     test_crop_image_bad_sizes()
     test_crop_image_bad_overlap()
+    test_crop_fix_overlaps()
