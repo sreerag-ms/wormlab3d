@@ -1,5 +1,6 @@
 import cv2
 import matplotlib.pyplot as plt
+import numpy as np
 
 from wormlab3d.data.model.cameras import CAMERA_IDXS
 from wormlab3d.data.model.trial import Trial
@@ -36,9 +37,14 @@ def plot_triangulations(trial_id, frame_num=1):
         ax = axes[c]
         ax.set_title(trial.videos[c])
         ax.imshow(img, vmin=0, vmax=255)
-        ax.scatter(x=centres[c][:, 0], y=centres[c][:, 1], color='blue', s=10, alpha=0.8)
+        centre_pts = np.stack(centres[c])
+        ax.scatter(x=centre_pts[:, 0], y=centre_pts[:, 1], color='blue', s=10, alpha=0.8)
         for r in res_3d:
-            ax.scatter(x=r['points_2d'][c][0], y=r['points_2d'][c][1], color='red', s=10, alpha=0.8)
+            ax.scatter(
+                x=r.reprojected_points_2d[c][0],
+                y=r.reprojected_points_2d[c][1],
+                color='red', s=10, alpha=0.8
+            )
 
     plt.show()
 

@@ -4,9 +4,12 @@ from mongoengine import *
 
 from wormlab3d.data.model.experiment import Experiment
 from wormlab3d.data.model.midline2d import Midline2D
+from wormlab3d.data.model.object_point import ObjectPoint
 from wormlab3d.data.model.tag import Tag
 from wormlab3d.data.numpy_field import NumpyField
 from wormlab3d.data.triplet_field import TripletField
+
+PREPARED_IMAGE_SIZE = (200, 200)
 
 
 class Frame(Document):
@@ -15,11 +18,11 @@ class Frame(Document):
     frame_num = IntField(required=True)
 
     # Triangulations
-    centres_2d = TripletField(ListField())
+    centres_2d = TripletField(ListField(ListField()))
+    centre_3d = EmbeddedDocumentField(ObjectPoint)
 
-    # Zoomed-in/low-resolution images (we don't store high-resolution images)
+    # Prepared images (we don't store high-resolution images)
     images = TripletField(NumpyField())
-    zoom_region_offset = NumpyField()
 
     # Tags
     tags = ListField(ReferenceField(Tag))
@@ -56,3 +59,17 @@ class Frame(Document):
             filters['model__exists'] = True
 
         return Midline2D.objects(**filters)
+
+    def centres_2d_available(self) -> bool:
+        """
+        Check that we have 2d centre points available in each camera view
+        """
+        image_points_valid = True
+        if len(self.centres_2d) != 3:
+            image_points_valid = False
+        else:
+            for centres_2d_cam in self.centres_2d:
+                if len(centres_2d_cam) == 0:
+                    image_points_valid = False
+                    break
+        return image_points_valid
