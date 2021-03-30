@@ -1,12 +1,12 @@
-# Connect to the database
 from mongoengine import connect
+from wormlab3d import DB_NAME, DB_HOST, DB_PORT, DB_USERNAME, DB_PASSWORD
 
-# todo: get env vars
+# Connect to the database
 connect(
-    'wormlab3d',
-    host='127.0.0.1',
-    port=27017,
-    username='root',
-    password='example',
+    DB_NAME,
+    host=DB_HOST,
+    port=DB_PORT,
+    username=DB_USERNAME,
+    password=DB_PASSWORD,
     authentication_source='admin'
 )

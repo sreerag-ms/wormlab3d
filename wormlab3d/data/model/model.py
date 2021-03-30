@@ -1,13 +1,9 @@
 from mongoengine import *
 
-from wormlab3d.data.model.frame import Frame
-
 
 class Model(Document):
+    id = SequenceField(primary_key=True)
     file = StringField()
     git_sha = StringField()
     parameters = DictField()
     date = DateTimeField()
-
-
-

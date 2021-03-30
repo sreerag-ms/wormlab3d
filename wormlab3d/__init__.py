@@ -1,25 +1,63 @@
 import logging
 import os
 import sys
+import time
+from pathlib import Path
 
-LOGS_DIR = 'logs'
-LOG_LEVEL = 'debug'
+import dotenv
+
+# Get running environment
+ENV = os.getenv('ENV', 'local')
+
+# Set base path to point to the repository root
+ROOT_PATH = str(Path(__file__).parent.parent)
+
+# Load environment variables from .env file
+dotenv.load_dotenv(ROOT_PATH + '/.env')
+
+# Data paths
+DATA_PATH = ROOT_PATH + '/data'
+ANNEX_PATH = os.getenv('ANNEX_PATH', str(Path(__file__).parent.parent.parent) + '/worm_data')
+WT3D_PATH = os.getenv('WT3D_PATH', str(Path(__file__).parent.parent.parent) + '/3DWT_Data')
+
+# When fetching annexed files on demand, ensure that this much space is always kept free
+MIN_FREE_DISK_SPACE = os.getenv('MIN_FREE_DISK_SPACE', '100G')
+
+# || ------------------------------ DATABASE ------------------------------- ||
+
+DB_NAME = os.getenv('DB_NAME', 'wormlab3d')
+DB_HOST = os.getenv('DB_HOST', '127.0.0.1')
+DB_PORT = int(os.getenv('DB_PORT', 27017))
+DB_USERNAME = os.getenv('DB_USERNAME')
+DB_PASSWORD = os.getenv('DB_PASSWORD')
+
+
+# || -------------------------------- LOGS --------------------------------- ||
+
+SCRIPT_PATH = os.path.dirname(sys.argv[0])
+LOGS_PATH = ROOT_PATH + '/logs' + SCRIPT_PATH[len(ROOT_PATH):]
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+WRITE_LOG_FILES = os.getenv('WRITE_LOG_FILES', False)
 
 # Set formatting
-logging.basicConfig(
-    format='[%(levelname)s %(asctime)s]: %(message)s',
-)
+formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
 
 # Create a logger with the name corresponding to the script being executed
 script_name = os.path.basename(sys.argv[0])[:-3]
 logger = logging.getLogger(script_name)
 logger.setLevel(LOG_LEVEL)
-logger.addHandler(logging.StreamHandler(sys.stdout))
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.setFormatter(formatter)
+logger.addHandler(stream_handler)
 
 # Setup handlers
-print('log path', f'{LOGS_DIR}/{script_name}.log')
-os.makedirs(LOGS_DIR, exist_ok=True)
-logger.addHandler(logging.FileHandler(f'{LOGS_DIR}/{script_name}.log', mode='a'))
+if WRITE_LOG_FILES:
+    LOG_FILENAME = f'{script_name}_{time.strftime("%Y-%m-%d_%H%M%S")}.log'
+    print(f'Writing logs to: {LOGS_PATH}/{LOG_FILENAME}')
+    os.makedirs(LOGS_PATH, exist_ok=True)
+    file_handler = logging.FileHandler(f'{LOGS_PATH}/{LOG_FILENAME}', mode='w')
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
 
 # Don't propagate logs to the root logger as this causes duplicate entries
 logger.propagate = False
@@ -34,3 +72,5 @@ def handle_exception(exc_type, exc_value, exc_traceback):
 
 
 sys.excepthook = handle_exception
+
+# || ---------------------------------------------------------------------- ||

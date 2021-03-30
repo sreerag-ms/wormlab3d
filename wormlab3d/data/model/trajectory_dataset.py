@@ -1,7 +1,6 @@
 from mongoengine import *
 
 from wormlab3d.data.model.tag import Tag
-from wormlab3d.data.model.trajectory import Trajectory
 
 DATA_TYPES = ['xyz', 'xyz_inv', 'bishop', 'cpca']
 
@@ -18,8 +17,8 @@ class TrajectoryDataset(Document):
     restrict_length = ListField(IntField())
     include_mirrors = BooleanField(required=True, default=False)
     inv_opt_params = DictField()
-    trajectories_train = ListField(ReferenceField[Trajectory])
-    trajectories_test = ListField(ReferenceField[Trajectory])
+    trajectories_train = ListField(ReferenceField('Trajectory'))
+    trajectories_test = ListField(ReferenceField('Trajectory'))
     size_all = IntField(default=0)
     size_train = IntField(default=0)
     size_test = IntField(default=0)

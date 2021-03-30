@@ -3,13 +3,20 @@ name: wormlab3d
 channels:
   - conda-forge
   - pytorch
+  - bioconda
 
 dependencies:
   - python = 3.9
-  - numpy = 1.19
-  - pytorch = 1.7
+  - av = 8.0
   - matplotlib = 3.3
-  - pymongo = 3.11
   - mongoengine = 0.22
+  - numpy = 1.20
   - opencv = 4.5
+  - pims = 0.5
+  - pymongo = 3.11
+  - python-blosc = 1.10
+  - python-dotenv = 0.16
+  - pytorch = 1.8
+  - scikit-image = 0.18
   - scikit-learn = 0.24
+  - snakemake

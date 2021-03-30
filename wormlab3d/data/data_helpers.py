@@ -403,7 +403,7 @@ def generate_dataset(
     # 1. collect all (overlapping) sequences into sequence groups
     for trial in trials:
         clips = trial.get_clips(
-            filter={'tags__contains': restrict_tags}  # todo
+            filters={'tags__contains': restrict_tags}  # todo
         )
 
         for clip in clips:

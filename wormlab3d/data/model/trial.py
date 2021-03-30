@@ -2,21 +2,27 @@ from typing import List, Dict
 
 from mongoengine import *
 
+from wormlab3d.data.model.cameras import CAMERA_IDXS
 from wormlab3d.data.model.experiment import Experiment
 from wormlab3d.data.model.frame import Frame
+from wormlab3d.data.triplet_field import TripletField
+from wormlab3d.data.util import fix_path
+from wormlab3d.preprocessing.video_reader import VideoReader
+from wormlab3d.preprocessing.video_triplet_reader import VideoTripletReader
 
 
 class Trial(Document):
+    id = SequenceField(primary_key=True)
     experiment = ReferenceField(Experiment)
     date = DateTimeField(required=True)
+    trial_num = IntField()
     num_frames = IntField(required=True, default=0)
     fps = FloatField()
     quality = FloatField()
     temperature = FloatField(min_value=0)
     comments = StringField()
-    camera_1_avi = StringField(required=True)
-    camera_2_avi = StringField(required=True)
-    camera_3_avi = StringField(required=True)
+    videos = TripletField(StringField(), required=True)
+    backgrounds = TripletField(StringField())
     legacy_id = IntField(unique=True)
     legacy_data = DictField()
 
@@ -26,21 +32,21 @@ class Trial(Document):
             frame_num=frame_num
         )
 
-    def get_frames(self, filter=None) -> List[Frame]:
-        if filter is None:
-            filter = {}
-        return Frame.objects.get(
+    def get_frames(self, filters: Dict = None) -> List[Frame]:
+        if filters is None:
+            filters = {}
+        return Frame.objects(
             trial=self,
-            **filter
+            **filters
         )
 
-    def get_clips(self, filter: Dict=None) -> List[List[Frame]]:
+    def get_clips(self, filters: Dict = None) -> List[List[Frame]]:
         """
         Return a list of clips (frame-sequences) where frames in each clip match the given filter.
         Ensures that the tags are consistent through the clip.
         If no filter is provided this should just return a single clip.
         """
-        frames = self.get_frames(filter)
+        frames = self.get_frames(filters)
         clips = []
         clip = []
         prev_num = -1
@@ -57,3 +63,34 @@ class Trial(Document):
                 prev_tags = f.tags
 
         return clips
+
+    def get_video_reader(self, camera_idx: int) -> VideoReader:
+        """
+        Instantiate a video reader for the recording taken by the target camera.
+        """
+        assert camera_idx in CAMERA_IDXS
+        vid_path = fix_path(self.videos[camera_idx])
+        if len(self.backgrounds) > 0:
+            bg_path = fix_path(self.backgrounds[camera_idx])
+        else:
+            bg_path = None
+
+        return VideoReader(
+            video_path=vid_path,
+            background_image_path=bg_path
+        )
+
+    def get_video_triplet_reader(self) -> VideoTripletReader:
+        """
+        Instantiate a video-triplet reader to read all recordings in sync.
+        """
+        vid_paths = [fix_path(self.videos[c]) for c in CAMERA_IDXS]
+        if len(self.backgrounds) > 0:
+            bg_paths = [fix_path(self.backgrounds[c]) for c in CAMERA_IDXS]
+        else:
+            bg_paths = None
+
+        return VideoTripletReader(
+            video_paths=vid_paths,
+            background_image_paths=bg_paths
+        )

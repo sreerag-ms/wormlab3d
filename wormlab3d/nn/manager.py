@@ -13,7 +13,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
-from wormlab3d import logger, LOGS_DIR
+from wormlab3d import logger, LOGS_PATH
 from wormlab3d.data.data_helpers import get_data_loaders
 from wormlab3d.nn.models.basenet import BaseNet
 
@@ -83,7 +83,7 @@ class Manager(ABC):
 
     @property
     def logs_path(self) -> str:
-        return LOGS_DIR + f'/{self.net.id}/{self.ds.id}'
+        return LOGS_PATH + f'/{self.net.id}/{self.ds.id}'
 
     @property
     @abstractmethod
