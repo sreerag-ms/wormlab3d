@@ -1,3 +1,4 @@
+import numpy as np
 from mongoengine import *
 
 from wormlab3d.data.numpy_field import NumpyField
@@ -22,9 +23,9 @@ class Cameras(Document):
     camera_type = IntField()
     reprojection_error = FloatField()
     n_images_used = TripletField(IntField(), required=True)
-    pose = TripletField(NumpyField(), required=True)
-    matrix = TripletField(NumpyField(), required=True)
-    distortion = TripletField(NumpyField(), required=True)
+    pose = TripletField(NumpyField(shape=(4, 4), dtype=np.float64), required=True)
+    matrix = TripletField(NumpyField(shape=(3, 3), dtype=np.float64), required=True)
+    distortion = TripletField(NumpyField(shape=(5,), dtype=np.float64), required=True)
 
     # Indexes
     meta = {

@@ -1,6 +1,5 @@
 from mongoengine import *
 
-from wormlab3d.data.numpy_field import NumpyField
 from wormlab3d.data.triplet_field import TripletField
 
 

@@ -18,6 +18,7 @@ setup(
         'torch >= 1.7, <= 1.8',
         'pims >= 0.5, <= 0.6',
         'pymongo >= 3.11, < 3.12',
+        'python-blosc >= 1.10, < 1.11',
         'python-dotenv >= 0.16, < 1',
         'pytorch >= 1.8, < 1.9',
         'scikit-image >= 0.18, < 0.19',

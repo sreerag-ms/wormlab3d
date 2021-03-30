@@ -1,12 +1,13 @@
 from typing import List
 
+import numpy as np
 from mongoengine import *
 
 from wormlab3d.data.model.experiment import Experiment
 from wormlab3d.data.model.midline2d import Midline2D
 from wormlab3d.data.model.object_point import ObjectPoint
 from wormlab3d.data.model.tag import Tag
-from wormlab3d.data.numpy_field import NumpyField
+from wormlab3d.data.numpy_field import NumpyField, COMPRESS_BLOSC_POINTER
 from wormlab3d.data.triplet_field import TripletField
 
 PREPARED_IMAGE_SIZE = (200, 200)
@@ -22,7 +23,13 @@ class Frame(Document):
     centre_3d = EmbeddedDocumentField(ObjectPoint)
 
     # Prepared images (we don't store high-resolution images)
-    images = TripletField(NumpyField())
+    images = TripletField(
+        NumpyField(
+            shape=PREPARED_IMAGE_SIZE,
+            dtype=np.float32,
+            compression=COMPRESS_BLOSC_POINTER
+        )
+    )
 
     # Tags
     tags = ListField(ReferenceField(Tag))

@@ -3,7 +3,7 @@ from mongoengine import *
 
 from wormlab3d.data.model.cameras import CAMERA_IDXS
 from wormlab3d.data.model.model import Model
-from wormlab3d.data.numpy_field import NumpyField
+from wormlab3d.data.numpy_field import NumpyField, COMPRESS_BLOSC_PACK
 
 
 class Midline2D(Document):
@@ -11,7 +11,7 @@ class Midline2D(Document):
     camera = IntField(choices=CAMERA_IDXS, required=True)
 
     # Midline coordinates
-    X = NumpyField(required=True)
+    X = NumpyField(required=True, dtype=np.float32, compression=COMPRESS_BLOSC_PACK)
 
     # Hand-annotated
     user = StringField()
