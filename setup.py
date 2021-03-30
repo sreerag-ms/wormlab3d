@@ -10,11 +10,18 @@ setup(
     setup_requires=['pytest-runner'],
     tests_require=['pytest'],
     install_requires=[
+        'av >= 8.0, < 8.1',
+        'matplotlib >= 3.3, < 3.4',
+        'mongoengine >= 0.22, < 0.23',
         'numpy >= 1.20, < 1.21',
+        'opencv >= 4.5, < 4.6',
         'torch >= 1.7, <= 1.8',
-        'matplotlib >= 3.3',
-        'scikit-learn >= 0.24',
-        'tensorboard == 2.4.1',
+        'pims >= 0.5, <= 0.6',
+        'pymongo >= 3.11, < 3.12',
+        'python-dotenv >= 0.16, < 1',
+        'pytorch >= 1.8, < 1.9',
+        'scikit-image >= 0.18, < 0.19',
+        'scikit-learn >= 0.24, < 0.25',
     ],
     extras_require={
         'test': [

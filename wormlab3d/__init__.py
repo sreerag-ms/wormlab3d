@@ -4,20 +4,40 @@ import sys
 import time
 from pathlib import Path
 
-# todo: config from env vars
+import dotenv
+
+# Get running environment
+ENV = os.getenv('ENV', 'local')
+
+# Set base path to point to the repository root
 ROOT_PATH = str(Path(__file__).parent.parent)
-SCRIPT_PATH = os.path.dirname(sys.argv[0])
-LOGS_PATH = ROOT_PATH + '/logs' + SCRIPT_PATH[len(ROOT_PATH):]
-LOG_LEVEL = 'DEBUG'
-WRITE_LOG_FILES = False
+
+# Load environment variables from .env file
+dotenv.load_dotenv(ROOT_PATH + '/.env')
 
 # Data paths
 DATA_PATH = ROOT_PATH + '/data'
-ANNEX_PATH = str(Path(__file__).parent.parent.parent) + '/worm_data'
-WT3D_PATH = str(Path(__file__).parent.parent.parent) + '/3DWT_Data'
+ANNEX_PATH = os.getenv('ANNEX_PATH', str(Path(__file__).parent.parent.parent) + '/worm_data')
+WT3D_PATH = os.getenv('WT3D_PATH', str(Path(__file__).parent.parent.parent) + '/3DWT_Data')
 
 # When fetching annexed files on demand, ensure that this much space is always kept free
-MIN_FREE_DISK_SPACE = '100G'
+MIN_FREE_DISK_SPACE = os.getenv('MIN_FREE_DISK_SPACE', '100G')
+
+# || ------------------------------ DATABASE ------------------------------- ||
+
+DB_NAME = os.getenv('DB_NAME', 'wormlab3d')
+DB_HOST = os.getenv('DB_HOST', '127.0.0.1')
+DB_PORT = int(os.getenv('DB_PORT', 27017))
+DB_USERNAME = os.getenv('DB_USERNAME')
+DB_PASSWORD = os.getenv('DB_PASSWORD')
+
+
+# || -------------------------------- LOGS --------------------------------- ||
+
+SCRIPT_PATH = os.path.dirname(sys.argv[0])
+LOGS_PATH = ROOT_PATH + '/logs' + SCRIPT_PATH[len(ROOT_PATH):]
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+WRITE_LOG_FILES = os.getenv('WRITE_LOG_FILES', False)
 
 # Set formatting
 formatter = logging.Formatter('%(asctime)s %(levelname)s: %(message)s')
@@ -52,3 +72,5 @@ def handle_exception(exc_type, exc_value, exc_traceback):
 
 
 sys.excepthook = handle_exception
+
+# || ---------------------------------------------------------------------- ||

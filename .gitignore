@@ -1,10 +1,17 @@
+# Caches and build files
 __pycache__
+.pyc
 .idea
-tmp
-logs
 *.egg-info
 .eggs
-data/db
-data/backgrounds
 .snakemake
+
+# Local environment
+.env
+/tmp
+/logs
+
+# Data directories
+/data/db
+/data/backgrounds
 intermediate-data
