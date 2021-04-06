@@ -23,6 +23,7 @@ setup(
         'pytorch >= 1.8, < 1.9',
         'scikit-image >= 0.18, < 0.19',
         'scikit-learn >= 0.24, < 0.25',
+        'tensorboard >= 2.4, < 2.5'
     ],
     extras_require={
         'test': [
