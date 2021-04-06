@@ -6,13 +6,15 @@ from torch.autograd.variable import Variable
 
 from wormlab3d.nn.models.basenet import BaseNet, InputLayer, OutputLayer
 
+RES_SHORTCUT_OPTIONS = ['id', 'conv']
+
 
 class ResNet(BaseNet):
-    def __init__(self, input_shape, n_classes, n_init_channels, block_config, shortcut_type, use_bottlenecks,
+    def __init__(self, input_shape, output_shape, n_init_channels, block_config, shortcut_type, use_bottlenecks,
                  dropout_prob=0., build_model=True):
-        super(ResNet, self).__init__(input_shape, n_classes)
+        super(ResNet, self).__init__(input_shape, output_shape)
 
-        assert shortcut_type in ['id', 'conv']
+        assert shortcut_type in RES_SHORTCUT_OPTIONS
         self.n_init_channels = n_init_channels
         self.block_config = block_config
         self.shortcut_type = shortcut_type
@@ -37,7 +39,7 @@ class ResNet(BaseNet):
         components, n_channels = self._build_model_components()
 
         # Add OutputLayer
-        output_layer = OutputLayer(n_channels_in=n_channels, n_classes=self.n_classes)
+        output_layer = OutputLayer(n_channels_in=n_channels, output_shape=self.output_shape)
 
         # Construct model
         self.model = nn.Sequential(OrderedDict([

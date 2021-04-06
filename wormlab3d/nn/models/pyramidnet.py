@@ -4,9 +4,9 @@ from wormlab3d.nn.models.resnet import ResNet, _ResBlock
 
 
 class PyramidNet(ResNet):
-    def __init__(self, input_shape, n_classes, n_init_channels, block_config, shortcut_type, use_bottlenecks, alpha,
+    def __init__(self, input_shape, output_shape, n_init_channels, block_config, shortcut_type, use_bottlenecks, alpha,
                  dropout_prob=0., build_model=True):
-        super().__init__(input_shape, n_classes, n_init_channels, block_config, shortcut_type,
+        super().__init__(input_shape, output_shape, n_init_channels, block_config, shortcut_type,
                          use_bottlenecks, dropout_prob, build_model=False)
         self.alpha = alpha
 

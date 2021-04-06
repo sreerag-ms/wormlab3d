@@ -5,10 +5,10 @@ import torch.nn as nn
 
 
 class BaseNet(nn.Module, ABC):
-    def __init__(self, input_shape: Tuple, n_classes: int = None):
+    def __init__(self, input_shape: Tuple[int], output_shape: Tuple[int]):
         super().__init__()
         self.input_shape = input_shape
-        self.n_classes = n_classes
+        self.output_shape = output_shape
         self.model: nn.Module = None
 
     @abstractmethod
@@ -25,7 +25,7 @@ class BaseNet(nn.Module, ABC):
                 nn.init.xavier_uniform_(m.weight)
                 nn.init.constant_(m.bias, 0)
 
-    def get_n_params(self):
+    def get_n_params(self) -> int:
         return sum([p.data.nelement() for p in self.parameters()])
 
     def multi_gpu_mode(self):
@@ -54,12 +54,15 @@ class InputLayer(nn.Module):
 
 
 class OutputLayer(nn.Module):
-    def __init__(self, n_channels_in, n_classes):
+    def __init__(self, n_channels_in, output_shape):
         super().__init__()
         self.bn = nn.BatchNorm2d(n_channels_in)
         self.relu = nn.ReLU(inplace=True)
-        self.pool = nn.AdaptiveAvgPool2d(1)
-        self.linear = nn.Linear(n_channels_in, n_classes)
+
+        # flat output, eg, classifier
+        if len(output_shape) == 1:
+            self.pool = nn.AdaptiveAvgPool2d(1)
+            self.linear = nn.Linear(n_channels_in, output_shape[0])
 
     def forward(self, x):
         x = self.bn(x)

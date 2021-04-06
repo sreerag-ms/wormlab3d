@@ -11,7 +11,7 @@ class DenseNet(BaseNet):
     def __init__(
             self,
             input_shape: Tuple,
-            n_classes: int,
+            output_shape: int,
             n_init_channels: int,
             growth_rate: int,
             block_config: Tuple[int],
@@ -19,7 +19,7 @@ class DenseNet(BaseNet):
             dropout_prob: float=0.,
             build_model: bool=True
     ):
-        super().__init__(input_shape, n_classes)
+        super().__init__(input_shape, output_shape)
         self.n_init_channels = n_init_channels
         self.growth_rate = growth_rate
         self.block_config = block_config
@@ -56,7 +56,7 @@ class DenseNet(BaseNet):
                 n_channels = n_compressed_channels
 
         # Add OutputLayer
-        output_layer = OutputLayer(n_channels_in=n_channels, n_classes=self.n_classes)
+        output_layer = OutputLayer(n_channels_in=n_channels, output_shape=self.output_shape)
 
         # Construct model
         self.model = nn.Sequential(OrderedDict([
