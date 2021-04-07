@@ -59,7 +59,7 @@ def contour_mask(
     """
     contours = find_contours(image, thresh=thresh, maxval=maxval, min_area=min_area, max_area=max_area)
     mask = np.zeros_like(image)
-    cv2.drawContours(mask, contours, 0, 255, -1)
+    cv2.drawContours(mask, contours, -1, 255, -1)
 
     return mask
 
