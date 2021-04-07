@@ -16,20 +16,16 @@ class MongoDBTestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         disconnect_all()
-        # Need to connect with uri as authentication details are dropped otherwise!
-        # see https://github.com/MongoEngine/mongoengine/issues/851
-        uri = f'mongodb://{DB_USERNAME}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{TEST_DB_NAME}?authSource=admin'
-        cls._connection = connect(host=uri)
-        # cls._connection = connect(
-        #     TEST_DB_NAME,
-        #     host=DB_HOST,
-        #     port=DB_PORT,
-        #     username=DB_USERNAME,
-        #     password=DB_PASSWORD,
-        #     authentication_source='admin'
-        # )
-        cls._connection.drop_database(TEST_DB_NAME)
+        cls._connection = connect(
+            TEST_DB_NAME,
+            host=DB_HOST,
+            port=DB_PORT,
+            username=DB_USERNAME,
+            password=DB_PASSWORD,
+            authentication_source='admin'
+        )
         cls.db = get_db()
+        cls._connection.drop_database(TEST_DB_NAME)
 
     @classmethod
     def tearDownClass(cls):
