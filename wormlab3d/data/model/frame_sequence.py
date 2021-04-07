@@ -3,17 +3,18 @@ from typing import List
 import numpy as np
 from mongoengine import *
 
+from wormlab3d.data.model.dataset import Dataset
 from wormlab3d.data.model.frame import Frame
 from wormlab3d.data.model.tag import Tag
-from wormlab3d.data.model.trajectory_dataset import TrajectoryDataset
 from wormlab3d.data.numpy_field import NumpyField, COMPRESS_BLOSC_PACK
 
 
-class Trajectory(Document):
-    dataset = ReferenceField(TrajectoryDataset)
-    frames = ListField(ReferenceField(Frame))
+class FrameSequence(Document):
+    dataset = ReferenceField(Dataset, required=True)
+    frames = ListField(ReferenceField(Frame), required=True)
     tags = ListField(ReferenceField(Tag))
-    X = NumpyField(dtype=np.float32, compression=COMPRESS_BLOSC_PACK)
+    X = NumpyField(dtype=np.float32, compression=COMPRESS_BLOSC_PACK, required=True)
+    Y = NumpyField(dtype=np.float32, compression=COMPRESS_BLOSC_PACK)
 
     def set_from_sequence(self, sequence: List[Frame], centre: bool = True):
         """
@@ -23,7 +24,7 @@ class Trajectory(Document):
         Collate the tags.
         """
         self.frames = sequence
-        self.X = np.stack([f.X for f in sequence])
+        self.X = np.stack([f.X for f in sequence])  # todo: check shape
 
         # Centre the worm position using the average over the sequence of frames
         if centre:

@@ -1,0 +1,578 @@
+import os
+import time
+from datetime import timedelta
+from typing import Dict
+from typing import List, Tuple
+
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.backends import cudnn
+from torch.optim import Optimizer
+from torch.utils.data import DataLoader as DataLoaderTorch
+# import wormlab3d.nn.manager as BaseManager  # todo
+from torch.utils.tensorboard import SummaryWriter
+
+from wormlab3d import logger, LOGS_PATH
+from wormlab3d.data.model import Midline2D
+from wormlab3d.data.model.checkpoint import Checkpoint
+from wormlab3d.data.model.dataset import DatasetMidline2D
+from wormlab3d.data.model.frame import PREPARED_IMAGE_SIZE
+from wormlab3d.data.model.network_parameters import *
+from wormlab3d.midlines2d.args import DatasetArgs, NetworkArgs, OptimiserArgs, RuntimeArgs
+from wormlab3d.midlines2d.data_loader import get_data_loader
+from wormlab3d.midlines2d.generate_dataset import generate_dataset
+
+LOG_EVERY_N_BATCHES = 1
+
+
+class Manager:
+    def __init__(
+            self,
+            runtime_args: RuntimeArgs,
+            dataset_args: DatasetArgs,
+            net_args: NetworkArgs,
+            optimiser_args: OptimiserArgs,
+    ):
+        # Argument groups
+        self.runtime_args = runtime_args
+        self.dataset_args = dataset_args
+        self.net_args = net_args
+        self.optimiser_args = optimiser_args
+
+        # Dataset and data loaders
+        self.ds = self._init_dataset()
+        self.train_loader, self.test_loader = self._init_data_loaders()
+
+        # Network
+        self.net, self.net_params = self._init_network()
+
+        # Optimiser
+        self.optimiser = self._init_optimiser()
+
+        # Runtime params
+        self.device = self._init_devices()
+
+        # Checkpoints
+        self.checkpoint = self._init_checkpoint()
+
+    def _init_dataset(self):
+        """
+        Load or create the dataset.
+        """
+        ds = None
+
+        # Try to load an existing dataset
+        if self.dataset_args.load:
+            # If we have a dataset id then load this from the database
+            if self.dataset_args.ds_id is not None:
+                ds = DatasetMidline2D.objects.get(id=self.dataset_args.ds_id)
+            else:
+                # Otherwise, try to find one matching the same parameters
+                datasets = DatasetMidline2D.objects(
+                    train_test_split_target=self.dataset_args.train_test_split,
+                    restrict_tags=self.dataset_args.restrict_tags,
+                    restrict_concs=self.dataset_args.restrict_concs,
+                    centre_3d_max_error=self.dataset_args.centre_3d_max_error
+                )
+                if datasets.count() > 0:
+                    ds = datasets[0]
+                    logger.info(f'Found {len(datasets)} suitable datasets in database, using most recent.')
+                else:
+                    logger.info('No suitable datasets found in database.')
+            if ds is not None:
+                logger.info(f'Loaded dataset (id={ds.id}, created={ds.created}).')
+
+        # Not loaded dataset, so create one
+        if ds is None:
+            ds = generate_dataset(self.dataset_args)  # persists dataset to the database
+
+        return ds
+
+    def _init_data_loaders(self) -> Tuple[DataLoaderTorch, DataLoaderTorch]:
+        """
+        Get the data loaders.
+        """
+        logger.info('Initialising data loaders.')
+        loaders = {}
+        for tt in ['train', 'test']:
+            loaders[tt] = get_data_loader(
+                ds=self.ds,
+                ds_args=self.dataset_args,
+                train_or_test=tt,
+                batch_size=self.runtime_args.batch_size,
+                n_workers=self.dataset_args.n_dataloader_workers
+            )
+
+        return loaders['train'], loaders['test']
+
+    def _init_network(self) -> Tuple[BaseNet, NetworkParameters]:
+        """
+        Build the network using the given parameters.
+        """
+        net_params = None
+        params = {**{
+            'network_type': self.net_args.base_net,
+            'input_shape': (1,) + PREPARED_IMAGE_SIZE,
+            'output_shape': (1,) + PREPARED_IMAGE_SIZE,
+        }, **self.net_args.hyperparameters}
+
+        # Try to load an existing network
+        if self.net_args.load:
+            # If we have a net id then load this from the database
+            if self.net_args.net_id is not None:
+                net_params = NetworkParameters.objects.get(id=self.net_args.net_id)
+            else:
+                # Otherwise, try to find one matching the same parameters
+                net_params_matching = NetworkParameters.objects(**params)
+                if net_params_matching.count() > 0:
+                    net_params = net_params_matching[0]
+                    logger.info(f'Found {len(net_params_matching)} suitable networks in database, using most recent.')
+                else:
+                    logger.info('No suitable networks found in database.')
+            if net_params is not None:
+                logger.info(f'Loaded networks (id={net_params.id}, created={net_params.created}).')
+
+        # Not loaded network, so create one
+        if net_params is None:
+            # Separate classes are used to validate the different available hyperparameters
+            if self.net_args.base_net == 'fcnet':
+                net_params = NetworkParametersFC(**params)
+            elif self.net_args.base_net == 'aenet':
+                net_params = NetworkParametersAE(**params)
+            elif self.net_args.base_net == 'resnet':
+                net_params = NetworkParametersResNet(**params)
+            elif self.net_args.base_net == 'densenet':
+                net_params = NetworkParametersDenseNet(**params)
+            elif self.net_args.base_net == 'pyramidnet':
+                net_params = NetworkParametersPyramidNet(**params)
+            elif self.net_args.base_net == 'nunet':
+                net_params = NetworkParametersNuNet(**params)
+            elif self.net_args.base_net == 'rdn':
+                net_params = NetworkParametersRDN(**params)
+            else:
+                raise ValueError(f'Unrecognised base net: {self.net_args.base_net}')
+
+            # Save the network parameters to the database
+            net_params.save()
+            logger.info(f'Saved net parameters to database (id={net_params.id})')
+
+        # Instantiate the network
+        net = net_params.instantiate_network()
+        logger.info(f'Instantiated network with {net.get_n_params() / 1e6:.4f}M parameters.')
+        logger.debug(f'----------- Network --------------\n\n{net}\n\n')
+
+        return net, net_params
+
+    def _init_optimiser(self):
+        """
+        Set up the optimiser.
+        """
+        logger.info('Initialising optimiser.')
+
+        # Build the optimiser
+        cls: Optimizer = getattr(torch.optim, self.optimiser_args.algorithm)
+        optimiser = cls(
+            params=self.net.parameters(),
+            lr=self.optimiser_args.lr_init,
+            weight_decay=self.optimiser_args.weight_decay
+        )
+
+        return optimiser
+
+    def _init_devices(self):
+        """
+        Find available devices and try to use what we want.
+        """
+        cpu_or_gpu = 'gpu' if self.runtime_args.gpu_only else None
+        if cpu_or_gpu == 'cpu':
+            device = torch.device('cpu')
+        else:
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        n_gpus = torch.cuda.device_count()
+        if device.type == 'cuda':
+            if n_gpus > 1:
+                logger.info('Using {} GPUs!'.format(n_gpus))
+                self.net.multi_gpu_mode()
+            else:
+                logger.info('Using GPU')
+            cudnn.benchmark = True  # optimises code for constant input sizes
+
+            # Move modules to the gpu
+            for k, v in vars(self).items():
+                if isinstance(v, torch.nn.Module):
+                    v.to(device)
+        else:
+            if cpu_or_gpu == 'gpu':
+                raise RuntimeError('GPU requested but not available. Aborting.')
+            logger.info('Using CPU')
+
+        return device
+
+    def _init_checkpoint(self):
+        """
+        The current checkpoint instance contains the most up to date instance of the model.
+        This is not persisted to the database until we actually want to checkpoint it, so should
+        be thought of more as a checkpoint-buffer.
+        """
+
+        # Load previous checkpoint
+        prev_checkpoint = None
+        if self.runtime_args.resume:
+            try:
+                if self.runtime_args.resume_from == 'latest':
+                    prev_checkpoint = Checkpoint.objects(
+                        dataset=self.ds,
+                        network_params=self.net_params
+                    ).first()
+                else:
+                    prev_checkpoint = Checkpoint.objects.get(
+                        id=self.runtime_args.resume_from
+                    )
+                logger.info(f'Loaded checkpoint id={prev_checkpoint.id}, created={prev_checkpoint.created}')
+                logger.info(f'Starting epoch={prev_checkpoint.epoch + 1}')
+                if prev_checkpoint.loss is not None:
+                    logger.info(f'Current loss = {prev_checkpoint.loss:.5f}')
+                for key, val in prev_checkpoint.stats.items():
+                    logger.info(f'\t{key}: {val:.4E}')
+            except DoesNotExist:
+                raise RuntimeError(f'Could not load checkpoint={self.runtime_args.resume_from}')
+
+        # Either clone the previous checkpoint to use as the starting point
+        if prev_checkpoint:
+            checkpoint = prev_checkpoint.clone()
+
+            # Update the dataset and network params references to the ones now in use
+            if self.checkpoint.dataset.id != self.ds.id:
+                logger.warn('Dataset has changed! This may result in training occurring on test data!')
+                checkpoint.dataset = self.ds
+
+            # If the hyperparameters have changed, the model file might now be incompatible, but try anyway
+            if self.checkpoint.network_params.id != self.net_params.id:
+                logger.warn('Network parameters have changed! This may result in a broken network!')
+                checkpoint.network_params = self.net_params
+
+            # Args are stored against the checkpoint, so just override them
+            checkpoint.optimiser_args = self.optimiser_args  # .to_dict()
+            checkpoint.runtime_args = self.runtime_args  # .to_dict()
+            checkpoint.dataset_args = self.dataset_args  # .to_dict()
+
+            # Load the network and optimiser parameter states
+            prev_logs_path = LOGS_PATH + f'/{prev_checkpoint.net.id}/{prev_checkpoint.ds.id}'
+            path = f'{prev_logs_path}/checkpoints/{checkpoint.id}.chkpt'
+            state = torch.load(path, map_location=self.device)
+            self.net.load_state_dict(state['model_state_dict'])
+            self.optimiser.load_state_dict(state['optimiser_state_dict'])
+            self.net.eval()
+            logger.info(f'Loaded state from "{path}"')
+
+        # ..or start a new checkpoint
+        else:
+            checkpoint = Checkpoint(
+                dataset=self.ds,
+                network_params=self.net_params,
+                optimiser_args=self.optimiser_args,
+                dataset_args=self.dataset_args,
+                runtime_args=self.runtime_args,
+            )
+
+        return checkpoint
+
+    @property
+    def logs_path(self) -> str:
+        return LOGS_PATH + f'/{self.net_params.id}/{self.ds.id}'
+
+    @property
+    def stat_keys(self) -> List[str]:
+        """Define the loss keys to track."""
+        return []
+
+    def _init_tb_logger(self):
+        """Initialise the tensorboard writer."""
+        self.tb_logger = SummaryWriter(self.logs_path + '/events', flush_secs=5)
+
+    def configure_paths(self):
+        """Create the directories."""
+        os.makedirs(self.logs_path, exist_ok=True)
+        os.makedirs(self.logs_path + '/checkpoints', exist_ok=True)
+        os.makedirs(self.logs_path + '/events', exist_ok=True)
+        os.makedirs(self.logs_path + '/plots', exist_ok=True)
+
+    def save_checkpoint(self):
+        """
+        Save the checkpoint information to the database and the network model parameters to file.
+        """
+        logger.info('Saving model checkpoint...')
+        self.checkpoint.save()
+        path = f'{self.logs_path}/checkpoints/{self.checkpoint.id}.chkpt'
+        torch.save({
+            'model_state_dict': self.net.state_dict(),
+            'optimiser_state_dict': self.optimiser.state_dict(),
+        }, path)
+
+        # Replace the current checkpoint-buffer with a clone of the just-saved checkpoint
+        self.checkpoint = self.checkpoint.clone()
+
+    def log_graph(self):
+        """
+        Log the graph to tensorboard.
+        """
+        with torch.no_grad():
+            dummy_input = torch.rand((self.train_loader.batch_size,) + tuple(self.net_params.input_shape))
+            dummy_input = dummy_input.to(self.device)
+            if not hasattr(self, 'tb_logger'):
+                self._init_tb_logger()
+            self.tb_logger.add_graph(self.net, [dummy_input, ], verbose=False)
+            self.tb_logger.flush()
+
+    def train(self, n_epochs):
+        """
+        Train the network for a number of epochs.
+        """
+        self.configure_paths()
+        self._init_tb_logger()
+        starting_epoch = self.checkpoint.epoch
+        final_epoch = starting_epoch + n_epochs - 1
+
+        # todo: lr scheduler
+        milestones = [n_epochs // 2, n_epochs // (4 / 3)]
+        lr_scheduler = optim.lr_scheduler.MultiStepLR(
+            optimizer=self.optimiser,
+            milestones=milestones,
+            gamma=self.optimiser_args.lr_gamma,
+            # last_epoch=starting_epoch-1
+        )
+
+        for epoch in range(starting_epoch, final_epoch + 1):
+            logger.info('{:-^80}'.format(' Train epoch: {} '.format(epoch)))
+            self.checkpoint.epoch = epoch
+            start_time = time.time()
+            self.tb_logger.add_scalar('lr', lr_scheduler.get_last_lr()[0], epoch)
+
+            # Train for an epoch
+            self._train_epoch(final_epoch)
+            time_per_epoch = time.time() - start_time
+            seconds_left = float((final_epoch - epoch) * time_per_epoch)
+            logger.info('Time per epoch: {}, Est. complete in: {}'.format(
+                str(timedelta(seconds=time_per_epoch)),
+                str(timedelta(seconds=seconds_left))))
+            lr_scheduler.step()
+
+            # Test every epoch
+            self.test()
+            self.tb_logger.add_scalar(f'epoch/test/total', self.checkpoint.loss_test, epoch)
+            for key, val in self.checkpoint.stats_test.items():
+                self.tb_logger.add_scalar(f'epoch/test/{key}', val, epoch)
+                logger.info(f'Test {key}: {val:.4E}')
+
+            if self.runtime_args.checkpoint_every_n_epochs > 0 \
+                    and (epoch + 1) % self.runtime_args.checkpoint_every_n_epochs == 0:
+                self.save_checkpoint()
+
+    def _train_epoch(self, final_epoch):
+        """
+        Train for a single epoch
+        """
+        num_batches_per_epoch = len(self.train_loader)
+        running_loss = 0.
+        running_stats = {k: 0. for k in self.stat_keys}
+        epoch_loss = 0.
+        epoch_stats = {k: 0. for k in self.stat_keys}
+
+        for i, data in enumerate(self.train_loader, 0):
+            batch_outputs, batch_loss, batch_stats = self._train_batch(data)
+
+            running_loss += batch_loss
+            epoch_loss += batch_loss
+            for k in self.stat_keys:
+                running_stats[k] += batch_stats[k]
+                epoch_stats[k] += batch_stats[k]
+
+            # Log statistics every X mini-batches
+            if (i + 1) % LOG_EVERY_N_BATCHES == 0:
+                batches_loss_avg = running_loss / LOG_EVERY_N_BATCHES
+                log_msg = f'[{self.checkpoint.epoch}/{final_epoch}][{i + 1}/{num_batches_per_epoch}]' \
+                          f'\t\tLoss: {batches_loss_avg:.7f}'
+                for k in self.stat_keys:
+                    avg = running_stats[k] / LOG_EVERY_N_BATCHES
+                    log_msg += f'\t\t{k}: {avg:.4E}'
+                logger.info(log_msg)
+                running_loss = 0.
+                running_stats = {k: 0. for k in self.stat_keys}
+
+            # Plot
+            self._make_plots(
+                data,
+                batch_outputs,
+                train_or_test='train'
+            )
+
+            # Checkpoint
+            if self.runtime_args.checkpoint_every_n_batches > 0 \
+                    and (i + 1) % self.runtime_args.checkpoint_every_n_batches == 0:
+                self.save_checkpoint()
+
+        # Update stats and write debug
+        self.checkpoint.loss_train = epoch_loss
+        self.checkpoint.stats_train = epoch_stats
+        self.tb_logger.add_scalar('epoch/train/total_loss', epoch_loss, self.checkpoint.epoch)
+        for key, val in epoch_stats.items():
+            self.tb_logger.add_scalar(f'epoch/train/{key}', val, self.checkpoint.epoch)
+            logger.info(f'Train {key}: {val:.4E}')
+
+    def _train_batch(self, data) -> Tuple[torch.Tensor, torch.Tensor, Dict]:
+        """
+        Train on a single batch of data.
+        """
+        self.net.train()
+        outputs, loss, stats = self._process_batch(data)
+
+        # Calculate gradients and do optimisation step
+        self.optimiser.zero_grad()
+        loss.backward()
+        self.optimiser.step()
+
+        # Log losses
+        self.tb_logger.add_scalar('batch/train/total_loss', loss, self.checkpoint.step)
+        for key, val in stats.items():
+            self.tb_logger.add_scalar(f'batch/train/{key}', val, self.checkpoint.step)
+
+        # Calculate L2 loss
+        norms = self.net.calc_norms()
+        weights_cumulative_norm = torch.tensor(0., dtype=torch.float32, device=self.device)
+        for _, norm in norms.items():
+            weights_cumulative_norm += norm
+        self.tb_logger.add_scalar('batch/train/w_norm', weights_cumulative_norm.item(), self.checkpoint.step)
+
+        # Increment global step counter
+        self.checkpoint.step += 1
+
+        return outputs, loss, stats
+
+    def test(self) -> Tuple[float, Dict]:
+        """
+        Test across the whole test dataset.
+        """
+        if not len(self.test_loader):
+            raise RuntimeError('No test data available, cannot test!')
+        self.net.eval()
+        cumulative_loss = 0.
+        cumulative_stats = {k: 0. for k in self.stat_keys}
+
+        with torch.no_grad():
+            for i, data in enumerate(self.test_loader, 0):
+                batch_outputs, batch_loss, batch_stats = self._process_batch(data)
+                cumulative_loss += batch_loss
+                for k in self.stat_keys:
+                    cumulative_stats[k] += batch_stats[k]
+
+        test_loss = cumulative_loss / len(self.test_loader)
+        test_stats = {k: cumulative_stats[k] / len(self.test_loader) for k in self.stat_keys}
+
+        self.checkpoint.loss_test = test_loss
+        self.checkpoint.stats_test = test_stats
+
+        return test_loss, test_stats
+
+    def _process_batch(self, data: Tuple[torch.Tensor, torch.Tensor, List[Midline2D]]) \
+            -> Tuple[torch.Tensor, torch.Tensor, Dict]:
+        """
+        Take a batch of input data, push it through the network and calculate the losses.
+        """
+
+        # Split data into input image and target mask and put on the right device
+        # (ignore the midlines returned from the dataloader)
+        X, Y_target, _ = data
+        X, Y_target = X.to(self.device), Y_target.to(self.device)
+
+        # Put input data through net
+        Y_pred = self.net(X)
+
+        # Calculate losses
+        loss = F.mse_loss(Y_pred, Y_target)
+
+        assert not torch.isnan(loss)
+
+        return Y_pred, loss, {}
+
+    def _make_plots(
+            self,
+            data: Tuple[torch.Tensor, torch.Tensor, List[Midline2D]],
+            outputs: torch.Tensor,
+            train_or_test: str,
+            end_of_epoch=False
+    ):
+        """
+        Generate some example plots.
+        """
+        if self.runtime_args.plot_n_examples > 0 and (
+                end_of_epoch or
+                (self.runtime_args.plot_every_n_batches > -1
+                 and (self.checkpoint.step + 1) % self.runtime_args.plot_every_n_batches == 0)
+        ):
+            self._plot_masks(data, outputs, train_or_test)
+
+    def _plot_masks(
+            self,
+            data: Tuple[torch.Tensor, torch.Tensor, List[Midline2D]],
+            outputs: torch.Tensor,
+            train_or_test: str
+    ):
+        images, masks, midlines = data
+        n_examples = min(self.runtime_args.plot_n_examples, self.runtime_args.batch_size)
+        idxs = np.random.choice(self.runtime_args.batch_size, n_examples, replace=False)
+        fig, axes = plt.subplots(4, n_examples)
+
+        # Calculate squared pixel errors
+        loss = np.square(masks[idxs] - outputs[idxs])
+
+        for i, idx in enumerate(idxs):
+            midline = midlines[idx]
+            trial = midline.frame.trial
+
+            # First row shows prepped images with midline annotations
+            X = midline.get_prepared_coordinates()
+            ax = axes[0, i]
+            ax.set_title(
+                f'Trial: {trial.id}, '
+                f'Video: {trial.videos[midline.camera]}, '
+                f'Frame: {midline.frame.frame_num}, '
+                f'Camera: {midline.camera}'
+            )
+            ax.imshow(images[idx], cmap='gray', vmin=0, vmax=1)
+            ax.scatter(x=X[:, 0], y=X[:, 1], color='red', s=2, alpha=0.8)
+            if i == 0:
+                ax.set_ylabel('Image + Annotations')
+
+            # Second row shows target segmentation mask
+            ax = axes[1, i]
+            # ax.set_title()
+            ax.imshow(masks[idx], cmap='gray', vmin=0, vmax=1)
+            ax.scatter(x=X[:, 0], y=X[:, 1], color='red', s=1, alpha=0.8)
+            if i == 0:
+                ax.set_ylabel(f'Segmentation mask (blur_sigma={self.dataset_args.blur_sigma:.1f})')
+
+            # Third row shows the error between masks
+            ax = axes[2, i]
+            # ax.set_title('Squared errors')
+            m = ax.imshow(loss[i], cmap=plt.cm.Reds, vmin=loss.min(), vmax=loss.max())
+            if i == 0:
+                ax.set_ylabel('Squared errors')
+            if i == n_examples - 1:
+                fig.colorbar(m, ax=ax, format='%.3f')
+
+            # Fourth row shows generated segmentation mask
+            ax = axes[3, i]
+            # ax.set_title('Output')
+            ax.imshow(outputs[idx], cmap='gray', vmin=0, vmax=1)
+            ax.scatter(x=X[:, 0], y=X[:, 1], color='red', s=1, alpha=0.8)
+            if i == 0:
+                ax.set_ylabel('Output')
+
+        fig.tight_layout()
+
+        # plt.show()
+        self.tb_logger.add_figure(f'masks_{train_or_test}', fig, self.checkpoint.step)
+        self.tb_logger.flush()
