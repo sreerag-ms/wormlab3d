@@ -1,13 +1,14 @@
 from typing import Tuple, List
 
-from wormlab3d.data.model.trial import Trial, CAMERA_IDXS
+from wormlab3d import CAMERA_IDXS
+from wormlab3d.data.model.trial import Trial
 
 
 def process_args(
-        experiment_id=None,
-        trial_id=None,
-        camera_idx=None,
-        frame_num=None,
+        experiment_id: int = None,
+        trial_id: int = None,
+        camera_idx: int = None,
+        frame_num: int = None,
 ) -> Tuple[List[Trial], list]:
     """
     Resolves any combination of passed experiments, trials and cameras.

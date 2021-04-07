@@ -23,6 +23,13 @@ WT3D_PATH = os.getenv('WT3D_PATH', str(Path(__file__).parent.parent.parent) + '/
 # When fetching annexed files on demand, ensure that this much space is always kept free
 MIN_FREE_DISK_SPACE = os.getenv('MIN_FREE_DISK_SPACE', '100G')
 
+# Size of prepared images, changing this will break lots of things :)
+PREPARED_IMAGE_SIZE = (200, 200)
+
+# Camera indices, for the avoidance of doubt
+CAMERA_IDXS = [0, 1, 2]
+
+
 # || ------------------------------ DATABASE ------------------------------- ||
 
 DB_NAME = os.getenv('DB_NAME', 'wormlab3d')

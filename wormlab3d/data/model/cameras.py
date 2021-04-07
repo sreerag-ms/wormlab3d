@@ -4,11 +4,10 @@ from mongoengine import *
 from wormlab3d.data.numpy_field import NumpyField
 from wormlab3d.data.triplet_field import TripletField
 
-CAMERA_IDXS = [0, 1, 2]
-
 
 class Cameras(Document):
     experiment = ReferenceField('Experiment')
+    trial = ReferenceField('Trial')
     timestamp = DateTimeField(required=True)
     wormcv_version = StringField()
     opencv_version = StringField()
@@ -34,7 +33,9 @@ class Cameras(Document):
     }
 
     def get_camera_model_triplet(self) -> 'CameraModelTriplet':
-        """Instantiate a CameraModelTriplet parametrised by self."""
+        """
+        Instantiate a CameraModelTriplet parametrised by self.
+        """
         from wormlab3d.toolkit.camera_model_triplet import CameraModelTriplet
         return CameraModelTriplet(
             camera_models=self

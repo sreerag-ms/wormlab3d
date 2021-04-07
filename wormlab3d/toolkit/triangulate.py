@@ -5,8 +5,8 @@ import numpy as np
 from numpy.linalg import norm
 from scipy.optimize import minimize
 
-from wormlab3d import logger
-from wormlab3d.data.model.cameras import CAMERA_IDXS, Cameras
+from wormlab3d import logger, CAMERA_IDXS
+from wormlab3d.data.model.cameras import Cameras
 from wormlab3d.data.model.object_point import ObjectPoint
 
 
@@ -14,13 +14,14 @@ def triangulate(
         image_points: List[np.ndarray],
         cameras: Cameras,
         x0: Union[list, np.ndarray] = None,
-        matching_threshold: float = 100,
+        matching_threshold: float = 1000,
 ) -> List[ObjectPoint]:
     """
     Triangulate a list of 2D image points obtained from each camera view to produce a list of 3D object
     points which correspond up to some tolerance.
     """
     assert len(image_points) == 3
+    assert isinstance(cameras, Cameras)
     for image_points_cam in image_points:
         assert isinstance(image_points_cam, list)
         for pts in image_points_cam:
@@ -31,11 +32,14 @@ def triangulate(
             x0 = np.array(x0)
         assert x0.shape == (3,)
 
-    logger.debug(f'Triangulating. Cameras mean reprojection error={cameras.reprojection_error:.4f}.')
+    logger.debug(f'Triangulating. '
+                 f'Cameras id={cameras.id}. '
+                 f'Reprojection error={cameras.reprojection_error:.4f}. '
+                 f'Trial={cameras.trial.id if cameras.trial is not None else "-"}.')
     cams_model = cameras.get_camera_model_triplet()
 
     if x0 is None:
-        x0 = np.array((1., 1., 1.))
+        x0 = np.array((1., 1., 500.))
 
     def f(x, pts):
         return np.sqrt(
@@ -54,6 +58,7 @@ def triangulate(
             image_points[1][point_key_combination[1]],
             image_points[2][point_key_combination[2]],
         ]
+        # logger.debug(f'Trying point combination: {points_2d}')
         res = minimize(
             f,
             x0=x0.copy(),
@@ -61,13 +66,14 @@ def triangulate(
             method='BFGS',
             options={
                 'maxiter': 1000,
-                'gtol': 1e-4,
-                # 'disp': LOG_LEVEL == 'DEBUG',
+                'gtol': 1e-8,
+                'disp': False,  # LOG_LEVEL == 'DEBUG',
             },
             tol=cameras.reprojection_error  # probably will never reach this
         )
 
         obj_point = ObjectPoint()
+        obj_point.cameras = cameras
         obj_point.point_3d = list(res.x)
         obj_point.error = res.fun
         obj_point.source_point_idxs = point_key_combination
@@ -75,11 +81,12 @@ def triangulate(
 
     # Filter out any point combinations with too large of an error
     res_3d = [r for r in res_3d if r.error < matching_threshold]
+    res_3d.sort(key=lambda r: r.error)
 
-    # Assuming any 3d points to be visible from all 3 views, then maximum number of 3d points
+    # Assuming any 3d points to be visible from all 3 views, then minimum number of 3d points
     # is the minimum number of 2d points provided from each views.
-    if len(res_3d) > min([len(image_points[c]) for c in CAMERA_IDXS]):
-        raise ValueError('Found too many 3D points! Maybe adjust the threshold?')
+    if len(res_3d) < min([len(image_points[c]) for c in CAMERA_IDXS]):
+        raise ValueError('Found too few 3D points! Maybe adjust the threshold?')
 
     # Re-project the final 3d object points back to new 2d image points
     for r in res_3d:
@@ -87,5 +94,9 @@ def triangulate(
             list(cams_model[c].project_to_2d(r.point_3d))
             for c in CAMERA_IDXS
         ]
+        logger.debug(f'Found point: {r.point_3d}')
+        logger.debug(f'Error: {r.error}')
+        logger.debug(f'Source point idxs: {r.source_point_idxs}')
+        logger.debug(f'Reprojected points 2d: {r.reprojected_points_2d}')
 
     return res_3d

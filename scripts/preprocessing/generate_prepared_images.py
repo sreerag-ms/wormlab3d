@@ -8,9 +8,9 @@ from wormlab3d.preprocessing.cropper import crop_image
 
 
 def generate_prepared_images(
-        experiment_id=None,
-        trial_id=None,
-        frame_num=None
+        experiment_id: int = None,
+        trial_id: int = None,
+        frame_num: int = None
 ):
     """
     Using the centre_3d point for a frame and its corresponding 2d reprojection points,
@@ -65,6 +65,11 @@ def generate_prepared_images(
 
 if __name__ == '__main__':
     generate_prepared_images(
-        trial_id=4,
-        frame_num=5820
+        # # Poor error, spot obscured in one view
+        # trial_id=186,
+        # frame_num=823
+
+        # Lots of 2d points
+        trial_id=301,
+        frame_num=79
     )

@@ -3,7 +3,7 @@ from typing import List
 import numpy as np
 import pims
 
-from wormlab3d.data.model.cameras import CAMERA_IDXS
+from wormlab3d import CAMERA_IDXS
 from wormlab3d.preprocessing.video_reader import VideoReader
 
 
@@ -63,18 +63,22 @@ class VideoTripletReader:
             for c in CAMERA_IDXS
         ]
 
-    def find_contours(self, subtract_background: bool = True) -> List[List[np.ndarray]]:
+    def find_contours(self, subtract_background: bool = True, cont_threshold: float = None) -> List[List[np.ndarray]]:
         contours = []
         for c in CAMERA_IDXS:
             contours.append(
-                self.readers[c].find_contours(subtract_background=subtract_background)
+                self.readers[c].find_contours(subtract_background=subtract_background, cont_threshold=cont_threshold)
             )
         return contours
 
-    def find_objects(self) -> List[list]:
+    def find_objects(self, cont_threshold: float = None) -> List[list]:
         centres = []
         for c in CAMERA_IDXS:
             centres.append(
-                self.readers[c].find_objects()
+                self.readers[c].find_objects(cont_threshold=cont_threshold)
             )
         return centres
+
+    def close(self):
+        for c in CAMERA_IDXS:
+            self.readers[c].close()

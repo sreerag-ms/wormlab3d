@@ -1,15 +1,14 @@
 from scripts.preprocessing.util import process_args
 from wormlab3d import logger
-from wormlab3d.toolkit.triangulate import triangulate
 
 cached_readers = {}
 
 
 def generate_centres_2d(
-        experiment_id=None,
-        trial_id=None,
-        camera_idx=None,
-        frame_num=None
+        experiment_id: int = None,
+        trial_id: int = None,
+        camera_idx: int = None,
+        frame_num: int = None
 ):
     """
     Find the centre-points of any objects in every frame of each camera's video.
@@ -50,22 +49,21 @@ def generate_centres_2d(
 
 
 def generate_centres_3d(
-        experiment_id=None,
-        trial_id=None,
-        frame_num=None
+        experiment_id: int = None,
+        trial_id: int = None,
+        frame_num: int = None
 ):
     """
     Find a unique 3d centre-point for the worm.
     This uses the 2d coordinates found in each of the 3 camera views to resolve any uncertainties.
     Note - background images and 2d centre points must be available for this to work.
     """
-    trials, cam_idxs = process_args(experiment_id, trial_id, frame_num)
+    trials, cam_idxs = process_args(experiment_id, trial_id, None, frame_num)
     logger.info(f'Generating 3d centre points for {len(trials)} trials.')
 
     # Iterate over matching trials
     for trial in trials:
         logger.info(f'Processing trial id={trial.id}')
-        cameras = trial.experiment.get_cameras()
         prev_point = None
 
         # Iterate over the frames
@@ -84,22 +82,29 @@ def generate_centres_3d(
                 frame = frame.reload()
                 assert frame.centres_2d_available()
 
-            res_3d = triangulate(
-                image_points=frame.centres_2d,
-                cameras=cameras,
-                x0=prev_point
-            )
-            assert len(res_3d) == 1, 'Found too many 3d centre points! (Adjust threshold?)'
-            frame.centre_3d = res_3d[0]
+            frame.generate_centre_3d(x0=prev_point)
             frame.save()
             prev_point = frame.centre_3d.point_3d
 
 
 if __name__ == '__main__':
-    # triangulate_2d(
-    #     trial_id=4,
-    #     camera_idx=None
-    # )
+    # # Poor error, spot obscured in one view
+    # trial_id=186
+    # frame_num=823
+
+    # Lots of 2d points
+    trial_id = 301
+    frame_num = 79
+
+    # 0-length video
+    # trial_id=258
+    # frame_num=559
+
+    generate_centres_2d(
+        trial_id=trial_id,
+        frame_num=frame_num
+    )
     generate_centres_3d(
-        trial_id=4
+        trial_id=trial_id,
+        frame_num=frame_num
     )

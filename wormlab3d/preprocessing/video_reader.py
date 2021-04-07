@@ -116,17 +116,15 @@ class VideoReader:
 
         # Subtract background
         if subtract_background:
-            if self.background is None:
-                raise ValueError('No background image available to subtract.')
-            if self.background.shape != image.shape:
-                raise ValueError('Image size from video does not match background image size!')
+            assert self.background is not None, 'No background image available to subtract.'
+            assert self.background.shape == image.shape, 'Image size from video does not match background image size!'
             if invert:
                 bg_inv = self._invert(self.background)
             image = cv2.subtract(image.copy(), bg_inv)
 
         return image
 
-    def find_contours(self, subtract_background: bool = True) -> List[np.ndarray]:
+    def find_contours(self, subtract_background: bool = True, cont_threshold: float = None) -> List[np.ndarray]:
         """
         Find the contours in the image.
         Note - if the background is not subtracted this doesn't work very well.
@@ -138,15 +136,16 @@ class VideoReader:
 
         # Find the contours
         contours = []
-        cont_thresh = self.contour_thresh
+        if cont_threshold is None:
+            cont_threshold = self.contour_thresh
         attempts = 0
         while len(contours) == 0:
             mask = contour_mask(
                 image,
-                thresh=max(3, max_brightness * cont_thresh),
+                thresh=max(3, max_brightness * cont_threshold),
                 maxval=max_brightness
             )
-            mask_dil = cv2.dilate(mask, None, iterations=10)
+            mask_dil = cv2.dilate(mask, None, iterations=5)
             contours = find_contours(
                 image=mask_dil,
                 max_area=np.inf
@@ -155,17 +154,20 @@ class VideoReader:
             # If no contours found, decrease the threshold and try again
             if len(contours) == 0:
                 attempts += 1
-                cont_thresh /= 2
+                cont_threshold /= 2
                 if attempts > MAX_CONTOURING_ATTEMPTS:
                     raise RuntimeError('Could not find any contours in image!')
 
         return contours
 
-    def find_objects(self) -> np.ndarray:
+    def find_objects(self, cont_threshold: float = None) -> np.ndarray:
         """
         Finds contours in the current frame and returns the centre point coordinates.
         """
-        contours = self.find_contours()
+        contours = self.find_contours(
+            subtract_background=True,
+            cont_threshold=cont_threshold
+        )
         centres = []
         for c in contours:
             centres.append(contour_centre(c))
@@ -184,3 +186,6 @@ class VideoReader:
             a.push(image)
         bg = a.get()
         return bg
+
+    def close(self):
+        self.video.close()

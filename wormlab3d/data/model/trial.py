@@ -1,8 +1,9 @@
-from typing import List, Dict
+from typing import List, Dict, Union
 
 from mongoengine import *
 
-from wormlab3d.data.model.cameras import CAMERA_IDXS
+from wormlab3d import CAMERA_IDXS
+from wormlab3d.data.model import Cameras
 from wormlab3d.data.model.experiment import Experiment
 from wormlab3d.data.model.frame import Frame
 from wormlab3d.data.triplet_field import TripletField
@@ -39,6 +40,26 @@ class Trial(Document):
             trial=self,
             **filters
         )
+
+    def get_cameras(self, best: bool = True, fallback_to_experiment: bool=True) -> Union[Cameras, List[Cameras]]:
+        """
+        Fetch the camera models for this trial.
+        If best=False then returns a list of all associated, otherwise picks the best according to reprojection_error.
+        """
+        cameras = Cameras.objects(
+            trial=self
+        )
+
+        # If no cameras are found for the trial, return what we can from the experiment
+        if len(cameras) == 0:
+            if fallback_to_experiment:
+                return self.experiment.get_cameras(best=best)
+            return None
+
+        if best:
+            return cameras.first()
+
+        return cameras
 
     def get_clips(self, filters: Dict = None) -> List[List[Frame]]:
         """
