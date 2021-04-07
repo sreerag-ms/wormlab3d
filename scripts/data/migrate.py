@@ -9,17 +9,15 @@ import numpy as np
 import scipy.io as sio
 from mongoengine import DoesNotExist
 
-from wormlab3d import WT3D_PATH, logger, CAMERA_IDXS
+from wormlab3d import WT3D_PATH, logger, CAMERA_IDXS, ANNEX_PATH, DATA_PATH
 from wormlab3d.data.model import *
 from wormlab3d.data.util import ANNEX_PATH_PLACEHOLDER
 
-HOME_DIR = os.path.expanduser('~')
-DATA_DIR = HOME_DIR + '/projects/worm_data'
 VIDEO_DIR = 'video'
 CALIB_DIR = 'calib'
 BACKGROUND_IMAGES_DIR = 'background'
-MIDLINES_2D_DIR = DATA_DIR + '/midlines'
-TAGS_MAT_PATH = '../../data/Behavior_Dictionary.mat'
+MIDLINES_2D_DIR = ANNEX_PATH + '/midlines'
+TAGS_MAT_PATH = DATA_PATH + '/Behavior_Dictionary.mat'
 
 fields = [
     '#id',
@@ -46,7 +44,7 @@ values = {k: [] for k in fields}
 
 
 def print_runinfo_data():
-    with open(DATA_DIR + '/run_info.csv') as f:
+    with open(ANNEX_PATH + '/run_info.csv') as f:
         reader = csv.DictReader(f)
         for row in reader:
             for k in fields:
@@ -102,7 +100,7 @@ def find_or_create_experiment(row: dict) -> Experiment:
     experiment.save()
 
     # Look for calibration file like 025.xml
-    calib_path = f'{DATA_DIR}/{CALIB_DIR}/{int(row["#id"]):03d}.xml'
+    calib_path = f'{ANNEX_PATH}/{CALIB_DIR}/{int(row["#id"]):03d}.xml'
     if os.path.exists(calib_path) or os.path.lexists(calib_path):
         logger.info(f'Found calibration file: {calib_path}')
         fs = cv2.FileStorage(calib_path, cv2.FILE_STORAGE_READ)
@@ -179,7 +177,7 @@ def find_or_create_trial(row: dict, experiment: Experiment) -> Trial:
     videos = []
     for c in CAMERA_IDXS:
         location = f'{VIDEO_DIR}/{int(row["#id"]):03d}_{c}.avi'
-        vid_path = DATA_DIR + '/' + location
+        vid_path = ANNEX_PATH + '/' + location
         if os.path.exists(vid_path) or os.path.lexists(vid_path):
             videos.append(f'{ANNEX_PATH_PLACEHOLDER}/{location}')
         else:
@@ -190,7 +188,7 @@ def find_or_create_trial(row: dict, experiment: Experiment) -> Trial:
     bgs = []
     for c in CAMERA_IDXS:
         location = f'{BACKGROUND_IMAGES_DIR}/{int(row["#id"]):03d}_{c}.png'
-        bg_path = DATA_DIR + '/' + location
+        bg_path = ANNEX_PATH + '/' + location
         if os.path.exists(bg_path) or os.path.lexists(bg_path):
             bgs.append(f'{ANNEX_PATH_PLACEHOLDER}/{location}')
     if len(bgs) == 3:
@@ -266,7 +264,7 @@ def migrate_tags():
 def migrate_runinfo():
     skipped_rows = []
 
-    with open(DATA_DIR + '/run_info.csv') as f:
+    with open(ANNEX_PATH + '/run_info.csv') as f:
         reader = csv.DictReader(f)
 
         for row in reader:
