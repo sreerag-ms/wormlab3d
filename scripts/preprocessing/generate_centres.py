@@ -74,7 +74,7 @@ def generate_centres_3d(
         for frame in frames:
             logger.info(f'Frame #{frame.frame_num}/{trial.num_frames} (id={frame.id}).')
             if not frame.centres_2d_available():
-                logger.warn('Frame does not have 2d centre points available for all views, generating now.')
+                logger.warning('Frame does not have 2d centre points available for all views, generating now.')
                 generate_centres_2d(
                     trial_id=trial.id,
                     frame_num=frame.frame_num

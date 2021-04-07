@@ -104,15 +104,15 @@ def generate_dataset(args: DatasetArgs, fix_frames: bool = False) -> DatasetMidl
             try:
                 if fix_frames:
                     if not frame.centres_2d_available():
-                        logger.warn('Frame does not have 2d centre points available for all views, generating now.')
+                        logger.warning('Frame does not have 2d centre points available for all views, generating now.')
                         frame.generate_centres_2d()
                         frame.save()
                     if frame.centre_3d is None:
-                        logger.warn('Frame does not have 3d centre point available, generating now.')
+                        logger.warning('Frame does not have 3d centre point available, generating now.')
                         frame.generate_centre_3d()
                         frame.save()
                     if len(frame.images) != 3:
-                        logger.warn(f'Frame does not have prepared images, generating now.')
+                        logger.warning(f'Frame does not have prepared images, generating now.')
                         frame.generate_prepared_images()
                         frame.save()
 

@@ -198,7 +198,7 @@ def find_or_create_trial(row: dict, experiment: Experiment) -> Trial:
     elif len(bgs) > 0:
         logger.error(f'Missing some backgrounds, found {len(bgs)}')
     else:
-        logger.warn('No backgrounds found')
+        logger.warning('No backgrounds found')
 
     trial.save()
 

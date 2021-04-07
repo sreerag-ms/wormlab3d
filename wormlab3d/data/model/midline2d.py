@@ -76,6 +76,6 @@ class Midline2D(Document):
             if mask_range > 0:
                 mask = (mask - mask.min()) / mask_range
             else:
-                logger.warn(f'Mask range zero! (midline id={self.id})')
+                logger.warning(f'Mask range zero! (midline id={self.id})')
 
         return mask

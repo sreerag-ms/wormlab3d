@@ -34,7 +34,7 @@ def generate_prepared_images(
 
             # Check the centre point exists and if not, create it
             if frame.centre_3d is None:
-                logger.warn('Frame does not have a 3d centre point available, generating now.')
+                logger.warning('Frame does not have a 3d centre point available, generating now.')
                 generate_centres_3d(
                     trial_id=trial.id,
                     frame_num=frame.frame_num

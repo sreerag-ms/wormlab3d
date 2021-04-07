@@ -74,7 +74,7 @@ class NumpyField(BaseField):
                 array = self._decompress(bytes_array, compression)
                 break
             except Exception:
-                logger.warn(f'Failed to unpack array using method={compression}. Trying next.')
+                logger.warning(f'Failed to unpack array using method={compression}. Trying next.')
         if array is None:
             raise ValueError('Could not unpack array.')
 

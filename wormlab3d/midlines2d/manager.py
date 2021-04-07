@@ -244,12 +244,12 @@ class Manager:
 
             # Update the dataset and network params references to the ones now in use
             if self.checkpoint.dataset.id != self.ds.id:
-                logger.warn('Dataset has changed! This may result in training occurring on test data!')
+                logger.warning('Dataset has changed! This may result in training occurring on test data!')
                 checkpoint.dataset = self.ds
 
             # If the hyperparameters have changed, the model file might now be incompatible, but try anyway
             if self.checkpoint.network_params.id != self.net_params.id:
-                logger.warn('Network parameters have changed! This may result in a broken network!')
+                logger.warning('Network parameters have changed! This may result in a broken network!')
                 checkpoint.network_params = self.net_params
 
             # Args are stored against the checkpoint, so just override them
@@ -296,7 +296,7 @@ class Manager:
     def configure_paths(self, renew_logs: bool = False):
         """Create the directories."""
         if renew_logs:
-            logger.warn('Removing previous log files...')
+            logger.warning('Removing previous log files...')
             shutil.rmtree(self.logs_path, ignore_errors=True)
         os.makedirs(self.logs_path, exist_ok=True)
         os.makedirs(self.logs_path + '/checkpoints', exist_ok=True)

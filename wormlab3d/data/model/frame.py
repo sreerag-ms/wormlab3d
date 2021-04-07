@@ -99,7 +99,7 @@ class Frame(Document):
         Find the triangulated 3d object centre point.
         """
         if not self.centres_2d_available():
-            logger.warn('Frame does not have 2d centre points available for all views, generating now.')
+            logger.warning('Frame does not have 2d centre points available for all views, generating now.')
             self.generate_centres_2d()
 
         best_err = 1000
@@ -222,7 +222,7 @@ class Frame(Document):
 
         # Check the centre point exists and if not, create it
         if self.centre_3d is None:
-            logger.warn('Frame does not have a 3d centre point available, generating now.')
+            logger.warning('Frame does not have a 3d centre point available, generating now.')
             self.generate_centre_3d()
             assert self.centre_3d is not None
 
