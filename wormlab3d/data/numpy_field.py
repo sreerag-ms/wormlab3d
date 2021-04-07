@@ -60,23 +60,27 @@ class NumpyField(BaseField):
     def to_python(self, bytes_array):
         """
         Unpack array.
+        If it fails it tries the other methods so we can change the method without losing the data.
         """
-        if self.compression == COMPRESS_NONE:
-            return pickle.loads(bytes_array)
 
-        if self.compression == COMPRESS_BLOSC_PACK:
-            return blosc.unpack_array(bytes_array)
+        # Put the expected method at the top of the list of options to try
+        options = COMPRESSION_OPTIONS.copy()
+        options.remove(self.compression)
+        options = [self.compression, ] + options
 
-        if self.compression == COMPRESS_BLOSC_POINTER:
+        array = None
+        for compression in options:
             try:
-                array = np.empty(self.shape, dtype=self.dtype)
-                blosc.decompress_ptr(bytes_array, array.__array_interface__['data'][0])
-                return array
+                array = self._decompress(bytes_array, compression)
+                break
             except Exception:
-                logger.warn('Failed to unpack array. Will try to read as uncompressed..')
-                return pickle.loads(bytes_array)
+                logger.warn(f'Failed to unpack array using method={compression}. Trying next.')
+        if array is None:
+            raise ValueError('Could not unpack array.')
 
-    def validate(self, value: np.ndarray):
+        return array
+
+    def validate(self, value: np.ndarray, clean: bool = True):
         """
         Validate the array type and shape.
         """
@@ -87,3 +91,18 @@ class NumpyField(BaseField):
         # Validate shape
         if self.shape is not None and value.shape != self.shape:
             self.error(f'Value shape {value.shape} does not match required shape {self.shape}')
+
+    def _decompress(self, bytes_array, compression: int) -> np.ndarray:
+        """
+        Decompress the data.
+        """
+        if compression == COMPRESS_NONE:
+            return pickle.loads(bytes_array)
+
+        if compression == COMPRESS_BLOSC_PACK:
+            return blosc.unpack_array(bytes_array)
+
+        if compression == COMPRESS_BLOSC_POINTER:
+            array = np.empty(self.shape, dtype=self.dtype)
+            blosc.decompress_ptr(bytes_array, array.__array_interface__['data'][0])
+            return array
