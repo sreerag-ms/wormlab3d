@@ -1,11 +1,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-from wormlab3d import logger
-from wormlab3d.data.model import Trial
-from wormlab3d.data.model.cameras import CAMERA_IDXS
-from wormlab3d.data.model.frame import PREPARED_IMAGE_SIZE
+from wormlab3d import logger, CAMERA_IDXS
 from wormlab3d.data.model.midline2d import Midline2D
+from wormlab3d.data.model.trial import Trial
 from wormlab3d.toolkit.plot_utils import interactive_plots
 
 
@@ -47,7 +45,7 @@ def plot_2d_midline_annotation(midline2d_id: str = None):
     trial = midline.frame.trial
     image_original = midline.get_image()
     image_prepped = midline.get_prepared_image()
-    n_plots = 1 if image_prepped is None else 2
+    n_plots = 1 if image_prepped is None else 4
 
     fig, axes = plt.subplots(n_plots)
     fig.suptitle(
@@ -67,18 +65,35 @@ def plot_2d_midline_annotation(midline2d_id: str = None):
         ax = axes[1]
         ax.set_title('Prepared image')
         ax.imshow(image_prepped, cmap='gray', vmin=0, vmax=1)
-
-        centre_2d = midline.frame.centre_3d.reprojected_points_2d[midline.camera]
-
-        X = midline.X.copy()
-        X[:, 0] = X[:, 0] - centre_2d[0] + PREPARED_IMAGE_SIZE[0] / 2
-        X[:, 1] = X[:, 1] - centre_2d[1] + PREPARED_IMAGE_SIZE[1] / 2
-
+        X = midline.get_prepared_coordinates()
         ax.scatter(x=X[:, 0], y=X[:, 1], color='red', s=10, alpha=0.8)
+
+        # Plot mask
+        ax = axes[2]
+        ax.set_title('Segmentation mask')
+        mask = midline.get_segmentation_mask()
+        ax.imshow(mask, cmap='gray', vmin=0, vmax=1)
+
+        # Plot fattened mask
+        blur_sigma = 5
+        ax = axes[3]
+        ax.set_title(f'Segmentation mask - blur_sigma={blur_sigma}')
+        mask = midline.get_segmentation_mask(blur_sigma=blur_sigma)
+        ax.imshow(mask, cmap='gray', vmin=0, vmax=1)
 
     plt.show()
 
 
 if __name__ == '__main__':
-    mid = get_midline(trial_id=4, frame_num=5820, camera_idx=1)
+    # mid = get_midline(trial_id=4, frame_num=0, camera_idx=1)
+
+    # # Lots of 2d points
+    # trial_id=301
+    # frame_num=79
+
+    # Broken
+    trial_id = 114
+    frame_num = 0
+
+    mid = get_midline(trial_id=trial_id, frame_num=frame_num, camera_idx=0)
     plot_2d_midline_annotation(midline2d_id=mid.id)
