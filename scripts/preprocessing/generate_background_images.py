@@ -1,4 +1,5 @@
 import os
+from collections import OrderedDict
 
 import cv2
 
@@ -27,7 +28,7 @@ def generate_background_images(
     # Iterate over matching trials
     for trial in trials:
         logger.info(f'Processing trial id={trial.id}')
-        backgrounds = {}
+        backgrounds = OrderedDict()
         for ci in cam_idxs:
             logger.info(f'Processing camera idx={ci}')
 
@@ -51,7 +52,7 @@ def generate_background_images(
         # Save backgrounds, replacing or updating as needed
         if len(backgrounds) > 0:
             if len(backgrounds) == 3:
-                trial.backgrounds = backgrounds
+                trial.backgrounds = list(backgrounds.values())
             else:
                 if len(trial.backgrounds) > 0:
                     bgs = trial.backgrounds
@@ -70,6 +71,6 @@ def generate_background_images(
 
 if __name__ == '__main__':
     generate_background_images(
-        trial_id=4636,
-        camera_idx=1
+        trial_id=114,
+        # camera_idx=1
     )
