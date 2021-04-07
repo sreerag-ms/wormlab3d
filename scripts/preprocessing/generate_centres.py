@@ -8,7 +8,8 @@ def generate_centres_2d(
         experiment_id: int = None,
         trial_id: int = None,
         camera_idx: int = None,
-        frame_num: int = None
+        frame_num: int = None,
+        missing_only: bool = True
 ):
     """
     Find the centre-points of any objects in every frame of each camera's video.
@@ -17,7 +18,10 @@ def generate_centres_2d(
     Note - the background images must be available for this to work well.
     """
     trials, cam_idxs = process_args(experiment_id, trial_id, camera_idx, frame_num)
-    logger.info(f'Generating 2d centre points for {len(trials)} trials.')
+    if missing_only:
+        logger.info(f'Generating any missing 2D centre points for {len(trials)} trials.')
+    else:
+        logger.info(f'(Re)generating ALL 2D centre points for {len(trials)} trials.')
 
     # Iterate over matching trials
     for trial in trials:
@@ -38,12 +42,16 @@ def generate_centres_2d(
         else:
             frames = trial.get_frames()
         for frame in frames:
+            log_prefix = f'Frame #{frame.frame_num}/{trial.num_frames} (id={frame.id}). '
+            if len(frame.centres_2d) == 3 and missing_only:
+                logger.info(log_prefix + 'Has 2D points, skipping.')
+                continue
             if len(frame.centres_2d) == 0:
                 frame.centres_2d = [[]] * 3
             for c in cam_idxs:
                 readers[c].set_frame_num(frame.frame_num)
                 centres = readers[c].find_objects()
-                logger.debug(f'Frame #{frame.frame_num}/{trial.num_frames}. Found {len(centres)} objects.')
+                logger.info(log_prefix + f'Found {len(centres)} objects.')
                 frame.centres_2d[c] = centres
             frame.save()
 
@@ -51,7 +59,8 @@ def generate_centres_2d(
 def generate_centres_3d(
         experiment_id: int = None,
         trial_id: int = None,
-        frame_num: int = None
+        frame_num: int = None,
+        missing_only: bool = True
 ):
     """
     Find a unique 3d centre-point for the worm.
@@ -59,7 +68,10 @@ def generate_centres_3d(
     Note - background images and 2d centre points must be available for this to work.
     """
     trials, cam_idxs = process_args(experiment_id, trial_id, None, frame_num)
-    logger.info(f'Generating 3d centre points for {len(trials)} trials.')
+    if missing_only:
+        logger.info(f'Generating any missing 3D centre points for {len(trials)} trials.')
+    else:
+        logger.info(f'(Re)generating ALL 3D centre points for {len(trials)} trials.')
 
     # Iterate over matching trials
     for trial in trials:
@@ -72,16 +84,19 @@ def generate_centres_3d(
         else:
             frames = trial.get_frames()
         for frame in frames:
-            logger.info(f'Frame #{frame.frame_num}/{trial.num_frames} (id={frame.id}).')
+            log_prefix = f'Frame #{frame.frame_num}/{trial.num_frames} (id={frame.id}). '
+            if frame.centre_3d is not None and missing_only:
+                logger.info(log_prefix + 'Has 3D point, skipping.')
+                continue
             if not frame.centres_2d_available():
-                logger.warning('Frame does not have 2d centre points available for all views, generating now.')
+                logger.warning('Frame does not have 2D centre points available for all views, generating now.')
                 generate_centres_2d(
                     trial_id=trial.id,
                     frame_num=frame.frame_num
                 )
                 frame = frame.reload()
                 assert frame.centres_2d_available()
-
+            logger.info(log_prefix + 'Triangulating...')
             frame.generate_centre_3d(x0=prev_point)
             frame.save()
             prev_point = frame.centre_3d.point_3d
