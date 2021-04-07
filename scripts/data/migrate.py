@@ -9,9 +9,8 @@ import numpy as np
 import scipy.io as sio
 from mongoengine import DoesNotExist
 
-from wormlab3d import WT3D_PATH, logger
+from wormlab3d import WT3D_PATH, logger, CAMERA_IDXS
 from wormlab3d.data.model import *
-from wormlab3d.data.model.cameras import CAMERA_IDXS
 from wormlab3d.data.util import ANNEX_PATH_PLACEHOLDER
 
 HOME_DIR = os.path.expanduser('~')
@@ -67,8 +66,8 @@ def clear_db():
     Midline3D.drop_collection()
     Model.drop_collection()
     Tag.drop_collection()
-    Trajectory.drop_collection()
-    TrajectoryDataset.drop_collection()
+    FrameSequence.drop_collection()
+    Dataset.drop_collection()
     Trial.drop_collection()
 
     # Reset id sequences / counters
@@ -109,6 +108,12 @@ def find_or_create_experiment(row: dict) -> Experiment:
         fs = cv2.FileStorage(calib_path, cv2.FILE_STORAGE_READ)
         cams = Cameras()
         cams.experiment = experiment
+        trial_id_old = int(row['#id'])
+        try:
+            trial = Trial.objects.get(legacy_id=trial_id_old)
+            cams.trial = trial
+        except DoesNotExist:
+            pass
 
         try:
             cams.timestamp = dateutil.parser.parse(fs.getNode('calibration_time').string())
@@ -318,7 +323,7 @@ def migrate_midlines2d():
                 if line[0] == '#':
                     continue
                 coords = np.array(list(float(c) for c in line.split(',')), dtype=np.float32)
-                if len(coords) == 2:
+                if len(coords) == 2 and not np.allclose(coords, np.array([0, 0])):
                     X.append(coords)
             X = np.stack(X)
             midline.X = X
