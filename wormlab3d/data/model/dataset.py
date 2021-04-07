@@ -5,6 +5,7 @@ from mongoengine import *
 
 from wormlab3d.data.model.midline2d import Midline2D
 from wormlab3d.data.model.tag import Tag
+from wormlab3d.midlines2d.args import DatasetArgs
 
 DATA_TYPES = ['xyz', 'xyz_inv', 'bishop', 'cpca']
 
@@ -73,3 +74,16 @@ class DatasetMidline2D(Dataset):
         self.size_test = len(test)
         if self.size_all > 0:
             self.train_test_split_actual = len(train) / self.size_all
+
+    @queryset_manager
+    def find_from_args(doc_cls, queryset, args: DatasetArgs):
+        return queryset.filter(
+            train_test_split_target=args.train_test_split,
+            restrict_tags=args.restrict_tags,
+            restrict_concs=args.restrict_concs,
+            centre_3d_max_error=args.centre_3d_max_error,
+            exclude_experiments=args.exclude_experiments,
+            include_experiments=args.include_experiments,
+            exclude_trials=args.exclude_trials,
+            include_trials=args.include_trials,
+        )

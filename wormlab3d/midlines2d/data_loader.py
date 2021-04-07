@@ -7,15 +7,10 @@ from torch.utils.data.dataloader import default_collate
 from torchvision import transforms
 from torchvision.transforms.functional import to_tensor
 
+from wormlab3d import logger
 from wormlab3d.data.model import Midline2D
 from wormlab3d.data.model.dataset import DatasetMidline2D
 from wormlab3d.midlines2d.args import DatasetArgs
-
-WORM_LENGTH = 128
-
-FRAME_DURATION = 1 / 25
-
-eps = 1e-8
 
 
 class DatasetLoader(DatasetTorch):
@@ -24,23 +19,50 @@ class DatasetLoader(DatasetTorch):
             ds: DatasetMidline2D,
             train_or_test: str,
             augment: bool = False,
-            blur_sigma: float = 0
+            blur_sigma: float = 0,
+            preload: bool = False
     ):
         assert train_or_test in ['train', 'test']
         self.ds = ds
         self.train_or_test = train_or_test
         self.augment = augment
         self.blur_sigma = blur_sigma
-        self.midlines = getattr(self.ds, 'X_' + train_or_test)
+        self.midlines = list(getattr(self.ds, 'X_' + train_or_test))
         self.affine_transforms, self.image_transforms = self._get_transforms()
+        self.preload = preload
+        if preload:
+            self._init_data()
+
+    def _init_data(self):
+        """
+        Load all the prepared images and segmentation masks for all midlines in the dataset into memory.
+        """
+        logger.info('Preloading data from database.')
+        images = []
+        masks = []
+        midline_ids = []
+        for m in self.midlines:
+            images.append(m.get_prepared_image())
+            masks.append(m.get_segmentation_mask(blur_sigma=self.blur_sigma))
+            midline_ids.append(m.id)
+
+        self.images = images
+        self.masks = masks
+        self.midline_ids = midline_ids
 
     def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor, Midline2D]:
         """
         Fetch the image, the segmentation mask and the midline database record.
         """
-        midline: Midline2D = self.midlines[index]
-        image = midline.get_prepared_image()
-        mask = midline.get_segmentation_mask(blur_sigma=self.blur_sigma)
+
+        if self.preload:
+            midline = self.midlines[index]
+            image = self.images[index]
+            mask = self.masks[index]
+        else:
+            midline: Midline2D = self.midlines[index]
+            image = midline.get_prepared_image()
+            mask = midline.get_segmentation_mask(blur_sigma=self.blur_sigma)
 
         # Convert to torch tensors
         image = to_tensor(image)
@@ -94,8 +116,7 @@ def get_data_loader(
         ds: DatasetMidline2D,
         ds_args: DatasetArgs,
         train_or_test: str,
-        batch_size: int,
-        n_workers: int = 0
+        batch_size: int
 ) -> DataLoader:
     """
     Get a data loader.
@@ -114,14 +135,15 @@ def get_data_loader(
         ds=ds,
         blur_sigma=ds_args.blur_sigma,
         augment=ds_args.augment,
-        train_or_test=train_or_test
+        train_or_test=train_or_test,
+        preload=ds_args.preload_from_database
     )
 
     loader = torch.utils.data.DataLoader(
         dataset_loader,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=n_workers,
+        num_workers=ds_args.n_dataloader_workers,
         drop_last=True,
         collate_fn=collate_fn
     )

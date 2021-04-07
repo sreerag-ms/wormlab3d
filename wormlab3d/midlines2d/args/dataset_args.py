@@ -17,7 +17,8 @@ class DatasetArgs:
             include_experiments: List[int] = None,
             augment: bool = False,
             blur_sigma: float = 0,
-            n_dataloader_workers: int = 4
+            n_dataloader_workers: int = 4,
+            preload_from_database: bool = False
     ):
         self.ds_id = ds_id
         if ds_id is not None:
@@ -54,6 +55,7 @@ class DatasetArgs:
         self.augment = augment
         self.blur_sigma = blur_sigma
         self.n_dataloader_workers = n_dataloader_workers
+        self.preload_from_database = preload_from_database
 
     @staticmethod
     def add_args(parser: ArgumentParser):
@@ -86,6 +88,8 @@ class DatasetArgs:
                             help='Fatten the midline mask with a gaussian blur using this sigma value (in pixels).')
         parser.add_argument('--n-dataloader-workers', type=int, default=4,
                             help='Number of dataloader worker processes.')
+        parser.add_argument('--preload-from-database', action='store_true', default=False,
+                            help='Preload all data from the database before starting, as opposed to loading on demand.')
 
     @staticmethod
     def from_args(args: Namespace) -> 'DatasetArgs':
@@ -105,5 +109,6 @@ class DatasetArgs:
             include_trials=args.include_trials,
             augment=args.augment,
             blur_sigma=args.blur_sigma,
-            n_dataloader_workers=args.n_dataloader_workers
+            n_dataloader_workers=args.n_dataloader_workers,
+            preload_from_database=args.preload_from_database,
         )

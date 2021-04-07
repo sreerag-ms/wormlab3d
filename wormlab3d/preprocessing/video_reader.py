@@ -1,3 +1,4 @@
+from subprocess import CalledProcessError
 from typing import List
 
 import cv2
@@ -43,7 +44,10 @@ class VideoReader:
         # Open background image
         if background_image_path is not None:
             if is_annexed_file(background_image_path):
-                fetch_from_annex(background_image_path)
+                try:
+                    fetch_from_annex(background_image_path)
+                except CalledProcessError as e:
+                    logger.error(f'Could not fetch from annex: {e}')
             self.background = cv2.imread(background_image_path, cv2.IMREAD_GRAYSCALE)
             if self.background is None:
                 logger.error(f'Cannot open background image: {background_image_path}')

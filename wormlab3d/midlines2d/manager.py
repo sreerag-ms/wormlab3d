@@ -1,4 +1,6 @@
+import gc
 import os
+import shutil
 import time
 from datetime import timedelta
 from typing import Dict
@@ -24,8 +26,10 @@ from wormlab3d.data.model.network_parameters import *
 from wormlab3d.midlines2d.args import DatasetArgs, NetworkArgs, OptimiserArgs, RuntimeArgs
 from wormlab3d.midlines2d.data_loader import get_data_loader
 from wormlab3d.midlines2d.generate_dataset import generate_dataset
+from wormlab3d.toolkit.util import is_bad, to_numpy
 
 LOG_EVERY_N_BATCHES = 1
+START_TIMESTAMP = time.strftime('%Y%m%d_%H%M')
 
 
 class Manager:
@@ -71,12 +75,7 @@ class Manager:
                 ds = DatasetMidline2D.objects.get(id=self.dataset_args.ds_id)
             else:
                 # Otherwise, try to find one matching the same parameters
-                datasets = DatasetMidline2D.objects(
-                    train_test_split_target=self.dataset_args.train_test_split,
-                    restrict_tags=self.dataset_args.restrict_tags,
-                    restrict_concs=self.dataset_args.restrict_concs,
-                    centre_3d_max_error=self.dataset_args.centre_3d_max_error
-                )
+                datasets = DatasetMidline2D.find_from_args(self.dataset_args)
                 if datasets.count() > 0:
                     ds = datasets[0]
                     logger.info(f'Found {len(datasets)} suitable datasets in database, using most recent.')
@@ -102,8 +101,7 @@ class Manager:
                 ds=self.ds,
                 ds_args=self.dataset_args,
                 train_or_test=tt,
-                batch_size=self.runtime_args.batch_size,
-                n_workers=self.dataset_args.n_dataloader_workers
+                batch_size=self.runtime_args.batch_size
             )
 
         return loaders['train'], loaders['test']
@@ -282,7 +280,9 @@ class Manager:
 
     @property
     def logs_path(self) -> str:
-        return LOGS_PATH + f'/{self.net_params.id}/{self.ds.id}'
+        return LOGS_PATH \
+               + f'/{self.ds.created:%Y%m%d_%H:%M}_{self.ds.id}' \
+               + f'/{self.net_params.created:%Y%m%d_%H:%M}_{self.net_params.id}'
 
     @property
     def stat_keys(self) -> List[str]:
@@ -291,10 +291,13 @@ class Manager:
 
     def _init_tb_logger(self):
         """Initialise the tensorboard writer."""
-        self.tb_logger = SummaryWriter(self.logs_path + '/events', flush_secs=5)
+        self.tb_logger = SummaryWriter(self.logs_path + '/events/' + START_TIMESTAMP, flush_secs=5)
 
-    def configure_paths(self):
+    def configure_paths(self, renew_logs: bool = False):
         """Create the directories."""
+        if renew_logs:
+            logger.warn('Removing previous log files...')
+            shutil.rmtree(self.logs_path, ignore_errors=True)
         os.makedirs(self.logs_path, exist_ok=True)
         os.makedirs(self.logs_path + '/checkpoints', exist_ok=True)
         os.makedirs(self.logs_path + '/events', exist_ok=True)
@@ -402,17 +405,13 @@ class Manager:
                 running_loss = 0.
                 running_stats = {k: 0. for k in self.stat_keys}
 
-            # Plot
-            self._make_plots(
-                data,
-                batch_outputs,
-                train_or_test='train'
-            )
-
-            # Checkpoint
+            # Plots and checkpoints
+            self._make_plots(data, batch_outputs, train_or_test='train')
             if self.runtime_args.checkpoint_every_n_batches > 0 \
                     and (i + 1) % self.runtime_args.checkpoint_every_n_batches == 0:
                 self.save_checkpoint()
+
+            gc.collect()
 
         # Update stats and write debug
         self.checkpoint.loss_train = epoch_loss
@@ -421,6 +420,9 @@ class Manager:
         for key, val in epoch_stats.items():
             self.tb_logger.add_scalar(f'epoch/train/{key}', val, self.checkpoint.epoch)
             logger.info(f'Train {key}: {val:.4E}')
+
+        # End-of-epoch plots
+        self._make_plots(data, batch_outputs, train_or_test='train', end_of_epoch=True)
 
     def _train_batch(self, data) -> Tuple[torch.Tensor, torch.Tensor, Dict]:
         """
@@ -474,6 +476,8 @@ class Manager:
         self.checkpoint.loss_test = test_loss
         self.checkpoint.stats_test = test_stats
 
+        self._make_plots(data, batch_outputs, train_or_test='test', end_of_epoch=True)
+
         return test_loss, test_stats
 
     def _process_batch(self, data: Tuple[torch.Tensor, torch.Tensor, List[Midline2D]]) \
@@ -492,8 +496,7 @@ class Manager:
 
         # Calculate losses
         loss = F.mse_loss(Y_pred, Y_target)
-
-        assert not torch.isnan(loss)
+        assert not is_bad(loss)
 
         return Y_pred, loss, {}
 
@@ -521,9 +524,29 @@ class Manager:
             train_or_test: str
     ):
         images, masks, midlines = data
+        images, masks, outputs = to_numpy(images), to_numpy(masks), to_numpy(outputs)
+        images, masks, outputs = images.squeeze(), masks.squeeze(), outputs.squeeze()
         n_examples = min(self.runtime_args.plot_n_examples, self.runtime_args.batch_size)
         idxs = np.random.choice(self.runtime_args.batch_size, n_examples, replace=False)
-        fig, axes = plt.subplots(4, n_examples)
+        fig, axes = plt.subplots(
+            nrows=5,
+            ncols=n_examples,
+            figsize=(16, n_examples * 4),
+            gridspec_kw=dict(
+                wspace=0.01, hspace=0.02,
+                width_ratios=[1] * n_examples,
+                top=0.9,
+                bottom=0.05,
+                left=0.05,
+                right=0.95
+            ),
+        )
+
+        fig.suptitle(
+            f'epoch={self.checkpoint.epoch}, '
+            f'step={self.checkpoint.step}, '
+            f'blur_sigma={self.dataset_args.blur_sigma:.1f}'
+        )
 
         # Calculate squared pixel errors
         loss = np.square(masks[idxs] - outputs[idxs])
@@ -532,46 +555,52 @@ class Manager:
             midline = midlines[idx]
             trial = midline.frame.trial
 
-            # First row shows prepped images with midline annotations
-            X = midline.get_prepared_coordinates()
+            # Shows original (prepped) images with midline annotations
             ax = axes[0, i]
-            ax.set_title(
-                f'Trial: {trial.id}, '
-                f'Video: {trial.videos[midline.camera]}, '
-                f'Frame: {midline.frame.frame_num}, '
+            ax.text(
+                -1, -10,
+                f'Midline: {midline.id}\n'
+                f'Trial: {trial.id}\n'
+                f'Video: {trial.videos[midline.camera]}\n'
+                f'Frame: {midline.frame.frame_num} (id={midline.frame.id})\n'
                 f'Camera: {midline.camera}'
             )
-            ax.imshow(images[idx], cmap='gray', vmin=0, vmax=1)
-            ax.scatter(x=X[:, 0], y=X[:, 1], color='red', s=2, alpha=0.8)
+            ax.imshow(midline.get_prepared_image(), cmap='gray', vmin=0, vmax=1)
+            X = midline.get_prepared_coordinates()
+            ax.scatter(x=X[:, 0], y=X[:, 1], color='red', s=2, alpha=0.8, marker='x')
             if i == 0:
-                ax.set_ylabel('Image + Annotations')
+                ax.text(-0.1, 0.25, 'Original+Annotation', transform=ax.transAxes, rotation='vertical')
+            ax.axis('off')
 
-            # Second row shows target segmentation mask
+            # Augmented images
             ax = axes[1, i]
-            # ax.set_title()
-            ax.imshow(masks[idx], cmap='gray', vmin=0, vmax=1)
-            ax.scatter(x=X[:, 0], y=X[:, 1], color='red', s=1, alpha=0.8)
+            ax.imshow(images[idx], cmap='gray', vmin=0, vmax=1)
             if i == 0:
-                ax.set_ylabel(f'Segmentation mask (blur_sigma={self.dataset_args.blur_sigma:.1f})')
+                ax.text(-0.1, 0.25, 'Augmented Image', transform=ax.transAxes, rotation='vertical')
+            ax.axis('off')
 
-            # Third row shows the error between masks
+            # Midline segmentation masks
             ax = axes[2, i]
-            # ax.set_title('Squared errors')
+            ax.imshow(masks[idx], cmap=plt.cm.Blues, vmin=0, vmax=1)
+            if i == 0:
+                ax.text(-0.1, 0.4, 'Target', transform=ax.transAxes, rotation='vertical')
+            ax.axis('off')
+
+            # Error between target and output
+            ax = axes[3, i]
             m = ax.imshow(loss[i], cmap=plt.cm.Reds, vmin=loss.min(), vmax=loss.max())
             if i == 0:
-                ax.set_ylabel('Squared errors')
+                ax.text(-0.1, 0.4, 'Error', transform=ax.transAxes, rotation='vertical')
             if i == n_examples - 1:
                 fig.colorbar(m, ax=ax, format='%.3f')
+            ax.axis('off')
 
-            # Fourth row shows generated segmentation mask
-            ax = axes[3, i]
-            # ax.set_title('Output')
-            ax.imshow(outputs[idx], cmap='gray', vmin=0, vmax=1)
-            ax.scatter(x=X[:, 0], y=X[:, 1], color='red', s=1, alpha=0.8)
+            # Generated segmentation mask
+            ax = axes[4, i]
+            ax.imshow(outputs[idx], cmap=plt.cm.Blues, vmin=0, vmax=1)
             if i == 0:
-                ax.set_ylabel('Output')
-
-        fig.tight_layout()
+                ax.text(-0.1, 0.4, 'Output', transform=ax.transAxes, rotation='vertical')
+            ax.axis('off')
 
         # plt.show()
         self.tb_logger.add_figure(f'masks_{train_or_test}', fig, self.checkpoint.step)

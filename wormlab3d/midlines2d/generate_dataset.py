@@ -1,3 +1,4 @@
+import gc
 import random
 from collections import OrderedDict
 
@@ -111,7 +112,7 @@ def generate_dataset(args: DatasetArgs, fix_frames: bool = False) -> DatasetMidl
                         frame.generate_centre_3d()
                         frame.save()
                     if len(frame.images) != 3:
-                        logger.warn(f'Frame (id={frame.id}) does not have prepared images, generating now.')
+                        logger.warn(f'Frame does not have prepared images, generating now.')
                         frame.generate_prepared_images()
                         frame.save()
 
@@ -126,6 +127,9 @@ def generate_dataset(args: DatasetArgs, fix_frames: bool = False) -> DatasetMidl
                     logger.error(f'Failed to prepare frame: {e}')
                 else:
                     logger.error(f'Frame is not ready: {e}')
+
+            # Keep on top of the memory usage
+            gc.collect()
 
         n = len(midline_ids)
         if n > 0:
