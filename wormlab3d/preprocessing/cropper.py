@@ -12,10 +12,10 @@ def crop_image(
     """
     Crop an image from the centre-out.
     """
-    row_from = int(centre_2d[0] - size[0] / 2)
-    row_to = int(centre_2d[0] + size[0] / 2)
-    col_from = int(centre_2d[1] - size[1] / 2)
-    col_to = int(centre_2d[1] + size[1] / 2)
+    row_from = int(centre_2d[1] - size[1] / 2)
+    row_to = int(centre_2d[1] + size[1] / 2)
+    col_from = int(centre_2d[0] - size[0] / 2)
+    col_to = int(centre_2d[0] + size[0] / 2)
 
     if fix_overlaps:
         top_overlap = -row_from if row_from < 0 else 0
