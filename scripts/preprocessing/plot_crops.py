@@ -1,8 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-from wormlab3d import logger
-from wormlab3d.data.model.cameras import CAMERA_IDXS
+from wormlab3d import logger, CAMERA_IDXS
 from wormlab3d.data.model.frame import PREPARED_IMAGE_SIZE
 from wormlab3d.data.model.trial import Trial
 from wormlab3d.preprocessing.cropper import crop_image
@@ -31,7 +30,12 @@ def plot_crops(trial_id, frame_num=1):
     images_inv_no_bg = reader.get_images(invert=True, subtract_background=True)
 
     # Get the centre points from the frame if available
-    if len(frame.centres_2d):
+    if frame.centre_3d is not None:
+        logger.info('Frame has 3d centre precomputed, using the reprojections.')
+        centres_2d = frame.centre_3d.reprojected_points_2d
+        centres_2d = np.array(centres_2d)
+        centres_2d = centres_2d[:, np.newaxis, :]
+    elif len(frame.centres_2d):
         logger.info('Frame has 2d centres precomputed, using these.')
         centres_2d = frame.centres_2d
     else:
@@ -101,7 +105,22 @@ def plot_crops(trial_id, frame_num=1):
 
 
 if __name__ == '__main__':
+    # plot_crops(
+    #     trial_id=287,
+    #     frame_num=0
+    # )
+
+    # Poor error, spot obscured in one view
     plot_crops(
-        trial_id=4,
-        frame_num=5820
+        # trial_id=186,
+        # frame_num=823,
+
+
+        # Lots of 2d points
+        # trial_id=301,
+        # frame_num=79
+
+        # Broken
+        trial_id=114,
+        frame_num=0
     )
