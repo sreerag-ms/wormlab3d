@@ -13,10 +13,16 @@ def generate_dataset(args: DatasetArgs, fix_frames: bool = False) -> DatasetMidl
     Generate a 2D midline dataset.
     """
     logger.info(
-        f'Generating dataset. '
-        f'Train/test split={args.train_test_split}. '
-        f'Restrict tags={args.restrict_tags}. '
-        f'Restrict concs={args.restrict_concs}.'
+        f'Generating dataset: ---- \n'
+        f'Train/test split={args.train_test_split}.\n'
+        f'Restrict tags={args.restrict_tags}.\n'
+        f'Restrict concs={args.restrict_concs}.\n'
+        f'Max centre 3d reprojection error={args.centre_3d_max_error}.\n'
+        f'Include experiments={args.include_experiments}.\n'
+        f'Exclude experiments={args.exclude_experiments}.\n'
+        f'Include trials={args.include_trials}.\n'
+        f'Exclude trials={args.exclude_trials}.\n'
+        '-----------------------------------\n'
     )
     DS = DatasetMidline2D(
         train_test_split_target=args.train_test_split,
@@ -31,7 +37,7 @@ def generate_dataset(args: DatasetArgs, fix_frames: bool = False) -> DatasetMidl
 
     # Fetch manually-annotated midlines, grouped by tags (each might appear for multiple tags)
     # The query starts matching on the midline2d collection.
-    logger.info('Querying database')
+    logger.info('Querying database.')
     pipeline = [
         {'$match': {'user': {'$exists': True}}},
         {'$lookup': {'from': 'frame', 'localField': 'frame', 'foreignField': '_id', 'as': 'frame'}},
@@ -91,7 +97,7 @@ def generate_dataset(args: DatasetArgs, fix_frames: bool = False) -> DatasetMidl
     cursor = Midline2D.objects().aggregate(pipeline)
 
     # Process results
-    logger.info('Processing results')
+    logger.info('Validating frames.')
     tags_info = OrderedDict()
     failed_midline_ids = []
     for tag in cursor:
@@ -100,7 +106,7 @@ def generate_dataset(args: DatasetArgs, fix_frames: bool = False) -> DatasetMidl
         for midline_id in tag['ids']:
             midline = Midline2D.objects.no_cache().get(id=midline_id)
             frame = midline.frame
-            logger.debug(f'--------------- Checking frame id={frame.id}')
+            logger.debug(f'Checking frame id={frame.id}')
             try:
                 if fix_frames:
                     if not frame.centres_2d_available():
@@ -155,6 +161,7 @@ def generate_dataset(args: DatasetArgs, fix_frames: bool = False) -> DatasetMidl
             }
 
     # Train/test split
+    logger.info('Splitting valid results into train and test sets.')
     for i, (tag_id, tag_info) in enumerate(tags_info.items()):
         ids_to_assign = tag_info['ids_to_assign'].copy()
         # Loop over the midlines, and assign them to train or test proportionally
@@ -218,10 +225,10 @@ def generate_dataset(args: DatasetArgs, fix_frames: bool = False) -> DatasetMidl
 
     n_failed = len(failed_midline_ids)
     if n_failed > 0:
-        logger.error(f'Failed to include {n_failed}/{DS.size_all + n_failed} matching midlines: {failed_midline_ids}')
+        logger.error(f'Failed to include {n_failed}/{DS.size_all + n_failed} matching midlines: {failed_midline_ids}.')
 
     # Save dataset
-    logger.debug('Saving dataset')
+    logger.debug('Saving dataset.')
     DS.save()
 
     return DS
