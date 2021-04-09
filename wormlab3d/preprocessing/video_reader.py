@@ -8,7 +8,7 @@ import pims
 from wormlab3d import logger
 from wormlab3d.data.annex import fetch_from_annex, is_annexed_file
 from wormlab3d.preprocessing.contour import CONT_THRESH_DEFAULT, contour_mask, find_contours, \
-    MAX_CONTOURING_ATTEMPTS, contour_centre
+    MAX_CONTOURING_ATTEMPTS, contour_centre, MAX_CONTOURS_ALLOWED
 from wormlab3d.preprocessing.create_bg_lp import Accumulate
 
 
@@ -143,7 +143,7 @@ class VideoReader:
         if cont_threshold is None:
             cont_threshold = self.contour_thresh
         attempts = 0
-        while len(contours) == 0:
+        while len(contours) == 0 or len(contours) > MAX_CONTOURS_ALLOWED:
             mask = contour_mask(
                 image,
                 thresh=max(3, max_brightness * cont_threshold),
@@ -157,10 +157,16 @@ class VideoReader:
 
             # If no contours found, decrease the threshold and try again
             if len(contours) == 0:
-                attempts += 1
-                cont_threshold /= 2
-                if attempts > MAX_CONTOURING_ATTEMPTS:
-                    raise RuntimeError('Could not find any contours in image!')
+                cont_threshold -= 0.05
+
+            # If too many contours found, increase the threshold and try again
+            if len(contours) > MAX_CONTOURS_ALLOWED:
+                cont_threshold += 0.05
+
+            # Bail if too many attempts
+            attempts += 1
+            if attempts > MAX_CONTOURING_ATTEMPTS:
+                raise RuntimeError('Could not find any contours in image!')
 
         return contours
 

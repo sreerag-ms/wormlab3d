@@ -1,9 +1,11 @@
 import os
 from collections import OrderedDict
+from subprocess import CalledProcessError
 
 import cv2
 
 from wormlab3d import logger
+from wormlab3d.data.annex import is_annexed_file, fetch_from_annex
 from wormlab3d.data.util import fix_path, DATA_PATH_PLACEHOLDER
 from wormlab3d.toolkit.util import resolve_targets
 
@@ -18,6 +20,7 @@ def generate_background_images(
         experiment_id: int = None,
         trial_id: int = None,
         camera_idx: int = None,
+        missing_only: bool = True
 ):
     """
     Generates a fixed background image from the input video using a low pass filter.
@@ -27,10 +30,25 @@ def generate_background_images(
 
     # Iterate over matching trials
     for trial in trials:
-        logger.info(f'Processing trial id={trial.id}')
+        logger.info(f'Processing trial id={trial.id}. {len(trial.backgrounds)} backgrounds in database.')
         backgrounds = OrderedDict()
         for ci in cam_idxs:
-            logger.info(f'Processing camera idx={ci}')
+            logger.info(f'Processing camera idx={ci}.')
+
+            # Check for any existing background
+            if missing_only and len(trial.backgrounds) > 0:
+                bg_existing = None
+                bg_path = fix_path(trial.backgrounds[ci])
+                if bg_path is not None:
+                    if is_annexed_file(bg_path):
+                        try:
+                            fetch_from_annex(bg_path)
+                        except CalledProcessError as e:
+                            logger.warning(f'Could not fetch existing background image from annex: {e}')
+                    bg_existing = cv2.imread(bg_path, cv2.IMREAD_GRAYSCALE)
+                if bg_existing is not None:
+                    logger.info('Background image available, skipping.')
+                    continue
 
             # Load the video and generate the background
             video = trial.get_video_reader(camera_idx=ci)
@@ -70,7 +88,4 @@ def generate_background_images(
 
 
 if __name__ == '__main__':
-    generate_background_images(
-        trial_id=114,
-        # camera_idx=1
-    )
+    generate_background_images()
