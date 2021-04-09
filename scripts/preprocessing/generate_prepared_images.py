@@ -1,10 +1,10 @@
 import numpy as np
 
 from scripts.preprocessing.generate_centres import generate_centres_3d
-from scripts.preprocessing.util import process_args
 from wormlab3d import logger
 from wormlab3d.data.model.frame import PREPARED_IMAGE_SIZE
 from wormlab3d.preprocessing.cropper import crop_image
+from wormlab3d.toolkit.util import resolve_targets
 
 
 def generate_prepared_images(
@@ -16,7 +16,7 @@ def generate_prepared_images(
     Using the centre_3d point for a frame and its corresponding 2d reprojection points,
     generate a prepared image by cropping around this point, inverting, normalising and saving to database.
     """
-    trials, _ = process_args(experiment_id, trial_id, frame_num=frame_num)
+    trials, _ = resolve_targets(experiment_id, trial_id, frame_num=frame_num)
     logger.info(f'Generating cropped frames for {len(trials)} trials.')
 
     # Iterate over matching trials

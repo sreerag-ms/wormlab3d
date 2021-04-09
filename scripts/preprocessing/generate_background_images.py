@@ -3,9 +3,9 @@ from collections import OrderedDict
 
 import cv2
 
-from scripts.preprocessing.util import process_args
 from wormlab3d import logger
 from wormlab3d.data.util import fix_path, DATA_PATH_PLACEHOLDER
+from wormlab3d.toolkit.util import resolve_targets
 
 
 def ensure_output_dir_exists():
@@ -15,14 +15,14 @@ def ensure_output_dir_exists():
 
 
 def generate_background_images(
-        experiment_id=None,
-        trial_id=None,
-        camera_idx=None,
+        experiment_id: int = None,
+        trial_id: int = None,
+        camera_idx: int = None,
 ):
     """
     Generates a fixed background image from the input video using a low pass filter.
     """
-    trials, cam_idxs = process_args(experiment_id, trial_id, camera_idx)
+    trials, cam_idxs = resolve_targets(experiment_id, trial_id, camera_idx)
     ensure_output_dir_exists()
 
     # Iterate over matching trials

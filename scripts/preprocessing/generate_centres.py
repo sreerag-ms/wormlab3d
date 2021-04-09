@@ -1,5 +1,5 @@
-from scripts.preprocessing.util import process_args
 from wormlab3d import logger
+from wormlab3d.toolkit.util import resolve_targets
 
 cached_readers = {}
 
@@ -16,7 +16,7 @@ def generate_centres_2d(
     but occasionally it might find multiple in which case we store all and resolve with triangulate_3d.
     Note - the background images must be available for this to work well.
     """
-    trials, cam_idxs = process_args(experiment_id, trial_id, camera_idx, frame_num)
+    trials, cam_idxs = resolve_targets(experiment_id, trial_id, camera_idx, frame_num)
     logger.info(f'Generating 2d centre points for {len(trials)} trials.')
 
     # Iterate over matching trials
@@ -58,7 +58,7 @@ def generate_centres_3d(
     This uses the 2d coordinates found in each of the 3 camera views to resolve any uncertainties.
     Note - background images and 2d centre points must be available for this to work.
     """
-    trials, cam_idxs = process_args(experiment_id, trial_id, None, frame_num)
+    trials, cam_idxs = resolve_targets(experiment_id, trial_id, None, frame_num)
     logger.info(f'Generating 3d centre points for {len(trials)} trials.')
 
     # Iterate over matching trials
