@@ -52,6 +52,13 @@ def generate_centres_2d(
         for frame in frames:
             log_prefix = f'Frame #{frame.frame_num}/{trial.num_frames} (id={frame.id}). '
 
+            # Due to the large number of frames in each trial, we need to reload from the
+            # database to catch changes since we fetched the results.
+            frame.reload()
+            if len(frame.centres_2d) == 3 and missing_only:
+                logger.info(log_prefix + 'Has 2D points, skipping.')
+                continue
+
             # Lock the frame, or if we can't then skip it.
             if not frame.get_lock():
                 logger.info(log_prefix + 'LOCKED, skipping.')
@@ -103,8 +110,16 @@ def generate_centres_3d(
             else:
                 filters = None
             frames = trial.get_frames(filters)
+
         for frame in frames:
             log_prefix = f'Frame #{frame.frame_num}/{trial.num_frames} (id={frame.id}). '
+
+            # Due to the large number of frames in each trial, we need to reload from the
+            # database to catch changes since we fetched the results.
+            frame.reload()
+            if frame.centre_3d is not None and missing_only:
+                logger.info(log_prefix + 'Has 3D point, skipping.')
+                continue
 
             # 3D triangulation requires 2D points in all 3 views
             # This check is done in frame.generate_centre_3d also, but we use the above method
