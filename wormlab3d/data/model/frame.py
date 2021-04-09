@@ -20,6 +20,7 @@ class Frame(Document):
     experiment = ReferenceField(Experiment, required=True)
     trial = ReferenceField('Trial', required=True)
     frame_num = IntField(required=True)
+    locked = BooleanField(default=False)
 
     # Triangulations
     centres_2d = TripletField(ListField(ListField()))
@@ -246,3 +247,28 @@ class Frame(Document):
             crops.append(crop)
 
         self.images = crops
+
+    def get_lock(self) -> bool:
+        """
+        Marks the frame as locked in the database.
+        Not atomic, so might hit race conditions!
+        """
+        self.reload('locked')
+        if self.locked:
+            return False
+        self.locked = True
+        self.save()
+        return True
+
+    def release_lock_and_save(self) -> bool:
+        """
+        Marks the frame as not-locked in the database.
+        Not atomic, and since the get_lock also isn't, might cause problems!
+        """
+        self.locked = False
+        self.save()
+
+    @staticmethod
+    def unlock_all():
+        """Helper method to clear the locked-state for all frames."""
+        Frame.objects.update(locked=False)

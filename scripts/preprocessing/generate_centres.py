@@ -14,8 +14,8 @@ def generate_centres_2d(
     """
     Find the centre-points of any objects in every frame of each camera's video.
     Ideally this should just return a single coordinate corresponding to the worm's location,
-    but occasionally it might find multiple in which case we store all and resolve with triangulate_3d.
-    Note - the background images must be available for this to work well.
+    but often it finds multiple in which case we store all and resolve later with generate_centres_3d.
+    Note - the background images must be available.
     """
     trials, cam_idxs = process_args(experiment_id, trial_id, camera_idx, frame_num)
     if missing_only:
@@ -26,6 +26,9 @@ def generate_centres_2d(
     # Iterate over matching trials
     for trial in trials:
         logger.info(f'Processing trial id={trial.id}')
+        if len(trial.backgrounds) != 3:
+            logger.debug(f'Background images unavailable, skipping.')
+            continue
 
         if trial_id in cached_readers:
             logger.debug('Using cached video readers.')
@@ -40,20 +43,33 @@ def generate_centres_2d(
         if frame_num is not None:
             frames = [trial.get_frame(frame_num)]
         else:
-            frames = trial.get_frames()
+            if missing_only:
+                filters = {'centres_2d__size': 0}
+            else:
+                filters = None
+            frames = trial.get_frames(filters)
+
         for frame in frames:
             log_prefix = f'Frame #{frame.frame_num}/{trial.num_frames} (id={frame.id}). '
-            if len(frame.centres_2d) == 3 and missing_only:
-                logger.info(log_prefix + 'Has 2D points, skipping.')
+
+            # Lock the frame, or if we can't then skip it.
+            if not frame.get_lock():
+                logger.info(log_prefix + 'LOCKED, skipping.')
                 continue
+
             if len(frame.centres_2d) == 0:
                 frame.centres_2d = [[]] * 3
             for c in cam_idxs:
-                readers[c].set_frame_num(frame.frame_num)
-                centres = readers[c].find_objects()
-                logger.info(log_prefix + f'Found {len(centres)} objects.')
-                frame.centres_2d[c] = centres
-            frame.save()
+                try:
+                    readers[c].set_frame_num(frame.frame_num)
+                    centres = readers[c].find_objects()
+                    logger.info(log_prefix + f'Cam={c}. Found {len(centres)} objects.')
+                    frame.centres_2d[c] = centres
+                except Exception as e:
+                    logger.error(log_prefix + f'Cam={c}. Failed to find objects: {e}')
+
+            # Unlock the frame when finished
+            frame.release_lock_and_save()
 
 
 def generate_centres_3d(
@@ -82,24 +98,39 @@ def generate_centres_3d(
         if frame_num is not None:
             frames = [trial.get_frame(frame_num)]
         else:
-            frames = trial.get_frames()
+            if missing_only:
+                filters = {'centre_3d__exists': False}
+            else:
+                filters = None
+            frames = trial.get_frames(filters)
         for frame in frames:
             log_prefix = f'Frame #{frame.frame_num}/{trial.num_frames} (id={frame.id}). '
-            if frame.centre_3d is not None and missing_only:
-                logger.info(log_prefix + 'Has 3D point, skipping.')
-                continue
+
+            # 3D triangulation requires 2D points in all 3 views
+            # This check is done in frame.generate_centre_3d also, but we use the above method
+            # to take advantage of locks and cached video readers - better for bulk processing.
             if not frame.centres_2d_available():
-                logger.warning('Frame does not have 2D centre points available for all views, generating now.')
-                generate_centres_2d(
-                    trial_id=trial.id,
-                    frame_num=frame.frame_num
-                )
+                logger.warning(log_prefix + '2D centre points not available, generating now.')
+                generate_centres_2d(trial_id=trial.id, frame_num=frame.frame_num)
                 frame = frame.reload()
                 assert frame.centres_2d_available()
+
+            # Lock the frame, or if we can't then skip it.
+            if not frame.get_lock():
+                logger.info(log_prefix + 'LOCKED, skipping.')
+                continue
+
             logger.info(log_prefix + 'Triangulating...')
-            frame.generate_centre_3d(x0=prev_point)
-            frame.save()
-            prev_point = frame.centre_3d.point_3d
+            try:
+                frame.generate_centre_3d(x0=prev_point)
+                logger.info(log_prefix + f'Found 3D centre point.')
+            except Exception as e:
+                logger.error(log_prefix + f'Failed to find 3D centre: {e}')
+
+            # Unlock the frame when finished
+            frame.release_lock_and_save()
+            if frame.centre_3d is not None:
+                prev_point = frame.centre_3d.point_3d
 
 
 if __name__ == '__main__':
@@ -116,10 +147,10 @@ if __name__ == '__main__':
     # frame_num=559
 
     generate_centres_2d(
-        trial_id=trial_id,
-        frame_num=frame_num
+        # trial_id=trial_id,
+        # frame_num=frame_num
     )
     generate_centres_3d(
-        trial_id=trial_id,
-        frame_num=frame_num
+        # trial_id=trial_id,
+        # frame_num=frame_num
     )
