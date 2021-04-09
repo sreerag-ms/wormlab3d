@@ -44,7 +44,12 @@ def generate_centres_2d(
             frames = [trial.get_frame(frame_num)]
         else:
             if missing_only:
-                filters = {'centres_2d__size': 0}
+                filters = {'__raw__': {
+                    '$or': [
+                        {'centres_2d': {'$size': 0}},
+                        {'centres_2d': {'$elemMatch': {'$size': 0}}},
+                    ]
+                }}
             else:
                 filters = None
             frames = trial.get_frames(filters)
@@ -55,7 +60,7 @@ def generate_centres_2d(
             # Due to the large number of frames in each trial, we need to reload from the
             # database to catch changes since we fetched the results.
             frame.reload()
-            if len(frame.centres_2d) == 3 and missing_only:
+            if missing_only and frame.centres_2d_available():
                 logger.info(log_prefix + 'Has 2D points, skipping.')
                 continue
 
@@ -117,7 +122,7 @@ def generate_centres_3d(
             # Due to the large number of frames in each trial, we need to reload from the
             # database to catch changes since we fetched the results.
             frame.reload()
-            if frame.centre_3d is not None and missing_only:
+            if missing_only and frame.centre_3d is not None:
                 logger.info(log_prefix + 'Has 3D point, skipping.')
                 continue
 
