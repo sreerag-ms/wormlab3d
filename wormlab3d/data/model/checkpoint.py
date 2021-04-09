@@ -2,28 +2,27 @@ import datetime
 
 from mongoengine import *
 
-from wormlab3d.data.model import Dataset
-from wormlab3d.data.model.network_parameters import NetworkParameters
-
 
 class Checkpoint(Document):
     created = DateTimeField(required=True, default=datetime.datetime.utcnow)
     cloned_from = ReferenceField('Checkpoint')
-    dataset = ReferenceField(Dataset, required=True)
-    network_params = ReferenceField(NetworkParameters, required=True)
-    epoch = IntField(required=True, default=1)
+    dataset = ReferenceField('Dataset', required=True)
+    network_params = ReferenceField('NetworkParameters', required=True)
+    epoch = IntField(required=True, default=0)
     step = IntField(required=True, default=0)
+    examples_count = IntField(required=True, default=0)
     loss_train = FloatField(required=True, default=1e10)
     loss_test = FloatField(required=True, default=1e10)
     stats_train = DictField()
     stats_test = DictField()
 
-    optimiser_args = DictField()
     dataset_args = DictField()
+    optimiser_args = DictField()
     runtime_args = DictField()
 
     meta = {
-        'ordering': '-created'
+        'ordering': ['-created'],
+        'indexes': ['dataset', 'network_params']
     }
 
     def clone(self):
@@ -36,11 +35,12 @@ class Checkpoint(Document):
             network_params=self.network_params,
             epoch=self.epoch,
             step=self.step,
+            examples_count=self.examples_count,
             loss_train=self.loss_train,
             loss_test=self.loss_test,
             stats_train=self.stats_train,
             stats_test=self.stats_test,
-            optimiser_args=self.optimiser_args,
             dataset_args=self.dataset_args,
+            optimiser_args=self.optimiser_args,
             runtime_args=self.runtime_args,
         )

@@ -1,6 +1,7 @@
 from typing import Tuple
 
 import torch
+from mongoengine import DoesNotExist
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset as DatasetTorch
 from torch.utils.data.dataloader import default_collate
@@ -149,3 +150,28 @@ def get_data_loader(
     )
 
     return loader
+
+
+
+def load_dataset(dataset_args: DatasetArgs) -> DatasetMidline2D:
+    """
+    Load an existing dataset from the database.
+    """
+    ds = None
+
+    # If we have a dataset id then load this from the database
+    if dataset_args.ds_id is not None:
+        ds = DatasetMidline2D.objects.get(id=dataset_args.ds_id)
+    else:
+        # Otherwise, try to find one matching the same parameters
+        datasets = DatasetMidline2D.find_from_args(dataset_args)
+        if datasets.count() > 0:
+            ds = datasets[0]
+            logger.info(f'Found {len(datasets)} suitable datasets in database, using most recent.')
+
+    if ds is None:
+        raise DoesNotExist()
+
+    logger.info(f'Loaded dataset (id={ds.id}, created={ds.created}).')
+
+    return ds

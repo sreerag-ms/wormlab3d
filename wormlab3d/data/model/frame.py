@@ -246,3 +246,9 @@ class Frame(Document):
             crops.append(crop)
 
         self.images = crops
+
+    def is_ready(self) -> bool:
+        """
+        Checks to see if the frame has 2D centres for all views, a 3D centre point and 3 prepared images.
+        """
+        return self.centres_2d_available() and self.centre_3d is not None and len(self.images) == 3

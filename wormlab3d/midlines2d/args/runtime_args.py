@@ -35,8 +35,8 @@ class RuntimeArgs:
         resume_parser.add_argument('--no-resume', action='store_false', dest='resume',
                                    help='Do not resume from a previous checkpoint.')
         resume_parser.set_defaults(resume=False)
-        parser.add_argument('--resume-from', type=str,
-                            help='Resume from a specific checkpoint id.')
+        parser.add_argument('--resume-from', type=str, default='latest',
+                            help='Resume from a specific checkpoint id, or "latest" or "best". Default="latest".')
         parser.add_argument('--gpu-only', action='store_true',
                             help='Abort if no gpus are detected.')
         parser.add_argument('--batch-size', type=int, default=32,

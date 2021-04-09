@@ -26,17 +26,10 @@ class OptimiserArgs:
             weight_decay: float = 1e-5,
     ):
         assert algorithm in OPTIMISER_ALGORITHMS
-        self.algorithm =algorithm
+        self.algorithm = algorithm
         self.lr_init = lr_init
         self.lr_gamma = lr_gamma
         self.weight_decay = weight_decay
-
-
-        # self.init_learning_rate = init_learning_rate
-        # self.learning_rate_update = learning_rate_update
-        # self.lr_gamma = lr_gamma
-        # self.sgd_momentum = sgd_momentum
-        # self.weight_decay = weight_decay
 
     @staticmethod
     def add_args(parser: ArgumentParser):
@@ -49,10 +42,6 @@ class OptimiserArgs:
                             help='Initial learning rate.')
         parser.add_argument('--lr-gamma', type=float, default=0.1,
                             help='Multiplicative factor of learning rate decay.')
-        # parser.add_argument('--lr-update', type=float, default=None,
-        #                     help='Use this learning rate (used to change learning rate of loaded checkpoints).')
-        # parser.add_argument('--sgd-momentum', type=float, default=0.9,
-        #                     help='SGD momentum.')
         parser.add_argument('--weight-decay', type=float, default=1e-5,
                             help='Weight decay.')
 
@@ -67,6 +56,3 @@ class OptimiserArgs:
             lr_gamma=args.lr_gamma,
             weight_decay=args.weight_decay,
         )
-
-    def to_dict(self) -> dict:
-        return {k: getattr(self, k) for k in self.__}

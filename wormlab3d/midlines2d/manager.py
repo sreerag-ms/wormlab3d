@@ -20,13 +20,12 @@ from torch.utils.tensorboard import SummaryWriter
 from wormlab3d import logger, LOGS_PATH
 from wormlab3d.data.model import Midline2D
 from wormlab3d.data.model.checkpoint import Checkpoint
-from wormlab3d.data.model.dataset import DatasetMidline2D
 from wormlab3d.data.model.frame import PREPARED_IMAGE_SIZE
 from wormlab3d.data.model.network_parameters import *
 from wormlab3d.midlines2d.args import DatasetArgs, NetworkArgs, OptimiserArgs, RuntimeArgs
-from wormlab3d.midlines2d.data_loader import get_data_loader
+from wormlab3d.midlines2d.data_loader import get_data_loader, load_dataset
 from wormlab3d.midlines2d.generate_dataset import generate_dataset
-from wormlab3d.toolkit.util import is_bad, to_numpy
+from wormlab3d.toolkit.util import is_bad, to_numpy, to_dict
 
 LOG_EVERY_N_BATCHES = 1
 START_TIMESTAMP = time.strftime('%Y%m%d_%H%M')
@@ -70,19 +69,10 @@ class Manager:
 
         # Try to load an existing dataset
         if self.dataset_args.load:
-            # If we have a dataset id then load this from the database
-            if self.dataset_args.ds_id is not None:
-                ds = DatasetMidline2D.objects.get(id=self.dataset_args.ds_id)
-            else:
-                # Otherwise, try to find one matching the same parameters
-                datasets = DatasetMidline2D.find_from_args(self.dataset_args)
-                if datasets.count() > 0:
-                    ds = datasets[0]
-                    logger.info(f'Found {len(datasets)} suitable datasets in database, using most recent.')
-                else:
-                    logger.info('No suitable datasets found in database.')
-            if ds is not None:
-                logger.info(f'Loaded dataset (id={ds.id}, created={ds.created}).')
+            try:
+                ds = load_dataset(self.dataset_args)
+            except DoesNotExist:
+                logger.info('No suitable datasets found in database.')
 
         # Not loaded dataset, so create one
         if ds is None:
@@ -217,49 +207,55 @@ class Manager:
         """
 
         # Load previous checkpoint
-        prev_checkpoint = None
+        prev_checkpoint: Checkpoint = None
         if self.runtime_args.resume:
             try:
-                if self.runtime_args.resume_from == 'latest':
-                    prev_checkpoint = Checkpoint.objects(
+                if self.runtime_args.resume_from in ['latest', 'best']:
+                    order_by = '-created' if self.runtime_args.resume_from == 'latest' else '+loss_test'
+                    prev_checkpoints = Checkpoint.objects(
                         dataset=self.ds,
                         network_params=self.net_params
-                    ).first()
+                    ).order_by(order_by)
+                    if prev_checkpoints.count() > 0:
+                        logger.info(
+                            f'Found {prev_checkpoints.count()} previous checkpoints. '
+                            f'Using {self.runtime_args.resume_from}.'
+                        )
+                        prev_checkpoint = prev_checkpoints[0]
+                    else:
+                        raise DoesNotExist()
                 else:
                     prev_checkpoint = Checkpoint.objects.get(
                         id=self.runtime_args.resume_from
                     )
                 logger.info(f'Loaded checkpoint id={prev_checkpoint.id}, created={prev_checkpoint.created}')
-                logger.info(f'Starting epoch={prev_checkpoint.epoch + 1}')
-                if prev_checkpoint.loss is not None:
-                    logger.info(f'Current loss = {prev_checkpoint.loss:.5f}')
-                for key, val in prev_checkpoint.stats.items():
+                logger.info(f'Test loss = {prev_checkpoint.loss_test:.5f}')
+                for key, val in prev_checkpoint.stats_test.items():
                     logger.info(f'\t{key}: {val:.4E}')
             except DoesNotExist:
                 raise RuntimeError(f'Could not load checkpoint={self.runtime_args.resume_from}')
 
         # Either clone the previous checkpoint to use as the starting point
-        if prev_checkpoint:
+        if prev_checkpoint is not None:
             checkpoint = prev_checkpoint.clone()
 
             # Update the dataset and network params references to the ones now in use
-            if self.checkpoint.dataset.id != self.ds.id:
+            if checkpoint.dataset.id != self.ds.id:
                 logger.warning('Dataset has changed! This may result in training occurring on test data!')
                 checkpoint.dataset = self.ds
 
             # If the hyperparameters have changed, the model file might now be incompatible, but try anyway
-            if self.checkpoint.network_params.id != self.net_params.id:
+            if checkpoint.network_params.id != self.net_params.id:
                 logger.warning('Network parameters have changed! This may result in a broken network!')
                 checkpoint.network_params = self.net_params
 
             # Args are stored against the checkpoint, so just override them
-            checkpoint.optimiser_args = self.optimiser_args  # .to_dict()
-            checkpoint.runtime_args = self.runtime_args  # .to_dict()
-            checkpoint.dataset_args = self.dataset_args  # .to_dict()
+            checkpoint.dataset_args = to_dict(self.dataset_args)
+            checkpoint.optimiser_args = to_dict(self.optimiser_args)
+            checkpoint.runtime_args = to_dict(self.runtime_args)
 
             # Load the network and optimiser parameter states
-            prev_logs_path = LOGS_PATH + f'/{prev_checkpoint.net.id}/{prev_checkpoint.ds.id}'
-            path = f'{prev_logs_path}/checkpoints/{checkpoint.id}.chkpt'
+            path = f'{self.get_logs_path(prev_checkpoint)}/checkpoints/{prev_checkpoint.id}.chkpt'
             state = torch.load(path, map_location=self.device)
             self.net.load_state_dict(state['model_state_dict'])
             self.optimiser.load_state_dict(state['optimiser_state_dict'])
@@ -271,18 +267,22 @@ class Manager:
             checkpoint = Checkpoint(
                 dataset=self.ds,
                 network_params=self.net_params,
-                optimiser_args=self.optimiser_args,
-                dataset_args=self.dataset_args,
-                runtime_args=self.runtime_args,
+                dataset_args=to_dict(self.dataset_args),
+                optimiser_args=to_dict(self.optimiser_args),
+                runtime_args=to_dict(self.runtime_args),
             )
 
         return checkpoint
 
     @property
     def logs_path(self) -> str:
+        return self.get_logs_path(self.checkpoint)
+
+    @staticmethod
+    def get_logs_path(checkpoint: Checkpoint) -> str:
         return LOGS_PATH \
-               + f'/{self.ds.created:%Y%m%d_%H:%M}_{self.ds.id}' \
-               + f'/{self.net_params.created:%Y%m%d_%H:%M}_{self.net_params.id}'
+               + f'/{checkpoint.dataset.created:%Y%m%d_%H:%M}_{checkpoint.dataset.id}' \
+               + f'/{checkpoint.network_params.created:%Y%m%d_%H:%M}_{checkpoint.network_params.id}'
 
     @property
     def stat_keys(self) -> List[str]:
@@ -336,7 +336,7 @@ class Manager:
         """
         self.configure_paths()
         self._init_tb_logger()
-        starting_epoch = self.checkpoint.epoch
+        starting_epoch = self.checkpoint.epoch + 1
         final_epoch = starting_epoch + n_epochs - 1
 
         # todo: lr scheduler
@@ -414,7 +414,7 @@ class Manager:
             gc.collect()
 
         # Update stats and write debug
-        self.checkpoint.loss_train = epoch_loss
+        self.checkpoint.loss_train = float(epoch_loss) / num_batches_per_epoch
         self.checkpoint.stats_train = epoch_stats
         self.tb_logger.add_scalar('epoch/train/total_loss', epoch_loss, self.checkpoint.epoch)
         for key, val in epoch_stats.items():
@@ -450,6 +450,7 @@ class Manager:
 
         # Increment global step counter
         self.checkpoint.step += 1
+        self.checkpoint.examples_count += self.runtime_args.batch_size
 
         return outputs, loss, stats
 
@@ -459,6 +460,7 @@ class Manager:
         """
         if not len(self.test_loader):
             raise RuntimeError('No test data available, cannot test!')
+        logger.info('Testing')
         self.net.eval()
         cumulative_loss = 0.
         cumulative_stats = {k: 0. for k in self.stat_keys}
@@ -473,7 +475,7 @@ class Manager:
         test_loss = cumulative_loss / len(self.test_loader)
         test_stats = {k: cumulative_stats[k] / len(self.test_loader) for k in self.stat_keys}
 
-        self.checkpoint.loss_test = test_loss
+        self.checkpoint.loss_test = float(test_loss)
         self.checkpoint.stats_test = test_stats
 
         self._make_plots(data, batch_outputs, train_or_test='test', end_of_epoch=True)
@@ -483,7 +485,7 @@ class Manager:
     def _process_batch(self, data: Tuple[torch.Tensor, torch.Tensor, List[Midline2D]]) \
             -> Tuple[torch.Tensor, torch.Tensor, Dict]:
         """
-        Take a batch of input data, push it through the network and calculate the losses.
+        Take a batch of input data, push it through the network and calculate the average loss per example.
         """
 
         # Split data into input image and target mask and put on the right device
@@ -492,13 +494,23 @@ class Manager:
         X, Y_target = X.to(self.device), Y_target.to(self.device)
 
         # Put input data through net
-        Y_pred = self.net(X)
+        with torch.no_grad():
+            Y_pred = self.predict(X)
 
         # Calculate losses
         loss = F.mse_loss(Y_pred, Y_target)
         assert not is_bad(loss)
+        loss = loss / len(X)  # return loss per-datum so different batch sizes can be compared
 
         return Y_pred, loss, {}
+
+    def predict(self, X: torch.Tensor) -> torch.Tensor:
+        """
+        Take a batch of input data and return network output.
+        """
+        X = X.to(self.device)
+        Y_pred = self.net(X)
+        return Y_pred
 
     def _make_plots(
             self,

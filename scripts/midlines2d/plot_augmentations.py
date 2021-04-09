@@ -1,34 +1,9 @@
 import matplotlib.pyplot as plt
+from mongoengine import DoesNotExist
 
-from wormlab3d import logger
-from wormlab3d.data.model.dataset import DatasetMidline2D
 from wormlab3d.midlines2d.args import DatasetArgs
-from wormlab3d.midlines2d.data_loader import get_data_loader
+from wormlab3d.midlines2d.data_loader import get_data_loader, load_dataset
 
-
-def load_dataset(dataset_args: DatasetArgs) -> DatasetMidline2D:
-    """
-    Load an existing dataset from the database.
-    """
-
-    # If we have a dataset id then load this from the database
-    if dataset_args.ds_id is not None:
-        ds = DatasetMidline2D.objects.get(id=dataset_args.ds_id)
-    else:
-        # Otherwise, try to find one matching the same parameters
-        datasets = DatasetMidline2D.objects(
-            train_test_split_target=dataset_args.train_test_split,
-            restrict_tags=dataset_args.restrict_tags,
-            restrict_concs=dataset_args.restrict_concs,
-            centre_3d_max_error=dataset_args.centre_3d_max_error
-        )
-        if datasets.count() > 0:
-            ds = datasets[0]
-            logger.info(f'Found {len(datasets)} suitable datasets in database, using most recent.')
-    if ds is None:
-        raise RuntimeError('No suitable datasets found in database.')
-    logger.info(f'Loaded dataset (id={ds.id}, created={ds.created}).')
-    return ds
 
 
 def plot_augmentations(n_examples: int = 5):
@@ -39,11 +14,15 @@ def plot_augmentations(n_examples: int = 5):
     # interactive_plots()
     dataset_args = DatasetArgs(
         train_test_split=0.8,
-        centre_3d_max_error=100,
+        centre_3d_max_error=0,
+        exclude_trials=[258, 183, 88, 115, 86, 29, 84, 85, 218],
         blur_sigma=5,
         augment=True
     )
-    ds = load_dataset(dataset_args)
+    try:
+        ds = load_dataset(dataset_args)
+    except DoesNotExist as e:
+        raise RuntimeError('No suitable datasets found in database.') from e
 
     loader = get_data_loader(
         ds=ds,
@@ -58,7 +37,7 @@ def plot_augmentations(n_examples: int = 5):
     n_cols = n_examples * 2 // n_rows
     fig, axes = plt.subplots(
         n_rows, n_cols,
-        figsize=(n_rows*2, n_cols*3),
+        figsize=(n_rows * 2, n_cols * 3),
         squeeze=False, sharex=True, sharey=True,
         gridspec_kw=dict(
             wspace=0.01, hspace=0.01,
@@ -80,6 +59,8 @@ def plot_augmentations(n_examples: int = 5):
             ax.imshow(midline.get_prepared_image(), vmin=0, vmax=1, cmap='gray', aspect='equal')
             ax.imshow(midline.get_segmentation_mask(blur_sigma=dataset_args.blur_sigma), vmin=0, vmax=1, cmap='jet',
                       alpha=0.2, aspect='equal')
+            X = midline.get_prepared_coordinates()
+            ax.scatter(x=X[:, 0], y=X[:, 1], color='red', s=10, alpha=0.8)
             ax.axis('off')
 
             # Show augmented

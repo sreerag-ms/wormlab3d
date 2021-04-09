@@ -18,6 +18,8 @@ class NetworkArgs:
         self.load = load
         self.net_id = net_id
         self.base_net = base_net
+        if hyperparameters is None:
+            hyperparameters = {}
         self.hyperparameters = hyperparameters
 
     @staticmethod
