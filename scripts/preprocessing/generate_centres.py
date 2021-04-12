@@ -1,4 +1,7 @@
+import gc
+
 from wormlab3d import logger
+from wormlab3d.data.model import Frame, Trial
 from wormlab3d.toolkit.util import resolve_targets
 
 cached_readers = {}
@@ -9,7 +12,8 @@ def generate_centres_2d(
         trial_id: int = None,
         camera_idx: int = None,
         frame_num: int = None,
-        missing_only: bool = True
+        missing_only: bool = True,
+        min_brightness: int = 15,
 ):
     """
     Find the centre-points of any objects in every frame of each camera's video.
@@ -27,35 +31,54 @@ def generate_centres_2d(
     for trial in trials:
         logger.info(f'Processing trial id={trial.id}')
         if len(trial.backgrounds) != 3:
-            logger.debug(f'Background images unavailable, skipping.')
+            logger.warning(f'Background images unavailable, skipping.')
             continue
 
-        if trial_id in cached_readers:
-            logger.debug('Using cached video readers.')
-            readers = cached_readers[trial_id]
-        else:
-            readers = {}
-            for c in cam_idxs:
-                readers[c] = trial.get_video_reader(camera_idx=c)
-            cached_readers[trial_id] = readers
-
-        # Iterate over the frames
+        # Filter frames
         if frame_num is not None:
             frames = [trial.get_frame(frame_num)]
         else:
-            if missing_only:
-                filters = {'__raw__': {
-                    '$or': [
-                        {'centres_2d': {'$size': 0}},
-                        {'centres_2d': {'$elemMatch': {'$size': 0}}},
-                    ]
-                }}
-            else:
-                filters = None
-            frames = trial.get_frames(filters)
+            # Match each cam if it is in range, bright enough and (optionally) centres are not computed
+            matches = []
+            if len(trial.n_frames) != 3:
+                trial.n_frames = [0] * 3
 
-        for frame in frames:
-            log_prefix = f'Frame #{frame.frame_num}/{trial.num_frames} (id={frame.id}). '
+            for c in cam_idxs:
+                if missing_only:
+                    missing_cond = {
+                        '$or': [
+                            {'centres_2d': {'$size': 0}},
+                            {f'centres_2d.{c}': {'$size': 0}},
+                        ]
+                    }
+                else:
+                    missing_cond = {}
+
+                matches.append(
+                    {'$and': [
+                        {'frame_num': {'$lte': trial.n_frames[c]}},
+                        {f'max_brightnesses.{c}': {'$gte': min_brightness}},
+                        missing_cond
+                    ]}
+                )
+
+            filters = {'__raw__': {'$or': matches}}
+            frames = trial.get_frames(filters)
+        frame_ids = [f.id for f in frames]
+
+        if len(frame_ids) == 0:
+            logger.debug('No frames missing 2d centre points!')
+            continue
+
+        # Get video readers
+        readers = {}
+        for c in cam_idxs:
+            readers[c] = trial.get_video_reader(camera_idx=c)
+
+        # Iterate over the frames
+        for frame_id in frame_ids:
+            frame = Frame.objects.get(id=frame_id)
+            log_prefix = f'Frame #{frame.frame_num}/{trial.n_frames_max} (id={frame.id}). '
 
             # Due to the large number of frames in each trial, we need to reload from the
             # database to catch changes since we fetched the results.
@@ -64,31 +87,62 @@ def generate_centres_2d(
                 logger.info(log_prefix + 'Has 2D points, skipping.')
                 continue
 
+            # Only process cameras which need it and for which the frames can be read.
+            cam_idxs_to_process = []
+            errors = {}
+            for c in cam_idxs:
+                if missing_only and len(frame.centres_2d) == 3 and len(frame.centres_2d[c]) > 0:
+                    errors[c] = 'Centres 2D already exist.'
+                    continue
+                if frame.frame_num > trial.n_frames[c]:
+                    errors[c] = 'Frame out of range.'
+                    continue
+                if frame.max_brightnesses[c] < min_brightness:
+                    errors[c] = 'Not bright enough.'
+                    continue
+                cam_idxs_to_process.append(c)
+            if len(cam_idxs_to_process) == 0:
+                logger.debug(log_prefix + f'No cameras to process: {errors}')
+                continue
+
             # Lock the frame, or if we can't then skip it.
             if not frame.get_lock():
                 logger.info(log_prefix + 'LOCKED, skipping.')
                 continue
 
+            # Generate the centres
             if len(frame.centres_2d) == 0:
                 frame.centres_2d = [[]] * 3
-            for c in cam_idxs:
+            for c in cam_idxs_to_process:
+                log_prefix_c = log_prefix + f'Cam={c}. '
                 try:
                     readers[c].set_frame_num(frame.frame_num)
                     centres = readers[c].find_objects()
-                    logger.info(log_prefix + f'Cam={c}. Found {len(centres)} objects.')
+                    logger.info(log_prefix_c + f'Found {len(centres)} objects.')
                     frame.centres_2d[c] = centres
                 except Exception as e:
-                    logger.error(log_prefix + f'Cam={c}. Failed to find objects: {e}')
+                    logger.error(log_prefix_c + f'Failed to find objects: {e}')
+
+                    # Catch any errors which won't log properly and re-raise
+                    if str(e) == '':
+                        frame.release_lock_and_save()
+                        raise e
 
             # Unlock the frame when finished
             frame.release_lock_and_save()
+            gc.collect()
+
+        for c in cam_idxs:
+            readers[c].close()
+        gc.collect()
 
 
 def generate_centres_3d(
         experiment_id: int = None,
         trial_id: int = None,
         frame_num: int = None,
-        missing_only: bool = True
+        missing_only: bool = True,
+        fix_missing_2d: bool = False
 ):
     """
     Find a unique 3d centre-point for the worm.
@@ -96,32 +150,48 @@ def generate_centres_3d(
     Note - background images and 2d centre points must be available for this to work.
     """
     trials, cam_idxs = resolve_targets(experiment_id, trial_id, None, frame_num)
+    trial_ids = [t.id for t in trials]
     if missing_only:
         logger.info(f'Generating any missing 3D centre points for {len(trials)} trials.')
     else:
         logger.info(f'(Re)generating ALL 3D centre points for {len(trials)} trials.')
 
     # Iterate over matching trials
-    for trial in trials:
-        logger.info(f'Processing trial id={trial.id}')
+    for trial_id in trial_ids:
+        logger.info(f'Processing trial id={trial_id}')
+        trial = Trial.objects.get(id=trial_id)
         prev_point = None
 
-        # Iterate over the frames
+        # Filter frames
         if frame_num is not None:
             frames = [trial.get_frame(frame_num)]
         else:
             if missing_only:
-                filters = {'centre_3d__exists': False}
+                filters = {'__raw__': {
+                    '$and': [
+                        {'centre_3d': None},
+                        {'centres_2d': {'$size': 3}},
+                        {'centres_2d.0.0': {'$exists': True}},
+                        {'centres_2d.1.0': {'$exists': True}},
+                        {'centres_2d.2.0': {'$exists': True}},
+                    ]
+                }}
             else:
                 filters = None
             frames = trial.get_frames(filters)
+        frame_ids = [f.id for f in frames]
 
-        for frame in frames:
-            log_prefix = f'Frame #{frame.frame_num}/{trial.num_frames} (id={frame.id}). '
+        if len(frame_ids) == 0:
+            logger.debug('No frames missing 3D centre points!')
+            continue
+
+        # Iterate over the frames
+        for frame_id in frame_ids:
+            frame = Frame.objects.get(id=frame_id)
+            log_prefix = f'Frame #{frame.frame_num}/{trial.n_frames_min} (id={frame.id}). '
 
             # Due to the large number of frames in each trial, we need to reload from the
             # database to catch changes since we fetched the results.
-            frame.reload()
             if missing_only and frame.centre_3d is not None:
                 logger.info(log_prefix + 'Has 3D point, skipping.')
                 continue
@@ -130,10 +200,15 @@ def generate_centres_3d(
             # This check is done in frame.generate_centre_3d also, but we use the above method
             # to take advantage of locks and cached video readers - better for bulk processing.
             if not frame.centres_2d_available():
-                logger.warning(log_prefix + '2D centre points not available, generating now.')
-                generate_centres_2d(trial_id=trial.id, frame_num=frame.frame_num)
-                frame = frame.reload()
-                assert frame.centres_2d_available()
+                log_prefix += '2D centre points not available, '
+                if fix_missing_2d:
+                    logger.warning(log_prefix + 'generating now.')
+                    generate_centres_2d(trial_id=trial.id, frame_num=frame.frame_num)
+                    frame = frame.reload()
+                else:
+                    logger.warning(log_prefix + 'skipping.')
+                    continue
+            assert frame.centres_2d_available()
 
             # Lock the frame, or if we can't then skip it.
             if not frame.get_lock():
@@ -142,7 +217,14 @@ def generate_centres_3d(
 
             logger.info(log_prefix + 'Triangulating...')
             try:
-                frame.generate_centre_3d(x0=prev_point)
+                frame.generate_centre_3d(
+                    x0=prev_point,
+                    try_experiment_cams=True,
+                    contour_threshold_adj_exp=0,
+                    try_all_cams=False,
+                    contour_threshold_adj_all=0,
+                    only_replace_if_better=True
+                )
                 logger.info(log_prefix + f'Found 3D centre point.')
             except Exception as e:
                 logger.error(log_prefix + f'Failed to find 3D centre: {e}')
@@ -165,12 +247,16 @@ if __name__ == '__main__':
     # 0-length video
     # trial_id=258
     # frame_num=559
+    # Frame.unlock_all()
+    # Frame.reset_centres()
 
-    generate_centres_2d(
-        # trial_id=trial_id,
-        # frame_num=frame_num
-    )
+    # generate_centres_2d(
+    # trial_id=trial_id,
+    # frame_num=frame_num
+    # missing_only=False
+    # )
     generate_centres_3d(
         # trial_id=trial_id,
         # frame_num=frame_num
+        # missing_only=False
     )

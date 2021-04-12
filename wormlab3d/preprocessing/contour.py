@@ -10,6 +10,7 @@ CONT_MAX_AREA = 20000
 CONT_THRESH_DEFAULT = .4
 MAX_CONTOURING_ATTEMPTS = 5
 MAX_CONTOURS_ALLOWED = 10
+MIN_REQ_THRESHOLD = 15
 
 
 def find_contours(
@@ -34,7 +35,7 @@ def find_contours(
     # Find the contours
     all_contours, hierarchy = cv2.findContours(thresh_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
-    # Filter the contours to only take ones larger than min_area
+    # Filter the contours to only take ones within area bounds
     contours = []
     for c in all_contours:
         area = cv2.contourArea(c)
@@ -54,15 +55,16 @@ def contour_mask(
         maxval: int = 255,
         min_area: int = CONT_MIN_AREA,
         max_area: int = CONT_MAX_AREA
-):
+) -> List[np.ndarray]:
     """
     Find the contours and create a mask from them.
     """
     contours = find_contours(image, thresh=thresh, maxval=maxval, min_area=min_area, max_area=max_area)
     mask = np.zeros_like(image)
-    cv2.drawContours(mask, contours, -1, 255, -1)
+    if len(contours):
+        cv2.drawContours(mask, contours, -1, 255, -1)
 
-    return mask
+    return contours, mask
 
 
 def contour_centre(contour: np.ndarray):

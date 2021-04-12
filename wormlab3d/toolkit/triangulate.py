@@ -94,9 +94,9 @@ def triangulate(
             list(cams_model[c].project_to_2d(r.point_3d))
             for c in CAMERA_IDXS
         ]
-        logger.debug(f'Found point: {r.point_3d}')
-        logger.debug(f'Error: {r.error}')
-        logger.debug(f'Source point idxs: {r.source_point_idxs}')
-        logger.debug(f'Reprojected points 2d: {r.reprojected_points_2d}')
+        # logger.debug(f'Found point: {r.point_3d}')
+        # logger.debug(f'Error: {r.error}')
+        # logger.debug(f'Source point idxs: {r.source_point_idxs}')
+        # logger.debug(f'Reprojected points 2d: {r.reprojected_points_2d}')
 
     return res_3d

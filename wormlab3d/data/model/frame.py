@@ -20,6 +20,7 @@ class Frame(Document):
     experiment = ReferenceField(Experiment, required=True)
     trial = ReferenceField('Trial', required=True)
     frame_num = IntField(required=True)
+    max_brightnesses = TripletField(IntField())
     locked = BooleanField(default=False)
 
     # Triangulations
@@ -95,7 +96,16 @@ class Frame(Document):
         self.centres_2d = reader.find_objects(cont_threshold=cont_threshold)
         reader.close()
 
-    def generate_centre_3d(self, x0=None, error_threshold: float = 50):
+    def generate_centre_3d(
+            self,
+            x0=None,
+            error_threshold: float = 50,
+            try_experiment_cams: bool = True,
+            contour_threshold_adj_exp: float = 0,
+            try_all_cams: bool = False,
+            contour_threshold_adj_all: float = 0,
+            only_replace_if_better: bool = True
+    ):
         """
         Find the triangulated 3d object centre point.
         """
@@ -103,9 +113,8 @@ class Frame(Document):
             logger.warning('Frame does not have 2d centre points available for all views, generating now.')
             self.generate_centres_2d()
 
-        best_err = 1000
-
         # Try own camera model for the benchmark
+        best_err = 1000
         trial_cameras = self.trial.get_cameras(best=True, fallback_to_experiment=False)
         trial_best = None
         if trial_cameras is not None:
@@ -120,101 +129,115 @@ class Frame(Document):
                 trial_best = res_3d[0]
                 best_err = trial_best.error
                 if best_err < error_threshold:
-                    logger.debug(f'Error ({best_err:.2f}) < {error_threshold:.1f}, happy days.')
-                    self.centre_3d = trial_best
-                    return
+                    if only_replace_if_better and self.centre_3d is not None and trial_best > self.centre_3d.error:
+                        logger.debug(f'Error ({best_err:.2f}) > previous best ({self.centre_3d.error:.1f}).')
+                    else:
+                        logger.debug(f'Error ({best_err:.2f}) < Threshold ({error_threshold:.1f}), happy days.')
+                        self.centre_3d = trial_best
+                        return
+                logger.debug(f'Error ({best_err:.1f}) > Threshold ({error_threshold:.1f}).')
             except ValueError:
                 logger.warning('Triangulation failed using trial cameras.')
         else:
             logger.warning('Trial cameras not found in database.')
 
         # Check to see if another camera model from the same experiment can do a better job
-        logger.debug(f'Error ({best_err:.1f}) > Threshold ({error_threshold:.1f}). '
-                     f'Trying other camera models from same experiment.')
-        if trial_best is not None:
-            x0 = trial_best.point_3d
-            logger.debug(f'Using x0={x0}.')
+        if try_experiment_cams:
+            logger.debug(f'Trying other camera models from same experiment.')
+            if trial_best is not None:
+                x0 = trial_best.point_3d
+                logger.debug(f'Using x0={x0}.')
 
-        # Try also lowering the contouring threshold to find more 2d points
-        # if we didn't find anything better than twice the threshold
-        if best_err > error_threshold * 2:
-            cont_threshold = CONT_THRESH_DEFAULT - 0.1
-            logger.debug(f'Regenerating 2d centres with contour threshold = {cont_threshold:.2f}')
-            self.generate_centres_2d(cont_threshold=cont_threshold)
+            # Try also lowering the contouring threshold to find more 2d points if we didn't find
+            # anything better than twice the threshold. Don't do this if we don't have trial cameras.
+            if contour_threshold_adj_exp > 0 and trial_cameras is not None and best_err > error_threshold * 2:
+                cont_threshold = CONT_THRESH_DEFAULT - contour_threshold_adj_exp
+                logger.debug(f'Regenerating 2d centres with contour threshold = {cont_threshold:.2f}')
+                self.generate_centres_2d(cont_threshold=cont_threshold)
 
-        # This will also include the trial cameras, but from a better starting point
-        exp_cameras = self.experiment.get_cameras(best=False)
-        exps_best = None if trial_best is None else trial_best
-        for cameras in exp_cameras:
-            # If the camera reprojection error is greater than the best error we currently have, skip it
-            if cameras.reprojection_error > best_err:
-                continue
-            try:
-                res_3d = triangulate(
-                    image_points=self.centres_2d,
-                    cameras=cameras,
-                    x0=x0,
-                    matching_threshold=best_err
-                )
-                exp_best = res_3d[0]
-                if exps_best is None or exp_best.error < best_err:
-                    exps_best = exp_best
-                    best_err = exp_best.error
-                    logger.debug(f'New best error: {best_err:.2f}')
-            except ValueError:
-                pass
+            # This will also include the trial cameras, but from a better starting point
+            exp_cameras = self.experiment.get_cameras(best=False)
+            exps_best = None if trial_best is None else trial_best
+            for cameras in exp_cameras:
+                # If the camera reprojection error is greater than the best error we currently have, skip it
+                if cameras.reprojection_error > best_err:
+                    continue
+                try:
+                    res_3d = triangulate(
+                        image_points=self.centres_2d,
+                        cameras=cameras,
+                        x0=x0,
+                        matching_threshold=best_err
+                    )
+                    exp_best = res_3d[0]
+                    if exps_best is None or exp_best.error < best_err:
+                        exps_best = exp_best
+                        best_err = exp_best.error
+                        logger.debug(f'New best error: {best_err:.2f}')
+                except ValueError:
+                    pass
 
-        # Check if one of the experiment cameras gave a good enough result
-        if exps_best is not None:
-            logger.debug(f'Best error with any experiment cameras = {best_err:.2f}.')
-            if best_err < error_threshold * 2:
-                if best_err < error_threshold:
-                    logger.debug(f'Error ({best_err:.1f}) < Threshold ({error_threshold:.1f}), happy days.')
-                else:
-                    logger.debug(f'Error ({best_err:.1f}) < 2*Threshold ({2 * error_threshold:.1f}), stopping here.')
-                self.centre_3d = exps_best
-                return
+            # Check if one of the experiment cameras gave a good enough result
+            if exps_best is not None:
+                logger.debug(f'Best error with any experiment cameras = {best_err:.2f}.')
+                if best_err < error_threshold * 2:
+                    if only_replace_if_better and self.centre_3d is not None and exps_best > self.centre_3d.error:
+                        logger.debug(
+                            f'Error ({best_err:.2f}) > previous best ({self.centre_3d.error:.1f}). '
+                            f'Not updating property, stopping.'
+                        )
+                    else:
+                        logger.debug(
+                            f'Error ({best_err:.2f}) < 2*Threshold ({2 * error_threshold:.1f}). '
+                            f'Updating property, stopping.'
+                        )
+                        self.centre_3d = exps_best
+                    return
 
         # Check to see if another camera model from any experiment can do a better job
-        logger.debug(f'Error ({best_err:.1f}) > 2*Threshold ({2 * error_threshold:.1f}), '
-                     f'Trying other camera models present in any experiments.')
+        if try_all_cams:
+            logger.debug(f'Error ({best_err:.1f}) > 2*Threshold ({2 * error_threshold:.1f}), '
+                         f'Trying other camera models present in any experiments.')
 
-        # Lower the contouring threshold again to find even more 2d points
-        # if we still didn't find anything better than twice the threshold
-        if best_err > error_threshold * 2:
-            cont_threshold = CONT_THRESH_DEFAULT - 0.15
-            logger.debug(f'Regenerating 2d centres with contour threshold = {cont_threshold:.2f}')
-            self.generate_centres_2d(cont_threshold=cont_threshold)
+            # Lower the contouring threshold again to find even more 2d points
+            # if we still didn't find anything better than twice the threshold
+            if contour_threshold_adj_all > 0 and best_err > error_threshold * 2:
+                cont_threshold = CONT_THRESH_DEFAULT - contour_threshold_adj_exp - contour_threshold_adj_all
+                logger.debug(f'Regenerating 2d centres with contour threshold = {cont_threshold:.2f}')
+                self.generate_centres_2d(cont_threshold=cont_threshold)
 
-        # Try across all camera models
-        all_cameras = Cameras.objects
-        all_best = None
-        for cameras in all_cameras:
-            # If the camera reprojection error is greater than the best error we currently have, skip it
-            if cameras.reprojection_error > best_err:
-                continue
-            try:
-                res_3d = triangulate(
-                    image_points=self.centres_2d,
-                    cameras=cameras,
-                    x0=x0,
-                    matching_threshold=best_err
-                )
-                cam_best = res_3d[0]
-                if all_best is None or cam_best.error < all_best.error:
-                    all_best = cam_best
-                    best_err = all_best.error
-                    logger.debug(f'New best error: {best_err:.2f}')
-            except ValueError:
-                pass
+            # Try across all camera models
+            all_cameras = Cameras.objects
+            all_best = None
+            for cameras in all_cameras:
+                # If the camera reprojection error is greater than the best error we currently have, skip it
+                if cameras.reprojection_error > best_err:
+                    continue
+                try:
+                    res_3d = triangulate(
+                        image_points=self.centres_2d,
+                        cameras=cameras,
+                        x0=x0,
+                        matching_threshold=best_err
+                    )
+                    cam_best = res_3d[0]
+                    if all_best is None or cam_best.error < all_best.error:
+                        all_best = cam_best
+                        best_err = all_best.error
+                        logger.debug(f'New best error: {best_err:.2f}')
+                except ValueError:
+                    pass
 
-        if all_best is None:
-            raise RuntimeError('Triangulation failed, completely.')
+            if all_best is None:
+                raise RuntimeError('Triangulation failed, completely.')
 
-        logger.debug(f'Best error with any cameras = {best_err:.2f}.')
-        if all_best.error > error_threshold:
-            logger.warning(f'Error > {error_threshold:.1f}, storing anyway.')
-        self.centre_3d = all_best
+            logger.debug(f'Best error with any cameras = {best_err:.2f}.')
+            if only_replace_if_better and self.centre_3d is not None and exps_best > self.centre_3d.error:
+                logger.debug(f'Error ({best_err:.2f}) > previous best ({self.centre_3d.error:.1f}). Not replacing.')
+            else:
+                if best_err > error_threshold * 2:
+                    logger.debug(f'Error ({best_err:.2f}) > 2*Threshold ({2 * error_threshold:.1f}), stopping here.')
+                self.centre_3d = all_best
 
     def generate_prepared_images(self):
         """
@@ -253,7 +276,7 @@ class Frame(Document):
         Checks to see if the frame has 2D centres for all views, a 3D centre point and 3 prepared images.
         """
         return self.centres_2d_available() and self.centre_3d is not None and len(self.images) == 3
-        
+
     def get_lock(self) -> bool:
         """
         Marks the frame as locked in the database.
@@ -278,3 +301,12 @@ class Frame(Document):
     def unlock_all():
         """Helper method to clear the locked-state for all frames."""
         Frame.objects.update(locked=False)
+
+    @staticmethod
+    def reset_centres():
+        """Helper method to remove ALL centres_2d and centre_3d points from all frames."""
+        Frame.objects.update(
+            locked=False,
+            centres_2d=[[], [], []],
+            centre_3d=None,
+        )
