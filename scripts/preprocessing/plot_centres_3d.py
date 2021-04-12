@@ -26,7 +26,7 @@ def plot_centres_3d(trial_id):
         timestamps.append(frame_time)
         frame_time += 1 / trial.fps
     centres_3d = np.stack(centres_3d)
-    assert centres_3d.shape == (trial.num_frames, 3)
+    assert centres_3d.shape == (trial.n_frames_max, 3)
 
     # Plot the results
     fig, axes = plt.subplots(3, sharex=True)

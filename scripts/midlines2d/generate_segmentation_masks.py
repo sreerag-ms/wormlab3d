@@ -105,7 +105,7 @@ def generate_2d_segmentation_masks(
                 filters = {}
             frames = trial.get_frames(filters)
         for frame in frames:
-            log_prefix = f'Frame #{frame.frame_num}/{trial.num_frames} (id={frame.id}). '
+            log_prefix = f'Frame #{frame.frame_num}/{trial.n_frames_max} (id={frame.id}). '
             if not frame.is_ready():
                 logger.warning(log_prefix + 'Not ready, skipping.')
                 continue

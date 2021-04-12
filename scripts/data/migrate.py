@@ -1,7 +1,6 @@
 import csv
 import datetime
 import os
-from typing import List
 
 import cv2
 import dateutil
@@ -156,8 +155,6 @@ def find_or_create_trial(row: dict, experiment: Experiment) -> Trial:
     trial.experiment = experiment
     trial.trial_num = int(row['trial_id'])
     trial.legacy_id = id_old
-    if row['num_frames'] not in ['', '?']:
-        trial.num_frames = int(row['num_frames'])
     if row['fps'] not in ['', '?', '??']:
         trial.fps = float(row['fps'])
     if row['quality'] not in ['', '?']:
@@ -170,7 +167,8 @@ def find_or_create_trial(row: dict, experiment: Experiment) -> Trial:
         'time_sync': row['time_sync'],
         'magnification': row['magnification'],
         'trial_id': row['trial_id'],
-        'legacy_id': row['legacy_id']
+        'legacy_id': row['legacy_id'],
+        'num_frames': row['num_frames'],
     }
 
     # Look for video files like 025_1.avi
@@ -201,29 +199,6 @@ def find_or_create_trial(row: dict, experiment: Experiment) -> Trial:
     trial.save()
 
     return trial
-
-
-def find_or_create_frames(trial: Trial) -> List[Frame]:
-    if trial.num_frames == 0:
-        return
-
-    # Check for existing frames
-    existing = trial.get_frames()
-    if len(existing) > 0:
-        assert len(existing) == trial.num_frames
-        return
-
-    # Create new empty frames
-    frames = []
-    for i in range(trial.num_frames):
-        frame = Frame()
-        frame.trial = trial
-        frame.experiment = trial.experiment
-        frame.frame_num = i
-        frames.append(frame)
-    Frame.objects.insert(frames)
-
-    return frames
 
 
 def find_or_create_midline() -> Midline3D:
@@ -281,7 +256,6 @@ def migrate_runinfo():
             try:
                 experiment = find_or_create_experiment(row)
                 trial = find_or_create_trial(row, experiment)
-                frames = find_or_create_frames(trial)
             except RuntimeError as e:
                 skipped_rows.append((row, str(e)))
 
