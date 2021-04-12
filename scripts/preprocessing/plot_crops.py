@@ -55,7 +55,10 @@ def plot_crops(trial_id, frame_num=1):
         f'Frame #{frame_num}.'
     )
     for c in CAMERA_IDXS:
-        centre_pts = np.stack(centres_2d[c])
+        if len(centres_2d[c]) > 0:
+            centre_pts = np.stack(centres_2d[c])
+        else:
+            centre_pts = np.zeros((0, 2))
 
         # Original images
         ax = axes[0, c]
@@ -64,16 +67,17 @@ def plot_crops(trial_id, frame_num=1):
         ax.scatter(x=centre_pts[:, 0], y=centre_pts[:, 1], color='blue', s=10, alpha=0.8)
 
         # Cropped images
-        crop = crop_image(
-            images[c],
-            centre_2d=centres_2d[c][0],
-            size=PREPARED_IMAGE_SIZE,
-            fix_overlaps=True
-        )
         ax = axes[1, c]
         if c == 1:
             ax.set_title(f'Cropped to ({PREPARED_IMAGE_SIZE})')
-        ax.imshow(crop, vmin=0, vmax=255, cmap='gray')
+        if len(centres_2d[c]) > 0:
+            crop = crop_image(
+                images[c],
+                centre_2d=centres_2d[c][0],
+                size=PREPARED_IMAGE_SIZE,
+                fix_overlaps=True
+            )
+            ax.imshow(crop, vmin=0, vmax=255, cmap='gray')
 
         # Inverted and background-subtracted images
         ax = axes[2, c]
@@ -83,16 +87,17 @@ def plot_crops(trial_id, frame_num=1):
         ax.scatter(x=centre_pts[:, 0], y=centre_pts[:, 1], color='yellow', s=10, alpha=0.8)
 
         # Cropped final images
-        crop_inv_no_bg = crop_image(
-            images_inv_no_bg[c],
-            centre_2d=centres_2d[c][0],
-            size=PREPARED_IMAGE_SIZE,
-            fix_overlaps=True
-        )
         ax = axes[3, c]
         if c == 1:
             ax.set_title(f'Cropped to ({PREPARED_IMAGE_SIZE})')
-        ax.imshow(crop_inv_no_bg, vmin=0, vmax=255, cmap='gray')
+        if len(centres_2d[c]) > 0:
+            crop_inv_no_bg = crop_image(
+                images_inv_no_bg[c],
+                centre_2d=centres_2d[c][0],
+                size=PREPARED_IMAGE_SIZE,
+                fix_overlaps=True
+            )
+            ax.imshow(crop_inv_no_bg, vmin=0, vmax=255, cmap='gray')
 
         if has_prepared_images:
             # Prepared images
@@ -115,12 +120,15 @@ if __name__ == '__main__':
         # trial_id=186,
         # frame_num=823,
 
-
         # Lots of 2d points
         # trial_id=301,
         # frame_num=79
 
         # Broken
-        trial_id=114,
-        frame_num=0
+        # trial_id=114,
+        # frame_num=0,
+
+        # Missing in cam0
+        trial_id=10,
+        frame_num=2034
     )
