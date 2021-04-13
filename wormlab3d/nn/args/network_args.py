@@ -2,6 +2,7 @@ import sys
 from argparse import ArgumentParser, Namespace
 
 from wormlab3d.data.model.network_parameters import *
+from wormlab3d.toolkit.util import str2bool
 
 NETWORK_TYPES = ['densenet', 'fcnet', 'resnet', 'pyramidnet', 'aenet', 'nunet', 'rdn']
 
@@ -29,7 +30,7 @@ class NetworkArgs:
         """
         parser.add_argument('--net-id', type=str,
                             help='Load a network by its database id.')
-        parser.add_argument('--load-net', action='store_true', default=True,
+        parser.add_argument('--load-net', type=str2bool, default=True,
                             help='Try to load an existing network if available matching the given parameters.')
 
         # Add network-specific options
@@ -101,12 +102,8 @@ class NetworkArgs:
                             help='Comma delimited list of layers for each block. Number of entries determines number of blocks.')
         parser.add_argument('--shortcut-type', type=str, choices=['id', 'conv'], default='id',
                             help='Shortcut operation to use when dimensions change.')
-        bottleneck_parser = parser.add_mutually_exclusive_group(required=False)
-        bottleneck_parser.add_argument('--use-bottlenecks', action='store_true',
-                                       help='Use bottleneck type residual layers.')
-        bottleneck_parser.add_argument('--no-bottlenecks', dest='use_bottlenecks', action='store_false',
-                                       help='Don\'t use bottleneck type residual layers.')
-        bottleneck_parser.set_defaults(use_bottlenecks=False)
+        parser.add_argument('--use-bottlenecks', type=str2bool, default=False,
+                            help='Use bottleneck type residual layers.')
         parser.add_argument('--dropout-prob', type=float, default=0.2,
                             help='Dropout probability.')
 
@@ -141,12 +138,8 @@ class NetworkArgs:
                             help='The widening factor which defines how quickly the pyramid expands at each layer.')
         parser.add_argument('--shortcut-type', type=str, choices=['id', 'conv'], default='id',
                             help='Shortcut operation to use when dimensions change.')
-        bottleneck_parser = parser.add_mutually_exclusive_group(required=False)
-        bottleneck_parser.add_argument('--use-bottlenecks', action='store_true',
-                                       help='Use bottleneck type residual layers.')
-        bottleneck_parser.add_argument('--no-bottlenecks', dest='use_bottlenecks', action='store_false',
-                                       help='Don\'t use bottleneck type residual layers.')
-        bottleneck_parser.set_defaults(use_bottlenecks=False)
+        parser.add_argument('--use-bottlenecks', type=str2bool, default=False,
+                            help='Use bottleneck type residual layers.')
         parser.add_argument('--dropout-prob', type=float, default=0.2,
                             help='Dropout probability.')
 
@@ -187,7 +180,7 @@ class NetworkArgs:
                             help='Apply activation at output, eg tanh.')
         parser.add_argument('--dropout-prob', type=float, default=0,
                             help='Dropout probability.')
-        parser.add_argument('--batch-norm', action='store_true', dest='batch_norm', default=False,
+        parser.add_argument('--batch-norm', type=str2bool, default=False,
                             help='Apply batch normalisation after convolution and activation.')
 
     @staticmethod

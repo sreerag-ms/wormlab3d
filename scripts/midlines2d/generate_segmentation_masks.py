@@ -5,8 +5,9 @@ from torchvision.transforms.functional import to_tensor
 
 from wormlab3d import logger, PREPARED_IMAGE_SIZE, CAMERA_IDXS
 from wormlab3d.data.model import Checkpoint, SegmentationMasks
-from wormlab3d.midlines2d.args import DatasetArgs, NetworkArgs, OptimiserArgs, RuntimeArgs
+from wormlab3d.midlines2d.args import DatasetMidline2DArgs
 from wormlab3d.midlines2d.manager import Manager
+from wormlab3d.nn.args import NetworkArgs, OptimiserArgs, RuntimeArgs
 from wormlab3d.toolkit.util import resolve_targets, to_numpy
 
 
@@ -30,7 +31,7 @@ def generate_2d_segmentation_masks(
 
     # Build arguments - don't use the args stored in the checkpoint as these
     # refer to how it was trained, not how we intend to use it now
-    dataset_args = DatasetArgs(ds_id=checkpoint.dataset.id, load=True)
+    dataset_args = DatasetMidline2DArgs(ds_id=checkpoint.dataset.id, load=True)
     net_args = NetworkArgs(net_id=checkpoint.network_params.id, load=True)
     optimiser_args = OptimiserArgs(**checkpoint.optimiser_args)  # not used
     runtime_args = RuntimeArgs(

@@ -1,6 +1,7 @@
-import argparse
+import distutils.util
 import hashlib
 import json
+from argparse import Namespace
 from typing import Tuple, List
 
 import torch
@@ -47,7 +48,7 @@ def resolve_targets(
     return trials, cam_idxs
 
 
-def print_args(args: argparse.Namespace):
+def print_args(args: Namespace):
     """Logs all the keys and values present in an argument namespace."""
     log = '--- Arguments ---\n'
     for arg_name, arg_value in vars(args).items():
@@ -82,3 +83,8 @@ def to_dict(obj) -> dict:
     # Filter out private attributes
     public_vars = {k: v for k, v in inst_vars.items() if not k.startswith('_')}
     return public_vars
+
+
+def str2bool(v: str) -> bool:
+    """Converts truthy and falsey strings to their boolean values."""
+    return bool(distutils.util.strtobool(v))

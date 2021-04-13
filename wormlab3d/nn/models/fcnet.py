@@ -29,7 +29,7 @@ class FCNet(BaseNet):
             input_shape: tuple,
             output_shape: tuple,
             layers_config: Tuple[int],
-            dropout_prob: float=0.,
+            dropout_prob: float = 0.,
             build_model=True
     ):
         super().__init__(input_shape, output_shape)

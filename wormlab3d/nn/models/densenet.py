@@ -4,6 +4,7 @@ from typing import Tuple
 
 import torch
 import torch.nn as nn
+
 from wormlab3d.nn.models.basenet import BaseNet, InputLayer, OutputLayer
 
 
@@ -16,8 +17,8 @@ class DenseNet(BaseNet):
             growth_rate: int,
             block_config: Tuple[int],
             compression_factor: int,
-            dropout_prob: float=0.,
-            build_model: bool=True
+            dropout_prob: float = 0.,
+            build_model: bool = True
     ):
         super().__init__(input_shape, output_shape)
         self.n_init_channels = n_init_channels
@@ -115,8 +116,8 @@ class _CompositeLayer(nn.Module):
 class _DenseLayer(_CompositeLayer):
     def __init__(self, n_channels_in, n_channels_out, dropout_prob=0.):
         super().__init__(n_channels_in, n_channels_out,
-                                          kernel_size=3, stride=1, padding=1,
-                                          dropout_prob=dropout_prob)
+                         kernel_size=3, stride=1, padding=1,
+                         dropout_prob=dropout_prob)
 
     def _stack(self, x_in, x):
         return torch.cat([x_in, x], 1)
@@ -131,8 +132,8 @@ class _DenseLayer(_CompositeLayer):
 class _Transition(_CompositeLayer):
     def __init__(self, n_channels_in, n_channels_out, dropout_prob=0.):
         super().__init__(n_channels_in, n_channels_out,
-                                          kernel_size=1, stride=1, padding=0,
-                                          dropout_prob=dropout_prob)
+                         kernel_size=1, stride=1, padding=0,
+                         dropout_prob=dropout_prob)
         self.pool = nn.AvgPool2d(kernel_size=2, stride=2)
 
     def forward(self, x):

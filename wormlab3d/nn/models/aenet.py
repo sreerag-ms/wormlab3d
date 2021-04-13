@@ -43,11 +43,11 @@ class AENet(BaseNet):
     @property
     def id(self):
         return f'AENet/{self.n_init_channels}i' \
-            f'_enc{",".join(map(str, self.block_config_enc))}' \
-            f'_dec{",".join(map(str, self.block_config_dec))}' \
-            f'_k={self.growth_rate}' \
-            f'_c={self.compression_factor}' \
-            f'_d={self.dropout_prob}'
+               f'_enc{",".join(map(str, self.block_config_enc))}' \
+               f'_dec{",".join(map(str, self.block_config_dec))}' \
+               f'_k={self.growth_rate}' \
+               f'_c={self.compression_factor}' \
+               f'_d={self.dropout_prob}'
 
     def _build_model(self):
         self.encoder = self._build_encoder()

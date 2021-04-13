@@ -1,7 +1,7 @@
 import numpy as np
 
-from scripts.midlines2d.util import parse_arguments
 from wormlab3d import logger
+from wormlab3d.midlines2d.args.parse import parse_arguments
 from wormlab3d.midlines2d.manager import Manager
 
 

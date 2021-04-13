@@ -1,9 +1,9 @@
 import matplotlib.pyplot as plt
 from mongoengine import DoesNotExist
 
-from wormlab3d.midlines2d.args import DatasetArgs
-from wormlab3d.midlines2d.data_loader import get_data_loader, load_dataset
-
+from wormlab3d.midlines2d.args import DatasetMidline2DArgs
+from wormlab3d.midlines2d.data_loader import get_data_loader
+from wormlab3d.nn.data_loader import load_dataset
 
 
 def plot_augmentations(n_examples: int = 5):
@@ -12,7 +12,7 @@ def plot_augmentations(n_examples: int = 5):
     """
 
     # interactive_plots()
-    dataset_args = DatasetArgs(
+    dataset_args = DatasetMidline2DArgs(
         train_test_split=0.8,
         centre_3d_max_error=0,
         exclude_trials=[258, 183, 88, 115, 86, 29, 84, 85, 218],

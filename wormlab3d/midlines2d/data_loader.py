@@ -1,40 +1,34 @@
 from typing import Tuple
 
 import torch
-from mongoengine import DoesNotExist
 from torch.utils.data import DataLoader
-from torch.utils.data import Dataset as DatasetTorch
 from torch.utils.data.dataloader import default_collate
-from torchvision import transforms
 from torchvision.transforms.functional import to_tensor
 
 from wormlab3d import logger
 from wormlab3d.data.model import Midline2D
 from wormlab3d.data.model.dataset import DatasetMidline2D
-from wormlab3d.midlines2d.args import DatasetArgs
+from wormlab3d.midlines2d.args import DatasetMidline2DArgs
+from wormlab3d.nn.data_loader import DatasetLoader, get_affine_transforms, get_image_transforms, make_data_loader
 
 
-class DatasetLoader(DatasetTorch):
+class DatasetMidline2DLoader(DatasetLoader):
     def __init__(
             self,
             ds: DatasetMidline2D,
+            ds_args: DatasetMidline2DArgs,
             train_or_test: str,
-            augment: bool = False,
-            blur_sigma: float = 0,
-            preload: bool = False
     ):
-        assert train_or_test in ['train', 'test']
-        self.ds = ds
-        self.train_or_test = train_or_test
-        self.augment = augment
-        self.blur_sigma = blur_sigma
-        self.midlines = list(getattr(self.ds, 'X_' + train_or_test))
-        self.affine_transforms, self.image_transforms = self._get_transforms()
-        self.preload = preload
-        if preload:
-            self._init_data()
+        self.blur_sigma = ds_args.blur_sigma
+        self.midlines = list(getattr(ds, 'X_' + train_or_test))
+        self.affine_transforms = None
+        self.image_transforms = None
+        self.images = []
+        self.masks = []
+        self.midline_ids = []
+        super().__init__(ds, ds_args, train_or_test)
 
-    def _init_data(self):
+    def _preload_data(self):
         """
         Load all the prepared images and segmentation masks for all midlines in the dataset into memory.
         """
@@ -55,7 +49,6 @@ class DatasetLoader(DatasetTorch):
         """
         Fetch the image, the segmentation mask and the midline database record.
         """
-
         if self.preload:
             midline = self.midlines[index]
             image = self.images[index]
@@ -81,41 +74,20 @@ class DatasetLoader(DatasetTorch):
 
         return image, mask, midline
 
-    def __len__(self) -> int:
-        return self.ds.get_size(self.train_or_test)
-
-    def _get_transforms(self) -> Tuple:
+    def _get_transforms(self):
         if not self.augment:
-            return None, None
+            return
 
         # These transforms are applied to the image and mask together
-        affine_transforms = transforms.Compose([
-            transforms.RandomOrder([
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomVerticalFlip(),
-                transforms.RandomAffine(
-                    degrees=180,
-                    translate=(0.2, 0.2),
-                    scale=(0.8, 1.2),
-                    shear=50
-                )
-            ])
-        ])
+        self.affine_transforms = get_affine_transforms()
 
         # These are applied to the image only
-        image_transforms = transforms.Compose([
-            transforms.RandomOrder([
-                transforms.GaussianBlur(kernel_size=9, sigma=(0.01, 10)),
-                transforms.RandomErasing(p=0.3, scale=(0.01, 0.2)),
-            ])
-        ])
-
-        return affine_transforms, image_transforms
+        self.image_transforms = get_image_transforms()
 
 
 def get_data_loader(
         ds: DatasetMidline2D,
-        ds_args: DatasetArgs,
+        ds_args: DatasetMidline2DArgs,
         train_or_test: str,
         batch_size: int
 ) -> DataLoader:
@@ -132,46 +104,17 @@ def get_data_loader(
             transposed[2]  # midlines
         ]
 
-    dataset_loader = DatasetLoader(
+    dataset_loader = DatasetMidline2DLoader(
         ds=ds,
-        blur_sigma=ds_args.blur_sigma,
-        augment=ds_args.augment,
+        ds_args=ds_args,
         train_or_test=train_or_test,
-        preload=ds_args.preload_from_database
     )
 
-    loader = torch.utils.data.DataLoader(
-        dataset_loader,
+    loader = make_data_loader(
+        dataset_loader=dataset_loader,
+        ds_args=ds_args,
         batch_size=batch_size,
-        shuffle=True,
-        num_workers=ds_args.n_dataloader_workers,
-        drop_last=True,
         collate_fn=collate_fn
     )
 
     return loader
-
-
-
-def load_dataset(dataset_args: DatasetArgs) -> DatasetMidline2D:
-    """
-    Load an existing dataset from the database.
-    """
-    ds = None
-
-    # If we have a dataset id then load this from the database
-    if dataset_args.ds_id is not None:
-        ds = DatasetMidline2D.objects.get(id=dataset_args.ds_id)
-    else:
-        # Otherwise, try to find one matching the same parameters
-        datasets = DatasetMidline2D.find_from_args(dataset_args)
-        if datasets.count() > 0:
-            ds = datasets[0]
-            logger.info(f'Found {len(datasets)} suitable datasets in database, using most recent.')
-
-    if ds is None:
-        raise DoesNotExist()
-
-    logger.info(f'Loaded dataset (id={ds.id}, created={ds.created}).')
-
-    return ds

@@ -4,13 +4,18 @@ from typing import List
 from mongoengine import *
 
 from wormlab3d.data.model.midline2d import Midline2D
+from wormlab3d.data.model.segmentation_masks import SegmentationMasks
 from wormlab3d.data.model.tag import Tag
-from wormlab3d.midlines2d.args import DatasetArgs
+from wormlab3d.nn.args import DatasetArgs
 
 DATA_TYPES = ['xyz', 'xyz_inv', 'bishop', 'cpca']
 
 DATASET_TYPE_2D_MIDLINE = '2d_midline'
-DATASET_TYPES = [DATASET_TYPE_2D_MIDLINE]
+DATASET_TYPE_SEGMENTATION_MASKS = 'segmentation_masks'
+DATASET_TYPES = [
+    DATASET_TYPE_2D_MIDLINE,
+    DATASET_TYPE_SEGMENTATION_MASKS
+]
 
 
 class TagInfo(EmbeddedDocument):
@@ -54,6 +59,42 @@ class Dataset(Document):
         else:
             return self.size
 
+    @queryset_manager
+    def find_from_args(doc_cls, queryset, args: DatasetArgs):
+        return queryset.filter(
+            dataset_type=args.dataset_type,
+            train_test_split_target=args.train_test_split,
+            restrict_tags=args.restrict_tags,
+            restrict_concs=args.restrict_concs,
+            centre_3d_max_error=args.centre_3d_max_error,
+            exclude_experiments=args.exclude_experiments,
+            include_experiments=args.include_experiments,
+            exclude_trials=args.exclude_trials,
+            include_trials=args.include_trials,
+        )
+
+    @staticmethod
+    def from_args(args: DatasetArgs) -> 'Dataset':
+        common_args = dict(
+            train_test_split_target=args.train_test_split,
+            restrict_tags=args.restrict_tags,
+            restrict_concs=args.restrict_concs,
+            centre_3d_max_error=args.centre_3d_max_error,
+            exclude_experiments=args.exclude_experiments,
+            include_experiments=args.include_experiments,
+            exclude_trials=args.exclude_trials,
+            include_trials=args.include_trials,
+        )
+
+        if args.dataset_type == DATASET_TYPE_2D_MIDLINE:
+            DS = DatasetMidline2D(**common_args)
+        elif args.dataset_type == DATASET_TYPE_SEGMENTATION_MASKS:
+            DS = DatasetSegmentationMasks(**common_args)
+        else:
+            raise RuntimeError(f'Unrecognised dataset_type={args.dataset_type}.')
+
+        return DS
+
 
 class DatasetMidline2D(Dataset):
     X_train = ListField(ReferenceField(Midline2D))
@@ -75,15 +116,23 @@ class DatasetMidline2D(Dataset):
         if self.size_all > 0:
             self.train_test_split_actual = len(train) / self.size_all
 
-    @queryset_manager
-    def find_from_args(doc_cls, queryset, args: DatasetArgs):
-        return queryset.filter(
-            train_test_split_target=args.train_test_split,
-            restrict_tags=args.restrict_tags,
-            restrict_concs=args.restrict_concs,
-            centre_3d_max_error=args.centre_3d_max_error,
-            exclude_experiments=args.exclude_experiments,
-            include_experiments=args.include_experiments,
-            exclude_trials=args.exclude_trials,
-            include_trials=args.include_trials,
-        )
+
+class DatasetSegmentationMasks(Dataset):
+    X_train = ListField(ReferenceField(SegmentationMasks))
+    X_test = ListField(ReferenceField(SegmentationMasks))
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.dataset_type = DATASET_TYPE_SEGMENTATION_MASKS
+
+    def set_data(self, train: List[SegmentationMasks], test: List[SegmentationMasks]):
+        """
+        Convenience method for setting the train and test data and automatically generating some stats.
+        """
+        self.X_train = train
+        self.X_test = test
+        self.size_all = len(train) + len(test)
+        self.size_train = len(train)
+        self.size_test = len(test)
+        if self.size_all > 0:
+            self.train_test_split_actual = len(train) / self.size_all

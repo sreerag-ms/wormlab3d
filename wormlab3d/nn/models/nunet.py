@@ -1,13 +1,7 @@
-import math
-from collections import OrderedDict
-
-import torch.nn.functional as F
 import torch
 import torch.nn as nn
 
-from wormlab3d.nn.models.aenet import _DenseBlock
 from wormlab3d.nn.models.basenet import BaseNet
-from wormlab3d.nn.models.densenet import _CompositeLayer, _Transition
 
 
 class NuNet(BaseNet):
@@ -98,17 +92,16 @@ class NuNet(BaseNet):
             block = _NuNetUpBlock(n_channels, n_channels_out, self.sizes[depth][0], self.sizes[depth][1], self.up_mode)
             self.up_path.append(block)
             n_channels = n_channels_out
-            n_channels_out = int(n_channels_out/2)
+            n_channels_out = int(n_channels_out / 2)
 
             # spatial_size = block.spatial_size_out
             # temporal_size = block.temporal_size_out
 
-        n_output_channels = 3 + 2*3 + 3   # xyz + e1/e2 + alpha/beta/gamma
+        n_output_channels = 3 + 2 * 3 + 3  # xyz + e1/e2 + alpha/beta/gamma
         self.output_layer = nn.Conv2d(n_channels, n_output_channels,
-                                    kernel_size=1, stride=1, padding=0)
+                                      kernel_size=1, stride=1, padding=0)
 
         # print('\n\n', self.sizes)
-
 
     def forward(self, x):
         bridges = []
@@ -148,7 +141,6 @@ class NuNet(BaseNet):
             x = up(x, bridges[-depth - 1])
             # print('x.shape (after up)', x.shape)
 
-
         # print('\n~~~top again~~~')
         # print(x.shape)
 
@@ -186,7 +178,7 @@ class _NuNetConvBlock(nn.Module):
                 3 if temporal_size >= 3 else 1,
             )
             layer = _NuCompositeLayer(n_channels, n_channels_out, kernel_size=k_size,
-                                        dropout_prob=dropout_prob)
+                                      dropout_prob=dropout_prob)
             n_channels = n_channels_out
             self.layers.append(layer)
             spatial_size = spatial_size - (k_size[0] - 1)
@@ -245,18 +237,18 @@ class _NuNetUpBlock(nn.Module):
 
         # print('spatial_size', spatial_size)
         # print('temporal_size', temporal_size)
-        self.conv_block = _NuNetConvBlock(n_channels_in, n_channels_out, spatial_size, temporal_size, dropout_prob=dropout_prob)
+        self.conv_block = _NuNetConvBlock(n_channels_in, n_channels_out, spatial_size, temporal_size,
+                                          dropout_prob=dropout_prob)
 
         # self.spatial_size_out = self.conv_block.spatial_size_out
         # self.temporal_size_out = self.conv_block.temporal_size_out
-
 
     def center_crop(self, layer, target_size):
         _, _, layer_height, layer_width = layer.size()
         diff_y = (layer_height - target_size[0]) // 2
         diff_x = (layer_width - target_size[1]) // 2
         return layer[
-               :, :, diff_y : (diff_y + target_size[0]), diff_x : (diff_x + target_size[1])
+               :, :, diff_y: (diff_y + target_size[0]), diff_x: (diff_x + target_size[1])
                ]
 
     def forward(self, x, bridge):
@@ -293,4 +285,3 @@ class _NuCompositeLayer(nn.Module):
             x = self.dropout(x)
         x = self.bn(x)
         return x
-
