@@ -2,6 +2,7 @@ import gc
 
 from wormlab3d import logger
 from wormlab3d.data.model import Frame, Trial
+from wormlab3d.preprocessing.contour import MIN_REQ_THRESHOLD, CONT_THRESH_DEFAULT
 from wormlab3d.toolkit.util import resolve_targets
 
 cached_readers = {}
@@ -13,7 +14,7 @@ def generate_centres_2d(
         camera_idx: int = None,
         frame_num: int = None,
         missing_only: bool = True,
-        min_brightness: int = 15,
+        min_brightness: int = None,
 ):
     """
     Find the centre-points of any objects in every frame of each camera's video.
@@ -26,6 +27,10 @@ def generate_centres_2d(
         logger.info(f'Generating any missing 2D centre points for {len(trials)} trials.')
     else:
         logger.info(f'(Re)generating ALL 2D centre points for {len(trials)} trials.')
+
+    if min_brightness is None:
+        min_brightness = MIN_REQ_THRESHOLD / CONT_THRESH_DEFAULT
+    logger.debug(f'Minimum brightness required = {min_brightness:.2f}.')
 
     # Iterate over matching trials
     for trial in trials:
@@ -250,11 +255,11 @@ if __name__ == '__main__':
     # Frame.unlock_all()
     # Frame.reset_centres()
 
-    # generate_centres_2d(
-    # trial_id=trial_id,
-    # frame_num=frame_num
-    # missing_only=False
-    # )
+    generate_centres_2d(
+        # trial_id=trial_id,
+        # frame_num=frame_num
+        # missing_only=False
+    )
     generate_centres_3d(
         # trial_id=trial_id,
         # frame_num=frame_num
