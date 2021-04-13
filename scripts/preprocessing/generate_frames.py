@@ -6,12 +6,12 @@ from wormlab3d.toolkit.util import resolve_targets
 
 
 def generate_frames(
-        experiment_id: int = 1,
+        experiment_id: int = None,
         trial_id: int = None,
         frame_num: int = None,
         remove_surplus_frames: bool = True,
         add_missing_frames: bool = True,
-        fix_brightnesses: bool = False,
+        fix_brightnesses: bool = True,
         fix_brightnesses_missing_only: bool = True,
 ):
     """

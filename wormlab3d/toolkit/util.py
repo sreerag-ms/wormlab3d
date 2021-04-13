@@ -1,7 +1,7 @@
 import distutils.util
 import hashlib
 import json
-from argparse import Namespace
+from argparse import ArgumentParser, Namespace
 from typing import Tuple, List
 
 import torch
@@ -9,6 +9,26 @@ import torch
 from wormlab3d import CAMERA_IDXS
 from wormlab3d import logger
 from wormlab3d.data.model.trial import Trial
+
+
+def parse_target_arguments() -> Namespace:
+    """
+    Parse command line arguments and build parameter holders.
+    """
+    parser = ArgumentParser(description='Wormlab3D script.')
+    parser.add_argument('--experiment', type=int,
+                        help='Restrict to a specific experiment by id.')
+    parser.add_argument('--trial', type=int,
+                        help='Restrict to a specific trial by id.')
+    parser.add_argument('--camera', type=int,
+                        help='Restrict to a specific camera by index.')
+    parser.add_argument('--frame-num', type=int,
+                        help='Restrict to a specific frame number (requires trial to be defined).')
+    parser.add_argument('--order-trials', type=str,
+                        help='Specify some ordering for the trials.')
+    args = parser.parse_args()
+
+    return args
 
 
 def resolve_targets(
@@ -19,31 +39,46 @@ def resolve_targets(
 ) -> Tuple[List[Trial], List[int]]:
     """
     Resolves any combination of passed experiments, trials and cameras.
+    Function arguments take priority over command-line arguments so this method can be called multiple times.
     """
+    args = parse_target_arguments()
+
+    # Override command line args with function arguments
+    if experiment_id is not None:
+        args.experiment = experiment_id
+    if trial_id is not None:
+        args.trial = trial_id
+    if camera_idx is not None:
+        args.camera = camera_idx
+    if frame_num is not None:
+        args.frame_num = frame_num
+    print_args(args)
 
     # Get trials
-    if trial_id is not None:
-        trial = Trial.objects.get(id=trial_id)
-        if experiment_id is not None:
-            assert trial.experiment.id == experiment_id, 'Trial is not part of target experiment!'
+    if args.trial is not None:
+        trial = Trial.objects.get(id=args.trial)
+        if args.experiment is not None:
+            assert trial.experiment.id == args.experiment, 'Trial is not part of target experiment!'
         trials = [trial]
     else:
-        if experiment_id is not None:
-            trials = Trial.objects(experiment_id=experiment_id)
+        if args.experiment is not None:
+            trials = Trial.objects(experiment=args.experiment)
         else:
             trials = Trial.objects
+        if args.order_trials is not None:
+            trials = trials.order_by(args.order_trials)
 
     # Camera indices
     cam_idxs = CAMERA_IDXS
-    if camera_idx is not None:
+    if args.camera is not None:
         assert trial_id is not None
-        assert camera_idx in cam_idxs
-        cam_idxs = [camera_idx]
+        assert args.camera in cam_idxs
+        cam_idxs = [args.camera]
 
     # Frame number - only makes sense in combination with a trial_id
-    if frame_num is not None:
-        assert trial_id is not None
-        assert 0 <= frame_num < trial.num_frames
+    if args.frame_num is not None:
+        assert args.trial is not None
+        assert 0 <= args.frame_num < trial.n_frames_max
 
     return trials, cam_idxs
 

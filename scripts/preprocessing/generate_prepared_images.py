@@ -30,7 +30,7 @@ def generate_prepared_images(
         else:
             frames = trial.get_frames()
         for frame in frames:
-            logger.info(f'Frame #{frame.frame_num}/{trial.num_frames} (id={frame.id}).')
+            logger.info(f'Frame #{frame.frame_num}/{trial.n_frames_max} (id={frame.id}).')
 
             # Check the centre point exists and if not, create it
             if frame.centre_3d is None:

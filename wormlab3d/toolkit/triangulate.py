@@ -1,4 +1,5 @@
 import itertools
+from collections import OrderedDict
 from typing import List, Union
 
 import numpy as np
@@ -22,6 +23,8 @@ def triangulate(
     """
     assert len(image_points) == 3
     assert isinstance(cameras, Cameras)
+    if isinstance(image_points, OrderedDict):
+        image_points = list(image_points.values())
     for image_points_cam in image_points:
         assert isinstance(image_points_cam, list)
         for pts in image_points_cam:
@@ -94,9 +97,9 @@ def triangulate(
             list(cams_model[c].project_to_2d(r.point_3d))
             for c in CAMERA_IDXS
         ]
-        logger.debug(f'Found point: {r.point_3d}')
-        logger.debug(f'Error: {r.error}')
-        logger.debug(f'Source point idxs: {r.source_point_idxs}')
-        logger.debug(f'Reprojected points 2d: {r.reprojected_points_2d}')
+        # logger.debug(f'Found point: {r.point_3d}')
+        # logger.debug(f'Error: {r.error}')
+        # logger.debug(f'Source point idxs: {r.source_point_idxs}')
+        # logger.debug(f'Reprojected points 2d: {r.reprojected_points_2d}')
 
     return res_3d
