@@ -98,44 +98,6 @@ def find_or_create_experiment(row: dict) -> Experiment:
     experiment.legacy_id = id_old
     experiment.save()
 
-    # Look for calibration file like 025.xml
-    calib_path = f'{ANNEX_PATH}/{CALIB_DIR}/{int(row["#id"]):03d}.xml'
-    if os.path.exists(calib_path) or os.path.lexists(calib_path):
-        logger.info(f'Found calibration file: {calib_path}')
-        fs = cv2.FileStorage(calib_path, cv2.FILE_STORAGE_READ)
-        cams = Cameras()
-        cams.experiment = experiment
-        trial_id_old = int(row['#id'])
-        try:
-            trial = Trial.objects.get(legacy_id=trial_id_old)
-            cams.trial = trial
-        except DoesNotExist:
-            pass
-
-        try:
-            cams.timestamp = dateutil.parser.parse(fs.getNode('calibration_time').string())
-            cams.wormcv_version = fs.getNode('WormCV_Version').string()
-            cams.opencv_version = fs.getNode('OpenCV_Version').string()
-            cams.opencv_contrib_hash = fs.getNode('OpenCV_contrib_hash').string()
-            cams.total_calib_images = int(fs.getNode('total_filenames').real())
-            if cams.total_calib_images == 0 and fs.getNode('image_filenames').size() > 0:
-                cams.total_calib_images = fs.getNode('image_filenames').size()
-            cams.pattern_height = float(fs.getNode('pattern_height').real())
-            cams.pattern_width = float(fs.getNode('pattern_width').real())
-            cams.square_size = float(fs.getNode('square_size').real())
-            cams.flag_value = int(fs.getNode('flag_value').real())
-            cams.n_mini_matches = int(fs.getNode('n_mini_matches').real())
-            cams.n_cameras = int(fs.getNode('nCameras').real())
-            cams.camera_type = int(fs.getNode('camera_type').real())
-            cams.reprojection_error = float(fs.getNode('meanReprojectError').real())
-            cams.n_images_used = [int(fs.getNode(f'images_used_{c}').real()) for c in CAMERA_IDXS]
-            cams.pose = [fs.getNode(f'camera_pose_{c}').mat() for c in CAMERA_IDXS]
-            cams.matrix = [fs.getNode(f'camera_matrix_{c}').mat() for c in CAMERA_IDXS]
-            cams.distortion = [fs.getNode(f'camera_distortion_{c}').mat()[0] for c in CAMERA_IDXS]
-            cams.save()
-        except Exception:
-            logger.error(f'Could not parse calibration file: {calib_path}')
-
     return experiment
 
 
@@ -201,6 +163,69 @@ def find_or_create_trial(row: dict, experiment: Experiment) -> Trial:
     return trial
 
 
+def find_or_create_cameras(row: dict, experiment: Experiment) -> Cameras:
+    # Look for calibration file like 025.xml
+    calib_path = f'{ANNEX_PATH}/{CALIB_DIR}/{int(row["#id"]):03d}.xml'
+    if os.path.exists(calib_path) or os.path.lexists(calib_path):
+        logger.info(f'Found calibration file: {calib_path}')
+        try:
+            fs = cv2.FileStorage(calib_path, cv2.FILE_STORAGE_READ)
+            timestamp = dateutil.parser.parse(fs.getNode('calibration_time').string())
+        except Exception:
+            logger.error(f'Could not parse calibration file: {calib_path}')
+            return
+
+        trial_id_old = int(row['#id'])
+        trial = None
+        try:
+            trial = Trial.objects.get(legacy_id=trial_id_old)
+        except DoesNotExist:
+            pass
+
+        try:
+            # Try to find existing cameras
+            cams = Cameras.objects.get(experiment=experiment, timestamp=timestamp)
+            if trial is not None:
+                cams.trial = trial
+                cams.save()
+            logger.debug(f'Found existing, id={cams.id}')
+            return cams
+        except DoesNotExist:
+            pass
+
+        cams = Cameras()
+        cams.experiment = experiment
+        if trial is not None:
+            cams.trial = trial
+
+        try:
+            cams.timestamp = timestamp
+            cams.wormcv_version = fs.getNode('WormCV_Version').string()
+            cams.opencv_version = fs.getNode('OpenCV_Version').string()
+            cams.opencv_contrib_hash = fs.getNode('OpenCV_contrib_hash').string()
+            cams.total_calib_images = int(fs.getNode('total_filenames').real())
+            if cams.total_calib_images == 0 and fs.getNode('image_filenames').size() > 0:
+                cams.total_calib_images = fs.getNode('image_filenames').size()
+            cams.pattern_height = float(fs.getNode('pattern_height').real())
+            cams.pattern_width = float(fs.getNode('pattern_width').real())
+            cams.square_size = float(fs.getNode('square_size').real())
+            cams.flag_value = int(fs.getNode('flag_value').real())
+            cams.n_mini_matches = int(fs.getNode('n_mini_matches').real())
+            cams.n_cameras = int(fs.getNode('nCameras').real())
+            cams.camera_type = int(fs.getNode('camera_type').real())
+            cams.reprojection_error = float(fs.getNode('meanReprojectError').real())
+            cams.n_images_used = [int(fs.getNode(f'images_used_{c}').real()) for c in CAMERA_IDXS]
+            cams.pose = [fs.getNode(f'camera_pose_{c}').mat() for c in CAMERA_IDXS]
+            cams.matrix = [fs.getNode(f'camera_matrix_{c}').mat() for c in CAMERA_IDXS]
+            cams.distortion = [fs.getNode(f'camera_distortion_{c}').mat()[0] for c in CAMERA_IDXS]
+            cams.save()
+            logger.debug('Saved cameras')
+            return cams
+
+        except Exception:
+            logger.error(f'Could not parse calibration file: {calib_path}')
+
+
 def find_or_create_midline() -> Midline3D:
     # Create new midline
     midline = Midline3D()
@@ -256,6 +281,7 @@ def migrate_runinfo():
             try:
                 experiment = find_or_create_experiment(row)
                 trial = find_or_create_trial(row, experiment)
+                cams = find_or_create_cameras(row, experiment)
             except RuntimeError as e:
                 skipped_rows.append((row, str(e)))
 
@@ -414,7 +440,7 @@ def migrate_WT3D():
 
 if __name__ == '__main__':
     # print_runinfo_data()
-    clear_db()
+    # clear_db()
     migrate_tags()
     migrate_runinfo()
     migrate_midlines2d()
