@@ -2,7 +2,7 @@ import gc
 
 from wormlab3d import logger
 from wormlab3d.data.model import Frame, Trial
-from wormlab3d.preprocessing.contour import MIN_REQ_THRESHOLD, CONT_THRESH_DEFAULT
+from wormlab3d.preprocessing.contour import MIN_REQ_THRESHOLD, CONT_THRESH_RATIO_DEFAULT
 from wormlab3d.toolkit.util import resolve_targets
 
 cached_readers = {}
@@ -14,6 +14,7 @@ def generate_centres_2d(
         camera_idx: int = None,
         frame_num: int = None,
         missing_only: bool = True,
+        contour_threshold_ratio: float = CONT_THRESH_RATIO_DEFAULT,
         min_brightness: int = None,
 ):
     """
@@ -29,7 +30,7 @@ def generate_centres_2d(
         logger.info(f'(Re)generating ALL 2D centre points for {len(trials)} trials.')
 
     if min_brightness is None:
-        min_brightness = MIN_REQ_THRESHOLD / CONT_THRESH_DEFAULT
+        min_brightness = MIN_REQ_THRESHOLD / contour_threshold_ratio
     logger.debug(f'Minimum brightness required = {min_brightness:.2f}.')
 
     # Iterate over matching trials
@@ -53,7 +54,12 @@ def generate_centres_2d(
                     missing_cond = {
                         '$or': [
                             {'centres_2d': {'$size': 0}},
-                            {f'centres_2d.{c}': {'$size': 0}},
+                            {'$and': [
+                                {f'centres_2d.{c}': {'$size': 0}},
+                                {f'centres_2d_thresholds.{c}': {'$gt': MIN_REQ_THRESHOLD}},
+                            ]},
+                            {'centres_2d_thresholds': None},
+                            {'centres_2d_thresholds': {'$size': 0}},
                         ]
                     }
                 else:
@@ -88,7 +94,7 @@ def generate_centres_2d(
             # Due to the large number of frames in each trial, we need to reload from the
             # database to catch changes since we fetched the results.
             frame.reload()
-            if missing_only and frame.centres_2d_available():
+            if missing_only and frame.centres_2d_available() and len(frame.centres_2d_thresholds) == 3:
                 logger.info(log_prefix + 'Has 2D points, skipping.')
                 continue
 
@@ -96,7 +102,8 @@ def generate_centres_2d(
             cam_idxs_to_process = []
             errors = {}
             for c in cam_idxs:
-                if missing_only and len(frame.centres_2d) == 3 and len(frame.centres_2d[c]) > 0:
+                if missing_only and len(frame.centres_2d) == 3 and len(frame.centres_2d[c]) > 0 \
+                        and len(frame.centres_2d_thresholds) == 3 and frame.centres_2d_thresholds[c] > 0:
                     errors[c] = 'Centres 2D already exist.'
                     continue
                 if frame.frame_num > trial.n_frames[c]:
@@ -104,6 +111,10 @@ def generate_centres_2d(
                     continue
                 if frame.max_brightnesses[c] < min_brightness:
                     errors[c] = 'Not bright enough.'
+                    continue
+                if len(frame.centres_2d_thresholds) == 3 \
+                        and frame.centres_2d_thresholds[c] <= MIN_REQ_THRESHOLD:
+                    errors[c] = 'Threshold already at minimum allowed.'
                     continue
                 cam_idxs_to_process.append(c)
             if len(cam_idxs_to_process) == 0:
@@ -118,13 +129,18 @@ def generate_centres_2d(
             # Generate the centres
             if len(frame.centres_2d) == 0:
                 frame.centres_2d = [[]] * 3
+            if len(frame.centres_2d_thresholds) == 0:
+                frame.centres_2d_thresholds = [0] * 3
             for c in cam_idxs_to_process:
                 log_prefix_c = log_prefix + f'Cam={c}. '
                 try:
                     readers[c].set_frame_num(frame.frame_num)
-                    centres = readers[c].find_objects()
+                    centres, final_thresholds = readers[c].find_objects(contour_threshold_ratio)
                     logger.info(log_prefix_c + f'Found {len(centres)} objects.')
-                    frame.centres_2d[c] = centres
+                    if centres != frame.centres_2d[c]:
+                        frame.centres_2d[c] = centres
+                        frame.centre_3d = None
+                    frame.centres_2d_thresholds[c] = final_thresholds
                 except Exception as e:
                     logger.error(log_prefix_c + f'Failed to find objects: {e}')
 
@@ -146,8 +162,13 @@ def generate_centres_3d(
         experiment_id: int = None,
         trial_id: int = None,
         frame_num: int = None,
+        error_threshold: float = 50,
         missing_only: bool = True,
-        fix_missing_2d: bool = False
+        fix_missing_2d: bool = False,
+        store_bad_results: bool = True,
+        ratio_adj_orig: float = 0,
+        ratio_adj_exp: float = 0,
+        ratio_adj_all: float = 0,
 ):
     """
     Find a unique 3d centre-point for the worm.
@@ -183,12 +204,16 @@ def generate_centres_3d(
                 }}
             else:
                 filters = None
-            frames = trial.get_frames(filters)
+            frames = trial.get_frames(filters).only('id')
         frame_ids = [f.id for f in frames]
 
         if len(frame_ids) == 0:
             logger.debug('No frames missing 3D centre points!')
             continue
+        logger.debug(f'Found {len(frame_ids)} frames to process.')
+
+        # Check if the trial has cameras
+        has_exp_cameras = trial.get_cameras() is not None
 
         # Iterate over the frames
         for frame_id in frame_ids:
@@ -200,6 +225,9 @@ def generate_centres_3d(
             if missing_only and frame.centre_3d is not None:
                 logger.info(log_prefix + 'Has 3D point, skipping.')
                 continue
+
+            # Assign the readers from the trial as reloading from the database will break this reference
+            frame.trial = trial
 
             # 3D triangulation requires 2D points in all 3 views
             # This check is done in frame.generate_centre_3d also, but we use the above method
@@ -224,15 +252,18 @@ def generate_centres_3d(
             try:
                 frame.generate_centre_3d(
                     x0=prev_point,
-                    try_experiment_cams=True,
-                    contour_threshold_adj_exp=0,
-                    try_all_cams=False,
-                    contour_threshold_adj_all=0,
-                    only_replace_if_better=True
+                    error_threshold=error_threshold,
+                    try_experiment_cams=has_exp_cameras,
+                    try_all_cams=True,
+                    only_replace_if_better=True,
+                    store_bad_result=store_bad_results,
+                    ratio_adj_orig=ratio_adj_orig,
+                    ratio_adj_exp=ratio_adj_exp,
+                    ratio_adj_all=ratio_adj_all,
                 )
-                logger.info(log_prefix + f'Found 3D centre point.')
             except Exception as e:
                 logger.error(log_prefix + f'Failed to find 3D centre: {e}')
+                # raise
 
             # Unlock the frame when finished
             frame.release_lock_and_save()
@@ -255,13 +286,15 @@ if __name__ == '__main__':
     # Frame.unlock_all()
     # Frame.reset_centres()
 
-    generate_centres_2d(
-        # trial_id=trial_id,
-        # frame_num=frame_num
-        # missing_only=False
-    )
+    # generate_centres_2d(
+    # trial_id=trial_id,
+    # frame_num=frame_num
+    # missing_only=True
+    # )
     generate_centres_3d(
-        # trial_id=trial_id,
-        # frame_num=frame_num
-        # missing_only=False
+        missing_only=True,
+        ratio_adj_orig=0.1,
+        ratio_adj_exp=0,
+        ratio_adj_all=0.1,
+
     )

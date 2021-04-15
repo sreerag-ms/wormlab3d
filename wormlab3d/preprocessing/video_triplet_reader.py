@@ -1,10 +1,11 @@
 from collections import OrderedDict
-from typing import List
+from typing import List, Tuple
 
 import numpy as np
 import pims
 
 from wormlab3d import CAMERA_IDXS, logger
+from wormlab3d.preprocessing.contour import CONT_THRESH_RATIO_DEFAULT
 from wormlab3d.preprocessing.video_reader import VideoReader
 
 
@@ -71,29 +72,42 @@ class VideoTripletReader:
                 logger.warning(f'Error reading image from camera {c}: {e}')
         return images
 
-    def find_contours(self, subtract_background: bool = True, cont_threshold: float = None) \
-            -> OrderedDict[int, List[np.ndarray]]:
+    def find_contours(self, subtract_background: bool = True, cont_threshold_ratios: List[float] = None) \
+            -> Tuple[OrderedDict[int, List[np.ndarray]], OrderedDict[int, int]]:
+        if cont_threshold_ratios is None:
+            cont_threshold_ratios = [CONT_THRESH_RATIO_DEFAULT] * 3
         contours = OrderedDict()
+        thresholds = OrderedDict()
         for c in CAMERA_IDXS:
             try:
-                conts = self.readers[c].find_contours(
+                conts, final_threshold = self.readers[c].find_contours(
                     subtract_background=subtract_background,
-                    cont_threshold=cont_threshold
+                    cont_threshold_ratio=cont_threshold_ratios[c]
                 )
                 contours[c] = conts
+                thresholds[c] = final_threshold
             except (IndexError, AssertionError) as e:
                 logger.warning(f'Error finding contours in camera {c}: {e}')
-        return contours
+        return contours, thresholds
 
-    def find_objects(self, cont_threshold: float = None) -> OrderedDict[int, list]:
+    def find_objects(self, cont_threshold_ratios: List[float] = None, cam_idxs: List[int] = None) \
+            -> Tuple[OrderedDict[int, list], OrderedDict[int, int]]:
+        if cont_threshold_ratios is None:
+            cont_threshold_ratios = [CONT_THRESH_RATIO_DEFAULT] * 3
+        if cam_idxs is None:
+            cam_idxs = CAMERA_IDXS
         centres = OrderedDict()
-        for c in CAMERA_IDXS:
+        thresholds = OrderedDict()
+        for c in cam_idxs:
             try:
-                objs = self.readers[c].find_objects(cont_threshold=cont_threshold)
+                objs, threshold = self.readers[c].find_objects(cont_threshold_ratio=cont_threshold_ratios[c])
                 centres[c] = objs
+                thresholds[c] = threshold
             except (IndexError, AssertionError) as e:
                 logger.warning(f'Error finding objects in camera {c}: {e}')
-        return centres
+                centres[c] = []
+                thresholds[c] = np.inf
+        return centres, thresholds
 
     def close(self):
         for c in CAMERA_IDXS:

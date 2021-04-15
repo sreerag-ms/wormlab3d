@@ -1,5 +1,5 @@
 from subprocess import CalledProcessError
-from typing import List
+from typing import List, Tuple
 
 import cv2
 import numpy as np
@@ -7,7 +7,7 @@ import pims
 
 from wormlab3d import logger
 from wormlab3d.data.annex import fetch_from_annex, is_annexed_file
-from wormlab3d.preprocessing.contour import CONT_THRESH_DEFAULT, contour_mask, find_contours, \
+from wormlab3d.preprocessing.contour import CONT_THRESH_RATIO_DEFAULT, contour_mask, find_contours, \
     MAX_CONTOURING_ATTEMPTS, contour_centre, MAX_CONTOURS_ALLOWED, MIN_REQ_THRESHOLD
 from wormlab3d.preprocessing.create_bg_lp import Accumulate
 
@@ -26,7 +26,7 @@ class VideoReader:
             self,
             video_path: str,
             background_image_path: str = None,
-            contour_thresh: float = CONT_THRESH_DEFAULT
+            contour_thresh_ratio: float = CONT_THRESH_RATIO_DEFAULT
     ):
         # If the video is a link try and fetch it from the annex
         if is_annexed_file(video_path):
@@ -55,7 +55,7 @@ class VideoReader:
             self.background = None
 
         self.current_frame: int = -1
-        self.contour_thresh = contour_thresh
+        self.contour_thresh_ratio = contour_thresh_ratio
         logger.debug(f'VideoReader(video={video_path}, bg={background_image_path})')
 
     @property
@@ -128,7 +128,8 @@ class VideoReader:
 
         return image
 
-    def find_contours(self, subtract_background: bool = True, cont_threshold: float = None) -> List[np.ndarray]:
+    def find_contours(self, subtract_background: bool = True, cont_threshold_ratio: float = None) \
+            -> Tuple[List[np.ndarray], int]:
         """
         Find the contours in the image.
         Note - if the background is not subtracted this doesn't work very well.
@@ -140,15 +141,12 @@ class VideoReader:
 
         # Find the contours
         contours = []
-        if cont_threshold is None:
-            cont_threshold = self.contour_thresh
+        if cont_threshold_ratio is None:
+            cont_threshold_ratio = self.contour_thresh_ratio
+
         attempts = 0
         while len(contours) == 0 or len(contours) > MAX_CONTOURS_ALLOWED:
-            threshold = max_brightness * cont_threshold
-            if threshold < MIN_REQ_THRESHOLD:
-                logger.warning(f'Threshold ({threshold:.2f}) too low. Min required = {MIN_REQ_THRESHOLD}.')
-                return []
-
+            threshold = max(MIN_REQ_THRESHOLD, int(max_brightness * cont_threshold_ratio))
             contours, mask = contour_mask(
                 image,
                 thresh=threshold,
@@ -163,11 +161,16 @@ class VideoReader:
 
             # If no contours found, decrease the threshold and try again
             if len(contours) == 0:
-                cont_threshold -= 0.05
+                cont_threshold_ratio -= 0.05
+
+                # Allow one less-than-minimum threshold to be processed so we save to the database and can avoid repeating it.
+                if threshold <= MIN_REQ_THRESHOLD:
+                    logger.warning(f'Threshold ({threshold}) now too low. Min required = {MIN_REQ_THRESHOLD}.')
+                    break
 
             # If too many contours found, increase the threshold and try again
             if len(contours) > MAX_CONTOURS_ALLOWED:
-                cont_threshold += 0.05
+                cont_threshold_ratio += 0.05
 
             # Bail if too many attempts
             attempts += 1
@@ -178,20 +181,21 @@ class VideoReader:
                 )
                 break
 
-        return contours
+        return contours, threshold
 
-    def find_objects(self, cont_threshold: float = None) -> np.ndarray:
+    def find_objects(self, cont_threshold_ratio: float = None) -> Tuple[np.ndarray, float]:
         """
-        Finds contours in the current frame and returns the centre point coordinates.
+        Finds contours in the current frame and returns all centre point coordinates plus
+        the final threshold value used to find them (it is automatically adjusted as needed).
         """
-        contours = self.find_contours(
+        contours, final_threshold = self.find_contours(
             subtract_background=True,
-            cont_threshold=cont_threshold
+            cont_threshold_ratio=cont_threshold_ratio
         )
         centres = []
         for c in contours:
             centres.append(contour_centre(c))
-        return centres
+        return centres, final_threshold
 
     def get_background(self) -> np.ndarray:
         """

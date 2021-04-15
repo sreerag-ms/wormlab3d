@@ -130,7 +130,7 @@ def test_triangulate_video():
     points_3d = []
     for _ in reader:
         logger.debug(f'Frame number = {reader.current_frame}')
-        centres = reader.find_objects()
+        centres, thresholds = reader.find_objects()
         res_3d = triangulate(
             image_points=centres,
             cameras=cameras

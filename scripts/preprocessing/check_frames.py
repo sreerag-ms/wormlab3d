@@ -18,23 +18,26 @@ def check_frames(
         check_frame_counts: bool = False,
         check_backgrounds: bool = False,
         check_brightnesses: bool = True,
+        check_thresholds: bool = True,
         check_centres: bool = True,
         check_images: bool = True,
 ):
     """
-    Runs a sweep of the trials and frames in the database and checks backgrounds, centres, images and brightness levels.
+    Runs a sweep of the trials and frames in the database and checks backgrounds, centres, images, thresholds and brightness levels.
     """
-    assert any([check_frame_counts, check_backgrounds, check_brightnesses, check_centres, check_images])
+    assert any(
+        [check_frame_counts, check_backgrounds, check_brightnesses, check_thresholds, check_centres, check_images])
     trials, cam_idxs = resolve_targets(experiment_id, trial_id, camera_idx)
     trial_ids = [t.id for t in trials]
 
     frame_counts = {}
     trials_incorrect_counts = OrderedDict()
     trials_missing_backgrounds = []
+    trials_missing_brightnesses = OrderedDict()
+    trials_missing_thresholds = OrderedDict()
     trials_missing_centres_2d = OrderedDict()
     trials_missing_centres_3d = OrderedDict()
     trials_missing_images = OrderedDict()
-    trials_missing_brightnesses = OrderedDict()
 
     # Iterate over matching trials
     for trial_id in trial_ids:
@@ -87,9 +90,24 @@ def check_frames(
                 },
                 'frame_num__lt': max(trial.n_frames),
             }
-            n_frames_missing_brightnesses = trial.get_frames(filters).count()
-            if n_frames_missing_brightnesses > 0:
-                trials_missing_brightnesses[trial.id] = n_frames_missing_brightnesses
+            n_frames = trial.get_frames(filters).count()
+            if n_frames > 0:
+                trials_missing_brightnesses[trial.id] = n_frames
+
+        # Check for pre-computed thresholds values
+        if check_thresholds:
+            filters = {
+                '__raw__': {
+                    '$or': [
+                        {'centres_2d_thresholds': None},
+                        {'centres_2d_thresholds': {'$size': 0}},
+                    ]
+                },
+                'frame_num__lt': max(trial.n_frames),
+            }
+            n_frames = trial.get_frames(filters).count()
+            if n_frames > 0:
+                trials_missing_thresholds[trial.id] = n_frames
 
         if check_centres:
             # 2D centres - check present in each camera
@@ -133,9 +151,9 @@ def check_frames(
                 },
                 'frame_num__lt': min(trial.n_frames),
             }
-            n_frames_missing_images = trial.get_frames(filters).count()
-            if n_frames_missing_images > 0:
-                trials_missing_images[trial.id] = n_frames_missing_images
+            n_frames = trial.get_frames(filters).count()
+            if n_frames > 0:
+                trials_missing_images[trial.id] = n_frames
 
         gc.collect()
 
@@ -195,6 +213,8 @@ def check_frames(
 
     if check_brightnesses:
         make_log_section('MAX BRIGHTNESSES', trials_missing_brightnesses, 'max')
+    if check_thresholds:
+        make_log_section('CONTOURING THRESHOLDS', trials_missing_thresholds, 'max')
     if check_centres:
         make_log_section('CENTRES 2D', trials_missing_centres_2d, 'max')
         make_log_section('CENTRES 3D', trials_missing_centres_3d, 'min')

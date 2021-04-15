@@ -7,7 +7,7 @@ from wormlab3d import logger
 
 CONT_MIN_AREA = 300
 CONT_MAX_AREA = 20000
-CONT_THRESH_DEFAULT = .4
+CONT_THRESH_RATIO_DEFAULT = .4
 MAX_CONTOURING_ATTEMPTS = 5
 MAX_CONTOURS_ALLOWED = 10
 MIN_REQ_THRESHOLD = 15
@@ -15,7 +15,7 @@ MIN_REQ_THRESHOLD = 15
 
 def find_contours(
         image: np.ndarray,
-        thresh: float = 50.,
+        thresh: int = 50,
         maxval: int = 255,
         min_area: int = CONT_MIN_AREA,
         max_area: int = CONT_MAX_AREA,
@@ -25,8 +25,8 @@ def find_contours(
     The image is first thresholded using `thresh` and `maxval` arguments before all contours are found.
     The possible contours are then filtered to remove any smaller than `min_area` or larger than `max_area`.
     """
-    logger.debug(f'Finding contours (thresh={thresh:.2f}, maxval={maxval}, min_area={min_area}, max_area={max_area})')
     thresh = int(thresh)
+    logger.debug(f'Finding contours (thresh={thresh}, maxval={maxval}, min_area={min_area}, max_area={max_area})')
     assert image.dtype == np.uint8
 
     # Threshold the image
@@ -51,7 +51,7 @@ def find_contours(
 
 def contour_mask(
         image: np.ndarray,
-        thresh: float = 50.,
+        thresh: int = 50,
         maxval: int = 255,
         min_area: int = CONT_MIN_AREA,
         max_area: int = CONT_MAX_AREA

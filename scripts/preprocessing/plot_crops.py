@@ -40,7 +40,7 @@ def plot_crops(trial_id, frame_num=1):
         centres_2d = frame.centres_2d
     else:
         logger.info('Frame has no 2d centres precomputed, computing new ones.')
-        centres_2d = reader.find_objects()
+        centres_2d, thresholds = reader.find_objects()
 
     # Check for prepared images
     has_prepared_images = False
