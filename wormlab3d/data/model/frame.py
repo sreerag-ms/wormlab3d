@@ -95,7 +95,10 @@ class Frame(Document):
         """
         if cont_threshold_ratios is None:
             cont_threshold_ratios = [CONT_THRESH_RATIO_DEFAULT] * 3
-        assert len(cont_threshold_ratios) == 3
+        assert len(
+            cont_threshold_ratios) == 3, f'Received {len(cont_threshold_ratios)} contour threshold ratios. Needed 3.'
+        assert len(
+            self.max_brightnesses) == 3, f'Max brightnesses not set for all views in frame: {self.max_brightnesses}.'
 
         # Check if we've already got results with this threshold for any of the cameras
         if self.centres_2d_available() and len(self.centres_2d_thresholds) == 3 and len(self.max_brightnesses) == 3:
@@ -324,12 +327,16 @@ class Frame(Document):
 
         # If we've got here then we've exhausted our options without success.
         if best is None:
-            raise RuntimeError('Triangulation failed, completely.')
+            logger.error('Triangulation failed, completely.')
+            return False
         logger.debug(f'Best error with any cameras = {best_err:.2f}.')
 
         # But there may be a bad result to save
+        res = False
         if store_bad_result:
-            _update_centre_3d(ignore_threshold=True)
+            res = _update_centre_3d(ignore_threshold=True)
+
+        return res
 
     def generate_prepared_images(self):
         """
@@ -339,7 +346,9 @@ class Frame(Document):
         # Check the centre point exists and if not, create it
         if self.centre_3d is None:
             logger.warning('Frame does not have a 3d centre point available, generating now.')
-            self.generate_centre_3d()
+            res = self.generate_centre_3d()
+            if not res:
+                return False
             assert self.centre_3d is not None
 
         # Set the frame number, fetch the images from each video and generate the crops
@@ -347,7 +356,7 @@ class Frame(Document):
         reader.set_frame_num(self.frame_num)
         images = reader.get_images(invert=True, subtract_background=True)
         crops = []
-        for c, image in enumerate(images):
+        for c, image in images.items():
             crop = crop_image(
                 image=image,
                 centre_2d=self.centre_3d.reprojected_points_2d[c],

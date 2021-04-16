@@ -25,9 +25,9 @@ def generate_centres_2d(
     """
     trials, cam_idxs = resolve_targets(experiment_id, trial_id, camera_idx, frame_num)
     if missing_only:
-        logger.info(f'Generating any missing 2D centre points for {len(trials)} trials.')
+        logger.info(f'Generating any missing 2D centre points for {trials.count()} trials.')
     else:
-        logger.info(f'(Re)generating ALL 2D centre points for {len(trials)} trials.')
+        logger.info(f'(Re)generating ALL 2D centre points for {trials.count()} trials.')
 
     if min_brightness is None:
         min_brightness = MIN_REQ_THRESHOLD / contour_threshold_ratio
@@ -74,7 +74,7 @@ def generate_centres_2d(
                 )
 
             filters = {'__raw__': {'$or': matches}}
-            frames = trial.get_frames(filters)
+            frames = trial.get_frames(filters).no_dereference()
         frame_ids = [f.id for f in frames]
 
         if len(frame_ids) == 0:
@@ -140,6 +140,7 @@ def generate_centres_2d(
                     if centres != frame.centres_2d[c]:
                         frame.centres_2d[c] = centres
                         frame.centre_3d = None
+                        frame.images = None
                     frame.centres_2d_thresholds[c] = final_thresholds
                 except Exception as e:
                     logger.error(log_prefix_c + f'Failed to find objects: {e}')
@@ -178,9 +179,9 @@ def generate_centres_3d(
     trials, cam_idxs = resolve_targets(experiment_id, trial_id, None, frame_num)
     trial_ids = [t.id for t in trials]
     if missing_only:
-        logger.info(f'Generating any missing 3D centre points for {len(trials)} trials.')
+        logger.info(f'Generating any missing 3D centre points for {trials.count()} trials.')
     else:
-        logger.info(f'(Re)generating ALL 3D centre points for {len(trials)} trials.')
+        logger.info(f'(Re)generating ALL 3D centre points for {trials.count()} trials.')
 
     # Iterate over matching trials
     for trial_id in trial_ids:
@@ -205,11 +206,11 @@ def generate_centres_3d(
             else:
                 filters = None
             frames = trial.get_frames(filters).only('id')
-        frame_ids = [f.id for f in frames]
 
-        if len(frame_ids) == 0:
+        if frames.count() == 0:
             logger.debug('No frames missing 3D centre points!')
             continue
+        frame_ids = [f.id for f in frames]
         logger.debug(f'Found {len(frame_ids)} frames to process.')
 
         # Check if the trial has cameras
@@ -250,7 +251,7 @@ def generate_centres_3d(
 
             logger.info(log_prefix + 'Triangulating...')
             try:
-                frame.generate_centre_3d(
+                res = frame.generate_centre_3d(
                     x0=prev_point,
                     error_threshold=error_threshold,
                     try_experiment_cams=has_exp_cameras,
@@ -261,6 +262,8 @@ def generate_centres_3d(
                     ratio_adj_exp=ratio_adj_exp,
                     ratio_adj_all=ratio_adj_all,
                 )
+                if not res:
+                    logger.error(log_prefix + f'Failed to find 3D centre.')
             except Exception as e:
                 logger.error(log_prefix + f'Failed to find 3D centre: {e}')
                 # raise
@@ -286,15 +289,14 @@ if __name__ == '__main__':
     # Frame.unlock_all()
     # Frame.reset_centres()
 
-    # generate_centres_2d(
+    generate_centres_2d(
     # trial_id=trial_id,
     # frame_num=frame_num
-    # missing_only=True
-    # )
-    generate_centres_3d(
-        missing_only=True,
-        ratio_adj_orig=0.1,
-        ratio_adj_exp=0,
-        ratio_adj_all=0.1,
-
+        missing_only=True
     )
+    # generate_centres_3d(
+    #     missing_only=True,
+    #     ratio_adj_orig=0.1,
+    #     ratio_adj_exp=0,
+    #     ratio_adj_all=0.1,
+    # )

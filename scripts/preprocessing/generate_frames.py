@@ -27,6 +27,7 @@ def generate_frames(
         logger.info(f'Checking trial id={trial_id}.')
         trial = Trial.objects.get(id=trial_id)
 
+        # Get video readers and check frame counts
         reader = trial.get_video_triplet_reader()
         n_frames = reader.get_frame_counts()
         max_n_frames = max(n_frames)
@@ -52,8 +53,8 @@ def generate_frames(
 
         # Check for surplus frames
         surplus = trial.get_frames({'frame_num__gt': max_n_frames})
-        if len(surplus) > 0:
-            log_prefix = f'Found {len(surplus)} frames in database without corresponding/readable video frames. '
+        if surplus.count() > 0:
+            log_prefix = f'Found {surplus.count()} frames in database without corresponding/readable video frames. '
             if remove_surplus_frames:
                 logger.warning(log_prefix + 'Removing.')
                 Frame.objects(
@@ -64,10 +65,10 @@ def generate_frames(
 
         # Check for missing frames
         existing = trial.get_frames({'frame_num__lte': max_n_frames})
-        if len(existing) < max_n_frames:
-            log_prefix = f'Found {len(existing)}/{max_n_frames} frames in database. '
+        if existing.count() < max_n_frames:
+            log_prefix = f'Found {existing.count()}/{max_n_frames} frames in database. '
             if add_missing_frames:
-                logger.warning(log_prefix + f'Adding {max_n_frames - len(existing)} missing frames.')
+                logger.warning(log_prefix + f'Adding {max_n_frames - existing.count()} missing frames.')
                 existing_frame_nums = [f.frame_num for f in existing]
 
                 # Add missing frames
@@ -99,7 +100,8 @@ def generate_frames(
                     }}
                 else:
                     filters = {}
-                frames = trial.get_frames(filters)
+                frames = trial.get_frames(filters).no_dereference()
+
             frame_ids = [f.id for f in frames]
             for frame_id in frame_ids:
                 frame = Frame.objects.get(id=frame_id)
