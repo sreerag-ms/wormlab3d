@@ -30,6 +30,11 @@ class Trial(Document):
     legacy_id = IntField(unique=True)
     legacy_data = DictField()
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.readers = [None] * 3
+        self.triplet_reader = None
+
     def get_frame(self, frame_num) -> Frame:
         return Frame.objects.get(
             trial=self,
@@ -44,7 +49,7 @@ class Trial(Document):
             **filters
         )
 
-    def get_cameras(self, best: bool = True, fallback_to_experiment: bool=True) -> Union[Cameras, List[Cameras]]:
+    def get_cameras(self, best: bool = True, fallback_to_experiment: bool = True) -> Union[Cameras, List[Cameras]]:
         """
         Fetch the camera models for this trial.
         If best=False then returns a list of all associated, otherwise picks the best according to reprojection_error.
@@ -88,33 +93,40 @@ class Trial(Document):
 
         return clips
 
-    def get_video_reader(self, camera_idx: int) -> VideoReader:
+    def get_video_reader(self, camera_idx: int, reload: bool = False) -> VideoReader:
         """
         Instantiate a video reader for the recording taken by the target camera.
         """
         assert camera_idx in CAMERA_IDXS
-        vid_path = fix_path(self.videos[camera_idx])
-        if len(self.backgrounds) > 0:
-            bg_path = fix_path(self.backgrounds[camera_idx])
-        else:
-            bg_path = None
 
-        return VideoReader(
-            video_path=vid_path,
-            background_image_path=bg_path
-        )
+        if self.readers[camera_idx] is None or reload:
+            vid_path = fix_path(self.videos[camera_idx])
+            if len(self.backgrounds) > 0:
+                bg_path = fix_path(self.backgrounds[camera_idx])
+            else:
+                bg_path = None
 
-    def get_video_triplet_reader(self) -> VideoTripletReader:
+            self.readers[camera_idx] = VideoReader(
+                video_path=vid_path,
+                background_image_path=bg_path
+            )
+
+        return self.readers[camera_idx]
+
+    def get_video_triplet_reader(self, reload: bool = False) -> VideoTripletReader:
         """
         Instantiate a video-triplet reader to read all recordings in sync.
         """
-        vid_paths = [fix_path(self.videos[c]) for c in CAMERA_IDXS]
-        if len(self.backgrounds) > 0:
-            bg_paths = [fix_path(self.backgrounds[c]) for c in CAMERA_IDXS]
-        else:
-            bg_paths = None
+        if self.triplet_reader is None or reload:
+            vid_paths = [fix_path(self.videos[c]) for c in CAMERA_IDXS]
+            if len(self.backgrounds) > 0:
+                bg_paths = [fix_path(self.backgrounds[c]) for c in CAMERA_IDXS]
+            else:
+                bg_paths = None
 
-        return VideoTripletReader(
-            video_paths=vid_paths,
-            background_image_paths=bg_paths
-        )
+            self.triplet_reader = VideoTripletReader(
+                video_paths=vid_paths,
+                background_image_paths=bg_paths
+            )
+
+        return self.triplet_reader

@@ -15,7 +15,8 @@ def generate_dataset(
         restrict_tags=restrict_tags,
         restrict_concs=restrict_concs,
         centre_3d_max_error=centre_3d_max_error,
-        exclude_trials=[258, 183, 88, 115, 86, 29, 84, 85, 218]
+        exclude_trials=[258]
+        # exclude_trials=[258, 183, 88, 115, 86, 29, 84, 85, 218]
     )
     generate_midline2d_dataset(dataset_params, fix_frames=True)
 

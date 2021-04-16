@@ -4,7 +4,7 @@ import numpy as np
 
 from wormlab3d import CAMERA_IDXS, logger
 from wormlab3d.data.model.trial import Trial
-from wormlab3d.preprocessing.contour import CONT_THRESH_DEFAULT
+from wormlab3d.preprocessing.contour import CONT_THRESH_RATIO_DEFAULT
 from wormlab3d.toolkit.plot_utils import interactive_plots
 from wormlab3d.toolkit.triangulate import triangulate
 
@@ -14,7 +14,7 @@ MAX_RESULTS = 5
 def plot_triangulations(
         trial_id: int,
         frame_num: int = 1,
-        contour_threshold: float = CONT_THRESH_DEFAULT
+        contour_threshold_ratio: float = CONT_THRESH_RATIO_DEFAULT
 ):
     interactive_plots()
 
@@ -26,8 +26,8 @@ def plot_triangulations(
     # Set the frame number, fetch the images from each video and find objects in all 3
     reader.set_frame_num(frame_num)
     images = reader.get_images()
-    contours = reader.find_contours(cont_threshold=contour_threshold)
-    centres = reader.find_objects(cont_threshold=contour_threshold)
+    contours, thresholds = reader.find_contours(cont_threshold_ratio=contour_threshold_ratio)
+    centres, thresholds = reader.find_objects(cont_threshold_ratio=contour_threshold_ratio)
 
     # Do the triangulation from all experiment cameras
     cameras_res = []
