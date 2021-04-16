@@ -45,9 +45,9 @@ class DatasetLoader(DatasetTorch, ABC):
         assert train_or_test in ['train', 'test']
         self.ds = ds
         self.train_or_test = train_or_test
-        self.augment = ds_args.augment,
+        self.augment = ds_args.augment
         self._get_transforms()
-        self.preload = ds_args.preload_from_database,
+        self.preload = ds_args.preload_from_database
         if self.preload:
             self._preload_data()
 
