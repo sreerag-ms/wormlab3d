@@ -1,4 +1,5 @@
 import datetime
+from typing import List
 
 import numpy as np
 from mongoengine import *
@@ -21,11 +22,19 @@ class SegmentationMasks(Document):
         compression=COMPRESS_BLOSC_POINTER
     )
 
+    # Indexes
     meta = {
         'indexes': [
+            'trial',
+            'frame',
+            'checkpoint',
             {
                 'fields': ['trial', 'frame', 'checkpoint'],
                 'unique': True
             }
         ],
+        'ordering': ['-created']
     }
+
+    def get_images(self) -> List[np.ndarray]:
+        return self.frame.images
