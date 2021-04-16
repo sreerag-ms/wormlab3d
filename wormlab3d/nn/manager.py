@@ -226,7 +226,7 @@ class Manager:
                         id=self.runtime_args.resume_from
                     )
                 logger.info(f'Loaded checkpoint id={prev_checkpoint.id}, created={prev_checkpoint.created}')
-                logger.info(f'Test loss = {prev_checkpoint.loss_test:.5f}')
+                logger.info(f'Test loss = {prev_checkpoint.loss_test:.6f}')
                 for key, val in prev_checkpoint.stats_test.items():
                     logger.info(f'\t{key}: {val:.4E}')
             except DoesNotExist:
@@ -336,13 +336,17 @@ class Manager:
         starting_epoch = self.checkpoint.epoch + 1
         final_epoch = starting_epoch + n_epochs - 1
 
+        # Reset learning rates (todo: this properly)
+        for group in self.optimiser.param_groups:
+            group['lr'] = self.optimiser_args.lr_init
+
         # todo: lr scheduler
-        milestones = [n_epochs // 2, n_epochs // (4 / 3)]
+        milestones = [n_epochs // 2 + starting_epoch, n_epochs // (4 / 3) + starting_epoch]
         lr_scheduler = optim.lr_scheduler.MultiStepLR(
             optimizer=self.optimiser,
             milestones=milestones,
             gamma=self.optimiser_args.lr_gamma,
-            # last_epoch=starting_epoch-1
+            last_epoch=starting_epoch - 1
         )
 
         for epoch in range(starting_epoch, final_epoch + 1):
