@@ -1,5 +1,7 @@
 import numpy as np
 from mongoengine import *
+from skimage.draw import line, line_aa
+from skimage.filters import gaussian
 
 from wormlab3d import PREPARED_IMAGE_SIZE, CAMERA_IDXS, logger
 from wormlab3d.data.numpy_field import NumpyField, COMPRESS_BLOSC_PACK
@@ -55,20 +57,37 @@ class Midline2D(Document):
               & (X[:, 1] < PREPARED_IMAGE_SIZE[1] - 0.5)]
         return X
 
-    def get_segmentation_mask(self, blur_sigma=None) -> np.ndarray:
+    def get_segmentation_mask(self, blur_sigma: float = None, draw_mode: str = 'line_aa') -> np.ndarray:
         """
-        Turn the midline coordinates into a segmentation mask.
-        Optionally apply a gaussian blur to the mask and then renormalise.
-        This has the effect of making the midline larger.
+        Turn the midline coordinates into a segmentation mask by drawing the coordinates onto the mask
+        either using (anti-aliased or not) straight-line interpolations or just the individual pixels.
+        Optionally apply a gaussian blur to the mask and then renormalise -- this has the effect of making the midline thicker.
         """
         X = self.get_prepared_coordinates()
         X = X.round().astype(np.uint8)
         mask = np.zeros(PREPARED_IMAGE_SIZE, dtype=np.float32)
-        mask[X[:, 1], X[:, 0]] = 1
+
+        # Anti-aliased lines between coordinates
+        if draw_mode == 'line_aa':
+            for i in range(len(X) - 1):
+                rr, cc, val = line_aa(X[i, 1], X[i, 0], X[i + 1, 1], X[i + 1, 0])
+                mask[rr, cc] = val
+
+        # Simpler single-pixel lines between coordinates
+        elif draw_mode == 'line':
+            for i in range(len(X) - 1):
+                rr, cc = line(X[i, 1], X[i, 0], X[i + 1, 1], X[i + 1, 0])
+                mask[rr, cc] = 1
+
+        # Draw the coordinate pixels only
+        elif draw_mode == 'pixels':
+            mask[X[:, 1], X[:, 0]] = 1
+
+        else:
+            raise RuntimeError(f'Unrecognised draw_mode: {draw_mode}')
 
         # Apply a gaussian blur and then re-normalise to "fatten" the midline
         if blur_sigma is not None:
-            from skimage.filters import gaussian
             mask = gaussian(mask, sigma=blur_sigma)
 
             # Normalise to [0-1] with float32 dtype
