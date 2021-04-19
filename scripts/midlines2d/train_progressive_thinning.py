@@ -47,6 +47,6 @@ def train_progressive_thinning(
 if __name__ == '__main__':
     train_progressive_thinning(
         n_sigmas=10,
-        sigmas_min=1,
-        sigmas_max=10,
+        sigmas_min=0.5,
+        sigmas_max=1.5,
     )

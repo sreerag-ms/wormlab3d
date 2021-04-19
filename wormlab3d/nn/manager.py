@@ -19,6 +19,7 @@ from wormlab3d.data.model.frame import PREPARED_IMAGE_SIZE
 from wormlab3d.data.model.network_parameters import *
 from wormlab3d.nn.args import DatasetArgs, NetworkArgs, OptimiserArgs, RuntimeArgs
 from wormlab3d.nn.data_loader import load_dataset
+from wormlab3d.nn.wrapped_data_parallel import WrappedDataParallel
 from wormlab3d.toolkit.util import to_dict
 
 LOG_EVERY_N_BATCHES = 1
@@ -180,7 +181,7 @@ class Manager:
         if device.type == 'cuda':
             if n_gpus > 1:
                 logger.info('Using {} GPUs!'.format(n_gpus))
-                self.net.multi_gpu_mode()
+                self.net = WrappedDataParallel(self.net)
             else:
                 logger.info('Using GPU')
             cudnn.benchmark = True  # optimises code for constant input sizes
@@ -346,7 +347,7 @@ class Manager:
             optimizer=self.optimiser,
             milestones=milestones,
             gamma=self.optimiser_args.lr_gamma,
-            last_epoch=starting_epoch - 1
+            last_epoch=starting_epoch - 1 if starting_epoch > 1 else -1
         )
 
         for epoch in range(starting_epoch, final_epoch + 1):
