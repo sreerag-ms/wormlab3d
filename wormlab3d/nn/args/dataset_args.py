@@ -1,14 +1,15 @@
-from argparse import ArgumentParser, Namespace
+from argparse import ArgumentParser, _ArgumentGroup
 from typing import List
 
+from wormlab3d.nn.args.base_args import BaseArgs
 from wormlab3d.toolkit.util import str2bool
 
 
-class DatasetArgs:
+class DatasetArgs(BaseArgs):
     def __init__(
             self,
-            ds_id: str = None,
-            load: bool = True,
+            dataset_id: str = None,
+            load_dataset: bool = True,
             train_test_split: float = 0.8,
             restrict_tags: List[int] = None,
             restrict_concs: List[float] = None,
@@ -19,13 +20,14 @@ class DatasetArgs:
             include_experiments: List[int] = None,
             augment: bool = False,
             n_dataloader_workers: int = 4,
-            preload_from_database: bool = False
+            preload_from_database: bool = False,
+            **kwargs
     ):
         self.dataset_type = None
-        self.ds_id = ds_id
-        if ds_id is not None:
-            assert load, 'Dataset id defined, this is incompatible with load=False'
-        self.load = load
+        self.ds_id = dataset_id
+        if dataset_id is not None:
+            assert load_dataset, 'Dataset id defined, this is incompatible with load=False.'
+        self.load = load_dataset
         self.train_test_split = train_test_split
         if restrict_tags is None:
             restrict_tags = []
@@ -58,58 +60,39 @@ class DatasetArgs:
         self.n_dataloader_workers = n_dataloader_workers
         self.preload_from_database = preload_from_database
 
-    @staticmethod
-    def add_args(parser: ArgumentParser):
+    @classmethod
+    def add_args(cls, parser: ArgumentParser) -> _ArgumentGroup:
         """
         Add arguments to a command parser.
         """
-        parser.add_argument('--dataset-id', type=str,
-                            help='Load a dataset by its database id.')
-        parser.add_argument('--load-dataset', type=str2bool, default=True,
-                            help='Try to load an existing dataset if available matching the given parameters.')
-        parser.add_argument('--train-test-split', type=float, default=0.8,
-                            help='Train/test split.')
-        parser.add_argument('--restrict-tags', type=lambda s: [int(item) for item in s.split(',')],
-                            help='Restrict the dataset to only include items matching (any of) the given (comma delimited) list of tag ids.')
-        parser.add_argument('--restrict-concs', type=lambda s: [float(item) for item in s.split(',')],
-                            help='Restrict the dataset to only include data from experiments at given (comma delimited) concentrations.')
-        parser.add_argument('--centre-3d-max-error', type=float, default=50,
-                            help='Maximum allowed reprojection error for the frame\'s 3d centre points.')
-        parser.add_argument('--exclude-experiments', type=lambda s: [int(item) for item in s.split(',')],
-                            help='Exclude data from these experiments.')
-        parser.add_argument('--include-experiments', type=lambda s: [int(item) for item in s.split(',')],
-                            help='Only include data from these experiments.')
-        parser.add_argument('--exclude-trials', type=lambda s: [int(item) for item in s.split(',')],
-                            help='Exclude data from these trials.')
-        parser.add_argument('--include-trials', type=lambda s: [int(item) for item in s.split(',')],
-                            help='Only include data from these trials.')
-        parser.add_argument('--augment', type=str2bool, default=True,
-                            help='Apply data augmentation.')
-        parser.add_argument('--n-dataloader-workers', type=int, default=4,
-                            help='Number of dataloader worker processes.')
-        parser.add_argument('--preload-from-database', type=str2bool, default=False,
-                            help='Preload all data from the database before starting, as opposed to loading on demand.')
-
-    @staticmethod
-    def from_args(args: Namespace) -> 'DatasetArgs':
-        """
-        Create a DatasetArgs instance from command-line arguments.
-        """
-        return DatasetArgs(
-            ds_id=args.dataset_id,
-            load=args.load_dataset,
-            train_test_split=args.train_test_split,
-            restrict_tags=args.restrict_tags,
-            restrict_concs=args.restrict_concs,
-            centre_3d_max_error=args.centre_3d_max_error,
-            exclude_experiments=args.exclude_experiments,
-            include_experiments=args.include_experiments,
-            exclude_trials=args.exclude_trials,
-            include_trials=args.include_trials,
-            augment=args.augment,
-            n_dataloader_workers=args.n_dataloader_workers,
-            preload_from_database=args.preload_from_database,
-        )
+        group = parser.add_argument_group('Dataset Args')
+        group.add_argument('--dataset-id', type=str,
+                           help='Load a dataset by its database id.')
+        group.add_argument('--load-dataset', type=str2bool, default=True,
+                           help='Try to load an existing dataset if available matching the given parameters.')
+        group.add_argument('--train-test-split', type=float, default=0.8,
+                           help='Train/test split.')
+        group.add_argument('--restrict-tags', type=lambda s: [int(item) for item in s.split(',')],
+                           help='Restrict the dataset to only include items matching (any of) the given (comma delimited) list of tag ids.')
+        group.add_argument('--restrict-concs', type=lambda s: [float(item) for item in s.split(',')],
+                           help='Restrict the dataset to only include data from experiments at given (comma delimited) concentrations.')
+        group.add_argument('--centre-3d-max-error', type=float, default=50,
+                           help='Maximum allowed reprojection error for the frame\'s 3d centre points.')
+        group.add_argument('--exclude-experiments', type=lambda s: [int(item) for item in s.split(',')],
+                           help='Exclude data from these experiments.')
+        group.add_argument('--include-experiments', type=lambda s: [int(item) for item in s.split(',')],
+                           help='Only include data from these experiments.')
+        group.add_argument('--exclude-trials', type=lambda s: [int(item) for item in s.split(',')],
+                           help='Exclude data from these trials.')
+        group.add_argument('--include-trials', type=lambda s: [int(item) for item in s.split(',')],
+                           help='Only include data from these trials.')
+        group.add_argument('--augment', type=str2bool, default=True,
+                           help='Apply data augmentation.')
+        group.add_argument('--n-dataloader-workers', type=int, default=4,
+                           help='Number of dataloader worker processes.')
+        group.add_argument('--preload-from-database', type=str2bool, default=False,
+                           help='Preload all data from the database before starting, as opposed to loading on demand.')
+        return group
 
     def get_info(self) -> List[str]:
         return [

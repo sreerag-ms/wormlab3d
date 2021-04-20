@@ -7,6 +7,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
+from wormlab3d import PREPARED_IMAGE_SIZE
 from wormlab3d.data.model import Midline2D
 from wormlab3d.midlines2d.args import DatasetMidline2DArgs
 from wormlab3d.midlines2d.data_loader import get_data_loader
@@ -36,6 +37,14 @@ class Manager(BaseManager):
             train_or_test=train_or_test,
             batch_size=self.runtime_args.batch_size
         )
+
+    @property
+    def input_shape(self) -> Tuple[int]:
+        return (1,) + PREPARED_IMAGE_SIZE
+
+    @property
+    def output_shape(self) -> Tuple[int]:
+        return (1,) + PREPARED_IMAGE_SIZE
 
     def _process_batch(self, data: Tuple[torch.Tensor, torch.Tensor, List[Midline2D]]) \
             -> Tuple[torch.Tensor, torch.Tensor, Dict]:

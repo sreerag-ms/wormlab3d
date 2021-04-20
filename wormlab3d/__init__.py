@@ -29,6 +29,9 @@ PREPARED_IMAGE_SIZE = (200, 200)
 # Camera indices, for the avoidance of doubt
 CAMERA_IDXS = [0, 1, 2]
 
+# Worm length in terms of number of coordinates/sections
+N_WORM_POINTS = 128
+
 
 # || ------------------------------ DATABASE ------------------------------- ||
 

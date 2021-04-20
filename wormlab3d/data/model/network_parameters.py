@@ -156,16 +156,16 @@ class NetworkParametersRDN(NetworkParameters):
     M = IntField(required=True)
     N = IntField(required=True)
     G = IntField(required=True)
-    C_out = IntField(required=True)
+    C_out = IntField(required=False)
     kernel_size = IntField(required=True)
     activation = StringField(required=True)
     batch_norm = BooleanField(required=True)
     act_out = StringField()
 
     def instantiate_network(self, build_model: bool = True) -> Union[RDN, MSRDN]:
-        assert self.input_shape == self.output_shape
         model_params = {
-            'data_shape': self.input_shape,
+            'input_shape': self.input_shape,
+            'output_shape': self.output_shape,
             'K': self.K,
             'M': self.M,
             'N': self.N,

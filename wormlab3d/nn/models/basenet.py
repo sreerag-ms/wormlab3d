@@ -31,7 +31,7 @@ class BaseNet(nn.Module, ABC):
     def multi_gpu_mode(self):
         self.model = nn.DataParallel(self.model)
 
-    def calc_norms(self, p=2):
+    def calc_norms(self, p: int = 2) -> float:
         p_norms = {}
         for name, m in self.named_modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):

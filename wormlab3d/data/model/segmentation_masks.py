@@ -23,6 +23,9 @@ class SegmentationMasks(Document):
 
     meta = {
         'indexes': [
+            'trial',
+            'frame',
+            'checkpoint',
             {
                 'fields': ['trial', 'frame', 'checkpoint'],
                 'unique': True

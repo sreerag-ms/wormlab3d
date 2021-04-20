@@ -2,18 +2,20 @@ import sys
 from argparse import ArgumentParser, Namespace
 
 from wormlab3d.data.model.network_parameters import *
+from wormlab3d.nn.args.base_args import BaseArgs
 from wormlab3d.toolkit.util import str2bool
 
 NETWORK_TYPES = ['densenet', 'fcnet', 'resnet', 'pyramidnet', 'aenet', 'nunet', 'rdn']
 
 
-class NetworkArgs:
+class NetworkArgs(BaseArgs):
     def __init__(
             self,
             net_id: str = None,
             load: bool = True,
             base_net: str = None,
             hyperparameters: dict = None,
+            **kwargs
     ):
         assert net_id is not None or base_net in NETWORK_TYPES
         self.load = load
@@ -23,15 +25,17 @@ class NetworkArgs:
             hyperparameters = {}
         self.hyperparameters = hyperparameters
 
-    @staticmethod
-    def add_args(parser: ArgumentParser):
+    @classmethod
+    def add_args(cls, parser: ArgumentParser):
         """
         Add arguments to a command parser.
         """
-        parser.add_argument('--net-id', type=str,
-                            help='Load a network by its database id.')
-        parser.add_argument('--load-net', type=str2bool, default=True,
-                            help='Try to load an existing network if available matching the given parameters.')
+        group = parser.add_argument_group('Network Args')
+
+        group.add_argument('--net-id', type=str,
+                           help='Load a network by its database id.')
+        group.add_argument('--load-net', type=str2bool, default=True,
+                           help='Try to load an existing network if available matching the given parameters.')
 
         # Add network-specific options
         if '--net-id' not in sys.argv:
@@ -45,6 +49,8 @@ class NetworkArgs:
             NetworkArgs._add_pyramidnet_args(subparsers.add_parser('pyramidnet'))
             NetworkArgs._add_nunet_args(subparsers.add_parser('nunet'))
             NetworkArgs._add_rdn_args(subparsers.add_parser('rdn'))
+
+        return group
 
     @staticmethod
     def _add_fcnet_args(parser: Namespace):
@@ -183,8 +189,8 @@ class NetworkArgs:
         parser.add_argument('--batch-norm', type=str2bool, default=False,
                             help='Apply batch normalisation after convolution and activation.')
 
-    @staticmethod
-    def from_args(args) -> 'NetworkArgs':
+    @classmethod
+    def from_args(cls, args: Namespace) -> 'NetworkArgs':
         """
         Create a NetworkParameters instance from command-line arguments.
         """
@@ -248,7 +254,6 @@ class NetworkArgs:
                 'M': args.M,
                 'N': args.N,
                 'G': args.G,
-                'C_out': 1,
                 'kernel_size': args.kernel_size,
                 'activation': args.activation,
                 'act_out': args.act_out if args.act_out is not False else None,

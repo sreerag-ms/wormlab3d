@@ -2,6 +2,7 @@ from typing import Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from wormlab3d.nn.models.basenet import BaseNet
 
@@ -9,12 +10,12 @@ from wormlab3d.nn.models.basenet import BaseNet
 class RDN(BaseNet):
     def __init__(
             self,
-            data_shape: Tuple[int],
+            input_shape: Tuple[int],
+            output_shape: Tuple[int],
             K: int,
             M: int,
             N: int,
             G: int,
-            C_out: int = 12,
             kernel_size: int = 3,
             activation: str = 'relu',
             batch_norm: bool = False,
@@ -22,12 +23,12 @@ class RDN(BaseNet):
             dropout_prob: float = 0.,
             build_model: bool = True
     ):
-        super().__init__(input_shape=data_shape, output_shape=data_shape)
+        super().__init__(input_shape=input_shape, output_shape=output_shape)
         self.K = K  # number of channels
         self.M = M  # number of RDBs
         self.N = N  # number of convs in each RDB
         self.G = G  # growth rate in each RDB
-        self.C_out = C_out  # Number of channels required at output
+        self.C_out = self.output_shape[0]  # Number of channels required at output
         self.batch_norm = batch_norm  # Apply batch normalisation layers
         self.kernel_size = kernel_size  # Spatial convolution kernel size
         self.activation = activation  # Activation function to use 'relu', 'elu', 'gelu'
@@ -60,11 +61,7 @@ class RDN(BaseNet):
         return id_
 
     def _build_model(self):
-        # print('\n\n\nBUILD MODEL-------\n')
         C_in = self.input_shape[0]
-        # spatial_size = self.input_shape[1]
-        # temporal_size = self.input_shape[2]
-        # print(f'[C_in, spatial_size, temporal_size]=[{C_in},{spatial_size},{temporal_size}]')
 
         # Shallow Feature Extraction
         self.SFE = _SFENet(
@@ -101,7 +98,7 @@ class RDN(BaseNet):
         # Add a final 1x1 convolution to resize to number of desired output channels
         self.resize_out = _ConvLayer(
             n_channels_in=self.K,
-            n_channels_out=self.C_out,
+            n_channels_out=self.output_shape[0],
             kernel_size=1,
             activation=self.act_out,
         )
@@ -111,12 +108,16 @@ class RDN(BaseNet):
         F00, F0 = self.SFE(x)
 
         # F0 is fed into the RDB chain
-        F = F0
+        Fi = F0
         Fs = []
         for RDB in self.RDBs:
-            F = RDB(F)
-            Fs.append(F)
+            Fi = RDB(Fi)
+            Fs.append(Fi)
         Fs = torch.cat(Fs, 1)  # concatenate all feature maps F1..FM
+
+        # Resize spatial dimensions to match target output shape
+        Fs = F.interpolate(Fs, self.output_shape[1:], mode='bilinear', align_corners=False)
+        F00 = F.interpolate(F00, self.output_shape[1:], mode='bilinear', align_corners=False)
 
         # Global feature fusion - combine all Fs with residual F00
         y = self.GFF(Fs) + F00
@@ -262,6 +263,8 @@ class _ConvLayer(nn.Module):
             self.activation = nn.Hardswish()
         elif activation == 'tanh':
             self.activation = nn.Tanh()
+        elif activation == 'sigmoid':
+            self.activation = nn.Sigmoid()
         else:
             self.activation = None
 

@@ -17,7 +17,7 @@ def train():
     )
 
     # Generate the neural network computation graph (view in tensorboard)
-    manager.log_graph()
+    # manager.log_graph()
 
     # Do some training
     manager.train(

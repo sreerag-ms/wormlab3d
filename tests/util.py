@@ -1,8 +1,7 @@
 import cv2
 
-from wormlab3d import ROOT_PATH
+from wormlab3d import ROOT_PATH, CAMERA_IDXS
 from wormlab3d.data.model import Cameras
-from wormlab3d.data.model.cameras import CAMERA_IDXS
 
 TEST_DATA_PATH = ROOT_PATH + '/tests/test-data'
 TEST_VIDEO_PATHS = [

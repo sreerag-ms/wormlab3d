@@ -48,7 +48,7 @@ class DatasetSegmentationMasksLoader(DatasetLoader):
             X = mask.X
 
         # Convert to torch tensor
-        X = to_tensor(X)
+        X = torch.from_numpy(X).contiguous().to(torch.float32)
 
         return X, mask
 

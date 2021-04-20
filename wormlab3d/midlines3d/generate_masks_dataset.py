@@ -1,18 +1,14 @@
 from bson import ObjectId
-
 from wormlab3d import logger
-from wormlab3d.data.model import Midline2D
-from wormlab3d.data.model.dataset import DatasetMidline2D, Dataset
-from wormlab3d.midlines2d.args import DatasetMidline2DArgs
-from wormlab3d.nn.generate_dataset import build_pipeline, build_dataset
-
-from wormlab3d import logger
+from wormlab3d.data.model import Checkpoint
 from wormlab3d.data.model import SegmentationMasks
+from wormlab3d.data.model.dataset import DatasetMidline2D
 from wormlab3d.data.model.dataset import DatasetSegmentationMasks
 from wormlab3d.midlines3d.args import DatasetSegmentationMasksArgs
-from wormlab3d.nn.data_loader import DatasetLoader, make_data_loader
+from wormlab3d.nn.generate_dataset import build_pipeline, build_dataset
 
-def generate_masks_dataset(args: DatasetSegmentationMasksArgs, fix_frames: bool = False) -> DatasetSegmentationMasks:
+
+def generate_masks_dataset(args: DatasetSegmentationMasksArgs) -> DatasetSegmentationMasks:
     """
     Generate a segmentation masks dataset.
     """
@@ -21,57 +17,52 @@ def generate_masks_dataset(args: DatasetSegmentationMasksArgs, fix_frames: bool 
         '\n'.join(args.get_info()) +
         '\n-----------------------------------\n'
     )
-    failed_midline_ids = []
+    failed_masks_ids = []
 
-    def validate_midline(midline_id: ObjectId) -> bool:
-        midline = Midline2D.objects.no_cache().get(id=midline_id)
-        frame = midline.frame
-        logger.debug(f'Checking frame id={frame.id}')
+    def validate_masks(masks_id: ObjectId) -> bool:
+        masks = SegmentationMasks.objects.no_cache().get(id=masks_id)
+        logger.debug(f'Checking frame id={masks.id}')
         try:
-            if fix_frames:
-                if not frame.centres_2d_available():
-                    logger.warning('Frame does not have 2d centre points available for all views, generating now.')
-                    frame.generate_centres_2d()
-                    frame.save()
-                if frame.centre_3d is None:
-                    logger.warning('Frame does not have 3d centre point available, generating now.')
-                    frame.generate_centre_3d()
-                    frame.save()
-                if len(frame.images) != 3:
-                    logger.warning(f'Frame does not have prepared images, generating now.')
-                    frame.generate_prepared_images()
-                    frame.save()
-
-            assert len(frame.images) == 3, 'Frame does not have prepared images.'
-            assert midline.frame.centre_3d is not None, 'Frame does not have 3d centre point available.'
-            assert len(midline.get_prepared_coordinates()) > 1, 'Midline coordinates empty after crop.'
+            assert len(masks.frame.images) == 3, 'Frame does not have prepared images.'
+            assert masks.frame.centre_3d is not None, 'Frame does not have 3d centre point available.'
             return True
         except AssertionError as e:
-            failed_midline_ids.append(midline_id)
-            if fix_frames:
-                logger.error(f'Failed to prepare frame: {e}')
-            else:
-                logger.error(f'Frame is not ready: {e}')
+            failed_masks_ids.append(masks_id)
+            logger.error(f'Frame is not ready: {e}')
         return False
 
-    # Fetch manually-annotated midlines, grouped by tags (each might appear for multiple tags)
-    # The query starts matching on the midline2d collection.
+    # Fetch the checkpoint to use, if one wasn't specified
+    if args.masks_model_checkpoint_id is None:
+        dataset_ids = DatasetMidline2D.objects.scalar('id')
+        checkpoint = Checkpoint.objects(dataset__in=dataset_ids).order_by('+loss_test').first()
+        if checkpoint is None:
+            raise RuntimeError('No checkpoints found for models trained on Midline2D annotations.')
+    else:
+        checkpoint = Checkpoint.objects.get(id=args.masks_model_checkpoint_id)
+    logger.info(f'Using checkpoint id="{checkpoint.id}". '
+                f'Test loss = {checkpoint.loss_test:.5f}. '
+                f'Created = {checkpoint.created:%Y-%m-%d %H:%M}.')
+
+    # Fetch masks, grouped by tags (each might appear for multiple tags)
+    # The query starts matching on the segmentation_masks collection.
     logger.info('Querying database.')
     pipeline = [
-        {'$match': {'user': {'$exists': True}}},
+        {'$match': {'checkpoint': checkpoint.id}},
         *build_pipeline(args)
     ]
-    cursor = Midline2D.objects().aggregate(pipeline)
+    cursor = SegmentationMasks.objects().aggregate(pipeline)
 
     # Build the dataset
-    DS = build_dataset(cursor, args, validate_midline)
+    DS = build_dataset(cursor, args, validate_masks)
+    if len(DS.X_train) == 0 and args.train_test_split > 0 or len(DS.X_test) == 0 and args.train_test_split < 1:
+        raise RuntimeError('No results returned from database!')
 
-    n_failed = len(failed_midline_ids)
+    n_failed = len(failed_masks_ids)
     if n_failed > 0:
-        logger.error(f'Failed to include {n_failed}/{DS.size_all + n_failed} matching midlines: {failed_midline_ids}.')
+        logger.error(f'Failed to include {n_failed}/{DS.size_all + n_failed} matching masks: {failed_masks_ids}.')
 
     # Save dataset
-    logger.debug('Saving dataset.')
     DS.save()
+    logger.debug(f'Saved dataset, id={DS.id}')
 
     return DS

@@ -15,7 +15,6 @@ from torch.utils.tensorboard import SummaryWriter
 
 from wormlab3d import logger, LOGS_PATH
 from wormlab3d.data.model.checkpoint import Checkpoint
-from wormlab3d.data.model.frame import PREPARED_IMAGE_SIZE
 from wormlab3d.data.model.network_parameters import *
 from wormlab3d.nn.args import DatasetArgs, NetworkArgs, OptimiserArgs, RuntimeArgs
 from wormlab3d.nn.data_loader import load_dataset
@@ -93,6 +92,16 @@ class Manager:
     def _get_data_loader(self, train_or_test: str) -> DataLoader:
         pass
 
+    @property
+    @abstractmethod
+    def input_shape(self) -> Tuple[int]:
+        pass
+
+    @property
+    @abstractmethod
+    def output_shape(self) -> Tuple[int]:
+        pass
+
     def _init_network(self) -> Tuple[BaseNet, NetworkParameters]:
         """
         Build the network using the given parameters.
@@ -100,8 +109,8 @@ class Manager:
         net_params = None
         params = {**{
             'network_type': self.net_args.base_net,
-            'input_shape': (1,) + PREPARED_IMAGE_SIZE,
-            'output_shape': (1,) + PREPARED_IMAGE_SIZE,
+            'input_shape': self.input_shape,
+            'output_shape': self.output_shape,
         }, **self.net_args.hyperparameters}
 
         # Try to load an existing network
@@ -171,7 +180,13 @@ class Manager:
         """
         Find available devices and try to use what we want.
         """
-        cpu_or_gpu = 'gpu' if self.runtime_args.gpu_only else None
+        if self.runtime_args.gpu_only:
+            cpu_or_gpu = 'gpu'
+        elif self.runtime_args.cpu_only:
+            cpu_or_gpu = 'cpu'
+        else:
+            cpu_or_gpu = None
+
         if cpu_or_gpu == 'cpu':
             device = torch.device('cpu')
         else:
@@ -179,7 +194,7 @@ class Manager:
         n_gpus = torch.cuda.device_count()
         if device.type == 'cuda':
             if n_gpus > 1:
-                logger.info('Using {} GPUs!'.format(n_gpus))
+                logger.info(f'Using {n_gpus} GPUs!')
                 self.net.multi_gpu_mode()
             else:
                 logger.info('Using GPU')
@@ -346,7 +361,7 @@ class Manager:
             optimizer=self.optimiser,
             milestones=milestones,
             gamma=self.optimiser_args.lr_gamma,
-            last_epoch=starting_epoch - 1
+            last_epoch=starting_epoch - 1 if starting_epoch > 1 else -1
         )
 
         for epoch in range(starting_epoch, final_epoch + 1):
