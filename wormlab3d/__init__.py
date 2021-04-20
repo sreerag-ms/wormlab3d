@@ -44,7 +44,9 @@ DB_PASSWORD = os.getenv('DB_PASSWORD')
 
 # || -------------------------------- LOGS --------------------------------- ||
 
-SCRIPT_PATH = (os.getcwd() + '/' + os.path.dirname(sys.argv[0])).rstrip('/')
+cwd = os.getcwd()
+dir_name = os.path.dirname(sys.argv[0]).replace(cwd, '').lstrip('/')
+SCRIPT_PATH = (cwd + '/' + dir_name).rstrip('/')
 LOGS_PATH = ROOT_PATH + '/logs' + SCRIPT_PATH[len(ROOT_PATH):]
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 WRITE_LOG_FILES = os.getenv('WRITE_LOG_FILES', False)
