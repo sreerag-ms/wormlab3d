@@ -58,7 +58,10 @@ def plot_segmentation_masks(
         ax = axes[1, c]
         ax.set_title('Combined')
         ax.imshow(images[c], vmin=0, vmax=1, cmap='gray', aspect='equal')
-        ax.imshow(segs[c], vmin=0, vmax=1, cmap='jet', alpha=0.3, aspect='equal')
+        alphas = segs[c].copy()
+        alphas[alphas < 0.1] = 0
+        alphas[alphas > 0.2] = 1
+        ax.imshow(segs[c], vmin=0, vmax=1, cmap='Reds', aspect='equal', alpha=alphas)
 
         ax = axes[2, c]
         ax.set_title('Mask')
@@ -69,6 +72,7 @@ def plot_segmentation_masks(
 
 if __name__ == '__main__':
     plot_segmentation_masks(
-        trial_id=1,
-        frame_num=3343,
+        masks_id='607ff754f782c04c8abd026d',
+        # trial_id=1,
+        # frame_num=3343,
     )
