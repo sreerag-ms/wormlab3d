@@ -21,7 +21,9 @@ from wormlab3d.data.model.network_parameters import *
 from wormlab3d.nn.args import DatasetArgs, NetworkArgs, OptimiserArgs, RuntimeArgs
 from wormlab3d.nn.args.optimiser_args import LOSS_MSE, LOSS_KL
 from wormlab3d.nn.data_loader import load_dataset
+from wormlab3d.nn.wrapped_data_parallel import WrappedDataParallel
 from wormlab3d.toolkit.util import to_dict, is_bad
+
 
 LOG_EVERY_N_BATCHES = 1
 START_TIMESTAMP = time.strftime('%Y%m%d_%H%M')
@@ -247,7 +249,8 @@ class Manager:
         if device.type == 'cuda':
             if n_gpus > 1:
                 logger.info(f'Using {n_gpus} GPUs!')
-                self.net.multi_gpu_mode()
+                logger.info('Using {} GPUs!'.format(n_gpus))
+                self.net = WrappedDataParallel(self.net)
             else:
                 logger.info('Using GPU')
             cudnn.benchmark = True  # optimises code for constant input sizes

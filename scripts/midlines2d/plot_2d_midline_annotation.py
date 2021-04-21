@@ -36,7 +36,7 @@ def get_midline(trial_id: int, frame_num: int = None, camera_idx: int = None) ->
     return midline
 
 
-def plot_2d_midline_annotation(midline2d_id: str = None):
+def plot_2d_midline_annotation(midline2d_id: str, draw_mode: str):
     """
     Plot a 2d midline annotation
     """
@@ -47,7 +47,7 @@ def plot_2d_midline_annotation(midline2d_id: str = None):
     image_prepped = midline.get_prepared_image()
     n_plots = 1 if image_prepped is None else 4
 
-    fig, axes = plt.subplots(n_plots)
+    fig, axes = plt.subplots(n_plots, figsize=(10, 10))
     fig.suptitle(
         f'{trial.date:%Y%m%d} #{trial.trial_num}. \n'
         f'Video: {trial.videos[midline.camera]}. \n'
@@ -70,17 +70,18 @@ def plot_2d_midline_annotation(midline2d_id: str = None):
 
         # Plot mask
         ax = axes[2]
-        ax.set_title('Segmentation mask')
-        mask = midline.get_segmentation_mask()
+        ax.set_title(f'Segmentation mask. Draw mode={draw_mode}.')
+        mask = midline.get_segmentation_mask(draw_mode=draw_mode)
         ax.imshow(mask, cmap='gray', vmin=0, vmax=1)
 
         # Plot fattened mask
         blur_sigma = 5
         ax = axes[3]
-        ax.set_title(f'Segmentation mask - blur_sigma={blur_sigma}')
-        mask = midline.get_segmentation_mask(blur_sigma=blur_sigma)
+        ax.set_title(f'Segmentation mask. Blur_sigma={blur_sigma}.')
+        mask = midline.get_segmentation_mask(draw_mode=draw_mode, blur_sigma=blur_sigma)
         ax.imshow(mask, cmap='gray', vmin=0, vmax=1)
 
+    fig.tight_layout()
     plt.show()
 
 
@@ -92,8 +93,12 @@ if __name__ == '__main__':
     # frame_num=79
 
     # Broken
-    trial_id = 114
-    frame_num = 0
+    # trial_id = 114
+    # frame_num = 0
+
+    # Sparsely defined midline
+    trial_id = 232
+    frame_num = 6983
 
     mid = get_midline(trial_id=trial_id, frame_num=frame_num, camera_idx=0)
-    plot_2d_midline_annotation(midline2d_id=mid.id)
+    plot_2d_midline_annotation(midline2d_id=mid.id, draw_mode='line_aa')

@@ -30,7 +30,7 @@ def get_image_transforms() -> transforms.Compose:
     return transforms.Compose([
         transforms.RandomOrder([
             transforms.GaussianBlur(kernel_size=9, sigma=(0.01, 10)),
-            transforms.RandomErasing(p=0.3, scale=(0.01, 0.2)),
+            transforms.RandomErasing(p=0.6, scale=(0.05, 0.2)),
         ])
     ])
 

@@ -294,9 +294,9 @@ if __name__ == '__main__':
     # frame_num=frame_num
         missing_only=True
     )
-    # generate_centres_3d(
-    #     missing_only=True,
-    #     ratio_adj_orig=0.1,
-    #     ratio_adj_exp=0,
-    #     ratio_adj_all=0.1,
-    # )
+    generate_centres_3d(
+        missing_only=True,
+        ratio_adj_orig=0.1,
+        ratio_adj_exp=0,
+        ratio_adj_all=0.1,
+    )

@@ -15,7 +15,6 @@ def generate_2d_segmentation_masks(
         checkpoint_id: str,
         experiment_id: int = None,
         trial_id: int = None,
-        camera_idx: int = None,
         frame_num: int = None,
         frame_batch_size: int = 16,
         missing_only: bool = True
@@ -50,7 +49,7 @@ def generate_2d_segmentation_masks(
     )
 
     # Resolve which trials want processing
-    trials, cam_idxs = resolve_targets(experiment_id, trial_id, camera_idx, frame_num)
+    trials, _ = resolve_targets(experiment_id, trial_id, frame_num=frame_num)
     logger.info(f'Generating 2D segmentation maps for {len(trials)} trials.')
     batch: List[SegmentationMasks] = []
 
