@@ -94,8 +94,8 @@ def load_dataset(dataset_args: DatasetArgs) -> Dataset:
     ds = None
 
     # If we have a dataset id then load this from the database
-    if dataset_args.ds_id is not None:
-        ds = Dataset.objects.get(id=dataset_args.ds_id)
+    if dataset_args.dataset_id is not None:
+        ds = Dataset.objects.get(id=dataset_args.dataset_id)
     else:
         # Otherwise, try to find one matching the same parameters
         datasets = Dataset.find_from_args(dataset_args)

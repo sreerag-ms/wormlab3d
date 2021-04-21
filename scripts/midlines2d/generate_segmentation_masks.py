@@ -30,7 +30,7 @@ def generate_2d_segmentation_masks(
 
     # Build arguments - don't use the args stored in the checkpoint as these
     # refer to how it was trained, not how we intend to use it now
-    dataset_args = DatasetMidline2DArgs(ds_id=checkpoint.dataset.id, load=True)
+    dataset_args = DatasetMidline2DArgs(dataset_id=checkpoint.dataset.id, load=True)
     net_args = NetworkArgs(net_id=checkpoint.network_params.id, load=True)
     optimiser_args = OptimiserArgs(**checkpoint.optimiser_args)  # not used
     runtime_args = RuntimeArgs(
@@ -86,24 +86,24 @@ def generate_2d_segmentation_masks(
 
     # Iterate over matching trials
     for trial in trials:
-        logger.info(f'Processing trial id={trial.id}')
+        logger.info(f'------------ Processing trial id={trial.id} ------------')
 
         # Find any trials with existing masks for this checkpoint
-        existing = SegmentationMasks.objects(
-            trial=trial,
-            checkpoint=checkpoint
-        )
-        masks_existing = {m.frame.id: m for m in existing}
+        pipeline = [
+            {'$match': {'trial': trial.id, 'checkpoint': checkpoint.id}},
+            {'$project': {'_id': 1, 'frame': 1}}
+        ]
+        existing = SegmentationMasks.objects().aggregate(pipeline)
+        masks_existing = {m['frame']: m['_id'] for m in existing}
+        logger.debug(f'Found {len(masks_existing)} existing masks generated with this checkpoint.')
 
         # Iterate over the frames
         if frame_num is not None:
             frames = [trial.get_frame(frame_num)]
         else:
-            if missing_only:
-                filters = {'id__nin': masks_existing.keys()}
-            else:
-                filters = {}
-            frames = trial.get_frames(filters)
+            frames = trial.get_frames()
+        logger.debug(f'Found {frames.count()} frames to process.')
+
         for frame in frames:
             log_prefix = f'Frame #{frame.frame_num}/{trial.n_frames_max} (id={frame.id}). '
             if not frame.is_ready():
@@ -116,7 +116,7 @@ def generate_2d_segmentation_masks(
                     continue
                 else:
                     logger.info(log_prefix + 'Already exists, replacing.')
-                masks = existing[0]
+                masks = SegmentationMasks.objects.get(id=masks_existing[frame.id])
             else:
                 logger.info(log_prefix + 'Adding to batch.')
                 masks = SegmentationMasks(
@@ -130,11 +130,12 @@ def generate_2d_segmentation_masks(
                 process_batch()
 
     # Process any leftovers
-    process_batch()
+    if len(batch) > 0:
+        process_batch()
 
 
 if __name__ == '__main__':
     generate_2d_segmentation_masks(
-        checkpoint_id='606f270a27951dfe6533e26c',
-        frame_batch_size=6  # this is multiplied by 3 for the neural-network batch size
+        checkpoint_id='607edc8cd549270c25c73346',
+        frame_batch_size=3  # this is multiplied by 3 for the neural-network batch size
     )

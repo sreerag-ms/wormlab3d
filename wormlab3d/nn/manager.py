@@ -249,7 +249,6 @@ class Manager:
         if device.type == 'cuda':
             if n_gpus > 1:
                 logger.info(f'Using {n_gpus} GPUs!')
-                logger.info('Using {} GPUs!'.format(n_gpus))
                 self.net = WrappedDataParallel(self.net)
             else:
                 logger.info('Using GPU')

@@ -24,7 +24,7 @@ class DatasetArgs(BaseArgs):
             **kwargs
     ):
         self.dataset_type = None
-        self.ds_id = dataset_id
+        self.dataset_id = dataset_id
         if dataset_id is not None:
             assert load_dataset, 'Dataset id defined, this is incompatible with load=False.'
         self.load = load_dataset

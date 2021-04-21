@@ -32,7 +32,7 @@ class OptimiserArgs(BaseArgs):
     def __init__(
             self,
             algorithm: str,
-            loss: str,
+            loss: str = LOSS_MSE,
             lr_init: float = 0.1,
             lr_gamma: float = 0.1,
             weight_decay: float = 1e-5,
