@@ -7,6 +7,7 @@ from wormlab3d.data.model.frame_sequence import FrameSequence
 from wormlab3d.data.model.midline2d import Midline2D
 from wormlab3d.data.model.midline3d import Midline3D
 from wormlab3d.data.model.model import Model
+from wormlab3d.data.model.network_parameters import NetworkParameters
 from wormlab3d.data.model.object_point import ObjectPoint
 from wormlab3d.data.model.segmentation_masks import SegmentationMasks
 from wormlab3d.data.model.tag import Tag
