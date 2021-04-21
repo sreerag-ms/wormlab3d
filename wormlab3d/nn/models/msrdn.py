@@ -34,11 +34,7 @@ class MSRDN(RDN):
         return id_
 
     def _build_model(self):
-        print('\n\n\nBUILD MODEL-------\n')
         C_in = self.input_shape[0]
-        spatial_size = self.input_shape[1]
-        temporal_size = self.input_shape[2]
-        print(f'[C_in, spatial_size, temporal_size]=[{C_in},{spatial_size},{temporal_size}]')
 
         # Shallow Feature Extraction
         self.SFE = _SFENet(
@@ -64,12 +60,17 @@ class MSRDN(RDN):
                 )
             )
             self.RDB_bottlenecks.append(
-                _ConvLayer(
-                    n_channels_in=self.D * self.K,
-                    n_channels_out=self.K,
-                    kernel_size=1,
-                    activation=self.activation,
-                    bn=self.batch_norm
+                nn.ModuleList(
+                    [
+                        _ConvLayer(
+                            n_channels_in=self.D * self.K,
+                            n_channels_out=self.K,
+                            kernel_size=1,
+                            activation=self.activation,
+                            bn=self.batch_norm
+                        )
+                        for _ in range(self.D)
+                    ]
                 )
             )
 
@@ -86,9 +87,9 @@ class MSRDN(RDN):
         # Add a final 1x1 convolution to resize to number of desired output channels
         self.resize_out = _ConvLayer(
             n_channels_in=self.K,
-            n_channels_out=self.C_out,
+            n_channels_out=self.output_shape[0],
             kernel_size=1,
-            activation=None,  # self.act_out,
+            activation=self.act_out,
             bn=self.batch_norm
         )
 
@@ -132,44 +133,29 @@ class MSRDN(RDN):
                 # Stack all feature maps produced at different scales, resized to fit current depth
                 F_in = torch.cat([F_prev[d2][d] for d2 in range(self.D)], 1)
                 Fd = RDB(F_in)
-                Fd = bottleneck(Fd)
+                Fd = bottleneck[d](Fd)
                 Fdms = self._multiscale(Fd)
                 Fds.append(Fdms)
             Fs.append(Fds)
             F_prev = Fds
 
-        ys = []
-        for d in range(self.D):
-            # Stack all feature maps F1..FM produced at different scales, resized to fit current depth
-            F_in = torch.cat([Fs[m][d2][d] for m in range(self.M) for d2 in range(self.D)], 1)
+        # Stack all feature maps F1..FM produced at different scales, resized to fit output shape
+        F_in = torch.cat([
+            F.interpolate(Fs[m][d2][d2], self.output_shape[1:], mode='bilinear', align_corners=False)
+            for m in range(self.M)
+            for d2 in range(self.D)
+        ], 1)
 
-            # Collect all F00s together
-            F00 = [F00s[d2][d] for d2 in range(self.D)]
+        # Collect all F00s together, resized to output shape
+        F00 = [
+            F.interpolate(F00s[d2][d2], self.output_shape[1:], mode='bilinear', align_corners=False)
+            for d2 in range(self.D)
+        ]
 
-            # Global feature fusion - combine all Fs with residual F00s
-            yd = self.GFF(F_in) + sum(F00)
+        # Global feature fusion - combine all Fs with residual F00s
+        y0 = self.GFF(F_in) + sum(F00)
 
-            # Resize output channels
-            yd = self.resize_out(yd)
+        # Resize output channels
+        y_out = self.resize_out(y0)
 
-            ys.append(yd)
-
-        # Sum the multiscale outputs to form a single output
-        y_out = ys[0]
-        for d in range(1, self.D):
-            y_out += self._interpolate(ys[d], 0)
-
-        # Split output by channels into X and Z (=E1+E2+ABG)
-        X = y_out[:, :3]
-        Z = y_out[:, 3:]
-        # print('XS.shape', X.shape)
-        # print('Z.shape', Z.shape)
-
-        if self.act_out == 'tanh':
-            X = torch.tanh(X)
-            # Z = torch.tanh(Z)
-
-        self.Z = Z
-        self.X_S = X
-
-        return Z, X
+        return y_out
