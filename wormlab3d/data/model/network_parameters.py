@@ -170,7 +170,6 @@ class NetworkParametersRDN(NetworkParameters):
             'M': self.M,
             'N': self.N,
             'G': self.G,
-            'C_out': self.C_out,
             'kernel_size': self.kernel_size,
             'activation': self.activation,
             'batch_norm': self.batch_norm,

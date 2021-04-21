@@ -1,4 +1,5 @@
 from argparse import ArgumentParser, _ArgumentGroup
+from typing import List
 
 from wormlab3d.nn.args.base_args import BaseArgs
 
@@ -16,19 +17,21 @@ class RuntimeArgs(BaseArgs):
             checkpoint_every_n_batches: int = -1,
             plot_every_n_batches: int = -1,
             plot_n_examples: int = 4,
+            track_metrics: List[str] = [],
             **kwargs
     ):
+        assert not (cpu_only and gpu_only), 'Invalid combination: gpu_only AND cpu_only!'
         self.resume = resume
         self.resume_from = resume_from
         self.gpu_only = gpu_only
         self.cpu_only = cpu_only
-        assert not (cpu_only and gpu_only), 'Invalid combination: gpu_only AND cpu_only!'
         self.batch_size = batch_size
         self.n_epochs = n_epochs
         self.checkpoint_every_n_epochs = checkpoint_every_n_epochs
         self.checkpoint_every_n_batches = checkpoint_every_n_batches
         self.plot_every_n_batches = plot_every_n_batches
         self.plot_n_examples = plot_n_examples
+        self.track_metrics = track_metrics
 
     @classmethod
     def add_args(cls, parser: ArgumentParser) -> _ArgumentGroup:
@@ -60,4 +63,7 @@ class RuntimeArgs(BaseArgs):
                            help='Plot example inputs and outputs every n batches, -1 turns this off.')
         group.add_argument('--plot-n-examples', type=int, default=4,
                            help='Show this many random examples in a single plot.')
+        group.add_argument('--track-metrics', type=lambda s: [str(item) for item in s.split(',')], default=[],
+                            help='Comma delimited list of metrics to track.')
+
         return group

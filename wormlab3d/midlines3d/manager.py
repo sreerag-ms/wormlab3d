@@ -2,7 +2,6 @@ from typing import Dict
 from typing import List, Tuple
 
 import torch
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from wormlab3d import PREPARED_IMAGE_SIZE, N_WORM_POINTS
@@ -17,7 +16,6 @@ from wormlab3d.midlines3d.generate_masks_dataset import generate_masks_dataset
 from wormlab3d.nn.args import NetworkArgs, OptimiserArgs
 from wormlab3d.nn.manager import Manager as BaseManager
 from wormlab3d.nn.models.basenet import BaseNet
-from wormlab3d.toolkit.util import is_bad
 
 
 class Manager(BaseManager):
@@ -76,11 +74,9 @@ class Manager(BaseManager):
         points_3d, coeffs, points_2d, masks = outputs
 
         # Calculate losses
-        loss = F.mse_loss(X, masks)
-        assert not is_bad(loss)
-        loss = loss / len(X)  # return loss per-datum so different batch sizes can be compared
+        loss, metrics = self.calculate_losses(masks, X)
 
-        return outputs, loss, {}
+        return outputs, loss, metrics
 
     def _make_plots(
             self,

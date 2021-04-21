@@ -4,7 +4,6 @@ from typing import List, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from wormlab3d import PREPARED_IMAGE_SIZE
@@ -14,7 +13,7 @@ from wormlab3d.midlines2d.data_loader import get_data_loader
 from wormlab3d.midlines2d.generate_midline2d_dataset import generate_midline2d_dataset
 from wormlab3d.nn.args import NetworkArgs, OptimiserArgs, RuntimeArgs
 from wormlab3d.nn.manager import Manager as BaseManager
-from wormlab3d.toolkit.util import is_bad, to_numpy
+from wormlab3d.toolkit.util import to_numpy
 
 
 class Manager(BaseManager):
@@ -27,6 +26,20 @@ class Manager(BaseManager):
     ):
         super().__init__(runtime_args, dataset_args, net_args, optimiser_args)
 
+    @property
+    def input_shape(self) -> Tuple[int]:
+        return (1,) + PREPARED_IMAGE_SIZE
+
+    @property
+    def output_shape(self) -> Tuple[int]:
+        return (1,) + PREPARED_IMAGE_SIZE
+
+    @property
+    def stat_keys(self) -> List[str]:
+        """Define the loss keys to track."""
+
+        return []
+
     def _generate_dataset(self):
         return generate_midline2d_dataset(self.dataset_args)
 
@@ -37,14 +50,6 @@ class Manager(BaseManager):
             train_or_test=train_or_test,
             batch_size=self.runtime_args.batch_size
         )
-
-    @property
-    def input_shape(self) -> Tuple[int]:
-        return (1,) + PREPARED_IMAGE_SIZE
-
-    @property
-    def output_shape(self) -> Tuple[int]:
-        return (1,) + PREPARED_IMAGE_SIZE
 
     def _process_batch(self, data: Tuple[torch.Tensor, torch.Tensor, List[Midline2D]]) \
             -> Tuple[torch.Tensor, torch.Tensor, Dict]:
@@ -59,13 +64,9 @@ class Manager(BaseManager):
 
         # Put input data through net
         Y_pred = self.predict(X)
+        loss, metrics = self.calculate_losses(Y_pred, Y_target)
 
-        # Calculate losses
-        loss = F.mse_loss(Y_pred, Y_target)
-        assert not is_bad(loss)
-        loss = loss / len(X)  # return loss per-datum so different batch sizes can be compared
-
-        return Y_pred, loss, {}
+        return Y_pred, loss, metrics
 
     def _make_plots(
             self,

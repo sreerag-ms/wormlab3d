@@ -2,6 +2,15 @@ from argparse import ArgumentParser, _ArgumentGroup
 
 from wormlab3d.nn.args.base_args import BaseArgs
 
+LOSS_MSE = 'mse'
+LOSS_KL = 'kl'
+
+LOSSES = [
+    LOSS_MSE,
+    LOSS_KL
+]
+
+
 OPTIMISER_ADADELTA = 'Adadelta'
 OPTIMISER_ADAGRAD = 'Adagrad'
 OPTIMISER_ADAM = 'Adam'
@@ -23,12 +32,15 @@ class OptimiserArgs(BaseArgs):
     def __init__(
             self,
             algorithm: str,
+            loss: str,
             lr_init: float = 0.1,
             lr_gamma: float = 0.1,
             weight_decay: float = 1e-5,
             **kwargs
     ):
+        assert loss in LOSSES
         assert algorithm in OPTIMISER_ALGORITHMS
+        self.loss = loss
         self.algorithm = algorithm
         self.lr_init = lr_init
         self.lr_gamma = lr_gamma
@@ -40,6 +52,8 @@ class OptimiserArgs(BaseArgs):
         Add arguments to a command parser.
         """
         group = parser.add_argument_group('Optimiser Args')
+        group.add_argument('--loss', type=str, choices=LOSSES, default=LOSS_MSE,
+                           help='The principal loss measure to minimise.')
         group.add_argument('--algorithm', type=str, choices=OPTIMISER_ALGORITHMS, default=OPTIMISER_ADAM,
                            help='Optimisation algorithm.')
         group.add_argument('--lr-init', type=float, default=0.1,

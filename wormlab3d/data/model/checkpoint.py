@@ -2,6 +2,8 @@ import datetime
 
 from mongoengine import *
 
+from wormlab3d.nn.args.optimiser_args import LOSS_MSE, LOSSES
+
 
 class Checkpoint(Document):
     created = DateTimeField(required=True, default=datetime.datetime.utcnow)
@@ -11,10 +13,11 @@ class Checkpoint(Document):
     epoch = IntField(required=True, default=0)
     step = IntField(required=True, default=0)
     examples_count = IntField(required=True, default=0)
+    loss_type = StringField(required=True, default=LOSS_MSE, choices=LOSSES)
     loss_train = FloatField(required=True, default=1e10)
     loss_test = FloatField(required=True, default=1e10)
-    stats_train = DictField()
-    stats_test = DictField()
+    metrics_train = DictField()
+    metrics_test = DictField()
 
     dataset_args = DictField()
     optimiser_args = DictField()
@@ -36,11 +39,22 @@ class Checkpoint(Document):
             epoch=self.epoch,
             step=self.step,
             examples_count=self.examples_count,
+            loss_type=self.loss_type,
             loss_train=self.loss_train,
             loss_test=self.loss_test,
-            stats_train=self.stats_train,
-            stats_test=self.stats_test,
+            metrics_train=self.metrics_train,
+            metrics_test=self.metrics_test,
             dataset_args=self.dataset_args,
             optimiser_args=self.optimiser_args,
             runtime_args=self.runtime_args,
         )
+
+    def clean(self):
+        """
+        Fix the metric values to be standard floats rather than torch tensors.
+        """
+        super().clean()
+        for k, v in self.metrics_train.items():
+            self.metrics_train[k] = float(v)
+        for k, v in self.metrics_test.items():
+            self.metrics_test[k] = float(v)

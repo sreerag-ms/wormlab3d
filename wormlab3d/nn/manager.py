@@ -3,11 +3,13 @@ import os
 import shutil
 import time
 from datetime import timedelta
-from typing import Dict
-from typing import List, Tuple
+from typing import Dict, List
+from typing import Tuple
 
 import torch
+import torch.nn.functional as F
 import torch.optim as optim
+from torch import nn
 from torch.backends import cudnn
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader as DataLoaderTorch, DataLoader
@@ -17,8 +19,9 @@ from wormlab3d import logger, LOGS_PATH
 from wormlab3d.data.model.checkpoint import Checkpoint
 from wormlab3d.data.model.network_parameters import *
 from wormlab3d.nn.args import DatasetArgs, NetworkArgs, OptimiserArgs, RuntimeArgs
+from wormlab3d.nn.args.optimiser_args import LOSS_MSE, LOSS_KL
 from wormlab3d.nn.data_loader import load_dataset
-from wormlab3d.toolkit.util import to_dict
+from wormlab3d.toolkit.util import to_dict, is_bad
 
 LOG_EVERY_N_BATCHES = 1
 START_TIMESTAMP = time.strftime('%Y%m%d_%H%M')
@@ -48,11 +51,34 @@ class Manager:
         # Optimiser
         self.optimiser = self._init_optimiser()
 
+        # Metrics
+        self.metrics, self.metric_keys = self._init_metrics()
+
         # Runtime params
         self.device = self._init_devices()
 
         # Checkpoints
         self.checkpoint = self._init_checkpoint()
+
+    @property
+    @abstractmethod
+    def input_shape(self) -> Tuple[int]:
+        pass
+
+    @property
+    @abstractmethod
+    def output_shape(self) -> Tuple[int]:
+        pass
+
+    @property
+    def logs_path(self) -> str:
+        return self.get_logs_path(self.checkpoint)
+
+    @staticmethod
+    def get_logs_path(checkpoint: Checkpoint) -> str:
+        return LOGS_PATH \
+               + f'/{checkpoint.dataset.created:%Y%m%d_%H:%M}_{checkpoint.dataset.id}' \
+               + f'/{checkpoint.network_params.created:%Y%m%d_%H:%M}_{checkpoint.network_params.id}'
 
     def _init_dataset(self):
         """
@@ -90,16 +116,6 @@ class Manager:
 
     @abstractmethod
     def _get_data_loader(self, train_or_test: str) -> DataLoader:
-        pass
-
-    @property
-    @abstractmethod
-    def input_shape(self) -> Tuple[int]:
-        pass
-
-    @property
-    @abstractmethod
-    def output_shape(self) -> Tuple[int]:
         pass
 
     def _init_network(self) -> Tuple[BaseNet, NetworkParameters]:
@@ -176,6 +192,42 @@ class Manager:
 
         return optimiser
 
+    def _init_metrics(self) -> Tuple[Dict[str, callable], List[str]]:
+        """
+        Set up the loss functions and any other metrics to track.
+        """
+
+        # Ensure the overall loss is included in the metrics to track
+        track_metrics = self.runtime_args.track_metrics.copy()
+        if self.optimiser_args.loss not in track_metrics:
+            track_metrics.append(self.optimiser_args.loss)
+
+        metrics = {}
+        for loss_type in track_metrics:
+
+            # Mean squared error / L2 loss
+            if loss_type == LOSS_MSE:
+                metrics[loss_type] = nn.MSELoss()
+
+            # KL divergence
+            elif loss_type == LOSS_KL:
+                def kl(pred, target):
+                    assert pred.min() > 0 and pred.max() < 1, 'KL divergence requires predictions to be in (0,1) range.'
+                    pred_prob = torch.cat([pred, 1 - pred], dim=1)
+                    pred_logprob = torch.log(pred_prob)
+                    assert not is_bad(pred_logprob)
+                    target = torch.cat([target, 1 - target], dim=1)
+                    loss = F.kl_div(pred_logprob, target, reduction='sum')
+                    loss = loss / len(pred)  # return loss per-datum so different batch sizes can be compared
+                    return loss
+
+                metrics[loss_type] = kl
+
+            else:
+                raise RuntimeError(f'Loss type: {loss_type} not recognised.')
+
+        return metrics, list(metrics.keys())
+
     def _init_devices(self):
         """
         Find available devices and try to use what we want.
@@ -242,7 +294,7 @@ class Manager:
                     )
                 logger.info(f'Loaded checkpoint id={prev_checkpoint.id}, created={prev_checkpoint.created}')
                 logger.info(f'Test loss = {prev_checkpoint.loss_test:.6f}')
-                for key, val in prev_checkpoint.stats_test.items():
+                for key, val in prev_checkpoint.metrics_test.items():
                     logger.info(f'\t{key}: {val:.4E}')
             except DoesNotExist:
                 raise RuntimeError(f'Could not load checkpoint={self.runtime_args.resume_from}')
@@ -279,27 +331,13 @@ class Manager:
             checkpoint = Checkpoint(
                 dataset=self.ds,
                 network_params=self.net_params,
+                loss_type=self.optimiser_args.loss,
                 dataset_args=to_dict(self.dataset_args),
                 optimiser_args=to_dict(self.optimiser_args),
                 runtime_args=to_dict(self.runtime_args),
             )
 
         return checkpoint
-
-    @property
-    def logs_path(self) -> str:
-        return self.get_logs_path(self.checkpoint)
-
-    @staticmethod
-    def get_logs_path(checkpoint: Checkpoint) -> str:
-        return LOGS_PATH \
-               + f'/{checkpoint.dataset.created:%Y%m%d_%H:%M}_{checkpoint.dataset.id}' \
-               + f'/{checkpoint.network_params.created:%Y%m%d_%H:%M}_{checkpoint.network_params.id}'
-
-    @property
-    def stat_keys(self) -> List[str]:
-        """Define the loss keys to track."""
-        return []
 
     def _init_tb_logger(self):
         """Initialise the tensorboard writer."""
@@ -382,7 +420,7 @@ class Manager:
             # Test every epoch
             self.test()
             self.tb_logger.add_scalar(f'epoch/test/total', self.checkpoint.loss_test, epoch)
-            for key, val in self.checkpoint.stats_test.items():
+            for key, val in self.checkpoint.metrics_test.items():
                 self.tb_logger.add_scalar(f'epoch/test/{key}', val, epoch)
                 logger.info(f'Test {key}: {val:.4E}')
 
@@ -396,30 +434,30 @@ class Manager:
         """
         num_batches_per_epoch = len(self.train_loader)
         running_loss = 0.
-        running_stats = {k: 0. for k in self.stat_keys}
+        running_metrics = {k: 0. for k in self.metric_keys}
         epoch_loss = 0.
-        epoch_stats = {k: 0. for k in self.stat_keys}
+        epoch_metrics = {k: 0. for k in self.metric_keys}
 
         for i, data in enumerate(self.train_loader, 0):
             batch_outputs, batch_loss, batch_stats = self._train_batch(data)
 
             running_loss += batch_loss
             epoch_loss += batch_loss
-            for k in self.stat_keys:
-                running_stats[k] += batch_stats[k]
-                epoch_stats[k] += batch_stats[k]
+            for k in self.metric_keys:
+                running_metrics[k] += batch_stats[k]
+                epoch_metrics[k] += batch_stats[k]
 
             # Log statistics every X mini-batches
             if (i + 1) % LOG_EVERY_N_BATCHES == 0:
                 batches_loss_avg = running_loss / LOG_EVERY_N_BATCHES
                 log_msg = f'[{self.checkpoint.epoch}/{final_epoch}][{i + 1}/{num_batches_per_epoch}]' \
                           f'\t\tLoss: {batches_loss_avg:.7f}'
-                for k in self.stat_keys:
-                    avg = running_stats[k] / LOG_EVERY_N_BATCHES
+                for k in self.metric_keys:
+                    avg = running_metrics[k] / LOG_EVERY_N_BATCHES
                     log_msg += f'\t\t{k}: {avg:.4E}'
                 logger.info(log_msg)
                 running_loss = 0.
-                running_stats = {k: 0. for k in self.stat_keys}
+                running_metrics = {k: 0. for k in self.metric_keys}
 
             # Plots and checkpoints
             self._make_plots(data, batch_outputs, train_or_test='train')
@@ -431,9 +469,9 @@ class Manager:
 
         # Update stats and write debug
         self.checkpoint.loss_train = float(epoch_loss) / num_batches_per_epoch
-        self.checkpoint.stats_train = epoch_stats
+        self.checkpoint.metrics_train = epoch_metrics
         self.tb_logger.add_scalar('epoch/train/total_loss', epoch_loss, self.checkpoint.epoch)
-        for key, val in epoch_stats.items():
+        for key, val in epoch_metrics.items():
             self.tb_logger.add_scalar(f'epoch/train/{key}', val, self.checkpoint.epoch)
             logger.info(f'Train {key}: {val:.4E}')
 
@@ -479,20 +517,20 @@ class Manager:
         logger.info('Testing')
         self.net.eval()
         cumulative_loss = 0.
-        cumulative_stats = {k: 0. for k in self.stat_keys}
+        cumulative_stats = {k: 0. for k in self.metric_keys}
 
         with torch.no_grad():
             for i, data in enumerate(self.test_loader, 0):
                 batch_outputs, batch_loss, batch_stats = self._process_batch(data)
                 cumulative_loss += batch_loss
-                for k in self.stat_keys:
+                for k in self.metric_keys:
                     cumulative_stats[k] += batch_stats[k]
 
         test_loss = cumulative_loss / len(self.test_loader)
-        test_stats = {k: cumulative_stats[k] / len(self.test_loader) for k in self.stat_keys}
+        test_stats = {k: cumulative_stats[k] / len(self.test_loader) for k in self.metric_keys}
 
         self.checkpoint.loss_test = float(test_loss)
-        self.checkpoint.stats_test = test_stats
+        self.checkpoint.metrics_test = test_stats
 
         self._make_plots(data, batch_outputs, train_or_test='test', end_of_epoch=True)
 
@@ -512,6 +550,19 @@ class Manager:
         X = X.to(self.device)
         Y_pred = self.net(X)
         return Y_pred
+
+    def calculate_losses(self, Y_pred: torch.Tensor, Y_target: torch.tensor) \
+            -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        """
+        Calculate losses
+        """
+        stats = {}
+        for metric, fn in self.metrics.items():
+            stats[metric] = fn(Y_pred, Y_target)
+            if metric == self.optimiser_args.loss:
+                loss = stats[metric]
+        assert not is_bad(loss), 'Bad loss!'
+        return loss, stats
 
     @abstractmethod
     def _make_plots(
