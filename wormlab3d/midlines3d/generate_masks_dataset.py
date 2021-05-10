@@ -1,4 +1,3 @@
-from bson import ObjectId
 from wormlab3d import logger
 from wormlab3d.data.model import Checkpoint
 from wormlab3d.data.model import SegmentationMasks
@@ -19,18 +18,6 @@ def generate_masks_dataset(args: DatasetSegmentationMasksArgs) -> DatasetSegment
     )
     failed_masks_ids = []
 
-    def validate_masks(masks_id: ObjectId) -> bool:
-        masks = SegmentationMasks.objects.no_cache().get(id=masks_id)
-        logger.debug(f'Checking frame id={masks.id}')
-        try:
-            assert len(masks.frame.images) == 3, 'Frame does not have prepared images.'
-            assert masks.frame.centre_3d is not None, 'Frame does not have 3d centre point available.'
-            return True
-        except AssertionError as e:
-            failed_masks_ids.append(masks_id)
-            logger.error(f'Frame is not ready: {e}')
-        return False
-
     # Fetch the checkpoint to use, if one wasn't specified
     if args.masks_model_checkpoint_id is None:
         dataset_ids = DatasetMidline2D.objects.scalar('id')
@@ -50,11 +37,11 @@ def generate_masks_dataset(args: DatasetSegmentationMasksArgs) -> DatasetSegment
         {'$match': {'checkpoint': checkpoint.id}},
         *build_pipeline(args)
     ]
-    cursor = SegmentationMasks.objects().aggregate(pipeline)
+    cursor = SegmentationMasks.objects().timeout(False).aggregate(pipeline)
 
     # Build the dataset
-    DS = build_dataset(cursor, args, validate_masks)
-    if len(DS.X_train) == 0 and args.train_test_split > 0 or len(DS.X_test) == 0 and args.train_test_split < 1:
+    DS = build_dataset(cursor, args)
+    if DS.size_train == 0 and args.train_test_split > 0 or DS.size_test == 0 and args.train_test_split < 1:
         raise RuntimeError('No results returned from database!')
 
     n_failed = len(failed_masks_ids)

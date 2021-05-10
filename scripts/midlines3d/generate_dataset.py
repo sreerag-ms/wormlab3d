@@ -25,5 +25,5 @@ if __name__ == '__main__':
     generate_dataset(
         checkpoint_id='607edc8cd549270c25c73346',
         train_test_split=0.8,
-        centre_3d_max_error=50
+        centre_3d_max_error=3
     )

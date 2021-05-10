@@ -1,11 +1,16 @@
 import datetime
 from typing import List
 
+import numpy as np
 from mongoengine import *
 
+from wormlab3d import logger, CAMERA_IDXS
+from wormlab3d.data.model import Cameras
 from wormlab3d.data.model.midline2d import Midline2D
 from wormlab3d.data.model.segmentation_masks import SegmentationMasks
 from wormlab3d.data.model.tag import Tag
+from wormlab3d.data.numpy_field import NumpyField, COMPRESS_BLOSC_POINTER
+from wormlab3d.data.triplet_field import TripletField
 from wormlab3d.nn.args import DatasetArgs
 
 DATA_TYPES = ['xyz', 'xyz_inv', 'bishop', 'cpca']
@@ -118,8 +123,16 @@ class DatasetMidline2D(Dataset):
 
 
 class DatasetSegmentationMasks(Dataset):
-    X_train = ListField(ReferenceField(SegmentationMasks))
-    X_test = ListField(ReferenceField(SegmentationMasks))
+    X_train = ListField(LazyReferenceField(SegmentationMasks))
+    X_test = ListField(LazyReferenceField(SegmentationMasks))
+    cams_train = ListField(LazyReferenceField(Cameras))
+    cams_test = ListField(LazyReferenceField(Cameras))
+    cam_coeffs_train = ListField(NumpyField(shape=(3, 19), dtype=np.float32, compression=COMPRESS_BLOSC_POINTER))
+    cam_coeffs_test = ListField(NumpyField(shape=(3, 19), dtype=np.float32, compression=COMPRESS_BLOSC_POINTER))
+    points_3d_train = ListField(TripletField(FloatField()))
+    points_3d_test = ListField(TripletField(FloatField()))
+    points_2d_train = ListField(TripletField(ListField(FloatField())))
+    points_2d_test = ListField(TripletField(ListField(FloatField())))
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -136,3 +149,71 @@ class DatasetSegmentationMasks(Dataset):
         self.size_test = len(test)
         if self.size_all > 0:
             self.train_test_split_actual = len(train) / self.size_all
+
+    def get_cameras(self, tt: str) -> List[Cameras]:
+        assert tt in ['train', 'test']
+        cams = getattr(self, f'cams_{tt}')
+        if len(cams) == 0:
+            logger.info('No cameras linked, linking now.')
+            cams = []
+            X = getattr(self, f'X_{tt}')
+            for mask in X:
+                mask = mask.fetch()
+                cams.append(mask.frame.centre_3d.cameras)
+            setattr(self, f'cams_{tt}', cams)
+            self.save()
+        return cams
+
+    def get_camera_coefficients(self, tt: str) -> List[List[float]]:
+        assert tt in ['train', 'test']
+        coeffs = getattr(self, f'cam_coeffs_{tt}')
+        if len(coeffs) == 0:
+            logger.info('No camera coefficients generated, generating now.')
+            coeffs = []
+            cams = getattr(self, f'cams_{tt}')
+            for cameras in cams:
+                cameras = cameras.fetch()
+                # Extract camera coefficients
+                fx = np.array([cameras.matrix[c][0, 0] for c in CAMERA_IDXS])
+                fy = np.array([cameras.matrix[c][1, 1] for c in CAMERA_IDXS])
+                R = np.array([cameras.pose[c][:3, :3] for c in CAMERA_IDXS])
+                t = np.array([cameras.pose[c][:3, 3] for c in CAMERA_IDXS])
+                d = np.array([cameras.distortion[c] for c in CAMERA_IDXS])
+                coeffs_i = np.concatenate([
+                    fx.reshape(3, 1), fy.reshape(3, 1), R.reshape(3, 9), t, d
+                ], axis=1).astype(np.float32)
+                coeffs.append(coeffs_i)
+            setattr(self, f'cam_coeffs_{tt}', coeffs)
+            self.save()
+
+            exit()
+        return coeffs
+
+    def get_points_3d(self, tt: str) -> List[float]:
+        assert tt in ['train', 'test']
+        p3d = getattr(self, f'points_3d_{tt}')
+        if len(p3d) == 0:
+            logger.info('No 3d points linked, linking now.')
+            p3d = []
+            X = getattr(self, f'X_{tt}')
+            for mask in X:
+                mask = mask.fetch()
+                p3d.append(mask.frame.centre_3d.point_3d)
+            setattr(self, f'points_3d_{tt}', p3d)
+            self.save()
+        return p3d
+
+    def get_points_2d(self, tt: str) -> List[float]:
+        assert tt in ['train', 'test']
+        p2d = getattr(self, f'points_2d_{tt}')
+        if len(p2d) == 0:
+            logger.info('No 2d points linked, linking now.')
+            p2d = []
+            X = getattr(self, f'X_{tt}')
+            for mask in X:
+                mask = mask.fetch()
+                p2d.append(mask.frame.centre_3d.reprojected_points_2d)
+            setattr(self, f'points_2d_{tt}', p2d)
+            self.save()
+            exit()
+        return p2d

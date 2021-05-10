@@ -48,7 +48,8 @@ class Frame(Document):
             {
                 'fields': ['trial', 'frame_num'],
                 'unique': True
-            }
+            },
+            'centre_3d.error'
         ],
         'ordering': ['+trial', '+frame_num']
     }

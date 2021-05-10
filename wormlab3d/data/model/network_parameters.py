@@ -12,9 +12,10 @@ from wormlab3d.nn.models.msrdn import MSRDN
 from wormlab3d.nn.models.nunet import NuNet
 from wormlab3d.nn.models.pyramidnet import PyramidNet
 from wormlab3d.nn.models.rdn import RDN
+from wormlab3d.nn.models.rednet import RedNet
 from wormlab3d.nn.models.resnet import ResNet, RES_SHORTCUT_OPTIONS
 
-NETWORK_TYPES = ['densenet', 'fcnet', 'resnet', 'pyramidnet', 'aenet', 'nunet', 'rdn']
+NETWORK_TYPES = ['densenet', 'fcnet', 'resnet', 'pyramidnet', 'aenet', 'nunet', 'rdn', 'red']
 
 
 class NetworkParameters(Document):
@@ -180,3 +181,33 @@ class NetworkParametersRDN(NetworkParameters):
             return MSRDN(**model_params)
         else:
             return RDN(**model_params)
+
+
+class NetworkParametersRED(NetworkParameters):
+    latent_size = IntField(required=True)
+    K = IntField(required=True)
+    M = IntField(required=True)
+    N = IntField(required=True)
+    G = IntField(required=True)
+    discriminator_layers = ListField(IntField(), required=True)
+    kernel_size = IntField(required=True)
+    activation = StringField(required=True)
+    batch_norm = BooleanField(required=True)
+    act_out = StringField()
+
+    def instantiate_network(self, build_model: bool = True) -> RedNet:
+        model_params = {
+            'input_shape': self.input_shape,
+            'latent_size': self.latent_size,
+            'parameters_size': self.output_shape[0],
+            'K': self.K,
+            'M': self.M,
+            'N': self.N,
+            'G': self.G,
+            'discriminator_layers': self.discriminator_layers,
+            'kernel_size': self.kernel_size,
+            'activation': self.activation,
+            'batch_norm': self.batch_norm,
+            'act_out': self.act_out,
+        }
+        return RedNet(**model_params)
