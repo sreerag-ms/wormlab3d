@@ -35,6 +35,7 @@ class MSRDN(RDN):
 
     def _build_model(self):
         C_in = self.input_shape[0]
+        C_out = self.output_shape[0]
 
         # Shallow Feature Extraction
         self.SFE = _SFENet(
@@ -75,10 +76,14 @@ class MSRDN(RDN):
             )
 
         # Global Feature Fusion - 1x1 convolution followed by 3x3 convolution
+        gff_c_in = self.D * self.M * self.K
+        gff_c_out = self.K if C_out < self.K else min(gff_c_in, C_out)
+        gff_c_inter = (gff_c_in + gff_c_out) // 2
+
         self.GFF = _GFFNet(
-            self.D * self.M * self.K,
-            self.K,
-            K_inter=self.D * self.K,
+            gff_c_in,
+            gff_c_out,
+            K_inter=gff_c_inter,
             kernel_size=self.kernel_size,
             activation=self.activation,
             bn=self.batch_norm
@@ -86,8 +91,8 @@ class MSRDN(RDN):
 
         # Add a final 1x1 convolution to resize to number of desired output channels
         self.resize_out = _ConvLayer(
-            n_channels_in=self.K,
-            n_channels_out=self.output_shape[0],
+            n_channels_in=gff_c_out,
+            n_channels_out=C_out,
             kernel_size=1,
             activation=self.act_out,
             bn=self.batch_norm
@@ -153,7 +158,7 @@ class MSRDN(RDN):
         ]
 
         # Global feature fusion - combine all Fs with residual F00s
-        y0 = self.GFF(F_in) + sum(F00)
+        y0 = self.GFF(F_in)  # + sum(F00)
 
         # Resize output channels
         y_out = self.resize_out(y0)

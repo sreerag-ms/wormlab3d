@@ -28,9 +28,6 @@ class BaseNet(nn.Module, ABC):
     def get_n_params(self) -> int:
         return sum([p.data.nelement() for p in self.parameters()])
 
-    def multi_gpu_mode(self):
-        self.model = nn.DataParallel(self.model)
-
     def calc_norms(self, p: int = 2) -> float:
         p_norms = {}
         for name, m in self.named_modules():

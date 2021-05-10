@@ -12,7 +12,7 @@ def test_dynamic_cameras():
     """
     dtype = torch.float32
 
-    # Test the same point with two difference camera models, one with distortion and the other without
+    # Test the same point with two different camera models, one with distortion and the other without
     batch_size = 2
     n_points = 5
 
@@ -43,8 +43,8 @@ def test_dynamic_cameras():
     # Combine the coefficients into single tensors
     fx = torch.tensor([cameras.matrix[c][0, 0] for c in CAMERA_IDXS])
     fy = torch.tensor([cameras.matrix[c][1, 1] for c in CAMERA_IDXS])
-    cx = torch.tensor([cameras.matrix[c][0, 2] for c in CAMERA_IDXS])
-    cy = torch.tensor([cameras.matrix[c][1, 2] for c in CAMERA_IDXS])
+    # cx = torch.tensor([cameras.matrix[c][0, 2] for c in CAMERA_IDXS])
+    # cy = torch.tensor([cameras.matrix[c][1, 2] for c in CAMERA_IDXS])
     rotation = torch.tensor([cameras.pose[c][:3, :3] for c in CAMERA_IDXS])
     translation = torch.tensor([cameras.pose[c][:3, 3] for c in CAMERA_IDXS])
     distortion = torch.tensor([cameras.distortion[c] for c in CAMERA_IDXS])
@@ -52,8 +52,6 @@ def test_dynamic_cameras():
     cameras1_parameters = torch.cat([
         fx.unsqueeze(1),
         fy.unsqueeze(1),
-        cx.unsqueeze(1),
-        cy.unsqueeze(1),
         rotation.reshape(3, -1),
         translation.reshape(3, -1),
         distortion.reshape(3, -1)
@@ -61,7 +59,7 @@ def test_dynamic_cameras():
 
     # No distortion in cams2
     cameras2_parameters = cameras1_parameters.clone()
-    cameras2_parameters[:, 16:] = 0.
+    cameras2_parameters[:, 14:] = 0.
 
     # Combine camera parameters in a batch of 2
     camera_parameters = torch.stack([cameras1_parameters, cameras2_parameters])

@@ -140,14 +140,14 @@ class _SFENet(nn.Module):
         super().__init__()
         self.conv1 = _ConvLayer(
             n_channels_in=C_in,
-            n_channels_out=K,
+            n_channels_out=K // 2,
             kernel_size=kernel_size,
             activation=activation,
             bn=bn,
         )
         self.conv2 = _ConvLayer(
-            n_channels_in=K,
-            n_channels_out=K,
+            n_channels_in=K // 2,
+            n_channels_out=K // 2,
             kernel_size=kernel_size,
             activation=activation,
             bn=bn,
@@ -201,7 +201,7 @@ class _RDB(nn.Module):
             G,  # growth rate in each RDB
             kernel_size=3,
             activation='relu',
-            bn=False,
+            bn=False
     ):
         super().__init__()
 

@@ -1,4 +1,4 @@
-from typing import Union, Tuple
+from typing import Union
 
 import numpy as np
 
@@ -31,6 +31,7 @@ class PinholeCamera:
         if not isinstance(image_point, np.ndarray):
             image_point = np.array(image_point)
         assert image_point.shape == (3,)
+
         x = np.matmul(self.rotation, image_point) + self.translation
         x, y = x[0] / x[2], x[1] / x[2]
         fx = self.matrix[0, 0]
@@ -51,6 +52,7 @@ class PinholeCamera:
 
         cx = self.matrix[0, 2]
         cy = self.matrix[1, 2]
+
         out = np.array([fx * x + cx, fy * y + cy])
 
         return out

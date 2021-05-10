@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from typing import Tuple
 
 import torch
 import torch.nn as nn
@@ -10,8 +11,17 @@ RES_SHORTCUT_OPTIONS = ['id', 'conv']
 
 
 class ResNet(BaseNet):
-    def __init__(self, input_shape, output_shape, n_init_channels, block_config, shortcut_type, use_bottlenecks,
-                 dropout_prob=0., build_model=True):
+    def __init__(
+            self,
+            input_shape: Tuple[int],
+            output_shape: Tuple[int],
+            n_init_channels: int,
+            block_config: Tuple[int],
+            shortcut_type: str,
+            use_bottlenecks: bool,
+            dropout_prob: float = 0.,
+            build_model: bool = True
+    ):
         super(ResNet, self).__init__(input_shape, output_shape)
 
         assert shortcut_type in RES_SHORTCUT_OPTIONS
@@ -39,7 +49,7 @@ class ResNet(BaseNet):
         components, n_channels = self._build_model_components()
 
         # Add OutputLayer
-        output_layer = OutputLayer(n_channels_in=n_channels, output_shape=self.output_shape)
+        output_layer = OutputLayer(n_channels_in=n_channels, output_shape=(self.output_shape[0],))
 
         # Construct model
         self.model = nn.Sequential(OrderedDict([

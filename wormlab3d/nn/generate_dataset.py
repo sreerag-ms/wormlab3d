@@ -115,6 +115,7 @@ def build_dataset(
 
     logger.info('Splitting valid results into train and test sets.')
     for i, (tag_id, tag_info) in enumerate(tags_info.items()):
+        logger.debug(f'Splitting tag id = {tag_id}')
         ids_to_assign = tag_info['ids_to_assign'].copy()
         # Loop over the ids, and assign them to train or test proportionally
         for doc_id in ids_to_assign:
@@ -144,10 +145,12 @@ def build_dataset(
                     tag_info2['ids_to_assign'].remove(doc_id)
 
     # Group documents into train/test sets and collate tag info
+    logger.info('Final validation pass.')
     ids_train = []
     ids_test = []
     infos = []
     for tag_id, tag_info in tags_info.items():
+        logger.debug(f'Validating tag id = {tag_id}')
         # Check no documents are left to assign and all the numbers add up
         assert len(tag_info['ids_to_assign']) == 0
         assert len(tag_info['ids_train']) + len(tag_info['ids_test']) == tag_info['n']
@@ -170,12 +173,15 @@ def build_dataset(
         infos.append(info)
 
     # Build dataset
+    logger.debug('Building dataset.')
     DS = Dataset.from_args(args)
     DS.tag_info = infos
 
     # De-duplicate
+    logger.debug('Removing any duplicates.')
     ids_train = list(set(ids_train))
     ids_test = list(set(ids_test))
+    logger.debug('Setting data')
     DS.set_data(train=ids_train, test=ids_test)
 
     return DS

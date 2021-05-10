@@ -4,10 +4,12 @@ from wormlab3d.nn.args.base_args import BaseArgs
 
 LOSS_MSE = 'mse'
 LOSS_KL = 'kl'
+LOSS_BCE = 'bce'
 
 LOSSES = [
     LOSS_MSE,
-    LOSS_KL
+    LOSS_KL,
+    LOSS_BCE
 ]
 
 

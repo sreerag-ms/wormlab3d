@@ -19,11 +19,10 @@ from wormlab3d import logger, LOGS_PATH
 from wormlab3d.data.model.checkpoint import Checkpoint
 from wormlab3d.data.model.network_parameters import *
 from wormlab3d.nn.args import DatasetArgs, NetworkArgs, OptimiserArgs, RuntimeArgs
-from wormlab3d.nn.args.optimiser_args import LOSS_MSE, LOSS_KL
+from wormlab3d.nn.args.optimiser_args import LOSS_MSE, LOSS_KL, LOSS_BCE
 from wormlab3d.nn.data_loader import load_dataset
 from wormlab3d.nn.wrapped_data_parallel import WrappedDataParallel
 from wormlab3d.toolkit.util import to_dict, is_bad
-
 
 LOG_EVERY_N_BATCHES = 1
 START_TIMESTAMP = time.strftime('%Y%m%d_%H%M')
@@ -164,6 +163,8 @@ class Manager:
                 net_params = NetworkParametersNuNet(**params)
             elif self.net_args.base_net == 'rdn':
                 net_params = NetworkParametersRDN(**params)
+            elif self.net_args.base_net == 'red':
+                net_params = NetworkParametersRED(**params)
             else:
                 raise ValueError(f'Unrecognised base net: {self.net_args.base_net}')
 
@@ -178,7 +179,7 @@ class Manager:
 
         return net, net_params
 
-    def _init_optimiser(self):
+    def _init_optimiser(self) -> Optimizer:
         """
         Set up the optimiser.
         """
@@ -209,12 +210,21 @@ class Manager:
 
             # Mean squared error / L2 loss
             if loss_type == LOSS_MSE:
-                metrics[loss_type] = nn.MSELoss()
+                def mse(pred, target):
+                    loss = F.mse_loss(pred, target, reduction='sum')
+                    loss = loss / len(pred)  # return loss per-datum so different batch sizes can be compared
+                    return loss
+
+                metrics[loss_type] = mse
 
             # KL divergence
             elif loss_type == LOSS_KL:
                 def kl(pred, target):
-                    assert pred.min() > 0 and pred.max() < 1, 'KL divergence requires predictions to be in (0,1) range.'
+                    # pred = pred.clamp(max=1)
+                    if pred.max() > 1:
+                        pred = pred / pred.max()
+                    assert pred.min() >= 0 and pred.max() <= 1, 'KL divergence requires predictions to be in (0,1) range.'
+                    pred = pred.clamp(min=1e-3, max=1 - 1e-3)
                     pred_prob = torch.cat([pred, 1 - pred], dim=1)
                     pred_logprob = torch.log(pred_prob)
                     assert not is_bad(pred_logprob)
@@ -224,6 +234,10 @@ class Manager:
                     return loss
 
                 metrics[loss_type] = kl
+
+            # BCE
+            elif loss_type == LOSS_BCE:
+                metrics[loss_type] = nn.BCELoss(reduction='sum')
 
             else:
                 raise RuntimeError(f'Loss type: {loss_type} not recognised.')
@@ -289,6 +303,10 @@ class Manager:
                         )
                         prev_checkpoint = prev_checkpoints[0]
                     else:
+                        logger.error(
+                            f'Found no checkpoints with dataset={self.ds.id} '
+                            f'and network_params={self.net_params.id}'
+                        )
                         raise DoesNotExist()
                 else:
                     prev_checkpoint = Checkpoint.objects.get(
@@ -323,7 +341,7 @@ class Manager:
             # Load the network and optimiser parameter states
             path = f'{self.get_logs_path(prev_checkpoint)}/checkpoints/{prev_checkpoint.id}.chkpt'
             state = torch.load(path, map_location=self.device)
-            self.net.load_state_dict(state['model_state_dict'])
+            self.net.load_state_dict(state['model_state_dict'], strict=False)
             self.optimiser.load_state_dict(state['optimiser_state_dict'])
             self.net.eval()
             logger.info(f'Loaded state from "{path}"')
@@ -419,12 +437,13 @@ class Manager:
                 str(timedelta(seconds=seconds_left))))
             lr_scheduler.step()
 
-            # Test every epoch
-            self.test()
-            self.tb_logger.add_scalar(f'epoch/test/total', self.checkpoint.loss_test, epoch)
-            for key, val in self.checkpoint.metrics_test.items():
-                self.tb_logger.add_scalar(f'epoch/test/{key}', val, epoch)
-                logger.info(f'Test {key}: {val:.4E}')
+            # # Test every epoch
+            # self.test()
+            # self.tb_logger.add_scalar(f'epoch/test/total', self.checkpoint.loss_test, epoch)
+            # for key, val in self.checkpoint.metrics_test.items():
+            #     self.tb_logger.add_scalar(f'epoch/test/{key}', val, epoch)
+            #     logger.info(f'Test {key}: {val:.4E}')
+            #
 
             if self.runtime_args.checkpoint_every_n_epochs > 0 \
                     and (epoch + 1) % self.runtime_args.checkpoint_every_n_epochs == 0:
@@ -453,10 +472,10 @@ class Manager:
             if (i + 1) % LOG_EVERY_N_BATCHES == 0:
                 batches_loss_avg = running_loss / LOG_EVERY_N_BATCHES
                 log_msg = f'[{self.checkpoint.epoch}/{final_epoch}][{i + 1}/{num_batches_per_epoch}]' \
-                          f'\t\tLoss: {batches_loss_avg:.7f}'
+                          f'\tLoss: {batches_loss_avg:.7f}'
                 for k in self.metric_keys:
                     avg = running_metrics[k] / LOG_EVERY_N_BATCHES
-                    log_msg += f'\t\t{k}: {avg:.4E}'
+                    log_msg += f'\t{k}: {avg:.4E}'
                 logger.info(log_msg)
                 running_loss = 0.
                 running_metrics = {k: 0. for k in self.metric_keys}
@@ -490,6 +509,10 @@ class Manager:
         # Calculate gradients and do optimisation step
         self.optimiser.zero_grad()
         loss.backward()
+
+        # Clip gradients
+        nn.utils.clip_grad_norm_(self.net.parameters(), max_norm=100)
+
         self.optimiser.step()
 
         # Log losses
@@ -502,6 +525,7 @@ class Manager:
         weights_cumulative_norm = torch.tensor(0., dtype=torch.float32, device=self.device)
         for _, norm in norms.items():
             weights_cumulative_norm += norm
+        assert not is_bad(weights_cumulative_norm)
         self.tb_logger.add_scalar('batch/train/w_norm', weights_cumulative_norm.item(), self.checkpoint.step)
 
         # Increment global step counter

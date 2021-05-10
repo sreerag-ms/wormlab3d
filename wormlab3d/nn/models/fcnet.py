@@ -30,12 +30,14 @@ class FCNet(BaseNet):
             output_shape: tuple,
             layers_config: Tuple[int],
             dropout_prob: float = 0.,
-            build_model=True
+            build_model=True,
+            act_out=None
     ):
         super().__init__(input_shape, output_shape)
 
         self.layers_config = layers_config
         self.dropout_prob = dropout_prob
+        self.act_out = act_out
 
         if build_model:
             self._build_model()
@@ -56,7 +58,7 @@ class FCNet(BaseNet):
             size = n
         self.model.add_module(
             'OutputLayer',
-            FCLayer(size, self.output_shape, activation=True)
+            FCLayer(size, self.output_shape, activation=self.act_out)
         )
 
         return self.model

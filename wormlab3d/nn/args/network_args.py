@@ -5,7 +5,7 @@ from wormlab3d.data.model.network_parameters import *
 from wormlab3d.nn.args.base_args import BaseArgs
 from wormlab3d.toolkit.util import str2bool
 
-NETWORK_TYPES = ['densenet', 'fcnet', 'resnet', 'pyramidnet', 'aenet', 'nunet', 'rdn']
+NETWORK_TYPES = ['densenet', 'fcnet', 'resnet', 'pyramidnet', 'aenet', 'nunet', 'rdn', 'red']
 
 
 class NetworkArgs(BaseArgs):
@@ -49,6 +49,7 @@ class NetworkArgs(BaseArgs):
             NetworkArgs._add_pyramidnet_args(subparsers.add_parser('pyramidnet'))
             NetworkArgs._add_nunet_args(subparsers.add_parser('nunet'))
             NetworkArgs._add_rdn_args(subparsers.add_parser('rdn'))
+            NetworkArgs._add_red_args(subparsers.add_parser('red'))
 
         return group
 
@@ -189,8 +190,36 @@ class NetworkArgs(BaseArgs):
         parser.add_argument('--batch-norm', type=str2bool, default=False,
                             help='Apply batch normalisation after convolution and activation.')
 
-    @classmethod
-    def from_args(cls, args: Namespace) -> 'NetworkArgs':
+    @staticmethod
+    def _add_red_args(parser):
+        """
+        Recursive Encoding Discriminator (RED) network parameters.
+        """
+        parser.add_argument('--latent-size', type=int, required=True,
+                            help='Size of latent representation vector.')
+        parser.add_argument('--K', type=int, default=16,
+                            help='Primary number of channels.')
+        parser.add_argument('--M', type=int, default=5,
+                            help='Number of RDBs (Residual Dense Blocks).')
+        parser.add_argument('--N', type=int, default=3,
+                            help='Number of convolution layers in each RDB.')
+        parser.add_argument('--G', type=int, default=3,
+                            help='Growth rate in each RDB - how many channels each convolution layer adds.')
+        parser.add_argument('--discriminator-layers', type=lambda s: [int(item) for item in s.split(',')],
+                            default='', help='Comma delimited list of discriminator layer sizes.')
+        parser.add_argument('--kernel-size', type=int, default=3,
+                            help='Spatial convolution size.')
+        parser.add_argument('--activation', type=str, default='relu',
+                            help='Activation function, relu, elu, gelu.')
+        parser.add_argument('--act-out', type=str, default=False,
+                            help='Apply activation at output, eg tanh.')
+        parser.add_argument('--dropout-prob', type=float, default=0,
+                            help='Dropout probability.')
+        parser.add_argument('--batch-norm', type=str2bool, default=False,
+                            help='Apply batch normalisation after convolution and activation.')
+
+    @staticmethod
+    def extract_hyperparameter_args(args: Namespace) -> dict:
         """
         Create a NetworkParameters instance from command-line arguments.
         """
@@ -260,6 +289,29 @@ class NetworkArgs(BaseArgs):
                 'batch_norm': args.batch_norm,
                 'dropout_prob': args.dropout_prob,
             }
+
+        elif args.base_net == 'red':
+            hyperparameters = {
+                'latent_size': args.latent_size,
+                'K': args.K,
+                'M': args.M,
+                'N': args.N,
+                'G': args.G,
+                'discriminator_layers': args.discriminator_layers,
+                'kernel_size': args.kernel_size,
+                'activation': args.activation,
+                'act_out': args.act_out if args.act_out is not False else None,
+                'batch_norm': args.batch_norm,
+                'dropout_prob': args.dropout_prob,
+            }
+        return hyperparameters
+
+    @classmethod
+    def from_args(cls, args: Namespace) -> 'NetworkArgs':
+        """
+        Create a NetworkParameters instance from command-line arguments.
+        """
+        hyperparameters = NetworkArgs.extract_hyperparameter_args(args)
 
         return NetworkArgs(
             net_id=args.net_id,
