@@ -32,7 +32,7 @@ CAMERA_IDXS = [0, 1, 2]
 # Worm length in terms of number of coordinates/sections
 # N_WORM_POINTS = 128
 N_WORM_POINTS = 50
-# N_WORM_POINTS = 1
+# N_WORM_POINTS = 3
 
 
 # || ------------------------------ DATABASE ------------------------------- ||

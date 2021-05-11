@@ -2,13 +2,13 @@ import distutils.util
 import hashlib
 import json
 from argparse import ArgumentParser, Namespace
-from typing import Tuple, List
+from typing import Tuple, List, TYPE_CHECKING
 
 import torch
 
-from wormlab3d import CAMERA_IDXS
-from wormlab3d import logger
-from wormlab3d.data.model.trial import Trial
+from wormlab3d import logger, CAMERA_IDXS
+if TYPE_CHECKING:
+    from wormlab3d.data.model import Trial
 
 
 def parse_target_arguments() -> Namespace:
@@ -36,7 +36,7 @@ def resolve_targets(
         trial_id: int = None,
         camera_idx: int = None,
         frame_num: int = None,
-) -> Tuple[List[Trial], List[int]]:
+) -> Tuple[List['Trial'], List[int]]:
     """
     Resolves any combination of passed experiments, trials and cameras.
     Function arguments take priority over command-line arguments so this method can be called multiple times.

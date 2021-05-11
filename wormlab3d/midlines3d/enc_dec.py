@@ -27,7 +27,15 @@ class EncDec(nn.Module):
         self.cams = DynamicCameras(distort=distorted_cameras)
         self.mode = mode
         self.n_basis_fns = n_basis_fns
-        self.register_buffer('blur_sigma', torch.tensor(blur_sigma, dtype=torch.float32))
+
+        # Points to masks todo: parametrise better
+        self.pointsToMasks = PointsToMasks(
+            blur_sigma=blur_sigma,
+            n_points=N_WORM_POINTS,
+            image_size=PREPARED_IMAGE_SIZE,
+            max_n_optimisation_steps=500,
+            oob_grad_val=1e-3
+        )
 
         # Shifts
         self.register_buffer('shifts', None, persistent=False)
@@ -67,7 +75,7 @@ class EncDec(nn.Module):
         # Grow the worm out by slowly letting more gradients through
         self.register_buffer('decay_factor', torch.tensor(MAX_DECAY_FACTOR, dtype=torch.float32), persistent=True)
 
-        # Track the best loss... so we know when to grow the worm more
+        # Track the best loss... so we know when to grow the worm more (wip)
         self.register_buffer('best_loss', torch.tensor(1e6, dtype=torch.float32), persistent=True)
 
     def set_decoder_mode(self, mode: str):
@@ -78,6 +86,7 @@ class EncDec(nn.Module):
     def set_decay_factor(self, decay_factor: float):
         """Set the decay factor, requires a method as this net may be copied and distributed across devices"""
         self.decay_factor.fill_(decay_factor)
+        self.pointsToMasks.set_decay_factor(decay_factor)
 
     def forward(
             self,
@@ -200,13 +209,13 @@ class EncDec(nn.Module):
         points_2d_net = points_2d - points_2d_base.unsqueeze(2) + image_centre_pt
 
         # Apply 2D offsets, max shift allowed is within centre 50%
-        self.shifts = torch.tanh(shifts) * PREPARED_IMAGE_SIZE[0] / 4
+        self.shifts = shifts
         points_2d_net = points_2d_net + self.shifts.unsqueeze(2)
 
-        # Generate the masks from the 2D image points
-        X_out = PointsToMasks.apply(points_2d_net, self.blur_sigma, self.decay_factor)
+        # Generate the masks from the 2D image points and find a better set of points
+        X_out, X_opt, points_2d_opt = self.pointsToMasks.forward(points_2d_net, X)
 
-        return disc, camera_coeffs, points_3d, points_2d_net, X_out, z_mu, z_log_var, e0s_scaled, delta_angles, X_approx
+        return disc, camera_coeffs, points_3d, points_2d_net, points_2d_opt, X_out, X_opt, z_mu, z_log_var, e0s_scaled, delta_angles, X_approx
 
     def get_n_params(self) -> int:
         """Return from the encoder network."""

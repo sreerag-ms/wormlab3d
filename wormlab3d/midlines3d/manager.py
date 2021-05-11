@@ -45,7 +45,9 @@ class Manager(BaseManager):
         ema.register('use_approx', decay=0.99, val=-1)
         ema.register('r_ema.99', decay=0.99)
         ema.register('r_ema.999', decay=0.999)
-        ema.register('r_grad_ema', decay=0.9)
+        ema.register('total_loss_ema.99', decay=0.99)
+        ema.register('total_loss_ema.999', decay=0.999)
+        ema.register('total_loss_grad_ema', decay=0.9)
         ema.register('decay_factor', decay=0.99, val=self.net.decay_factor)
         self.ema = ema
 
@@ -138,12 +140,13 @@ class Manager(BaseManager):
         losses_d = []
 
         loss_weights = {
+            'distances': 1,
             # 'd': 1,  # 1
             # 'r': 0.05,  # 10
             # 'kl': 0.02,  # ~ 1
-            'r': 1,  # 20
+            # 'r': 1,  # 20
             'kl': 0.1,  # ~ 5
-            'angles': 0,  # .1,  # 4e-2
+            'angles': 0.1,  # 4e-2
             # 'approx': 1,
         }
 
@@ -222,15 +225,16 @@ class Manager(BaseManager):
             stats['use_approx'] = self.ema('use_approx', use_approx_threshold - stats['loss/approx'])
 
             # If loss is within 1.1 of best loss then decrease the decay factor, else increase..?
-            stats['loss/r_ema.99'] = self.ema('r_ema.99', stats['loss/r'])
-            stats['loss/r_ema.999'] = self.ema('r_ema.999', stats['loss/r'])
-            stats['loss/r_grad_ema'] = self.ema('r_grad_ema', stats['loss/r_ema.99'] - stats['loss/r_ema.999'])
-            self.net.best_loss = min(self.net.best_loss, stats['loss/r_ema.999'])
-            stats['loss/r_best'] = self.net.best_loss
-            if stats['loss/r_ema.99'] < self.net.best_loss * 1.1:
-                df = -0.1
+            stats['loss/total_loss/ema.99'] = self.ema('total_loss_ema.99', loss_total)
+            stats['loss/total_loss/ema.999'] = self.ema('total_loss_ema.999', loss_total)
+            stats['loss/total_loss/grad_ema'] = self.ema('total_loss_grad_ema', stats['loss/total_loss_ema.99'] - stats[
+                'loss/total_loss_ema.999'])
+            self.net.best_loss = min(self.net.best_loss, stats['loss/total_loss_ema.999'])
+            stats['loss/total_loss/best'] = self.net.best_loss
+            if stats['loss/total_loss/best'] < self.net.best_loss * 1.1:
+                df = -1
             else:
-                df = 0.1
+                df = 1
             ndf = max(0, min(MAX_DECAY_FACTOR, self.ema['decay_factor'] + df))
             stats['decay_factor'] = self.ema('decay_factor', ndf)
 
@@ -253,11 +257,19 @@ class Manager(BaseManager):
 
         return outputs_d, loss_total, stats
 
-    def _process_batch(self, X_in, cam_coeffs_base, points_3d_base, points_2d_base, depth=0, X_original=None):
+    def _process_batch(
+            self,
+            X_in,
+            cam_coeffs_base,
+            points_3d_base,
+            points_2d_base,
+            depth=0,
+            X_original=None
+    ):
         outputs = self.net(X_in, cam_coeffs_base, points_3d_base, points_2d_base)
-        disc_out, cam_coeffs, points_3d, points_2d, X_out, mus, log_vars, e0s_scaled, delta_angles, X_approx = outputs
+        disc_out, cam_coeffs, points_3d, points_2d, points_2d_opt, X_out, X_opt, mus, log_vars, e0s_scaled, delta_angles, X_approx = outputs
 
-        # Calculate reconstruction losses
+        # Calculate pixel-wise losses (ie, MSE)
         if self.net.use_approx:
             X_ = X_approx
         else:
@@ -267,6 +279,12 @@ class Manager(BaseManager):
             r_loss_og, metrics_og = self.calculate_losses(X_, X_original)
             r_loss = (r_loss + 2 * r_loss_og) / 3
         metrics['loss/r'] = r_loss
+
+        # Losses to propagate are the sum of euclidean distances between the 2d points and their "optimals"
+        point_distances = torch.norm(points_2d - points_2d_opt, p=2, dim=-1)
+        decay = torch.exp(-torch.arange(N_WORM_POINTS, device=self.device) / N_WORM_POINTS * self.ema['decay_factor'])
+        dist_loss = (point_distances * decay).sum(dim=(1, 2)).mean()
+        metrics['loss/distances'] = dist_loss
 
         # Discriminator loss
         disc_out_mean = disc_out.mean()
@@ -347,7 +365,7 @@ class Manager(BaseManager):
             X_in, masks_docs, cam_coeffs_base, points_3d_base, points_2d_base = data
 
             for depth, outputs in enumerate(outputs_d):
-                disc_out, cam_coeffs, points_3d, points_2d, X_out, mus, log_vars, e0s_scaled, delta_angles, X_approx = outputs
+                disc_out, cam_coeffs, points_3d, points_2d, points_2d_opt, X_out, X_opt, mus, log_vars, e0s_scaled, delta_angles, X_approx = outputs
                 if depth > 0:
                     X_in = X_prev
                 X_prev = X_out
@@ -356,7 +374,8 @@ class Manager(BaseManager):
                 suffix = train_or_test + f'_d={depth}'
                 # self._plot_3d_midlines(points_3d, masks_docs, suffix, idxs)
                 self._plot_masks(X_in, X_out, masks_docs, suffix, idxs, points_2d=points_2d)
-                self._plot_masks(X_out, X_approx, masks_docs, suffix + '_approx', idxs, points_2d=points_2d)
+                self._plot_masks(X_in, X_opt, masks_docs, suffix + '_opt', idxs, points_2d=points_2d_opt)
+                # self._plot_masks(X_out, X_approx, masks_docs, suffix + '_approx', idxs, points_2d=points_2d)
                 # self._plot_coefficients(masks_docs, disc_X_in=disc_out, disc_X_out=None, train_or_test=suffix,
                 #                         idxs=idxs)
 
@@ -527,11 +546,9 @@ class Manager(BaseManager):
             ax.imshow(masks_out_triplet, vmin=0, vmax=1, cmap='Reds', aspect='equal', alpha=alphas)
             if points_2d is not None:
                 for c in CAMERA_IDXS:
-                    # print('\n\ncam=',c)
-                    # print(points_2d)
                     p2d = points_2d[idx][c]
-                    p2d[:, 1] += c * 200
-                    ax.scatter(p2d[:, 1], p2d[:, 0], **p2d_opts)
+                    p2d[:, 0] += c * 200
+                    ax.scatter(p2d[:, 0], p2d[:, 1], **p2d_opts)
             if i == 0:
                 ax.text(-0.05, 0.1, 'Original+Masks_Out', transform=ax.transAxes, rotation='vertical')
             ax.axis('off')
