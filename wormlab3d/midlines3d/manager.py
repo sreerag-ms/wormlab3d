@@ -147,6 +147,7 @@ class Manager(BaseManager):
             # 'r': 1,  # 20
             'kl': 0.1,  # ~ 5
             'angles': 0.1,  # 4e-2
+            'preangles': 1,
             # 'approx': 1,
         }
 
@@ -287,6 +288,15 @@ class Manager(BaseManager):
         decay = torch.exp(-torch.arange(N_WORM_POINTS, device=self.device) / N_WORM_POINTS * self.ema['decay_factor'])
         dist_loss = (point_distances * decay).sum(dim=(1, 2)).mean()
         metrics['loss/distances'] = dist_loss
+
+        # Pre-angles should sum to 1 (ie, lie on unit circle)
+        theta0_pre = self.net.pre_angles[:, :2]
+        phi0_pre = self.net.pre_angles[:, 2:]
+        preangles_loss = sum([
+            ((pa[:, 0]**2 + pa[:, 1]**2 - 1)**2).mean()
+            for pa in [theta0_pre, phi0_pre]
+        ])
+        metrics['loss/preangles'] = preangles_loss
 
         # Discriminator loss
         disc_out_mean = disc_out.mean()

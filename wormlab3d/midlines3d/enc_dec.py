@@ -34,7 +34,8 @@ class EncDec(nn.Module):
             n_points=N_WORM_POINTS,
             image_size=PREPARED_IMAGE_SIZE,
             max_n_optimisation_steps=500,
-            oob_grad_val=1e-3
+            oob_grad_val=1e-2,
+            noise_std=0.
         )
 
         # Shifts
@@ -134,7 +135,7 @@ class EncDec(nn.Module):
             # phi: azimuth - rotation angle from x-y: (-pi, pi)
             pre_angles = parameters[:, :4]
             self.pre_angles = pre_angles
-            pre_angles = F.hardtanh(pre_angles, min_val=-1, max_val=1)
+            # pre_angles = F.hardtanh(pre_angles, min_val=-1, max_val=1)
             theta0 = (torch.atan2(pre_angles[:, 0], pre_angles[:, 1]) + np.pi) / 2
             phi0 = torch.atan2(pre_angles[:, 2], pre_angles[:, 3])
             self.theta0 = theta0

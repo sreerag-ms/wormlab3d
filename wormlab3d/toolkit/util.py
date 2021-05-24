@@ -7,6 +7,7 @@ from typing import Tuple, List, TYPE_CHECKING
 import torch
 
 from wormlab3d import logger, CAMERA_IDXS
+
 if TYPE_CHECKING:
     from wormlab3d.data.model import Trial
 
@@ -41,6 +42,7 @@ def resolve_targets(
     Resolves any combination of passed experiments, trials and cameras.
     Function arguments take priority over command-line arguments so this method can be called multiple times.
     """
+    from wormlab3d.data.model import Trial
     args = parse_target_arguments()
 
     # Override command line args with function arguments

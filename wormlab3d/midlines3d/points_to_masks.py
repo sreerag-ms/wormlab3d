@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.optim import AdamW
+from torch.optim import RMSprop
 from torchvision.transforms.functional import gaussian_blur
 
 from wormlab3d import PREPARED_IMAGE_SIZE, N_WORM_POINTS
@@ -40,7 +40,7 @@ class PointsToMasks(nn.Module):
     def forward(
             self,
             points_2d: torch.Tensor,
-            mask_target: torch.Tensor
+            masks_target: torch.Tensor
     ):
         """
         Takes a batch of 2D points in coordinate form and generates 2D segmentation masks.
@@ -49,7 +49,7 @@ class PointsToMasks(nn.Module):
         """
 
         # Optimise the points to better fit the target mask
-        p_opt = self._optimise_points(points_2d, mask_target)
+        p_opt = self._optimise_points(points_2d, masks_target)
 
         # Generate masks from both the input points and the optimal points
         masks_out = self._points_to_masks(points_2d)
@@ -60,28 +60,31 @@ class PointsToMasks(nn.Module):
     def _optimise_points(
             self,
             points_2d: torch.Tensor,
-            mask_target: torch.Tensor
+            masks_target: torch.Tensor
     ):
         decay = torch.exp(-torch.arange(self.n_points, device=points_2d.device) / self.n_points * self.decay_factor)
         coord_shape = points_2d.shape[0], 3, self.n_points
 
         def get_pixel_losses(idxs):
-            return (1 - mask_target[[*idxs]].reshape(coord_shape)) * decay
+            return (1 - masks_target[[*idxs]].reshape(coord_shape)) * decay
 
         # Calculate the gradient surface approximation
-        J = self._calculate_gradient_surface(mask_target)
+        masks_out = self._points_to_masks(points_2d)
+        masks_diff = masks_target - 1e-2 * masks_out
+        J = self._calculate_gradient_surface(masks_diff)
 
         # Set initial coordinates
         p0 = points_2d.clone().detach()
         idxs = self._get_idxs(p0)
 
         # Set up the optimiser
-        optimiser = AdamW(params=(p0,), lr=0.1)
+        # optimiser = AdamW(params=(p0,), lr=0.1)
+        optimiser = RMSprop(params=(p0,), lr=0.2)
 
         # Take some optimisation steps
         i = 0
         pixel_losses = get_pixel_losses(idxs)
-        while pixel_losses.max() > 0.5 and i < self.max_n_optimisation_steps:
+        while pixel_losses.max() > 0.1 and i < self.max_n_optimisation_steps:
             grads = self._get_directional_gradients(J, idxs)
             optimiser.zero_grad()
             p0.grad = -grads * pixel_losses.unsqueeze(-1)
@@ -162,8 +165,8 @@ class PointsToMasks(nn.Module):
         # todo: needs fixing now duplicated pixels have different values, we should use the max...
         masks = torch.zeros((bs, 3, *self.image_size), device=device)
         mw = torch.exp(-torch.arange(self.n_points, device=device) / self.n_points * self.decay_factor).repeat(bs * 3)
-        masks[[*idxs]] = mw
-        # masks[[*idxs]] = 1  #mw
+        # masks[[*idxs]] = mw
+        masks[[*idxs]] = 1
 
         # Apply a gaussian blur to the masks
         if self.blur_sigma > 0:
