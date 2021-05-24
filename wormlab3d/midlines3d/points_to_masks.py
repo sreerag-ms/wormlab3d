@@ -145,8 +145,9 @@ class PointsToMasks(nn.Module):
         points_2d_grad = torch.stack([pixel_grads_y, pixel_grads_x], dim=-1)
 
         # Add some noise
-        noise = torch.normal(mean=torch.zeros_like(points_2d_grad), std=self.noise_std)
-        points_2d_grad += noise
+        if self.noise_std > 0:
+            noise = torch.normal(mean=torch.zeros_like(points_2d_grad), std=self.noise_std)
+            points_2d_grad += noise
 
         return points_2d_grad
 

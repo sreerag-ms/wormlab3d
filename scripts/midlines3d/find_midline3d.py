@@ -1,0 +1,838 @@
+from typing import Any
+
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+import torch.nn.functional as F
+from torch import nn
+from torch.optim import RMSprop
+from torch.optim.lr_scheduler import CyclicLR
+from torchvision.transforms.functional import gaussian_blur
+
+from wormlab3d import logger, CAMERA_IDXS, N_WORM_POINTS, PREPARED_IMAGE_SIZE
+from wormlab3d.data.model import SegmentationMasks
+from wormlab3d.midlines2d.masks_from_coordinates import make_segmentation_mask
+from wormlab3d.midlines3d.args.network_args import ENCODING_MODE_DELTA_VECTORS, ENCODING_MODE_DELTA_ANGLES, \
+    ENCODING_MODE_DELTA_ANGLES_BASIS, MAX_DECAY_FACTOR, ENCODING_MODE_POINTS
+from wormlab3d.midlines3d.dynamic_cameras import DynamicCameras
+from wormlab3d.midlines3d.points_to_masks import PointsToMasks
+from wormlab3d.toolkit.util import is_bad, to_numpy
+
+
+if 1 and torch.cuda.is_available():
+    logger.info('USING GPU!')
+    device = 'cuda'
+else:
+    logger.info('USING CPU')
+    device = 'cpu'
+
+VOL_BOUNDS = (-0.4, 0.4)
+VOL_SIZE = (201, 201, 201)
+
+cmap_cloud = 'autumn_r'
+cmap_curve = 'YlGnBu'
+
+
+class CloudToCurve(torch.autograd.Function):
+    @staticmethod
+    def forward(
+            ctx: Any,
+            curve_points_3d: torch.Tensor,
+            cloud_points_3d: torch.Tensor,
+            cloud_points_scores: torch.Tensor,
+            blur_sigma: torch.Tensor,
+            decay_factor: torch.Tensor
+    ) -> torch.Tensor:
+        # Make volume from the point cloud
+        vol_cloud = _points_3d_to_volume(cloud_points_3d, cloud_points_scores, blur_sigma)
+
+        # Score the curve points against the point cloud volume
+        curve_idxs = _get_idxs_3d(curve_points_3d)
+        points_scores = vol_cloud[[*curve_idxs]].reshape(curve_points_3d.shape[:-1])
+
+        ctx.save_for_backward(
+            curve_points_3d,
+            vol_cloud,
+            curve_idxs,
+            points_scores,
+            torch.tensor(blur_sigma),
+            decay_factor
+        )
+
+        return points_scores
+
+    @staticmethod
+    def backward(ctx: Any, points_scores_grad: torch.Tensor) -> torch.Tensor:
+        curve_points_3d, vol_cloud, curve_idxs, points_scores, blur_sigma, decay_factor = ctx.saved_tensors
+        n_curve_points = curve_points_3d.shape[-2]
+        decay = torch.exp(-torch.arange(n_curve_points, device=curve_points_3d.device) / n_curve_points * decay_factor)
+
+        # Make volume from the curve points
+        vol_curve = _points_3d_to_volume(curve_points_3d, blur_sigma=blur_sigma, decay_factor=decay_factor)
+        vol_diff = vol_cloud - vol_curve
+
+        # Calculate the gradient surface approximations
+        J_diff = _calculate_gradient_surface_3d(vol_diff)
+        J_target = _calculate_gradient_surface_3d(vol_cloud)
+
+        # Get the directional gradients both towards the target and to spread the points out
+        grads_diff = _get_directional_gradients_3d(J_diff, curve_idxs, n_curve_points)
+        grads_target = _get_directional_gradients_3d(J_target, curve_idxs, n_curve_points)
+
+        # Gradients are combination of towards-the-target when far away and cover-up-remainder when close
+        points_scores = points_scores.unsqueeze(-1)
+        points_3d_grad = grads_diff * points_scores + grads_target * (1 - points_scores)
+        points_3d_grad = -points_3d_grad * decay.reshape(1, n_curve_points, 1)
+
+        assert not is_bad(points_3d_grad)
+
+        return points_3d_grad, None, None, None, None
+
+
+class PointsToMasks(torch.autograd.Function):
+    @staticmethod
+    def forward(
+            ctx: Any,
+            points_2d: torch.Tensor,
+            blur_sigma: torch.Tensor,
+            masks_target: torch.Tensor
+    ) -> torch.Tensor:
+        # Generate masks from 2D points
+        masks = _points_to_masks(points_2d, blur_sigma)
+
+        # Check how close each 2D point is to the target mask
+        idxs = _get_idxs_2d(points_2d)
+        points_scores = masks_target[[*idxs]].reshape(points_2d.shape[:-1])
+
+        ctx.save_for_backward(points_2d, masks, masks_target, idxs, points_scores)
+
+        return masks, points_scores
+
+    @staticmethod
+    def backward(ctx: Any, masks_grad: torch.Tensor, points_scores_grad: torch.Tensor) -> torch.Tensor:
+        points_2d, masks_out, masks_target, idxs, points_scores = ctx.saved_tensors
+        n_points = points_2d.shape[2]
+        masks_diff = masks_target - masks_out
+
+        # Calculate the gradient surface approximations
+        J_diff = _calculate_gradient_surface_2d(masks_diff)
+        J_target = _calculate_gradient_surface_2d(masks_target)
+
+        # Get the directional gradients both towards the target and to spread the points out
+        grads_diff = _get_directional_gradients_2d(J_diff, idxs, n_points)
+        grads_target = _get_directional_gradients_2d(J_target, idxs, n_points)
+
+        # Gradients are combination of towards-the-target when far away and cover-up-remainder when close
+        points_scores = points_scores.unsqueeze(-1)
+        points_2d_grad = grads_diff * points_scores + grads_target * (1 - points_scores)
+        points_2d_grad = -points_2d_grad
+
+        assert not is_bad(points_2d_grad)
+
+        return points_2d_grad, None, None, None, None
+
+
+def _get_idxs_2d(points_2d: torch.Tensor):
+    bs = points_2d.shape[0]
+    n_points = points_2d.shape[2]
+    device = points_2d.device
+    point_idxs_2d = points_2d.round().to(torch.long)  # <-- this operation is non-differentiable!
+    point_idxs_2d = point_idxs_2d.clamp(min=0, max=PREPARED_IMAGE_SIZE[0] - 1)
+    idxs = [
+        torch.arange(bs, device=device).repeat_interleave(3 * n_points),
+        torch.arange(3, device=device).repeat_interleave(n_points).repeat(bs),
+        point_idxs_2d[:, :, :, 0].flatten(),
+        point_idxs_2d[:, :, :, 1].flatten(),
+    ]
+    idxs = torch.stack([ix for ix in idxs])
+    return idxs
+
+
+def _calculate_gradient_surface_2d(masks_target: torch.Tensor):
+    # Calculate gradient surface
+    grad0 = -masks_target
+    grads = [grad0]
+    g = grad0
+    while g.shape[-1] > 1:
+        g2 = _avg_grad_2d(g, oob_grad_val=0.1)
+        grads.append(g2)
+        g = g2
+
+    # Got all the grad averages, now add them together and average
+    grad_sum = torch.zeros_like(grad0)
+    for i, g in enumerate(grads):
+        grad_sum += F.interpolate(grads[i], PREPARED_IMAGE_SIZE, mode='bilinear', align_corners=False)
+    grad_avg = grad_sum / len(grads)
+
+    # Calculate directional gradients
+    gapx = F.pad(grad_avg, (0, 0, 1, 1), mode='replicate')
+    gx = (gapx[:, :, :-2] - gapx[:, :, 2:]) / 2
+    gapy = F.pad(grad_avg, (1, 1, 0, 0), mode='replicate')
+    gy = (gapy[:, :, :, :-2] - gapy[:, :, :, 2:]) / 2
+    J = torch.stack([gx, gy])
+
+    return J
+
+
+def _avg_grad_2d(grad, oob_grad_val=0.):
+    # Average pooling with overlap and boundary values
+    padded_grad = F.pad(grad, (1, 1, 1, 1), mode='constant', value=oob_grad_val)
+    ag = F.avg_pool2d(input=padded_grad, kernel_size=3, stride=2, padding=0)
+    return ag
+
+
+def _get_directional_gradients_2d(J: torch.Tensor, idxs: torch.Tensor, n_points: int):
+    # Determine direction of minimum gradient from each sample coordinate
+    coord_shape = J.shape[1], 3, n_points
+    pixel_grads_x = J[0][[*idxs]].reshape(coord_shape)
+    pixel_grads_y = J[1][[*idxs]].reshape(coord_shape)
+    points_2d_grad = torch.stack([pixel_grads_x, pixel_grads_y], dim=-1)
+    return points_2d_grad
+
+
+def _get_idxs_3d(points_3d: torch.Tensor):
+    bs = points_3d.shape[0]
+    n_points = points_3d.shape[1]
+    device = points_3d.device
+    point_idxs_3d = ((points_3d - VOL_BOUNDS[0]) * VOL_SIZE[0]).round().to(torch.long)
+    point_idxs_3d = point_idxs_3d.clamp(min=0, max=VOL_SIZE[0] - 1)
+    idxs = [
+        torch.arange(bs, device=device).repeat_interleave(n_points),
+        point_idxs_3d[:, :, 0].flatten(),
+        point_idxs_3d[:, :, 1].flatten(),
+        point_idxs_3d[:, :, 2].flatten(),
+    ]
+    idxs = torch.stack([ix for ix in idxs])
+    return idxs
+
+
+def _calculate_gradient_surface_3d(vol_grad: torch.Tensor):
+    # Calculate gradient surface
+    grad0 = -vol_grad.unsqueeze(1)
+    grads = [grad0]
+    g = grad0
+    while g.shape[-1] > 1:
+        g2 = _avg_grad_3d(g, oob_grad_val=0.1)
+        grads.append(g2)
+        g = g2
+
+    # Got all the grad averages, now add them together and average
+    grad_sum = torch.zeros_like(grad0)
+    for i, g in enumerate(grads):
+        grad_sum += F.interpolate(grads[i], vol_grad.shape[-3:], mode='trilinear', align_corners=False)
+    grad_avg = grad_sum / len(grads)
+
+    # Calculate directional gradients
+    gapx = F.pad(grad_avg, (0, 0, 0, 0, 1, 1), mode='replicate')
+    gx = (gapx[:, :, :-2] - gapx[:, :, 2:]) / 2
+    gapy = F.pad(grad_avg, (0, 0, 1, 1, 0, 0), mode='replicate')
+    gy = (gapy[:, :, :, :-2] - gapy[:, :, :, 2:]) / 2
+    gapz = F.pad(grad_avg, (1, 1, 0, 0, 0, 0), mode='replicate')
+    gz = (gapz[:, :, :, :, :-2] - gapz[:, :, :, :, 2:]) / 2
+    J = torch.stack([gx, gy, gz])
+    J = J.squeeze(2)
+
+    return J
+
+
+def _avg_grad_3d(grad, oob_grad_val=0.):
+    # Average pooling with overlap and boundary values
+    padded_grad = F.pad(grad, (1, 1, 1, 1, 1, 1), mode='constant', value=oob_grad_val)
+    ag = F.avg_pool3d(input=padded_grad, kernel_size=3, stride=2, padding=0)
+    return ag
+
+
+def _get_directional_gradients_3d(J: torch.Tensor, idxs: torch.Tensor, n_points: int):
+    # Determine direction of minimum gradient from each sample coordinate
+    coord_shape = J.shape[1], n_points
+    pixel_grads_x = J[0][[*idxs]].reshape(coord_shape)
+    pixel_grads_y = J[1][[*idxs]].reshape(coord_shape)
+    pixel_grads_z = J[2][[*idxs]].reshape(coord_shape)
+    points_3d_grad = torch.stack([pixel_grads_x, pixel_grads_y, pixel_grads_z], dim=-1)
+    return points_3d_grad
+
+
+def _points_to_masks(points_2d: torch.Tensor, blur_sigma: float = 1, decay_factor: float = None) -> torch.Tensor:
+    bs = points_2d.shape[0]
+    idxs = _get_idxs_2d(points_2d)
+
+    # Write ones at the indexed locations
+    if decay_factor is None:
+        mw = torch.ones(np.prod(points_2d.shape[:-1]), device=device)
+    else:
+        n_points = points_2d.shape[2]
+        mw = torch.exp(-torch.arange(n_points) / n_points * decay_factor).repeat(bs * 3)
+    ms = torch.sparse_coo_tensor(
+        indices=idxs,
+        values=mw,
+        size=(bs, 3, *PREPARED_IMAGE_SIZE),
+        device=device
+    )
+    masks = ms.to_dense()
+    masks = masks.clamp(max=1)
+
+    # Apply a gaussian blur to the masks
+    if blur_sigma > 0:
+        ks = int(blur_sigma * 5)
+        if ks % 2 == 0:
+            ks += 1
+        masks = gaussian_blur(masks, kernel_size=ks, sigma=blur_sigma)
+        mask_maxs = torch.amax(masks, dim=(2, 3), keepdim=True)
+        masks = torch.where(
+            mask_maxs > 0,
+            masks / mask_maxs,
+            torch.zeros_like(masks)
+        )
+
+    return masks
+
+
+def make_gaussian_kernel(sigma):
+    ks = int(sigma * 5)
+    if ks % 2 == 0:
+        ks += 1
+    ts = torch.linspace(-ks // 2, ks // 2 + 1, ks, device=device)
+    kernel = torch.exp(- (ts / sigma)**2 / 2)
+    kernel /= kernel.max()
+
+    return kernel
+
+
+def _points_3d_to_volume(points_3d: torch.Tensor, cloud_points_scores=None, blur_sigma: float = 1,
+                         decay_factor: float = None) -> torch.Tensor:
+    bs = points_3d.shape[0]
+    idxs = _get_idxs_3d(points_3d)
+    if cloud_points_scores is None:
+        weights = torch.ones(np.prod(points_3d.shape[:-1]), device=device)
+    else:
+        # Weight the points by the scores, but only take the top 10%, and only if > 0.5.
+        weights = cloud_points_scores.mean(dim=1).flatten()
+        min_weight = max(0.5, weights.sort(descending=True)[0][:int(len(weights) * 0.1)][-1])
+        weights[weights < min_weight] = 0
+
+    if decay_factor is not None:
+        n_points = points_3d.shape[1]
+        decay = torch.exp(-torch.arange(n_points, device=device) / n_points * decay_factor).repeat(bs)
+        weights = weights * decay
+
+    # Write ones at the indexed locations
+    ms = torch.sparse_coo_tensor(
+        indices=idxs,
+        values=weights,
+        size=(bs, *VOL_SIZE),
+        device=device
+    )
+    vol = ms.to_dense()
+    vol = vol.clamp(max=1)
+    if vol.max() > 0:
+        vol = vol / vol.max()
+
+    # Apply a gaussian blur to the volume
+    if blur_sigma > 0:
+        k = make_gaussian_kernel(blur_sigma)
+        k1d = k.reshape(1, 1, len(k), 1, 1)
+        vol_in = vol.unsqueeze(1)
+        for i in range(3):
+            vol_in = vol_in.permute(0, 1, 4, 2, 3)
+            vol_in = F.conv3d(vol_in, k1d, stride=1, padding=(len(k) // 2, 0, 0))  # , groups=VOL_SIZE)
+        vol = vol_in.squeeze(1)
+
+    if vol.max() > 0:
+        vol = vol / vol.max()
+
+    return vol
+
+
+def parameters_to_curve_coordinates(
+        parameters,
+        mode,
+        n_points,
+        worm_length,
+        max_revolutions,
+        bs=1,
+        decay_factor=None,
+):
+    if parameters.ndim == 1:
+        parameters = parameters.unsqueeze(0)
+
+    if mode == ENCODING_MODE_POINTS:
+        # Parameters are the curve coordinates
+        return parameters.reshape((bs, n_points, 3))
+
+    # First 3 parameters are the offset
+    offset = parameters[:, :3]
+    parameters = parameters[:, 3:]
+
+    if mode == ENCODING_MODE_DELTA_VECTORS:
+        # Remaining parameters are the delta vectors (de0s)
+        delta_vectors = parameters.reshape((bs, n_points, 3))
+
+        # Scale the ds's so that neighbouring points will be equidistant
+        e0s = F.normalize(delta_vectors, dim=2)
+
+    else:
+        # Initial angles are unconstrained
+        # https://discuss.pytorch.org/t/custom-loss-function-for-discontinuous-angle-calculation/58579/11
+
+        # theta: inclination - angle wrt z-axis: (0, pi)
+        # phi: azimuth - rotation angle from x-y: (-pi, pi)
+        pre_angles = parameters[:, :4]
+        # pre_angles = F.hardtanh(pre_angles, min_val=-1, max_val=1)
+        theta0 = (torch.atan2(pre_angles[:, 0], pre_angles[:, 1]) + np.pi) / 2
+        phi0 = torch.atan2(pre_angles[:, 2], pre_angles[:, 3])
+        parameters = parameters[:, 4:]
+
+        # Determine maximum delta-angle
+        max_delta_angle = max_revolutions * 2 * np.pi / n_points
+
+        # Remaining parameters are the delta angles
+        delta_angles = torch.tanh(parameters.reshape((bs, 2, -1))) * max_delta_angle
+
+        # Apply decay to delta angles so they go to 0 (ie, straight lines)
+        if decay_factor is not None:
+            decay = torch.exp(-torch.arange(n_points, device=device) / n_points * decay_factor).repeat(bs)
+            delta_angles = delta_angles * decay[1:].reshape((1, 1, n_points - 1))
+
+        # Sum the initial angles with the delta angles to give the progression
+        delta_thetas = torch.cat([theta0.unsqueeze(1), delta_angles[:, 0]], dim=-1)
+        delta_phis = torch.cat([phi0.unsqueeze(1), delta_angles[:, 1]], dim=-1)
+        thetas = torch.cumsum(delta_thetas, dim=-1)
+        phis = torch.cumsum(delta_phis, dim=-1)
+
+        # Convert to cartesian coordinates to find the e0 unit vectors
+        e0s = torch.stack([
+            torch.cos(phis) * torch.sin(thetas),
+            torch.sin(phis) * torch.sin(thetas),
+            torch.cos(thetas),
+        ], dim=-1)
+
+    # Scale the e0s (which have unit length) so the arc length is fixed
+    e0s_scaled = e0s * worm_length / n_points
+
+    # Start at the offset and add the scaled e0s's to form the curve
+    curve_coordinates = offset + torch.cumsum(e0s_scaled, dim=1)
+
+    return curve_coordinates
+
+
+class EncDec(nn.Module):
+    def __init__(
+            self,
+            n_cloud_points: int,
+            n_curve_points: int = N_WORM_POINTS,
+            worm_length: float = 1.,
+            max_revolutions: float = 2,
+            blur_sigma_masks: float = 0,
+            blur_sigma_vols: float = 0,
+            mode: str = ENCODING_MODE_DELTA_ANGLES,
+            n_basis_fns: int = 4
+    ):
+        super().__init__()
+        self.n_cloud_points = n_cloud_points
+        self.n_curve_points = n_curve_points
+        self.worm_length = worm_length
+        self.max_revolutions = max_revolutions
+        self.blur_sigma_masks = blur_sigma_masks
+        self.blur_sigma_vols = blur_sigma_vols
+        self.mode = mode
+        self.n_basis_fns = n_basis_fns
+        self.cams = DynamicCameras()
+
+        # Grow the worm out by slowly letting more gradients through
+        self.decay_factor = torch.tensor(MAX_DECAY_FACTOR, dtype=torch.float32)
+
+        if self.mode == ENCODING_MODE_DELTA_ANGLES_BASIS:
+            # Fix frequencies
+            ws = [1 / 4, ]  # base frequency in units 2pi
+            for n in range(self.n_basis_fns - 1):
+                ws.append(ws[-1] * 2)
+            w_n = torch.tensor(ws) * 2 * np.pi
+            self.register_buffer('w_n', w_n)
+
+            # Sample point locations
+            t = torch.linspace(0, 1, n_curve_points - 1)
+            self.register_buffer('w*t', torch.einsum('n,t->nt', w_n, t))
+
+    def forward(
+            self,
+            parameters: torch.Tensor,
+            camera_coeffs: torch.Tensor,
+            points_3d_base: torch.Tensor,
+            points_2d_base: torch.Tensor,
+            masks_target: torch.Tensor
+    ):
+        bs = parameters.shape[0]
+        device = parameters.device
+
+        # Extract xy shift/offset for each view
+        shifts = parameters[:, :3 * 3].reshape((bs, 3, 3))
+        parameters = parameters[:, 3 * 3:]
+
+        # Extract point cloud coordinates
+        cloud_points = parameters[:, :self.n_cloud_points * 3].reshape((bs, self.n_cloud_points, 3))
+        parameters = parameters[:, self.n_cloud_points * 3:]
+
+        # Remaining parameters define the curve
+        curve_points = parameters_to_curve_coordinates(
+            parameters=parameters,
+            mode=self.mode,
+            n_points=self.n_curve_points,
+            worm_length=self.worm_length,
+            max_revolutions=self.max_revolutions,
+            bs=bs,
+            decay_factor=self.decay_factor
+        )
+
+        # Add the 3d centre point offset to centre on the camera
+        cloud_points_3d = points_3d_base.unsqueeze(1) + cloud_points
+        curve_points_3d = points_3d_base.unsqueeze(1) + curve_points
+
+        # Apply translation shift adjustments
+        camera_coeffs[:, :, 13:16] = camera_coeffs[:, :, 13:16] + shifts
+
+        # Project 3D points to 2D
+        cloud_points_2d = self.cams.forward(camera_coeffs, cloud_points_3d)
+        curve_points_2d = self.cams.forward(camera_coeffs, curve_points_3d)
+
+        # Re-centre according to 2D base points plus a (100,100) to put it in the centre of the cropped image
+        image_centre_pt = torch.ones((bs, 1, 1, 2), dtype=torch.float32, device=device) * PREPARED_IMAGE_SIZE[0] / 2
+        cloud_points_2d_net = cloud_points_2d - points_2d_base.unsqueeze(2) + image_centre_pt
+        curve_points_2d_net = curve_points_2d - points_2d_base.unsqueeze(2) + image_centre_pt
+
+        # Generate the masks from the 2D image points and get the scores for the cloud points
+        masks_cloud, cloud_points_scores = PointsToMasks.apply(cloud_points_2d_net, self.blur_sigma_masks, masks_target)
+        masks_curves = _points_to_masks(curve_points_2d_net, self.blur_sigma_masks, decay_factor=self.decay_factor)
+
+        # Get the point scores for the curve points
+        curve_points_scores = CloudToCurve.apply(curve_points, cloud_points, cloud_points_scores, self.blur_sigma_vols,
+                                                 self.decay_factor)
+
+        return masks_cloud, masks_curves, cloud_points_scores, curve_points_scores
+
+
+def plot_mask(X, title=None, points=None, show=True):
+    if isinstance(X, torch.Tensor):
+        X = to_numpy(X)
+    while X.ndim > 2:
+        X = X.squeeze(0)
+    m = plt.imshow(X)
+    plt.gcf().colorbar(m)
+    if title is not None:
+        plt.gca().set_title(title)
+
+    if points is not None:
+        if isinstance(points, torch.Tensor):
+            points = to_numpy(points)
+        while points.ndim > 2:
+            points = points.squeeze(0)
+        plt.scatter(y=points[:, 1], x=points[:, 0], s=20, c='red', marker='x', zorder=10)
+
+    if show:
+        plt.show()
+
+
+def find_midline3d(
+        masks_id: str,
+        n_cloud_points: int = 1000,
+        n_worm_points: int = 10,
+        blur_sigma_masks: float = 1,
+        blur_sigma_vols: float = 1,
+        max_revolutions: int = 2,
+        mode: str = ENCODING_MODE_DELTA_ANGLES,
+        n_basis_fns: int = 4,
+        n_steps: int = 2000,
+        n_warmup_steps: int = 100
+):
+    # interactive_plots()
+    masks: SegmentationMasks = SegmentationMasks.objects.get(id=masks_id)
+    trial = masks.trial
+    images = masks.get_images()
+    frame = masks.frame
+    masks_target = torch.from_numpy(masks.X)
+    masks_target /= masks_target.max()
+    point_3d_base = torch.tensor(frame.centre_3d.point_3d)
+    points_2d_base = torch.tensor(frame.centre_3d.reprojected_points_2d)
+    cameras = frame.centre_3d.cameras
+    worm_length = masks.trial.experiment.worm_length
+    logger.debug(f'Worm length = {worm_length}')
+    azim = -60
+    n_adjustment_steps = n_steps - n_warmup_steps
+    max_revolutions_absolute = max_revolutions
+    max_revolutions_init = 0
+    max_revolutions = max_revolutions_init
+
+
+    # make test
+    if 0:
+        p3d1 = np.array(frame.centre_3d.point_3d)
+        p3d1[0] -= 0.2
+        p3d2 = np.array(frame.centre_3d.point_3d)
+        p3d2[0] += 0.2
+        b2d = np.array(frame.centre_3d.reprojected_points_2d)
+        ct = cameras.get_camera_model_triplet()
+        t2d = np.array(ct.project_to_2d(object_points=np.array([p3d1, p3d2])))  # [0]
+        masks_target = []
+        for c in CAMERA_IDXS:
+            test_points = np.array(t2d[:, c] - b2d[c]) + np.array([[100, 100]])
+            masks_target.append(make_segmentation_mask(test_points, draw_mode='line_aa', blur_sigma=5))
+        masks_target = np.array(masks_target)
+        masks_target = torch.from_numpy(masks_target)
+        masks_target /= masks_target.max()
+
+    # Extract camera coefficients
+    fx = np.array([cameras.matrix[c][0, 0] for c in CAMERA_IDXS])
+    fy = np.array([cameras.matrix[c][1, 1] for c in CAMERA_IDXS])
+    cx = np.array([cameras.matrix[c][0, 2] for c in CAMERA_IDXS])
+    cy = np.array([cameras.matrix[c][1, 2] for c in CAMERA_IDXS])
+    R = np.array([cameras.pose[c][:3, :3] for c in CAMERA_IDXS])
+    t = np.array([cameras.pose[c][:3, 3] for c in CAMERA_IDXS])
+    d = np.array([cameras.distortion[c] for c in CAMERA_IDXS])
+    cam_coeffs = np.concatenate([
+        fx.reshape(3, 1), fy.reshape(3, 1), cx.reshape(3, 1), cy.reshape(3, 1), R.reshape(3, 9), t, d
+    ], axis=1).astype(np.float32)
+    cam_coeffs = torch.from_numpy(cam_coeffs)
+
+    # Set initial parameter vector to be optimised
+    shifts0 = torch.zeros(3 * 3)
+
+    # Distribute initial cloud points randomly on surface of a sphere
+    mean = torch.zeros(n_cloud_points, 3)
+    x = torch.normal(mean=mean, std=1)
+    x = x / torch.norm(x, dim=-1, keepdim=True) * 0.4
+    cloud0 = x.flatten()
+    p0 = [shifts0, cloud0]
+
+    if mode == ENCODING_MODE_POINTS:
+        mean = torch.zeros(3 * n_worm_points)
+        x = torch.normal(mean=mean, std=0.1)
+        cc0 = x.flatten()
+        p0.append(cc0)
+    elif mode == ENCODING_MODE_DELTA_VECTORS:
+        delta_vectors0 = torch.normal(mean=torch.zeros(3 * n_worm_points), std=0.2)
+        p0.append(delta_vectors0)
+    else:
+        offset0 = torch.zeros(3)
+        p0.append(offset0)
+        pre_angles0 = torch.rand(size=(4,)) * 2 - 1
+        p0.append(pre_angles0)
+
+        if mode == ENCODING_MODE_DELTA_ANGLES:
+            delta_angles0 = torch.normal(mean=torch.zeros(2 * (n_worm_points - 1)), std=0.1)
+            p0.append(delta_angles0)
+        elif mode == ENCODING_MODE_DELTA_ANGLES_BASIS:
+            a0 = torch.normal(mean=torch.zeros(2 * n_basis_fns), std=1)
+            p0 = torch.normal(mean=torch.zeros(2 * n_basis_fns), std=1)
+            p0.append(a0)
+            p0.append(p0)
+    px = torch.cat(p0)
+
+    # Add batch dims and put on correct device
+    cam_coeffs = cam_coeffs.unsqueeze(0).to(device)
+    point_3d_base = point_3d_base.unsqueeze(0).to(device)
+    points_2d_base = points_2d_base.unsqueeze(0).to(device)
+    masks_target = masks_target.unsqueeze(0).to(device)
+    masks_cloud: torch.Tensor
+    masks_curve: torch.Tensor
+    px = px.to(device)
+    px.requires_grad = True
+
+    # Build modules
+    encdec = EncDec(
+        n_cloud_points=n_cloud_points,
+        n_curve_points=n_worm_points,
+        worm_length=worm_length,
+        max_revolutions=max_revolutions_init,
+        blur_sigma_masks=blur_sigma_masks,
+        blur_sigma_vols=blur_sigma_vols,
+        mode=mode,
+        n_basis_fns=n_basis_fns
+    )
+
+    optimiser = RMSprop(
+        params=(px,),
+        lr=0.0005,
+    )
+
+    lr_scheduler = CyclicLR(
+        optimizer=optimiser,
+        base_lr=0.0005,
+        max_lr=0.001,
+        step_size_up=1000,
+        mode='triangular2',
+        gamma=0.99,
+        cycle_momentum=False
+    )
+
+    # Optimise
+    for i in range(n_steps):
+        # Set decay factor
+        if i > n_warmup_steps:
+            encdec.decay_factor = torch.tensor(max(0, 1 - i / (n_adjustment_steps / 2)) * MAX_DECAY_FACTOR)
+
+        # Set max curvature
+        if i > n_warmup_steps:
+            max_revolutions = torch.tensor(min(1, max(0, (i-n_warmup_steps-n_adjustment_steps/4) / (n_adjustment_steps/2)))) * max_revolutions_absolute
+            encdec.max_revolutions = max_revolutions
+
+        # Generate masks from parameters
+        masks_cloud, masks_curve, cloud_points_scores, curve_points_scores = encdec.forward(
+            parameters=px.unsqueeze(0),
+            camera_coeffs=cam_coeffs.clone().detach(),
+            points_3d_base=point_3d_base,
+            points_2d_base=points_2d_base,
+            masks_target=masks_target
+        )
+
+        if i < n_warmup_steps:
+            loss = -(cloud_points_scores.sum())
+        else:
+            loss = -(cloud_points_scores.sum() + curve_points_scores.sum())
+
+        assert not is_bad(loss)
+
+        # Add losses for curve length and curvatures
+        if mode == ENCODING_MODE_POINTS:
+            max_delta_angle = max_revolutions * 2 * np.pi / n_worm_points
+
+            cc = px[-n_worm_points * 3:].reshape((n_worm_points, 3))
+            assert not is_bad(cc)
+
+            segment_lengths = torch.norm(cc[1:] - cc[:-1], dim=-1)
+            arc_length = segment_lengths.sum()
+            # print('arc_length', arc_length)
+            sl_loss = ((segment_lengths - worm_length / n_worm_points)**2).sum()
+
+            a = cc[1:-1] - cc[:-2]
+            b = cc[2:] - cc[1:-1]
+            an = torch.norm(a, dim=-1)
+            bn = torch.norm(b, dim=-1)
+            adotb = (a * b).sum(dim=-1)
+            acos_arg = adotb / (an * bn)
+            eps = 1e-5
+            acos_arg = acos_arg.clamp(min=-1 + eps, max=1 - eps)
+            angles = torch.acos(acos_arg)
+            # assert not is_bad(angles)
+            # angles_loss = ((angles - max_delta_angle)**2).sum()
+            angles_loss = ((angles / max_delta_angle)**4).sum() / 50000
+            # angles_loss = angles[angles>max_delta_angle].sum() / 50000
+            # assert not is_bad(sl_loss)
+            # assert not is_bad(angles_loss)
+            loss += sl_loss + angles_loss
+            # loss += sl_loss  # + angles_loss
+
+        # Take an optimisation step
+        optimiser.zero_grad()
+        loss.backward()
+        optimiser.step()
+        lr_scheduler.step()
+        assert not is_bad(px)
+
+        if 1 or i % 10 == 0:
+            log = f'Step {i}. ' \
+                  f'Loss={loss:.3f}. ' \
+                  f'lr={lr_scheduler.get_last_lr()[0]:.5f}. ' \
+                  f'df={encdec.decay_factor:.2f}. ' \
+                  f'cloud={cloud_points_scores.sum():.3f}. ' \
+                  f'curve={curve_points_scores.sum():.3f}. ' \
+                  f'rev={max_revolutions:.1f}.'
+            if mode == ENCODING_MODE_POINTS:
+                log += f' sl_loss={sl_loss:.4f} angles={angles_loss:.4f} arc_length={arc_length:.3f}'
+            logger.info(log)
+
+        def plot_3d():
+            nonlocal azim
+            azim += 15
+            fig = plt.figure()
+            ax = fig.gca(projection='3d')
+            ax.view_init(azim=azim)
+            cloud_points = px[9:9 + n_cloud_points * 3].reshape((n_cloud_points, 3))
+            curve_points = parameters_to_curve_coordinates(
+                parameters=px[9 + n_cloud_points * 3:],
+                mode=mode,
+                n_points=n_worm_points,
+                worm_length=worm_length,
+                max_revolutions=max_revolutions,
+                decay_factor=encdec.decay_factor
+            )[0]
+            x, y, z = (to_numpy(cloud_points[:, j]) for j in range(3))
+            scores = cloud_points_scores.mean(dim=1)[0]
+            s1 = ax.scatter(x, y, z, c=to_numpy(scores), cmap='autumn_r', s=10, alpha=0.4)
+            fig.colorbar(s1)
+            x, y, z = (to_numpy(curve_points[:, j]) for j in range(3))
+            scores = curve_points_scores[0]
+            s2 = ax.scatter(x, y, z, c=to_numpy(scores), cmap='YlGnBu', s=50, marker='x', alpha=0.9)
+            fig.colorbar(s2)
+
+            ax.set_title(f'Step {i}')
+            fig.tight_layout()
+            plt.show()
+
+        def plot_attempt():
+            X_target = to_numpy(masks_target[0])
+            X_cloud = to_numpy(masks_cloud[0])
+            X_curve = to_numpy(masks_curve[0])
+
+            nrows = 3
+            fig, axes = plt.subplots(nrows, figsize=(6, 8))
+            fig.suptitle(
+                f'{trial.date:%Y%m%d} #{trial.trial_num}. \n'
+                f'Frame: {frame.frame_num}. Step = {i}'
+            )
+
+            # Stitch images and masks together
+            image_triplet = np.concatenate(images, axis=1)
+            X_target_triplet = np.concatenate(X_target, axis=1)
+            X_cloud_triplet = np.concatenate(X_cloud, axis=1)
+            X_curve_triplet = np.concatenate(X_curve, axis=1)
+
+            ax = axes[0]
+            ax.set_title('Target')
+            ax.imshow(image_triplet, cmap='gray', vmin=0, vmax=1)
+            alphas = X_target_triplet.copy()
+            alphas[alphas < 0.1] = 0
+            alphas[alphas > 0.2] = 1
+            ax.imshow(X_target_triplet, vmin=0, vmax=1, cmap='Reds', aspect='equal', alpha=alphas)
+
+            ax = axes[1]
+            ax.set_title('Cloud')
+            ax.imshow(image_triplet, cmap='gray', vmin=0, vmax=1)
+            alphas = X_cloud_triplet.copy()
+            alphas[alphas < 0.1] = 0
+            alphas[alphas > 0.2] = 1
+            ax.imshow(X_cloud_triplet, vmin=0, vmax=1, cmap='Reds', aspect='equal', alpha=alphas)
+
+            ax = axes[2]
+            ax.set_title('Curve')
+            ax.imshow(image_triplet, cmap='gray', vmin=0, vmax=1)
+            alphas = X_curve_triplet.copy()
+            alphas[alphas < 0.1] = 0
+            alphas[alphas > 0.2] = 1
+            ax.imshow(X_curve_triplet, vmin=0, vmax=1, cmap='Reds', aspect='equal', alpha=alphas)
+
+            fig.tight_layout()
+            plt.show()
+
+        # Plot
+        if i % 100 == 0 or i == 0 or i == n_steps - 1:
+            plot_3d()
+
+        # Plot
+        if i % 500 == 0 or i == 0 or i == n_steps - 1:
+            plot_attempt()
+
+
+if __name__ == '__main__':
+    find_midline3d(
+        # masks_id='60801a42f782c04c8abf6ed0',
+        # masks_id='608019f0f782c04c8abf6c41',
+        masks_id='6080190ef782c04c8abf6b02',
+        n_cloud_points=10000,
+        n_worm_points=40,
+        blur_sigma_masks=1,
+        blur_sigma_vols=7,
+        # mode=ENCODING_MODE_POINTS,
+        mode=ENCODING_MODE_DELTA_ANGLES,
+        n_basis_fns=4,
+        n_steps=10000,
+        n_warmup_steps=200
+    )

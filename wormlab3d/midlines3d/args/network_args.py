@@ -3,10 +3,12 @@ from argparse import ArgumentParser, Namespace
 from wormlab3d.nn.args import NetworkArgs
 from wormlab3d.toolkit.util import str2bool
 
+ENCODING_MODE_POINTS = 'points'
 ENCODING_MODE_DELTA_VECTORS = 'delta_vectors'
 ENCODING_MODE_DELTA_ANGLES = 'delta_angles'
 ENCODING_MODE_DELTA_ANGLES_BASIS = 'delta_angles_basis'
 ENCODING_MODES = [
+    ENCODING_MODE_POINTS,
     ENCODING_MODE_DELTA_VECTORS,
     ENCODING_MODE_DELTA_ANGLES,
     ENCODING_MODE_DELTA_ANGLES_BASIS

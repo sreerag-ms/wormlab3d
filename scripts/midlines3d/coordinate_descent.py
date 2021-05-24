@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 from torch.optim import *
+from torchvision.transforms.functional import gaussian_blur
 
 from wormlab3d import PREPARED_IMAGE_SIZE
 from wormlab3d.midlines2d.masks_from_coordinates import make_segmentation_mask
@@ -23,7 +24,6 @@ def plot_mask(X, title=None, points=None, show=True):
             points = to_numpy(points)
         while points.ndim > 2:
             points = points.squeeze(0)
-        # print('points.shape', points.shape)
         plt.scatter(points[:, 0], points[:, 1], s=20, c='red', marker='x')
 
     if show:
@@ -45,9 +45,12 @@ def calculate_gradient_surface(mask_target):
     image_size = mask_target.shape[-2:]
 
     # Calculate gradient surface
-    grad0 = -mask_target
+    # grad0 = -mask_target
+    grad0 = -torch.log(mask_target.clamp(min=1e-5))
     # grad0 = grad0.reshape((1, 1, *grad0.shape))
-    plot_mask(grad0)
+    plot_mask(grad0, 'grad0')
+    # plot_mask(-torch.log(grad0), '-log(grad0)')
+    # exit()
 
     grads = [grad0]
     g = grad0
@@ -64,7 +67,7 @@ def calculate_gradient_surface(mask_target):
         grad_sum += F.interpolate(grads[i], image_size, mode='bilinear', align_corners=False)
     grad_avg = grad_sum / len(grads)
     plot_mask(grad_avg, f'grad avg')
-    # grad_avg = gaussian_blur(grad_avg, kernel_size=51, sigma=20)
+    # grad_avg = gaussian_blur(grad_avg, kernel_size=7, sigma=1)
     # grad_avg.zero_()
 
     # Calculate directional gradients

@@ -227,9 +227,11 @@ class Manager(BaseManager):
             # If loss is within 1.1 of best loss then decrease the decay factor, else increase..?
             stats['loss/total_loss/ema.99'] = self.ema('total_loss_ema.99', loss_total)
             stats['loss/total_loss/ema.999'] = self.ema('total_loss_ema.999', loss_total)
-            stats['loss/total_loss/grad_ema'] = self.ema('total_loss_grad_ema', stats['loss/total_loss_ema.99'] - stats[
-                'loss/total_loss_ema.999'])
-            self.net.best_loss = min(self.net.best_loss, stats['loss/total_loss_ema.999'])
+            stats['loss/total_loss/grad_ema'] = self.ema(
+                'total_loss_grad_ema',
+                stats['loss/total_loss/ema.99'] - stats['loss/total_loss/ema.999']
+            )
+            self.net.best_loss = min(self.net.best_loss, stats['loss/total_loss/ema.999'])
             stats['loss/total_loss/best'] = self.net.best_loss
             if stats['loss/total_loss/best'] < self.net.best_loss * 1.1:
                 df = -1

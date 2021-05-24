@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-N_CAM_COEFFICIENTS = 19
+N_CAM_COEFFICIENTS = 21
 
 
 class DynamicCameras(nn.Module):
@@ -30,10 +30,11 @@ class DynamicCameras(nn.Module):
         # Extract parameters
         self.fx = coefficients[:, :, 0].unsqueeze(dim=2)
         self.fy = coefficients[:, :, 1].unsqueeze(dim=2)
-        self.cx, self.cy = 1023.5, 1023.5
-        self.rotation = coefficients[:, :, 2:11].reshape((bs, 3, 3, 3))
-        self.translation = coefficients[:, :, 11:14]
-        self.distortion = coefficients[:, :, 14:19]
+        self.cx = coefficients[:, :, 2].unsqueeze(dim=2)
+        self.cy = coefficients[:, :, 3].unsqueeze(dim=2)
+        self.rotation = coefficients[:, :, 4:13].reshape((bs, 3, 3, 3))
+        self.translation = coefficients[:, :, 13:16]
+        self.distortion = coefficients[:, :, 16:21]
 
     def forward(self, coefficients: torch.Tensor, points: torch.Tensor) -> torch.Tensor:
         """
