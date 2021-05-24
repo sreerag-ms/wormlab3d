@@ -4,18 +4,21 @@ import os
 
 import cv2
 import dateutil
+import h5py
 import numpy as np
 import scipy.io as sio
 from mongoengine import DoesNotExist
 
 from wormlab3d import WT3D_PATH, logger, CAMERA_IDXS, ANNEX_PATH, DATA_PATH
 from wormlab3d.data.model import *
+from wormlab3d.data.model.midline3d import M3D_SOURCE_RECONST
 from wormlab3d.data.util import ANNEX_PATH_PLACEHOLDER
 
 VIDEO_DIR = 'video'
 CALIB_DIR = 'calib'
 BACKGROUND_IMAGES_DIR = 'background'
 MIDLINES_2D_DIR = ANNEX_PATH + '/midlines'
+MIDLINES_3D_DIR = ANNEX_PATH + '/reconst'
 TAGS_MAT_PATH = DATA_PATH + '/Behavior_Dictionary.mat'
 
 fields = [
@@ -340,6 +343,73 @@ def migrate_midlines2d():
         logger.error('\n=== FAILED:' + '\n'.join(failed) + '\n')
 
 
+def migrate_midlines3d(drop_collection=False):
+    if drop_collection:
+        Midline3D.drop_collection()
+    files = os.listdir(MIDLINES_3D_DIR)
+    failed = []
+    logger.info(f'{len(files)} files found.')
+    for i, filename in enumerate(files):
+        if not filename.endswith('.hdf5'):
+            continue
+        logger.info(f'Processing file {i + 1}/{len(files)}: {filename}')
+
+        # Get trial
+        trial_id = filename[:3]
+        try:
+            trial = Trial.objects.get(legacy_id=trial_id)
+        except DoesNotExist:
+            failed.append(filename)
+            continue
+
+        midlines = []
+
+        try:
+            f = h5py.File(MIDLINES_3D_DIR + '/' + filename, 'r')
+        except FileNotFoundError as e:
+            logger.error(f'Failed to open file: {e}')
+            failed.append(filename)
+            continue
+
+        X = f.get('X')
+        E = f.get('E')
+        base_3d = f.get('base_3d')
+        n_frames = X.shape[0]
+
+        if n_frames > trial.n_frames_min:
+            logger.error('More frames than possible!')
+            failed.append(filename)
+            continue
+
+        if E.shape[0] != n_frames or base_3d.shape[0] != n_frames:
+            logger.error('Numbers of frames inconsistent!')
+            failed.append(filename)
+            continue
+
+        for frame_num in range(n_frames):
+            midline3d = Midline3D()
+            midline3d.frame = trial.get_frame(frame_num)
+            midline3d.X = X[frame_num]
+            midline3d.base_3d = base_3d[frame_num]
+            midline3d.error = E[frame_num]
+            midline3d.source = M3D_SOURCE_RECONST
+            midline3d.validate()
+            midlines.append(midline3d)
+
+        f.close()
+
+        # Bulk insert
+        if len(midlines) > 0:
+            logger.info(f'Inserting {len(midlines)} 3D midlines.')
+            Midline3D.objects.insert(midlines)
+        else:
+            logger.error('No 3D midlines could be migrated!')
+
+    # Show any failures
+    if len(failed):
+        logger.error('\n=== FAILED:' + '\n'.join(failed) + '\n')
+
+
 def migrate_WT3D():
     # Project *.mat files
     path = WT3D_PATH + '/Project_Files'
@@ -441,7 +511,8 @@ def migrate_WT3D():
 if __name__ == '__main__':
     # print_runinfo_data()
     # clear_db()
-    migrate_tags()
-    migrate_runinfo()
-    migrate_midlines2d()
-    migrate_WT3D()
+    # migrate_tags()
+    # migrate_runinfo()
+    # migrate_midlines2d()
+    migrate_midlines3d(drop_collection=True)
+    # migrate_WT3D()

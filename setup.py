@@ -11,7 +11,8 @@ setup(
     tests_require=['pytest'],
     install_requires=[
         'av >= 8.0, < 8.1',
-        'matplotlib >= 3.3, < 3.4',
+        'h5py >= 3.2, < 3.3',
+        'matplotlib >= 3.4, < 3.5',
         'mongoengine >= 0.22, < 0.23',
         'numpy >= 1.20, < 1.21',
         'opencv-python >= 4.5, < 4.6',

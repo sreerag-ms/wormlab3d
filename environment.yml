@@ -8,7 +8,8 @@ channels:
 dependencies:
   - python = 3.9
   - av = 8.0
-  - matplotlib = 3.3
+  - h5py = 3.2
+  - matplotlib = 3.4
   - mongoengine = 0.22
   - numpy = 1.20
   - opencv = 4.5
