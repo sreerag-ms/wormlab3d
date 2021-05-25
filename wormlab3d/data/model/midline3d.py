@@ -1,7 +1,6 @@
 import numpy as np
 from mongoengine import *
 
-from wormlab3d.data.model.frame import Frame
 from wormlab3d.data.model.model import Model
 from wormlab3d.data.numpy_field import NumpyField, COMPRESS_BLOSC_PACK
 
@@ -17,7 +16,7 @@ M3D_SOURCES = [
 
 
 class Midline3D(Document):
-    frame = ReferenceField(Frame, required=True)
+    frame = ReferenceField('Frame', required=True)
 
     # Midline coordinates
     X = NumpyField(required=True, dtype=np.float32, compression=COMPRESS_BLOSC_PACK)

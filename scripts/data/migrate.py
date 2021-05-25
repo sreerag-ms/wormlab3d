@@ -540,6 +540,7 @@ def migrate_WT3D(
                 continue
             n_midlines = trace.shape[1]
             logger.debug(f'{n_midlines} midlines found.')
+            midlines = []
 
             for j in range(n_midlines):
                 trace_j = trace[0][j]
@@ -590,6 +591,8 @@ def migrate_WT3D(
             if len(midlines) > 0:
                 Midline3D.objects.insert(midlines)
                 logger.debug(f'{len(midlines)} inserted')
+            else:
+                logger.debug('0 valid midlines found')
 
 
 if __name__ == '__main__':

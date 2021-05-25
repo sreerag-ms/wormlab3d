@@ -7,6 +7,7 @@ from wormlab3d import logger, PREPARED_IMAGE_SIZE, CAMERA_IDXS
 from wormlab3d.data.model import Cameras
 from wormlab3d.data.model.experiment import Experiment
 from wormlab3d.data.model.midline2d import Midline2D
+from wormlab3d.data.model.midline3d import Midline3D
 from wormlab3d.data.model.object_point import ObjectPoint
 from wormlab3d.data.model.tag import Tag
 from wormlab3d.data.numpy_field import NumpyField, COMPRESS_BLOSC_POINTER
@@ -75,6 +76,18 @@ class Frame(Document):
             filters['model__exists'] = True
 
         return Midline2D.objects(**filters)
+
+    def get_midlines3d(
+            self,
+            filters: dict = None
+    ) -> List['Midline3D']:
+        """
+        Fetch all the 3D midlines associated with this frame.
+        """
+        if filters is None:
+            filters = {}
+        filters = {'frame': self, **filters}
+        return Midline3D.objects(**filters)
 
     def centres_2d_available(self) -> bool:
         """
