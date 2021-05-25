@@ -26,9 +26,11 @@ class Midline3D(Document):
 
     # Model/source used to generate this midline
     source = StringField(choices=M3D_SOURCES, required=True)
+    source_file = StringField()
     model = ReferenceField(Model)
 
     # Specify collection name otherwise it puts an underscore in it
     meta = {
-        'collection': 'midline3d'
+        'collection': 'midline3d',
+        'indexes': ['frame']
     }

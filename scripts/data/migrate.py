@@ -345,6 +345,7 @@ def migrate_midlines2d():
 
 def migrate_midlines3d(drop_collection=False):
     if drop_collection:
+        logger.warning('Dropping Midline3D collection.')
         Midline3D.drop_collection()
     files = os.listdir(MIDLINES_3D_DIR)
     failed = []
@@ -366,7 +367,7 @@ def migrate_midlines3d(drop_collection=False):
 
         try:
             f = h5py.File(MIDLINES_3D_DIR + '/' + filename, 'r')
-        except FileNotFoundError as e:
+        except (FileNotFoundError, OSError) as e:
             logger.error(f'Failed to open file: {e}')
             failed.append(filename)
             continue
@@ -386,14 +387,33 @@ def migrate_midlines3d(drop_collection=False):
             failed.append(filename)
             continue
 
+        # Check for existing
+        existing = Midline3D.objects(source_file=filename)
+        check_missing = False
+        if existing.count() > 0:
+            logger.debug(f'Found {existing.count()} existing midlines.')
+            if existing.count() != n_frames:
+                logger.warning('Numbers from file don\'t match database, adding any missing.')
+                check_missing = True
+            else:
+                continue
+
         for frame_num in range(n_frames):
+            frame = trial.get_frame(frame_num)
+            if check_missing:
+                try:
+                    Midline3D.objects.get(source_file=filename, frame=frame)
+                    continue
+                except DoesNotExist:
+                    pass
             midline3d = Midline3D()
-            midline3d.frame = trial.get_frame(frame_num)
+            midline3d.frame = frame
             midline3d.X = X[frame_num]
             midline3d.base_3d = base_3d[frame_num]
             midline3d.error = E[frame_num]
             midline3d.source = M3D_SOURCE_RECONST
-            midline3d.validate()
+            midline3d.source_file = filename
+            # midline3d.validate()
             midlines.append(midline3d)
 
         f.close()
@@ -514,5 +534,5 @@ if __name__ == '__main__':
     # migrate_tags()
     # migrate_runinfo()
     # migrate_midlines2d()
-    migrate_midlines3d(drop_collection=True)
+    migrate_midlines3d(drop_collection=False)
     # migrate_WT3D()
