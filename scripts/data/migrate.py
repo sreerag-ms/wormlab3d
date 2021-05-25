@@ -8,10 +8,9 @@ import h5py
 import numpy as np
 import scipy.io as sio
 from mongoengine import DoesNotExist
-
 from wormlab3d import WT3D_PATH, logger, CAMERA_IDXS, ANNEX_PATH, DATA_PATH
 from wormlab3d.data.model import *
-from wormlab3d.data.model.midline3d import M3D_SOURCE_RECONST
+from wormlab3d.data.model.midline3d import M3D_SOURCE_RECONST, M3D_SOURCE_WT3D
 from wormlab3d.data.util import ANNEX_PATH_PLACEHOLDER
 
 VIDEO_DIR = 'video'
@@ -430,7 +429,11 @@ def migrate_midlines3d(drop_collection=False):
         logger.error('\n=== FAILED:' + '\n'.join(failed) + '\n')
 
 
-def migrate_WT3D():
+def migrate_WT3D(
+        update_tags: bool = False,
+        update_midlines2d: bool = False,
+        update_midlines3d: bool = False,
+):
     # Project *.mat files
     path = WT3D_PATH + '/Project_Files'
 
@@ -453,56 +456,120 @@ def migrate_WT3D():
         # todo: verify other trial info all matches up
 
         # Tags (Behavior)
-        tag_entries = mat['Behavior'][0][0]
-        n_entries = tag_entries.shape[1]
-        if n_entries > 0:
-            for j in range(n_entries):
-                # Get tag objects
-                tags = []
-                tag_ids = tag_entries[0]['Tags'][j][0]
-                for tag_id in tag_ids:
-                    tags.append(Tag.objects.get(id=tag_id))
+        if update_tags:
+            tag_entries = mat['Behavior'][0][0]
+            n_entries = tag_entries.shape[1]
+            if n_entries > 0:
+                for j in range(n_entries):
+                    # Get tag objects
+                    tags = []
+                    tag_ids = tag_entries[0]['Tags'][j][0]
+                    for tag_id in tag_ids:
+                        tags.append(Tag.objects.get(id=tag_id))
 
-                # Attach tags to all frames in range
-                first_frame = tag_entries[0]['First_Frame'][j][0][0] - 1
-                last_frame = tag_entries[0]['Last_Frame'][j][0][0] - 1
-                logger.info(f'Migrating {j + 1}/{n_entries} tag entries. '
-                            f'Adding {len(tags)} tags to frames {first_frame} - {last_frame}.')
-                Frame.objects(
-                    trial=trial,
-                    frame_num__gte=first_frame,
-                    frame_num__lte=last_frame
-                ).update(
-                    set__tags=tags
-                )
+                    # Attach tags to all frames in range
+                    first_frame = tag_entries[0]['First_Frame'][j][0][0] - 1
+                    last_frame = tag_entries[0]['Last_Frame'][j][0][0] - 1
+                    logger.info(f'Migrating {j + 1}/{n_entries} tag entries. '
+                                f'Adding {len(tags)} tags to frames {first_frame} - {last_frame}.')
+                    Frame.objects(
+                        trial=trial,
+                        frame_num__gte=first_frame,
+                        frame_num__lte=last_frame
+                    ).update(
+                        set__tags=tags
+                    )
 
-        # 2D midline annotations are stored in the camera parameters as annotations
-        annotations = mat['Camera_Parameters'][0][0]['Calib'][0][0]['Annotations']
+        if update_midlines2d:
+            # 2D midline annotations are stored in the camera parameters as annotations
+            annotations = mat['Camera_Parameters'][0][0]['Calib'][0][0]['Annotations']
 
-        # Annotation keys: 'Frame_Number', 'X', 'Y', 'Intrinsic_Matrix', 'Radial_Distortion_Vector', 'Tangential_Distortion_Vector', 'Extrinsic_Matrix'
+            # Annotation keys: 'Frame_Number', 'X', 'Y', 'Intrinsic_Matrix', 'Radial_Distortion_Vector', 'Tangential_Distortion_Vector', 'Extrinsic_Matrix'
 
-        n_midlines = annotations[0][0].shape[-1]
-        logger.info(f'n_midlines={n_midlines}')
-        for n in range(n_midlines):
-            midlines = []
+            n_midlines = annotations[0][0].shape[-1]
+            logger.info(f'n_midlines={n_midlines}')
+            for n in range(n_midlines):
+                midlines = []
 
-            for c in CAMERA_IDXS:
-                annotation = annotations[0][c]
-                x = annotation['X'][0][n][0]
-                y = annotation['Y'][0][n][0]
-                X = np.stack([x, y]).T
+                for c in CAMERA_IDXS:
+                    annotation = annotations[0][c]
+                    x = annotation['X'][0][n][0]
+                    y = annotation['Y'][0][n][0]
+                    X = np.stack([x, y]).T
+
+                    # Get frame
+                    frame_num = annotation['Frame_Number'][0][n][0][0] - 1
+                    try:
+                        frame = trial.get_frame(frame_num)
+                    except DoesNotExist:
+                        logger.error('Could not find frame in database.')
+                        continue
+
+                    # Get any existing annotations
+                    exists = False
+                    existing = frame.get_midlines2d(manual_only=True, filters={'camera': c})
+                    for mid in existing:
+                        if X.shape == mid.X.shape and np.allclose(X, mid.X):
+                            # Midline matches existing record so skip it
+                            logger.debug('Midline already exists, skipping.')
+                            exists = True
+                            break
+                    if exists:
+                        continue
+
+                    midline = Midline2D()
+                    midline.frame = frame
+                    midline.camera = c
+                    midline.user = 'YO'
+                    midline.X = X
+                    midlines.append(midline)
+
+                if len(midlines) > 0:
+                    # Midline annotations should come in triplets, one for each camera view
+                    assert len(midlines) == 3
+                    for m1, m2 in zip(midlines, midlines):
+                        assert m1.frame.frame_num == m2.frame.frame_num
+                    for m in midlines:
+                        m.save()
+
+        # 3D midline reconstructions
+        if update_midlines3d:
+            trace = mat['Trace'][0][0]
+            if len(trace) == 0:
+                logger.debug('No 3D midlines found.')
+                continue
+            n_midlines = trace.shape[1]
+            logger.debug(f'{n_midlines} midlines found.')
+
+            for j in range(n_midlines):
+                trace_j = trace[0][j]
+                frame_num = trace_j['Frame_Number'][0][0] - 1
+
+                # Check curve
+                X = trace_j['Curve_3D']
+
+                # Ignore head-tail annotations
+                if np.isnan(X[1:-1]).all():
+                    continue
+
+                # Check that we don't have any infs or nans
+                try:
+                    assert not np.isinf(X).any(), 'Curve contains infs!'
+                    assert not np.isnan(X).any(), 'Curve contains nans!'
+                except AssertionError as e:
+                    logger.error(f'Invalid curve for frame={frame_num}: {e}')
+                    continue
 
                 # Get frame
-                frame_num = annotation['Frame_Number'][0][n][0][0] - 1
                 try:
                     frame = trial.get_frame(frame_num)
                 except DoesNotExist:
-                    logger.error('Could not find frame in database.')
+                    logger.error(f'Could not find frame {frame_num} in database.')
                     continue
 
-                # Get any existing annotations
+                # Get any existing midlines
                 exists = False
-                existing = frame.get_midlines2d(manual_only=True, filters={'camera': c})
+                existing = frame.get_midlines3d(filters={'source': M3D_SOURCE_WT3D, 'source_file': filename})
                 for mid in existing:
                     if X.shape == mid.X.shape and np.allclose(X, mid.X):
                         # Midline matches existing record so skip it
@@ -512,20 +579,17 @@ def migrate_WT3D():
                 if exists:
                     continue
 
-                midline = Midline2D()
-                midline.frame = frame
-                midline.camera = c
-                midline.user = 'YO'
+                midline = Midline3D()
+                midline.frame = trial.get_frame(frame_num)
                 midline.X = X
+                midline.source = M3D_SOURCE_WT3D
+                midline.source_file = filename
+                # midline.validate()
                 midlines.append(midline)
 
             if len(midlines) > 0:
-                # Midline annotations should come in triplets, one for each camera view
-                assert len(midlines) == 3
-                for m1, m2 in zip(midlines, midlines):
-                    assert m1.frame.frame_num == m2.frame.frame_num
-                for m in midlines:
-                    m.save()
+                Midline3D.objects.insert(midlines)
+                logger.debug(f'{len(midlines)} inserted')
 
 
 if __name__ == '__main__':
@@ -534,5 +598,9 @@ if __name__ == '__main__':
     # migrate_tags()
     # migrate_runinfo()
     # migrate_midlines2d()
-    migrate_midlines3d(drop_collection=False)
-    # migrate_WT3D()
+    # migrate_midlines3d(drop_collection=True)
+    migrate_WT3D(
+        update_tags=False,
+        update_midlines2d=False,
+        update_midlines3d=True,
+    )
