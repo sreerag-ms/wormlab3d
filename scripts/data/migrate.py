@@ -15,6 +15,7 @@ from wormlab3d.data.util import ANNEX_PATH_PLACEHOLDER
 
 VIDEO_DIR = 'video'
 CALIB_DIR = 'calib'
+CAMERA_SHIFTS_DIR = ANNEX_PATH + '/calib/shifts'
 BACKGROUND_IMAGES_DIR = 'background'
 MIDLINES_2D_DIR = ANNEX_PATH + '/midlines'
 MIDLINES_3D_DIR = ANNEX_PATH + '/reconst'
@@ -228,17 +229,6 @@ def find_or_create_cameras(row: dict, experiment: Experiment) -> Cameras:
             logger.error(f'Could not parse calibration file: {calib_path}')
 
 
-def find_or_create_midline() -> Midline3D:
-    # Create new midline
-    midline = Midline3D()
-
-    midline.base_3d = np.array([-1, 5, 2.], dtype=np.float32)
-
-    midline.save()
-
-    return midline
-
-
 def migrate_tags():
     # Map Omer's ontology matlab table
     mat = sio.loadmat(TAGS_MAT_PATH)
@@ -429,6 +419,68 @@ def migrate_midlines3d(drop_collection=False):
         logger.error('\n=== FAILED:' + '\n'.join(failed) + '\n')
 
 
+def migrate_shifts(drop_collection=False):
+    if drop_collection:
+        logger.warning('Dropping CameraShifts collection.')
+        CameraShifts.drop_collection()
+    files = os.listdir(CAMERA_SHIFTS_DIR)
+    failed = []
+    logger.info(f'{len(files)} files found.')
+    for i, filename in enumerate(files):
+        if not filename.endswith('_shift.out'):
+            continue
+        logger.info(f'Processing file {i + 1}/{len(files)}: {filename}')
+
+        # Get trial
+        trial_id = filename[:3]
+        try:
+            trial = Trial.objects.get(legacy_id=trial_id)
+        except DoesNotExist:
+            failed.append(filename)
+            continue
+
+        shifts = []
+        batch_size = 10
+
+        # Parse shifts
+        with open(CAMERA_SHIFTS_DIR + '/' + filename) as f:
+            for line in f.readlines():
+                if line[0] == '#':
+                    continue
+
+                start_frame, dx, dy, dz = line.split(' ')
+                start_frame = int(start_frame)
+                for frame_num in range(start_frame, start_frame + batch_size):
+                    try:
+                        frame = trial.get_frame(frame_num)
+                    except DoesNotExist:
+                        continue
+                    try:
+                        CameraShifts.objects.get(frame=frame)
+                        continue  # unique
+                    except DoesNotExist:
+                        pass
+
+                    cam_shifts = CameraShifts()
+                    cam_shifts.frame = frame
+                    cam_shifts.dx = float(dx)
+                    cam_shifts.dy = float(dy)
+                    cam_shifts.dz = float(dz)
+                    # cam_shifts.validate()
+                    shifts.append(cam_shifts)
+
+        # Bulk insert
+        if len(shifts) > 0:
+            logger.info(f'Inserting {len(shifts)} camera shifts.')
+            # CameraShifts.objects.insert(shifts)
+        else:
+            logger.error('No shifts could be migrated!')
+
+    # Show any failures
+    if len(failed):
+        logger.error('\n=== FAILED:' + '\n'.join(failed) + '\n')
+
+
 def migrate_WT3D(
         update_tags: bool = False,
         update_midlines2d: bool = False,
@@ -602,8 +654,9 @@ if __name__ == '__main__':
     # migrate_runinfo()
     # migrate_midlines2d()
     # migrate_midlines3d(drop_collection=True)
-    migrate_WT3D(
-        update_tags=False,
-        update_midlines2d=False,
-        update_midlines3d=True,
-    )
+    migrate_shifts(drop_collection=True)
+    # migrate_WT3D(
+    #     update_tags=False,
+    #     update_midlines2d=False,
+    #     update_midlines3d=True,
+    # )
