@@ -425,6 +425,7 @@ def migrate_shifts(drop_collection=False):
         CameraShifts.drop_collection()
     files = os.listdir(CAMERA_SHIFTS_DIR)
     failed = []
+    batch_size = 10  # shifts are calculated in batches of 10
     logger.info(f'{len(files)} files found.')
     for i, filename in enumerate(files):
         if not filename.endswith('_shift.out'):
@@ -432,7 +433,11 @@ def migrate_shifts(drop_collection=False):
         logger.info(f'Processing file {i + 1}/{len(files)}: {filename}')
 
         # Get trial
-        trial_id = filename[:3]
+        try:
+            trial_id = int(filename[:3])
+        except ValueError:
+            failed.append(filename)
+            continue
         try:
             trial = Trial.objects.get(legacy_id=trial_id)
         except DoesNotExist:
@@ -440,7 +445,6 @@ def migrate_shifts(drop_collection=False):
             continue
 
         shifts = []
-        batch_size = 10
 
         # Parse shifts
         with open(CAMERA_SHIFTS_DIR + '/' + filename) as f:
@@ -472,7 +476,7 @@ def migrate_shifts(drop_collection=False):
         # Bulk insert
         if len(shifts) > 0:
             logger.info(f'Inserting {len(shifts)} camera shifts.')
-            # CameraShifts.objects.insert(shifts)
+            CameraShifts.objects.insert(shifts)
         else:
             logger.error('No shifts could be migrated!')
 
@@ -651,9 +655,9 @@ if __name__ == '__main__':
     # print_runinfo_data()
     # clear_db()
     # migrate_tags()
-    # migrate_runinfo()
+    migrate_runinfo()
     # migrate_midlines2d()
-    # migrate_midlines3d(drop_collection=True)
+    migrate_midlines3d(drop_collection=False)
     migrate_shifts(drop_collection=True)
     # migrate_WT3D(
     #     update_tags=False,
