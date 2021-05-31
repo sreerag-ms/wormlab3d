@@ -4,7 +4,7 @@ import numpy as np
 from mongoengine import *
 
 from wormlab3d import logger, PREPARED_IMAGE_SIZE, CAMERA_IDXS
-from wormlab3d.data.model import Cameras
+from wormlab3d.data.model import Cameras, CameraShifts
 from wormlab3d.data.model.experiment import Experiment
 from wormlab3d.data.model.midline2d import Midline2D
 from wormlab3d.data.model.midline3d import Midline3D
@@ -384,6 +384,24 @@ class Frame(Document):
             crops.append(crop)
 
         self.images = crops
+
+    def get_cameras(self, use_shifts:bool=True) -> Cameras:
+        if self.centre_3d is not None:
+            cams = self.centre_3d.cameras
+        else:
+            cams = self.trial.get_cameras()
+        if use_shifts:
+            shifts = self.get_shifts()
+            if shifts is not None:
+                cams.set_shifts(shifts)
+        return cams
+
+    def get_shifts(self) -> CameraShifts:
+        try:
+            shifts = CameraShifts.objects.get(frame=self)
+        except DoesNotExist:
+            shifts = None
+        return shifts
 
     def is_ready(self) -> bool:
         """

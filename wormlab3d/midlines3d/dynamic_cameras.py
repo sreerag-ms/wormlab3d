@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-N_CAM_COEFFICIENTS = 21
+N_CAM_COEFFICIENTS = 22
 
 
 class DynamicCameras(nn.Module):
@@ -35,6 +35,7 @@ class DynamicCameras(nn.Module):
         self.rotation = coefficients[:, :, 4:13].reshape((bs, 3, 3, 3))
         self.translation = coefficients[:, :, 13:16]
         self.distortion = coefficients[:, :, 16:21]
+        self.shifts = coefficients[:, :, 21]
 
     def forward(self, coefficients: torch.Tensor, points: torch.Tensor) -> torch.Tensor:
         """
@@ -52,6 +53,15 @@ class DynamicCameras(nn.Module):
         # Project to 2D
         x = xyz[:, :, :, 0] / xyz[:, :, :, 2]
         y = xyz[:, :, :, 1] / xyz[:, :, :, 2]
+
+        # Apply shifts
+        shifts = torch.zeros(points.shape[0], 3, 2)
+        shifts[:, 0, 0] = self.shifts[:, 0]
+        shifts[:, 1, 1] = -self.shifts[:, 1]
+        shifts[:, 2, 1] = self.shifts[:, 2]
+        shifts = shifts.unsqueeze(-1)
+        x = x + shifts[:, :, 0] / self.fx
+        y = y + shifts[:, :, 1] / self.fy
 
         # Distort
         if self.distort:

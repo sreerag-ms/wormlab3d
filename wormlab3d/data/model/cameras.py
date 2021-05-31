@@ -1,6 +1,7 @@
+from typing import Tuple
+
 import numpy as np
 from mongoengine import *
-
 from wormlab3d.data.numpy_field import NumpyField
 from wormlab3d.data.triplet_field import TripletField
 
@@ -31,6 +32,28 @@ class Cameras(Document):
         'indexes': ['reprojection_error'],
         'ordering': ['+reprojection_error']
     }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.shifts = None
+
+    def set_shifts(self, shifts: 'CameraShifts'):
+        """Link CameraShifts to this Cameras instance."""
+        self.shifts = shifts
+
+    def get_shift(self, camera_idx: int) -> Tuple[float, float]:
+        """
+        Return the camera shift for the given camera index.
+        Assumes the default camera layout; possible bug.
+        """
+        if self.shifts is None:
+            return 0, 0
+        if camera_idx == 0:
+            return self.shifts.dx, 0
+        if camera_idx == 1:
+            return 0, -self.shifts.dy
+        if camera_idx == 2:
+            return 0, self.shifts.dz
 
     def get_camera_model_triplet(self) -> 'CameraModelTriplet':
         """

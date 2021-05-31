@@ -27,6 +27,10 @@ def parse_target_arguments() -> Namespace:
                         help='Restrict to a specific frame number (requires trial to be defined).')
     parser.add_argument('--order-trials', type=str,
                         help='Specify some ordering for the trials.')
+    parser.add_argument('--midline2d', type=str,
+                        help='Midline2D id.')
+    parser.add_argument('--midline3d', type=str,
+                        help='Midline3D id.')
     args = parser.parse_args()
 
     return args
@@ -36,7 +40,7 @@ def resolve_targets(
         experiment_id: int = None,
         trial_id: int = None,
         camera_idx: int = None,
-        frame_num: int = None,
+        frame_num: int = None
 ) -> Tuple[List['Trial'], List[int]]:
     """
     Resolves any combination of passed experiments, trials and cameras.
