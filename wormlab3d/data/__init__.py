@@ -1,4 +1,5 @@
 from mongoengine import connect
+
 from wormlab3d import DB_NAME, DB_HOST, DB_PORT, DB_USERNAME, DB_PASSWORD
 
 # Connect to the database

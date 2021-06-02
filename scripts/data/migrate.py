@@ -8,6 +8,7 @@ import h5py
 import numpy as np
 import scipy.io as sio
 from mongoengine import DoesNotExist
+
 from wormlab3d import WT3D_PATH, logger, CAMERA_IDXS, ANNEX_PATH, DATA_PATH
 from wormlab3d.data.model import *
 from wormlab3d.data.model.midline3d import M3D_SOURCE_RECONST, M3D_SOURCE_WT3D

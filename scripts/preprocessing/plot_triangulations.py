@@ -26,8 +26,8 @@ def plot_triangulations(
     # Set the frame number, fetch the images from each video and find objects in all 3
     reader.set_frame_num(frame_num)
     images = reader.get_images()
-    contours, thresholds = reader.find_contours(cont_threshold_ratios=[contour_threshold_ratio]*3)
-    centres, thresholds = reader.find_objects(cont_threshold_ratios=[contour_threshold_ratio]*3)
+    contours, thresholds = reader.find_contours(cont_threshold_ratios=[contour_threshold_ratio] * 3)
+    centres, thresholds = reader.find_objects(cont_threshold_ratios=[contour_threshold_ratio] * 3)
 
     # Do the triangulation from all experiment cameras
     cameras_res = []

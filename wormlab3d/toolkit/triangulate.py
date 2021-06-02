@@ -3,7 +3,6 @@ from collections import OrderedDict
 from typing import List, Union
 
 import numpy as np
-from numpy.linalg import norm
 from scipy.optimize import minimize
 
 from wormlab3d import logger, CAMERA_IDXS

@@ -1,6 +1,7 @@
 from typing import List
 
 import numpy as np
+
 from wormlab3d import CAMERA_IDXS
 from wormlab3d.data.model.cameras import Cameras
 from wormlab3d.toolkit.pinhole_camera import PinholeCamera

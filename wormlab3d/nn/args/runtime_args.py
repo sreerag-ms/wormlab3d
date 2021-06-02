@@ -64,6 +64,6 @@ class RuntimeArgs(BaseArgs):
         group.add_argument('--plot-n-examples', type=int, default=4,
                            help='Show this many random examples in a single plot.')
         group.add_argument('--track-metrics', type=lambda s: [str(item) for item in s.split(',')], default=[],
-                            help='Comma delimited list of metrics to track.')
+                           help='Comma delimited list of metrics to track.')
 
         return group

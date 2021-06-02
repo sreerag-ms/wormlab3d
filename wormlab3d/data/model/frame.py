@@ -385,7 +385,7 @@ class Frame(Document):
 
         self.images = crops
 
-    def get_cameras(self, use_shifts:bool=True) -> Cameras:
+    def get_cameras(self, use_shifts: bool = True) -> Cameras:
         if self.centre_3d is not None:
             cams = self.centre_3d.cameras
         else:

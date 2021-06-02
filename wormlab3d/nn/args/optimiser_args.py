@@ -12,7 +12,6 @@ LOSSES = [
     LOSS_BCE
 ]
 
-
 OPTIMISER_ADADELTA = 'Adadelta'
 OPTIMISER_ADAGRAD = 'Adagrad'
 OPTIMISER_ADAM = 'Adam'

@@ -1,7 +1,7 @@
 import numpy as np
 from mongoengine import *
-from wormlab3d import CAMERA_IDXS, PREPARED_IMAGE_SIZE
 
+from wormlab3d import CAMERA_IDXS, PREPARED_IMAGE_SIZE
 from wormlab3d.data.model.model import Model
 from wormlab3d.data.numpy_field import NumpyField, COMPRESS_BLOSC_PACK
 from wormlab3d.midlines2d.masks_from_coordinates import make_segmentation_mask
@@ -36,7 +36,6 @@ class Midline3D(Document):
         'indexes': ['frame']
     }
 
-
     def get_segmentation_masks(self, blur_sigma: float = None, draw_mode: str = 'line_aa') -> np.ndarray:
         """
         Turn the midline coordinates into a set of segmentation masks by projecting the 3D object points
@@ -50,7 +49,7 @@ class Midline3D(Document):
         cameras = cams.get_camera_model_triplet()
 
         image_points = cameras.project_to_2d(object_points=self.X)
-        image_points = np.array(image_points).transpose(1,0,2)
+        image_points = np.array(image_points).transpose(1, 0, 2)
 
         masks = []
         for c in CAMERA_IDXS:

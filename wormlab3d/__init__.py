@@ -43,7 +43,6 @@ DB_PORT = int(os.getenv('DB_PORT', 27017))
 DB_USERNAME = os.getenv('DB_USERNAME')
 DB_PASSWORD = os.getenv('DB_PASSWORD')
 
-
 # || -------------------------------- LOGS --------------------------------- ||
 
 cwd = os.getcwd()
