@@ -11,14 +11,14 @@ import torch
 import torch.nn.functional as F
 from matplotlib.figure import Figure
 from mongoengine import DoesNotExist
-from torch.utils.tensorboard import SummaryWriter
-
 from simple_worm.controls_torch import ControlSequenceTorch, ControlSequenceBatchTorch
 from simple_worm.frame_torch import FrameTorch, FrameSequenceBatchTorch, FrameSequenceTorch, FrameBatchTorch
 from simple_worm.losses import REG_LOSS_TYPES, REG_LOSS_VARS
 from simple_worm.losses_torch import LossesTorch
-from simple_worm.plot3d import plot_X_vs_target, plot_FS_3d
+from simple_worm.plot3d import plot_X_vs_target, plot_FS_3d, generate_scatter_diff_clip, plot_CS, plot_frame_3d, \
+    plot_frame_components
 from simple_worm.worm_torch import WormModule
+from torch.utils.tensorboard import SummaryWriter
 from wormlab3d import LOGS_PATH, logger
 from wormlab3d.data.model import Checkpoint, FrameSequence, Trial
 from wormlab3d.data.model.sw_checkpoint import SwCheckpoint
@@ -26,8 +26,6 @@ from wormlab3d.data.model.sw_regularisation_parameters import SwRegularisationPa
 from wormlab3d.data.model.sw_run import SwRun, SwControlSequence, SwFrameSequence
 from wormlab3d.data.model.sw_simulation_parameters import SwSimulationParameters
 from wormlab3d.simple_worm.args import RuntimeArgs, FrameSequenceArgs, SimulationArgs, OptimiserArgs, RegularisationArgs
-from wormlab3d.simple_worm.plot_helper import plot_frame_components, plot_CS, plot_F0_3d
-from wormlab3d.simple_worm.video_helper import generate_scatter_diff_clip
 from wormlab3d.toolkit.util import to_dict, to_numpy
 
 START_TIMESTAMP = time.strftime('%Y%m%d_%H%M')
@@ -498,8 +496,8 @@ class Manager:
         ):
             self._plot_X()
             self._plot_F0_components()
-            self._plot_CS()
             self._plot_F0_3d()
+            self._plot_CS()
 
         if final_step or (
                 self.runtime_args.videos_every_n_steps > -1
@@ -527,6 +525,15 @@ class Manager:
         )
         self._save_plot(fig, 'F0')
 
+    def _plot_F0_3d(self):
+        """
+        Plot a 3x3 grid of 3D plots of the same worm frame from different angles.
+        """
+        fig = plot_frame_3d(
+            F0=self.F0.to_numpy(worm=self.worm.worm_solver, calculate_components=True)
+        )
+        self._save_plot(fig, 'F0_3D')
+
     def _plot_CS(self):
         """
         Plot the control sequences as matrices.
@@ -541,12 +548,6 @@ class Manager:
             labels=['Attempt', 'Target']
         )
         self._save_plot(fig, '3D')
-
-    def _plot_F0_3d(self):
-        fig = plot_F0_3d(
-            F0=self.F0.to_numpy(worm=self.worm.worm_solver, calculate_components=True)
-        )
-        self._save_plot(fig, 'F0_3D')
 
     def _save_plot(self, fig: Figure, plot_type: str):
         """
