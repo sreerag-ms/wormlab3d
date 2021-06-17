@@ -1,3 +1,5 @@
+import os
+import time
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -5,32 +7,36 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.optim import RMSprop
+from torch.optim import RMSprop, SGD
 from torch.optim.lr_scheduler import CyclicLR
 from torchvision.transforms.functional import gaussian_blur
-
+from wormlab3d.toolkit.plot_utils import interactive_plots
 from wormlab3d import logger, CAMERA_IDXS, N_WORM_POINTS, PREPARED_IMAGE_SIZE
-from wormlab3d.data.model import SegmentationMasks
+from wormlab3d.data.model import SegmentationMasks, Midline3D
 from wormlab3d.midlines2d.masks_from_coordinates import make_segmentation_mask
 from wormlab3d.midlines3d.args.network_args import ENCODING_MODE_DELTA_VECTORS, ENCODING_MODE_DELTA_ANGLES, \
     ENCODING_MODE_DELTA_ANGLES_BASIS, MAX_DECAY_FACTOR, ENCODING_MODE_POINTS
 from wormlab3d.midlines3d.dynamic_cameras import DynamicCameras
 from wormlab3d.midlines3d.points_to_masks import PointsToMasks
 from wormlab3d.toolkit.util import is_bad, to_numpy
+from wormlab3d import logger, LOGS_PATH
 
 
-if 1 and torch.cuda.is_available():
+if 0 and torch.cuda.is_available():
     logger.info('USING GPU!')
     device = 'cuda'
 else:
     logger.info('USING CPU')
     device = 'cpu'
 
+START_TIMESTAMP = time.strftime('%Y%m%d_%H%M')
+
 VOL_BOUNDS = (-0.4, 0.4)
-VOL_SIZE = (201, 201, 201)
+VOL_SIZE = (11, 11, 11)
 
 cmap_cloud = 'autumn_r'
 cmap_curve = 'YlGnBu'
+
 
 
 class CloudToCurve(torch.autograd.Function):
@@ -122,10 +128,56 @@ class PointsToMasks(torch.autograd.Function):
         grads_diff = _get_directional_gradients_2d(J_diff, idxs, n_points)
         grads_target = _get_directional_gradients_2d(J_target, idxs, n_points)
 
+        # grads_noise = torch.normal(0, std=torch.ones_like(grads_diff)/grads_diff.mean())
+        # grads_diff = grads_diff + grads_noise
+        # grads_noise = torch.normal(0, std=torch.stack([grads_target.norm(dim=-1), grads_target.norm(dim=-1)], dim=-1))
+        # grads_diff = grads_noise * 100
+
+        # How well is the target covered in each view?
+
+        grads_noise = torch.normal(0, std=torch.ones_like(grads_target))
+        coverage = torch.sqrt((masks_diff**2).mean(dim=(2,3)))
+        coverage = coverage.reshape(grads_target.shape[0], 3, 1, 1)
+        grads_diff = grads_noise * coverage
+
+        # # Normalise the grads
+        # nf = grads_target.norm() / grads_diff.norm()
+        # grads_diff = grads_diff * nf
+
         # Gradients are combination of towards-the-target when far away and cover-up-remainder when close
         points_scores = points_scores.unsqueeze(-1)
+        mean_scores = points_scores.mean(dim=1, keepdim=True) #.unsqueeze(-1)
+        # max_scores = points_scores.max(dim=1, keepdim=True)[0]
+        min_scores = points_scores.min(dim=1, keepdim=True)[0]
+        # sf_max = (points_scores == max_scores).to(torch.float32)
+        sf_min = (points_scores == min_scores).to(torch.float32)
+        # grads_diff = grads_diff * sf_max  # only move towards diff in best views
+        # grads_diff = grads_diff * (1-sf_min)  # only move towards diff in best views
+        # grads_target = grads_target * sf_min  # only move towards target in worst views
+
         points_2d_grad = grads_diff * points_scores + grads_target * (1 - points_scores)
-        points_2d_grad = -points_2d_grad
+        # points_2d_grad = grads_diff * mean_scores + grads_target * (1 - mean_scores)
+        # points_2d_grad = grads_diff + grads_target
+        # points_2d_grad = grads_target
+        # points_2d_grad = -points_2d_grad
+
+        # Points scoring low => far away from target => take bigger steps
+        # points_2d_grad = (-points_2d_grad) * (-torch.log(points_scores+1e-10))
+        gs = points_2d_grad.abs().sum(dim=-1, keepdim=True)
+        points_2d_grad = (-points_2d_grad) * (-torch.log(gs+1e-10))
+
+        # if a point has a high score in one view and very low score in another
+        # then it is difficult to resolve properly
+        # maybe first we need to ignore high scores and focus solely on the low ones
+        # ie, only move each point in the view in which it has the lowest score
+        # ie, set grads to zero in the other views
+
+        points_2d_grad = torch.where(
+            mean_scores < 0.7,
+            points_2d_grad * sf_min,
+            points_2d_grad  #* sf_max,
+        )
+        # points_2d_grad = points_2d_grad * sf_min
 
         assert not is_bad(points_2d_grad)
 
@@ -273,6 +325,7 @@ def _points_to_masks(points_2d: torch.Tensor, blur_sigma: float = 1, decay_facto
 
     # Apply a gaussian blur to the masks
     if blur_sigma > 0:
+        mask_maxs_original = torch.amax(masks, dim=(2, 3), keepdim=True)
         ks = int(blur_sigma * 5)
         if ks % 2 == 0:
             ks += 1
@@ -283,6 +336,7 @@ def _points_to_masks(points_2d: torch.Tensor, blur_sigma: float = 1, decay_facto
             masks / mask_maxs,
             torch.zeros_like(masks)
         )
+        masks = masks * mask_maxs_original
 
     return masks
 
@@ -307,7 +361,8 @@ def _points_3d_to_volume(points_3d: torch.Tensor, cloud_points_scores=None, blur
     else:
         # Weight the points by the scores, but only take the top 10%, and only if > 0.5.
         weights = cloud_points_scores.mean(dim=1).flatten()
-        min_weight = max(0.5, weights.sort(descending=True)[0][:int(len(weights) * 0.1)][-1])
+        # min_weight = max(0.5, weights.sort(descending=True)[0][:int(len(weights) * 0.1)][-1])
+        min_weight = 0.5
         weights[weights < min_weight] = 0
 
     if decay_factor is not None:
@@ -334,7 +389,7 @@ def _points_3d_to_volume(points_3d: torch.Tensor, cloud_points_scores=None, blur
         vol_in = vol.unsqueeze(1)
         for i in range(3):
             vol_in = vol_in.permute(0, 1, 4, 2, 3)
-            vol_in = F.conv3d(vol_in, k1d, stride=1, padding=(len(k) // 2, 0, 0))  # , groups=VOL_SIZE)
+            vol_in = F.conv3d(vol_in, k1d, stride=1, padding=(len(k) // 2, 0, 0))
         vol = vol_in.squeeze(1)
 
     if vol.max() > 0:
@@ -423,6 +478,7 @@ class EncDec(nn.Module):
             worm_length: float = 1.,
             max_revolutions: float = 2,
             blur_sigma_masks: float = 0,
+            blur_sigma_masks_curve: float = 0,
             blur_sigma_vols: float = 0,
             mode: str = ENCODING_MODE_DELTA_ANGLES,
             n_basis_fns: int = 4
@@ -433,6 +489,7 @@ class EncDec(nn.Module):
         self.worm_length = worm_length
         self.max_revolutions = max_revolutions
         self.blur_sigma_masks = blur_sigma_masks
+        self.blur_sigma_masks_curve = blur_sigma_masks_curve
         self.blur_sigma_vols = blur_sigma_vols
         self.mode = mode
         self.n_basis_fns = n_basis_fns
@@ -455,6 +512,7 @@ class EncDec(nn.Module):
 
     def forward(
             self,
+            shifts: torch.Tensor,
             parameters: torch.Tensor,
             camera_coeffs: torch.Tensor,
             points_3d_base: torch.Tensor,
@@ -463,10 +521,6 @@ class EncDec(nn.Module):
     ):
         bs = parameters.shape[0]
         device = parameters.device
-
-        # Extract xy shift/offset for each view
-        shifts = parameters[:, :3 * 3].reshape((bs, 3, 3))
-        parameters = parameters[:, 3 * 3:]
 
         # Extract point cloud coordinates
         cloud_points = parameters[:, :self.n_cloud_points * 3].reshape((bs, self.n_cloud_points, 3))
@@ -488,7 +542,7 @@ class EncDec(nn.Module):
         curve_points_3d = points_3d_base.unsqueeze(1) + curve_points
 
         # Apply translation shift adjustments
-        camera_coeffs[:, :, 13:16] = camera_coeffs[:, :, 13:16] + shifts
+        camera_coeffs[:, :, 21] = camera_coeffs[:, :, 21] + shifts
 
         # Project 3D points to 2D
         cloud_points_2d = self.cams.forward(camera_coeffs, cloud_points_3d)
@@ -501,7 +555,7 @@ class EncDec(nn.Module):
 
         # Generate the masks from the 2D image points and get the scores for the cloud points
         masks_cloud, cloud_points_scores = PointsToMasks.apply(cloud_points_2d_net, self.blur_sigma_masks, masks_target)
-        masks_curves = _points_to_masks(curve_points_2d_net, self.blur_sigma_masks, decay_factor=self.decay_factor)
+        masks_curves = _points_to_masks(curve_points_2d_net, self.blur_sigma_masks_curve, decay_factor=self.decay_factor)
 
         # Get the point scores for the curve points
         curve_points_scores = CloudToCurve.apply(curve_points, cloud_points, cloud_points_scores, self.blur_sigma_vols,
@@ -536,12 +590,19 @@ def find_midline3d(
         n_cloud_points: int = 1000,
         n_worm_points: int = 10,
         blur_sigma_masks: float = 1,
+        blur_sigma_masks_curve: float = 1,
         blur_sigma_vols: float = 1,
         max_revolutions: int = 2,
         mode: str = ENCODING_MODE_DELTA_ANGLES,
         n_basis_fns: int = 4,
         n_steps: int = 2000,
-        n_warmup_steps: int = 100
+        n_warmup_steps: int = 100,
+        n_straight_steps: int = 100,
+        checkpoint_every_n_steps: int = -1,
+        resume_from_run: str = None,
+        resume_from_step: int = None,
+        save_plots:bool =False,
+        show_plots:bool =True
 ):
     # interactive_plots()
     masks: SegmentationMasks = SegmentationMasks.objects.get(id=masks_id)
@@ -550,9 +611,11 @@ def find_midline3d(
     frame = masks.frame
     masks_target = torch.from_numpy(masks.X)
     masks_target /= masks_target.max()
+    masks_target[masks_target > 0.3] = 1
     point_3d_base = torch.tensor(frame.centre_3d.point_3d)
     points_2d_base = torch.tensor(frame.centre_3d.reprojected_points_2d)
-    cameras = frame.centre_3d.cameras
+    # cameras = frame.centre_3d.cameras
+    cameras = frame.get_cameras()
     worm_length = masks.trial.experiment.worm_length
     logger.debug(f'Worm length = {worm_length}')
     azim = -60
@@ -560,24 +623,18 @@ def find_midline3d(
     max_revolutions_absolute = max_revolutions
     max_revolutions_init = 0
     max_revolutions = max_revolutions_init
+    shifts_reg = 1e-3
 
-
-    # make test
-    if 0:
-        p3d1 = np.array(frame.centre_3d.point_3d)
-        p3d1[0] -= 0.2
-        p3d2 = np.array(frame.centre_3d.point_3d)
-        p3d2[0] += 0.2
-        b2d = np.array(frame.centre_3d.reprojected_points_2d)
-        ct = cameras.get_camera_model_triplet()
-        t2d = np.array(ct.project_to_2d(object_points=np.array([p3d1, p3d2])))  # [0]
-        masks_target = []
-        for c in CAMERA_IDXS:
-            test_points = np.array(t2d[:, c] - b2d[c]) + np.array([[100, 100]])
-            masks_target.append(make_segmentation_mask(test_points, draw_mode='line_aa', blur_sigma=5))
-        masks_target = np.array(masks_target)
-        masks_target = torch.from_numpy(masks_target)
-        masks_target /= masks_target.max()
+    if resume_from_run is not None:
+        assert resume_from_step is not None
+        logs_path = LOGS_PATH + '/find_midline3d/' + resume_from_run
+    else:
+        logs_path = LOGS_PATH + '/find_midline3d/' + START_TIMESTAMP
+    if checkpoint_every_n_steps != -1:
+        os.makedirs(logs_path, exist_ok=True)
+    if save_plots:
+        os.makedirs(logs_path + '/3d', exist_ok=True)
+        os.makedirs(logs_path + '/2d', exist_ok=True)
 
     # Extract camera coefficients
     fx = np.array([cameras.matrix[c][0, 0] for c in CAMERA_IDXS])
@@ -587,27 +644,98 @@ def find_midline3d(
     R = np.array([cameras.pose[c][:3, :3] for c in CAMERA_IDXS])
     t = np.array([cameras.pose[c][:3, 3] for c in CAMERA_IDXS])
     d = np.array([cameras.distortion[c] for c in CAMERA_IDXS])
+    if cameras.shifts is not None:
+        s = np.array([cameras.shifts.dx, cameras.shifts.dy, cameras.shifts.dz])
+    else:
+        s = np.array([0,0,0])
+    print('shifts=', s)
     cam_coeffs = np.concatenate([
-        fx.reshape(3, 1), fy.reshape(3, 1), cx.reshape(3, 1), cy.reshape(3, 1), R.reshape(3, 9), t, d
+        fx.reshape(3, 1), fy.reshape(3, 1), cx.reshape(3, 1), cy.reshape(3, 1), R.reshape(3, 9), t, d, s.reshape(3, 1)
     ], axis=1).astype(np.float32)
     cam_coeffs = torch.from_numpy(cam_coeffs)
 
-    # Set initial parameter vector to be optimised
-    shifts0 = torch.zeros(3 * 3)
+    # make test 1 - 1 point
+    if 0:
+        p3d1 = np.array(frame.centre_3d.point_3d)
+        p3d1[0] += 0.1
+        p3d1[1] += 0.1
+        b2d = np.array(frame.centre_3d.reprojected_points_2d)
+        ct = cameras.get_camera_model_triplet()
+        object_points=np.array([p3d1])
+        print('object_points', object_points)
+        print('object_points.shape', object_points.shape)
+        t2d = np.array(ct.project_to_2d(object_points))  # [0]
+        masks_target = []
+        for c in CAMERA_IDXS:
+            test_points = np.array(t2d[:, c] - b2d[c]) + np.array([[100, 100]])
+            print(test_points.shape)
+            print(test_points)
+            masks_target.append(make_segmentation_mask(test_points, draw_mode='pixels', blur_sigma=3))
+        masks_target = np.array(masks_target)
+        masks_target = torch.from_numpy(masks_target)
+        masks_target /= masks_target.max()
+
+        dc = DynamicCameras()
+        test_points_2 = dc.forward(cam_coeffs.unsqueeze(0), torch.from_numpy(object_points).unsqueeze(0).to(torch.float32))
+
+        print('t2d.shape', t2d.shape)
+        test_points_1 = torch.from_numpy(t2d)
+        test_points_1 = test_points_1.permute(1, 0, 2)
+        test_points_1 = test_points_1.unsqueeze(0).to(torch.float32)
+        print('test_points_1.shape', test_points_1.shape)
+        print('test_points_2.shape', test_points_2.shape)
+        assert torch.allclose(test_points_1, test_points_2)
+
+    # make test 2 - 2-point line
+    if 0:
+        p3d1 = np.array(frame.centre_3d.point_3d)
+        p3d1[0] -= 0.1
+        p3d1[2] += 0.1
+        p3d2 = np.array(frame.centre_3d.point_3d)
+        p3d2[0] += 0.1
+        p3d2[1] -= 0.1
+        b2d = np.array(frame.centre_3d.reprojected_points_2d)
+        ct = cameras.get_camera_model_triplet()
+        object_points=np.array([p3d1, p3d2])
+        print('object_points', object_points)
+        print('object_points.shape', object_points.shape)
+        t2d = np.array(ct.project_to_2d(object_points))
+        masks_target = []
+        for c in CAMERA_IDXS:
+            test_points = np.array(t2d[:, c] - b2d[c]) + np.array([[100, 100]])
+            print(test_points.shape)
+            print(test_points)
+            masks_target.append(make_segmentation_mask(test_points, draw_mode='pixels', blur_sigma=3))
+        masks_target = np.array(masks_target)
+        masks_target = torch.from_numpy(masks_target)
+
+    # make test 3 - find a pre-computed 3d midline and use the projections as the targets
+    if 1:
+        m3d = Midline3D.objects(frame=frame)[0]
+        masks_target = m3d.get_segmentation_masks(blur_sigma=3)
+        masks_target = np.array(masks_target)
+        masks_target = torch.from_numpy(masks_target)
+        masks_target /= masks_target.max()
+
+    # Set initial parameter vectors to be optimised
+    shifts = torch.zeros(3)
 
     # Distribute initial cloud points randomly on surface of a sphere
     mean = torch.zeros(n_cloud_points, 3)
     x = torch.normal(mean=mean, std=1)
     x = x / torch.norm(x, dim=-1, keepdim=True) * 0.4
     cloud0 = x.flatten()
-    p0 = [shifts0, cloud0]
+    p0 = [cloud0]
 
     if mode == ENCODING_MODE_POINTS:
-        mean = torch.zeros(3 * n_worm_points)
-        x = torch.normal(mean=mean, std=0.1)
-        cc0 = x.flatten()
+        cc0 = torch.linspace(-np.sqrt(3)/6, np.sqrt(3)/6, n_worm_points).repeat_interleave(3)
+        # mean = torch.zeros(3 * n_worm_points)
+        # x = torch.normal(mean=mean, std=0.01)
+        # cc0 = x.flatten()
         p0.append(cc0)
     elif mode == ENCODING_MODE_DELTA_VECTORS:
+        offset0 = torch.zeros(3)
+        p0.append(offset0)
         delta_vectors0 = torch.normal(mean=torch.zeros(3 * n_worm_points), std=0.2)
         p0.append(delta_vectors0)
     else:
@@ -620,10 +748,10 @@ def find_midline3d(
             delta_angles0 = torch.normal(mean=torch.zeros(2 * (n_worm_points - 1)), std=0.1)
             p0.append(delta_angles0)
         elif mode == ENCODING_MODE_DELTA_ANGLES_BASIS:
-            a0 = torch.normal(mean=torch.zeros(2 * n_basis_fns), std=1)
-            p0 = torch.normal(mean=torch.zeros(2 * n_basis_fns), std=1)
-            p0.append(a0)
-            p0.append(p0)
+            amps0 = torch.normal(mean=torch.zeros(2 * n_basis_fns), std=1)
+            phases0 = torch.normal(mean=torch.zeros(2 * n_basis_fns), std=1)
+            p0.append(amps0)
+            p0.append(phases0)
     px = torch.cat(p0)
 
     # Add batch dims and put on correct device
@@ -633,6 +761,8 @@ def find_midline3d(
     masks_target = masks_target.unsqueeze(0).to(device)
     masks_cloud: torch.Tensor
     masks_curve: torch.Tensor
+    shifts = shifts.to(device)
+    shifts.requires_grad = True
     px = px.to(device)
     px.requires_grad = True
 
@@ -643,39 +773,66 @@ def find_midline3d(
         worm_length=worm_length,
         max_revolutions=max_revolutions_init,
         blur_sigma_masks=blur_sigma_masks,
+        blur_sigma_masks_curve=blur_sigma_masks_curve,
         blur_sigma_vols=blur_sigma_vols,
         mode=mode,
         n_basis_fns=n_basis_fns
     )
 
     optimiser = RMSprop(
+        [
+            {'params':(shifts,), 'lr': 0.01, 'momentum': 0.9},
+            {'params':(px,)},
+       ] ,
+        lr=0.001,
+        momentum=0.9
+    )
+    optimiser_curve = RMSprop(
         params=(px,),
-        lr=0.0005,
+        lr=0.001,
     )
 
-    lr_scheduler = CyclicLR(
-        optimizer=optimiser,
-        base_lr=0.0005,
-        max_lr=0.001,
-        step_size_up=1000,
-        mode='triangular2',
-        gamma=0.99,
-        cycle_momentum=False
-    )
+    # lr_scheduler = CyclicLR(
+    #     optimizer=optimiser,
+    #     base_lr=0.0001,
+    #     max_lr=0.001,
+    #     step_size_up=1000,
+    #     mode='triangular2',
+    #     gamma=0.99,
+    #     # cycle_momentum=True
+    # )
+
+    if resume_from_step is not None:
+        path =logs_path + f'/{resume_from_step}.chkpt'
+        logger.info(f'Resuming from {path}')
+        state = torch.load(path, map_location=device)
+        shifts.data = state['shifts']
+        px.data = state['px']
+        optimiser.load_state_dict(state['optim_sd'])
+        optimiser_curve.load_state_dict(state['optim_curve_sd'])
+        start_step = resume_from_step
+    else:
+        start_step = 0
+
+    encdec.decay_factor = torch.tensor(0., device=device)
 
     # Optimise
-    for i in range(n_steps):
+    for i in range(start_step, start_step+n_steps):
         # Set decay factor
-        if i > n_warmup_steps:
-            encdec.decay_factor = torch.tensor(max(0, 1 - i / (n_adjustment_steps / 2)) * MAX_DECAY_FACTOR)
+        # if i > n_warmup_steps:
+        #     encdec.decay_factor = torch.tensor(max(0, 1 - i / (n_adjustment_steps / 2)) * MAX_DECAY_FACTOR)
 
         # Set max curvature
-        if i > n_warmup_steps:
-            max_revolutions = torch.tensor(min(1, max(0, (i-n_warmup_steps-n_adjustment_steps/4) / (n_adjustment_steps/2)))) * max_revolutions_absolute
+        if i > (n_warmup_steps+n_straight_steps):
+            x = (i-n_warmup_steps-n_straight_steps) / (n_steps - n_warmup_steps-n_straight_steps)
+            max_revolutions = torch.tensor(min(1, max(0, x))) * max_revolutions_absolute
+            # max_revolutions = torch.tensor(min(1, max(0, (i-n_warmup_steps) / 2))) * max_revolutions_absolute
+            # encdec.decay_factor = torch.tensor(max(0, 1 - i / (n_adjustment_steps / 2)) * MAX_DECAY_FACTOR)
             encdec.max_revolutions = max_revolutions
 
         # Generate masks from parameters
         masks_cloud, masks_curve, cloud_points_scores, curve_points_scores = encdec.forward(
+            shifts=shifts.unsqueeze(0),
             parameters=px.unsqueeze(0),
             camera_coeffs=cam_coeffs.clone().detach(),
             points_3d_base=point_3d_base,
@@ -683,89 +840,237 @@ def find_midline3d(
             masks_target=masks_target
         )
 
-        if i < n_warmup_steps:
-            loss = -(cloud_points_scores.sum())
-        else:
-            loss = -(cloud_points_scores.sum() + curve_points_scores.sum())
+        curve_loss = 0
+        arc_length = 0
+        sl_loss = 0
+        al_loss = 0
+        angles_loss = 0
+        cc = None
 
-        assert not is_bad(loss)
+        def get_curve_loss():
+            nonlocal curve_loss, arc_length, sl_loss, al_loss, angles_loss
 
-        # Add losses for curve length and curvatures
-        if mode == ENCODING_MODE_POINTS:
+            # Losses for curve length and curvatures
+            if mode != ENCODING_MODE_POINTS:
+                return 0
             max_delta_angle = max_revolutions * 2 * np.pi / n_worm_points
+            l = worm_length / (n_worm_points-1)
 
             cc = px[-n_worm_points * 3:].reshape((n_worm_points, 3))
             assert not is_bad(cc)
 
+            scale_sl = 50
             segment_lengths = torch.norm(cc[1:] - cc[:-1], dim=-1)
-            arc_length = segment_lengths.sum()
-            # print('arc_length', arc_length)
-            sl_loss = ((segment_lengths - worm_length / n_worm_points)**2).sum()
+            # sl_loss = scale_sl*((segment_lengths - l)**2).sum()
+            sl_loss = torch.exp(scale_sl*((segment_lengths - l).abs())).mean()
 
-            a = cc[1:-1] - cc[:-2]
-            b = cc[2:] - cc[1:-1]
-            an = torch.norm(a, dim=-1)
-            bn = torch.norm(b, dim=-1)
-            adotb = (a * b).sum(dim=-1)
-            acos_arg = adotb / (an * bn)
+            arc_length = segment_lengths.sum()
+            al_loss = (arc_length - worm_length)**2
+            # print('arc_length', arc_length)
+
             eps = 1e-5
-            acos_arg = acos_arg.clamp(min=-1 + eps, max=1 - eps)
-            angles = torch.acos(acos_arg)
-            # assert not is_bad(angles)
+            # a = cc[1:-1] - cc[:-2]
+            a = cc[:-2]- cc[1:-1]
+            b = cc[2:] - cc[1:-1]
+            # a = cc[:-2] - cc[1:-1]
+            # b = cc[1:-1] - cc[2:]
+            # an = torch.norm(a, dim=-1)
+            # bn = torch.norm(b, dim=-1)
+            # adotb = (a * b).sum(dim=-1)
+            # # adotb[adotb < 0.1] = 0
+            # acos_arg = adotb / (an * bn)
+            # acos_arg = acos_arg.clamp(min=-1 + eps, max=1 - eps)
+            # angles = torch.acos(acos_arg)
+            #
+            # # angles[angles > np.pi] = angles[angles > np.pi] - 2*np.pi
+            # # angles[angles < 0.01] = 0.01
+            # # assert not is_bad(angles)
+            #
+            # if max_delta_angle > 0:
+            #     angles_loss = (((angles - np.pi) / max_delta_angle)**2).sum()
+            # else:
+            #     angles_loss = ((angles - np.pi)**2).sum()
+
+            scale_al = 50
+            min_dist_1hop = l * np.sqrt(2*(1-np.cos(np.pi - max_delta_angle)))
+            angles_loss = torch.exp(scale_al * (min_dist_1hop - torch.norm(a-b, dim=-1))).mean()
+            # angles_loss = (dists_loss/n_worm_points).sum()
+
+            # angles_loss = ((angles.abs() - max_delta_angle)**2).sum()
             # angles_loss = ((angles - max_delta_angle)**2).sum()
-            angles_loss = ((angles / max_delta_angle)**4).sum() / 50000
+            # angles_loss = ((angles / max_delta_angle)**4).sum() / 50000
+            # if max_delta_angle > 0:
+            #     angles_loss = torch.clamp((angles / max_delta_angle)**4, max=100).mean()
+            # else:
+            #     angles_loss = torch.clamp(angles**2, max=100).mean() * 10000
             # angles_loss = angles[angles>max_delta_angle].sum() / 50000
-            # assert not is_bad(sl_loss)
-            # assert not is_bad(angles_loss)
-            loss += sl_loss + angles_loss
+            # curve_loss = sl_loss
+            curve_loss = sl_loss + angles_loss
+            # curve_loss = angles_loss + al_loss
+            # curve_loss = al_loss
             # loss += sl_loss  # + angles_loss
+
+            return curve_loss
+
+
+        if i < n_warmup_steps:  # or curve_loss > 1:
+            loss = -(cloud_points_scores.sum())
+        else:
+            loss = -(cloud_points_scores.sum() + curve_points_scores.sum())
+        # loss += curve_loss
+        loss += curve_loss
+
+        # Prefer small shifts
+        loss += shifts_reg * (shifts**2).sum()
+
+        assert not is_bad(loss)
+
+        px_prev = px.detach().clone()
 
         # Take an optimisation step
         optimiser.zero_grad()
         loss.backward()
         optimiser.step()
-        lr_scheduler.step()
-        assert not is_bad(px)
+        # lr_scheduler.step()
 
-        if 1 or i % 10 == 0:
+        # Fix curve
+        optimiser_curve.zero_grad()
+        curve_loss = get_curve_loss()
+        cl_threshold = 1.1
+        curve_fix_count = 0
+        while sl_loss > cl_threshold or angles_loss > cl_threshold:
+            curve_fix_count += 1
+            # Keep optimising until the curve losses are within the threshold
+            optimiser_curve.zero_grad()
+            curve_loss.backward()
+            optimiser_curve.step()
+            assert not is_bad(px)
+            curve_loss = get_curve_loss()
+        if curve_fix_count > 0:
+            logger.info(f'Fixed curve in {curve_fix_count} steps.')
+
+        if 1 or i % 10 == 0:   # f'lr={lr_scheduler.get_last_lr()[0]:.5f}. ' \
             log = f'Step {i}. ' \
                   f'Loss={loss:.3f}. ' \
-                  f'lr={lr_scheduler.get_last_lr()[0]:.5f}. ' \
                   f'df={encdec.decay_factor:.2f}. ' \
                   f'cloud={cloud_points_scores.sum():.3f}. ' \
                   f'curve={curve_points_scores.sum():.3f}. ' \
-                  f'rev={max_revolutions:.1f}.'
+                  f'shifts={",".join([f"{s.item():.2f}" for s in shifts])}. ' \
+                  f'rev={max_revolutions:.3f}.'
+            # log = f'Step {i}. ' \
+            #       f'rev={max_revolutions:.3f}.'
             if mode == ENCODING_MODE_POINTS:
-                log += f' sl_loss={sl_loss:.4f} angles={angles_loss:.4f} arc_length={arc_length:.3f}'
+                log += f' al_loss={al_loss:.4f} ' \
+                       f'sl_loss={sl_loss:.4f} ' \
+                       f'angles={angles_loss:.4f} ' \
+                       f'cl={curve_loss:.4f} ' \
+                       f'arc_length={arc_length:.3f}'
             logger.info(log)
 
-        def plot_3d():
-            nonlocal azim
+        def plot_check():
+            nonlocal  cam_coeffs, points_2d_base, point_3d_base
+            cloud_points = px[:n_cloud_points * 3].reshape((n_cloud_points, 3))
+            curve_points = torch.from_numpy(object_points - np.array(frame.centre_3d.point_3d))
+            dc = DynamicCameras()
+            cam_coeffs = cam_coeffs.clone()
+            cp = torch.tensor(frame.centre_3d.point_3d)
+            ip = torch.tensor([100,100])
+            curve_points_2d_orig_shifts = dc.forward(cam_coeffs, (curve_points+cp).unsqueeze(0).to(torch.float32)) - points_2d_base.unsqueeze(2) + ip
+            cam_coeffs[:, :, 21] = cam_coeffs[:, :, 21] + shifts
+            curve_points_2d = dc.forward(cam_coeffs, (curve_points+cp).unsqueeze(0).to(torch.float32)) - points_2d_base.unsqueeze(2) + ip
+            cloud_points_2d = dc.forward(cam_coeffs, (cloud_points+cp).unsqueeze(0).to(torch.float32)) - points_2d_base.unsqueeze(2) + ip
+
+            curve_masks_os = _points_to_masks(curve_points_2d_orig_shifts, blur_sigma=4)
+            curve_masks = _points_to_masks(curve_points_2d, blur_sigma=4)
+            cloud_masks = _points_to_masks(cloud_points_2d)
+
+            fig, axes = plt.subplots(3, figsize=(6, 8))
+            image_triplet = np.concatenate(images, axis=1)
+            curve_triplet_os = np.concatenate(to_numpy(curve_masks_os[0]), axis=1)
+            curve_triplet = np.concatenate(to_numpy(curve_masks[0]), axis=1)
+            cloud_triplet = np.concatenate(to_numpy(cloud_masks[0]), axis=1)
+
+            ax = axes[0]
+            ax.set_title('Curve')
+            ax.imshow(image_triplet, cmap='gray', vmin=0, vmax=1)
+            alphas = curve_triplet.copy()
+            alphas[alphas < 0.1] = 0
+            alphas[alphas > 0.2] = 1
+            ax.imshow(curve_triplet, vmin=0, vmax=1, cmap='Reds', aspect='equal', alpha=alphas)
+
+            ax = axes[1]
+            ax.set_title('Curve OS')
+            ax.imshow(image_triplet, cmap='gray', vmin=0, vmax=1)
+            alphas = curve_triplet_os.copy()
+            alphas[alphas < 0.1] = 0
+            alphas[alphas > 0.2] = 1
+            ax.imshow(curve_triplet_os, vmin=0, vmax=1, cmap='Reds', aspect='equal', alpha=alphas)
+
+            ax = axes[2]
+            ax.set_title('Cloud')
+            ax.imshow(image_triplet, cmap='gray', vmin=0, vmax=1)
+            alphas = cloud_triplet.copy()
+            alphas[alphas < 0.1] = 0
+            alphas[alphas > 0.2] = 1
+            ax.imshow(cloud_triplet, vmin=0, vmax=1, cmap='Reds', aspect='equal', alpha=alphas)
+
+
+            ax.set_title(f'Step {i}')
+            fig.tight_layout()
+
+            plt.show()
+            plt.close(fig)
+
+            exit()
+
+        def plot_3d(cloud_point_threshold=0):
+            nonlocal azim, cam_coeffs, points_2d_base, point_3d_base
             azim += 15
             fig = plt.figure()
-            ax = fig.gca(projection='3d')
+            ax = fig.add_subplot(projection='3d')
             ax.view_init(azim=azim)
-            cloud_points = px[9:9 + n_cloud_points * 3].reshape((n_cloud_points, 3))
-            curve_points = parameters_to_curve_coordinates(
-                parameters=px[9 + n_cloud_points * 3:],
-                mode=mode,
-                n_points=n_worm_points,
-                worm_length=worm_length,
-                max_revolutions=max_revolutions,
-                decay_factor=encdec.decay_factor
-            )[0]
-            x, y, z = (to_numpy(cloud_points[:, j]) for j in range(3))
+            # cloud_points = px[9:9 + n_cloud_points * 3].reshape((n_cloud_points, 3))
+            # cloud_points = px[3:3 + n_cloud_points * 3].reshape((n_cloud_points, 3))
+            cloud_points = px[:n_cloud_points * 3].reshape((n_cloud_points, 3))
+            # curve_points = parameters_to_curve_coordinates(
+            #     # parameters=px[9 + n_cloud_points * 3:],
+            #     # parameters=px[3 + n_cloud_points * 3:],
+            #     parameters=px[n_cloud_points * 3:],
+            #     mode=mode,
+            #     n_points=n_worm_points,
+            #     worm_length=worm_length,
+            #     max_revolutions=max_revolutions,
+            #     decay_factor=encdec.decay_factor
+            # )[0]
+
+            curve_points = torch.from_numpy(object_points) - np.array(frame.centre_3d.point_3d)
+
             scores = cloud_points_scores.mean(dim=1)[0]
+            if cloud_point_threshold > 0:
+                above_threshold = scores>cloud_point_threshold
+                scores = scores[above_threshold]
+                cloud_points = cloud_points[above_threshold]
+            x, y, z = (to_numpy(cloud_points[:, j]) for j in range(3))
             s1 = ax.scatter(x, y, z, c=to_numpy(scores), cmap='autumn_r', s=10, alpha=0.4)
             fig.colorbar(s1)
             x, y, z = (to_numpy(curve_points[:, j]) for j in range(3))
             scores = curve_points_scores[0]
-            s2 = ax.scatter(x, y, z, c=to_numpy(scores), cmap='YlGnBu', s=50, marker='x', alpha=0.9)
+            # s2 = ax.scatter(x, y, z, c=to_numpy(scores), cmap='YlGnBu', s=50, marker='x', alpha=0.9)
+            s2 = ax.scatter(x, y, z, color='black', s=75, marker='x', alpha=0.9)
             fig.colorbar(s2)
 
             ax.set_title(f'Step {i}')
             fig.tight_layout()
-            plt.show()
+
+            if save_plots:
+                save_dir = f'{logs_path}/3d'
+                if cloud_point_threshold > 0:
+                    save_dir += f'/T={cloud_point_threshold:.1f}'
+                    os.makedirs(save_dir, exist_ok=True)
+                plt.savefig(save_dir + f'/{i:06d}.png')
+            if show_plots:
+                plt.show()
+            plt.close(fig)
 
         def plot_attempt():
             X_target = to_numpy(masks_target[0])
@@ -810,15 +1115,38 @@ def find_midline3d(
             ax.imshow(X_curve_triplet, vmin=0, vmax=1, cmap='Reds', aspect='equal', alpha=alphas)
 
             fig.tight_layout()
-            plt.show()
+
+            if save_plots:
+                fn = f'{logs_path}/2d/{i:06d}.png'
+                plt.savefig(fn)
+            if show_plots:
+                plt.show()
+            plt.close(fig)
+
+        # plot_check()
 
         # Plot
-        if i % 100 == 0 or i == 0 or i == n_steps - 1:
+        if i % 200 == 0 or i == 0 or i == n_steps - 1:
+            # interactive_plots()
             plot_3d()
+            # plot_3d(cloud_point_threshold=0.3)
+            # plot_3d(cloud_point_threshold=0.6)
+            # plot_3d(cloud_point_threshold=0.9)
 
         # Plot
-        if i % 500 == 0 or i == 0 or i == n_steps - 1:
+        if i % 200 == 0 or i == 0 or i == n_steps - 1:
             plot_attempt()
+
+        # Checkpoint
+        if checkpoint_every_n_steps != -1 and (i+1)%checkpoint_every_n_steps == 0:
+            path = f'{logs_path}/{i}.chkpt'
+            logger.info(f'Saving checkpoint to {path}')
+            torch.save({
+                'shifts':shifts,
+                'px':px,
+                'optim_sd':optimiser.state_dict(),
+                'optim_curve_sd':optimiser_curve.state_dict()
+            }, path)
 
 
 if __name__ == '__main__':
@@ -826,13 +1154,25 @@ if __name__ == '__main__':
         # masks_id='60801a42f782c04c8abf6ed0',
         # masks_id='608019f0f782c04c8abf6c41',
         masks_id='6080190ef782c04c8abf6b02',
-        n_cloud_points=10000,
-        n_worm_points=40,
+        n_cloud_points=5000,
+        n_worm_points=4,
         blur_sigma_masks=1,
-        blur_sigma_vols=7,
-        # mode=ENCODING_MODE_POINTS,
-        mode=ENCODING_MODE_DELTA_ANGLES,
+        blur_sigma_masks_curve=2,
+        blur_sigma_vols=6,
+        max_revolutions=.2,
+        mode=ENCODING_MODE_POINTS,
+        # mode=ENCODING_MODE_DELTA_VECTORS,
+        # mode=ENCODING_MODE_DELTA_ANGLES,
+        # mode=ENCODING_MODE_DELTA_ANGLES_BASIS,
         n_basis_fns=4,
-        n_steps=10000,
-        n_warmup_steps=200
+        n_steps=500000,
+        n_warmup_steps=500000,
+        n_straight_steps=200000,
+        checkpoint_every_n_steps=10000,
+        # resume_from_run='20210603_1127',
+        # resume_from_step=279999,
+        save_plots=True,
+        show_plots=False,
+        # save_plots=False,
+        # show_plots=True,
     )

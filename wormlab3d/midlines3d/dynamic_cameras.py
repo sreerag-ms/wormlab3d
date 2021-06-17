@@ -55,7 +55,7 @@ class DynamicCameras(nn.Module):
         y = xyz[:, :, :, 1] / xyz[:, :, :, 2]
 
         # Apply shifts
-        shifts = torch.zeros(points.shape[0], 3, 2)
+        shifts = torch.zeros((points.shape[0], 3, 2), device=coefficients.device)
         shifts[:, 0, 0] = self.shifts[:, 0]
         shifts[:, 1, 1] = -self.shifts[:, 1]
         shifts[:, 2, 1] = self.shifts[:, 2]
