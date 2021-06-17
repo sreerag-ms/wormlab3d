@@ -23,3 +23,6 @@ dependencies:
   - snakemake
   - tensorboard = 2.4
   - torchvision = 0.9
+  - pip
+  - pip:
+    - git+https://gitlab.com/tom-ranner/simple-worm.git@master
