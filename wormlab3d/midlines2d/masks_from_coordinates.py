@@ -3,7 +3,6 @@ from typing import Tuple
 import numpy as np
 from skimage.draw import line, line_aa
 from skimage.filters import gaussian
-
 from wormlab3d import PREPARED_IMAGE_SIZE
 
 
@@ -25,12 +24,16 @@ def make_segmentation_mask(
     if draw_mode == 'line_aa':
         for i in range(len(X) - 1):
             rr, cc, val = line_aa(X[i, 1], X[i, 0], X[i + 1, 1], X[i + 1, 0])
+            rr = rr.clip(min=0, max=image_size[0] - 1)
+            cc = cc.clip(min=0, max=image_size[1] - 1)
             mask[rr, cc] = val
 
     # Simpler single-pixel lines between coordinates
     elif draw_mode == 'line':
         for i in range(len(X) - 1):
             rr, cc = line(X[i, 1], X[i, 0], X[i + 1, 1], X[i + 1, 0])
+            rr = rr.clip(min=0, max=image_size[0] - 1)
+            cc = cc.clip(min=0, max=image_size[1] - 1)
             mask[rr, cc] = 1
 
     # Draw the coordinate pixels only
