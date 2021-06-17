@@ -18,7 +18,7 @@ def make_segmentation_mask(
     either using (anti-aliased or not) straight-line interpolations or just the individual pixels.
     Optionally apply a gaussian blur to the mask and then renormalise -- this has the effect of making the midline thicker.
     """
-    X = X.round().astype(np.uint8)
+    X = X.round().astype(np.uint16)
     mask = np.zeros(image_size, dtype=np.float32)
 
     # Anti-aliased lines between coordinates
