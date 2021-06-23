@@ -4,6 +4,7 @@ from typing import List, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from wormlab3d import PREPARED_IMAGE_SIZE
 from wormlab3d.data.model import Midline2D, NetworkParameters
@@ -79,6 +80,22 @@ class ManagerCoords(BaseManager):
         loss, metrics = self.calculate_losses(Y_pred, Y_target)
 
         return Y_pred, loss, metrics
+
+    def calculate_losses(self, Y_pred: torch.Tensor, Y_target: torch.tensor) \
+            -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        """
+        Calculate losses
+        """
+        loss, stats = super().calculate_losses(Y_pred, Y_target)
+
+        # Calculate losses in both orientations and take the minimum
+        loss_a = F.mse_loss(Y_pred, Y_target, reduction='none').sum(dim=(1, 2))
+        loss_b = F.mse_loss(Y_pred, Y_target.flip(dims=(1,)), reduction='none').sum(dim=(1, 2))
+        loss_min = torch.min(loss_a, loss_b)
+        loss = loss_min.mean()
+        stats['mse_min'] = loss_min
+
+        return loss, stats
 
     def _make_plots(
             self,
