@@ -7,6 +7,7 @@ from typing import Tuple, List, TYPE_CHECKING
 import torch
 
 from wormlab3d import logger, CAMERA_IDXS
+from wormlab3d.data.model.midline3d import M3D_SOURCE_RECONST, M3D_SOURCES
 
 if TYPE_CHECKING:
     from wormlab3d.data.model import Trial
@@ -15,22 +16,32 @@ if TYPE_CHECKING:
 def parse_target_arguments() -> Namespace:
     """
     Parse command line arguments and build parameter holders.
+    This is used for multiple scripts to avoid repetition.
     """
     parser = ArgumentParser(description='Wormlab3D script.')
     parser.add_argument('--experiment', type=int,
-                        help='Restrict to a specific experiment by id.')
+                        help='Experiment by id.')
     parser.add_argument('--trial', type=int,
-                        help='Restrict to a specific trial by id.')
+                        help='Trial by id.')
     parser.add_argument('--camera', type=int,
-                        help='Restrict to a specific camera by index.')
+                        help='Camera by index.')
     parser.add_argument('--frame-num', type=int,
-                        help='Restrict to a specific frame number (requires trial to be defined).')
+                        help='Frame number.')
+    parser.add_argument('--duration', type=float,
+                        help='Duration in seconds.')
     parser.add_argument('--order-trials', type=str,
-                        help='Specify some ordering for the trials.')
+                        help='Specify some ordering for multiple trials.')
     parser.add_argument('--midline2d', type=str,
                         help='Midline2D id.')
     parser.add_argument('--midline3d', type=str,
                         help='Midline3D id.')
+    parser.add_argument('--midline3d-source', type=str, default=M3D_SOURCE_RECONST, choices=M3D_SOURCES,
+                        help='Midline3D source.')
+    parser.add_argument('--frame-sequence', type=str,
+                        help='FrameSequence id.')
+    parser.add_argument('--sw-run', type=str,
+                        help='SwRun id.')
+
     args = parser.parse_args()
 
     return args
