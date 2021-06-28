@@ -5,6 +5,7 @@ from mongoengine import *
 
 from wormlab3d import logger, PREPARED_IMAGE_SIZE, CAMERA_IDXS
 from wormlab3d.data.model import Cameras, CameraShifts
+from wormlab3d.data.model.cameras import CAM_SOURCE_ANNEX
 from wormlab3d.data.model.experiment import Experiment
 from wormlab3d.data.model.midline2d import Midline2D
 from wormlab3d.data.model.midline3d import Midline3D
@@ -390,7 +391,7 @@ class Frame(Document):
             cams = self.centre_3d.cameras
         else:
             cams = self.trial.get_cameras()
-        if use_shifts:
+        if use_shifts and cams.source == CAM_SOURCE_ANNEX:
             shifts = self.get_shifts()
             if shifts is not None:
                 cams.set_shifts(shifts)

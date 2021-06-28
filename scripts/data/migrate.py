@@ -11,6 +11,7 @@ from mongoengine import DoesNotExist
 
 from wormlab3d import WT3D_PATH, logger, CAMERA_IDXS, ANNEX_PATH, DATA_PATH
 from wormlab3d.data.model import *
+from wormlab3d.data.model.cameras import CAM_SOURCE_ANNEX, CAM_SOURCE_WT3D
 from wormlab3d.data.model.midline3d import M3D_SOURCE_RECONST, M3D_SOURCE_WT3D
 from wormlab3d.data.util import ANNEX_PATH_PLACEHOLDER
 
@@ -188,16 +189,26 @@ def find_or_create_cameras(row: dict, experiment: Experiment) -> Cameras:
 
         try:
             # Try to find existing cameras
-            cams = Cameras.objects.get(experiment=experiment, timestamp=timestamp)
-            if trial is not None:
-                cams.trial = trial
-                cams.save()
-            logger.debug(f'Found existing, id={cams.id}')
+            if trial is None:
+                cams = Cameras.objects.get(experiment=experiment, timestamp=timestamp)
+            else:
+                try:
+                    cams = Cameras.objects.get(experiment=experiment, trial=trial, timestamp=timestamp)
+                except DoesNotExist:
+                    cams = Cameras.objects.get(experiment=experiment, timestamp=timestamp)
+                    cams.trial = trial
+            cams.source = CAM_SOURCE_ANNEX
+            cams.source_file = f'{int(row["#id"]):03d}.xml'
+            cams.save()
+
+            logger.debug(f'Found existing cameras, id={cams.id}')
             return cams
         except DoesNotExist:
             pass
 
         cams = Cameras()
+        cams.source = CAM_SOURCE_ANNEX
+        cams.source_file = f'{int(row["#id"]):03d}.xml'
         cams.experiment = experiment
         if trial is not None:
             cams.trial = trial
@@ -490,6 +501,7 @@ def migrate_WT3D(
         update_tags: bool = False,
         update_midlines2d: bool = False,
         update_midlines3d: bool = False,
+        update_cameras: bool = False
 ):
     # Project *.mat files
     path = WT3D_PATH + '/Project_Files'
@@ -543,9 +555,9 @@ def migrate_WT3D(
 
             # Annotation keys: 'Frame_Number', 'X', 'Y', 'Intrinsic_Matrix', 'Radial_Distortion_Vector', 'Tangential_Distortion_Vector', 'Extrinsic_Matrix'
 
-            n_midlines = annotations[0][0].shape[-1]
-            logger.info(f'n_midlines={n_midlines}')
-            for n in range(n_midlines):
+            n_annotations = annotations[0][0].shape[-1]
+            logger.info(f'n_midlines={n_annotations}')
+            for n in range(n_annotations):
                 midlines = []
 
                 for c in CAMERA_IDXS:
@@ -651,17 +663,129 @@ def migrate_WT3D(
             else:
                 logger.debug('0 valid midlines found')
 
+        # Camera models
+        if update_cameras:
+            cameras_inserted = 0
+            cameras_updated = 0
+
+            def create_or_update_WT3D_camera(cam_data, frame=None):
+                nonlocal cameras_inserted, cameras_updated
+
+                # Check that camera model parameters exist
+                try:
+                    intrinsic_matrix = cam_data['Intrinsic_Matrix'][0]
+                    assert len(intrinsic_matrix) == 3
+                    assert all([intrinsic_matrix[c].shape == (3, 3) for c in CAMERA_IDXS])
+
+                    extrinsic_matrix = cam_data['Extrinsic_Matrix'][0]
+                    assert len(extrinsic_matrix) == 3
+                    assert all([extrinsic_matrix[c].shape == (3, 4) for c in CAMERA_IDXS])
+
+                    radial_distortion = cam_data['Radial_Distortion_Vector'][0]
+                    assert len(radial_distortion) == 3
+                    assert all([radial_distortion[c].shape[0] == 1 for c in CAMERA_IDXS])
+                    assert all([radial_distortion[c].shape[1] >= 3 for c in CAMERA_IDXS])
+
+                    tangential_distortion = cam_data['Tangential_Distortion_Vector'][0]
+                    assert len(tangential_distortion) == 3
+                    assert all([tangential_distortion[c].shape[0] == 1 for c in CAMERA_IDXS])
+                    assert all([tangential_distortion[c].shape[1] >= 2 for c in CAMERA_IDXS])
+
+                except ValueError:
+                    return
+                except AssertionError:
+                    return
+
+                existing_cams = Cameras.objects(
+                    source=CAM_SOURCE_WT3D,
+                    source_file=filename,
+                    frame=frame
+                )
+
+                if existing_cams.count() == 1:
+                    logger.debug('Checking/updating existing camera.')
+                    cams = existing_cams[0]
+                    is_new = False
+                elif existing_cams.count() > 1:
+                    logger.error('Multiple cameras found! (This shouldn\'t happen!)')
+                    return
+                else:
+                    logger.debug('Existing camera not found, creating new.')
+                    cams = Cameras()
+                    is_new = True
+
+                cams.source = CAM_SOURCE_WT3D
+                cams.source_file = filename
+                cams.experiment = experiment
+                cams.trial = trial
+                pose = list(extrinsic_matrix)
+                cams.pose = [np.r_[pose[c], np.zeros((1, 4))] for c in CAMERA_IDXS]
+                cams.matrix = list(intrinsic_matrix)
+
+                # Reshape the distortion parameters into [k1, k2, p1, p2, k3]
+                cams.distortion = [
+                    np.array([
+                        radial_distortion[c][0][0],
+                        radial_distortion[c][0][1],
+                        tangential_distortion[c][0][0],
+                        tangential_distortion[c][0][1],
+                        radial_distortion[c][0][2],
+                    ])
+                    for c in CAMERA_IDXS
+                ]
+
+                cams.save()
+                if is_new:
+                    cameras_inserted += 1
+                else:
+                    cameras_updated += 1
+
+            # Create top-level cameras
+            calib = mat['Camera_Parameters'][0][0]['Calib'][0][0]
+            create_or_update_WT3D_camera(calib)
+
+            # Other camera models may exist tuned for a specific frame
+            annotations = calib['Annotations']
+            n_annotations = annotations[0][0].shape[-1]
+            logger.info(f'n_annotations={n_annotations}')
+            for n in range(n_annotations):
+                frame_num = annotations[0][0]['Frame_Number'][0][n] - 1
+                try:
+                    frame = trial.get_frame(frame_num)
+                except DoesNotExist:
+                    logger.error('Could not find frame in database.')
+                    continue
+
+                try:
+                    cam_data = {
+                        'Intrinsic_Matrix': [[annotations[0][c][0][n]['Intrinsic_Matrix'] for c in CAMERA_IDXS]],
+                        'Extrinsic_Matrix': [[annotations[0][c][0][n]['Extrinsic_Matrix'] for c in CAMERA_IDXS]],
+                        'Radial_Distortion_Vector': [
+                            [annotations[0][c][0][n]['Radial_Distortion_Vector'] for c in CAMERA_IDXS]],
+                        'Tangential_Distortion_Vector': [
+                            [annotations[0][c][0][n]['Tangential_Distortion_Vector'] for c in CAMERA_IDXS]],
+                    }
+                except ValueError:
+                    continue
+
+                create_or_update_WT3D_camera(cam_data, frame)
+
+            logger.info(f'{cameras_inserted} new cameras inserted.')
+            logger.info(f'{cameras_updated} existing cameras updated.')
+
 
 if __name__ == '__main__':
     # print_runinfo_data()
     # clear_db()
     # migrate_tags()
-    migrate_runinfo()
+    # migrate_runinfo()
     # migrate_midlines2d()
-    migrate_midlines3d(drop_collection=False)
-    migrate_shifts(drop_collection=True)
-    # migrate_WT3D(
-    #     update_tags=False,
-    #     update_midlines2d=False,
-    #     update_midlines3d=True,
-    # )
+    # migrate_midlines3d(drop_collection=False)
+    # migrate_shifts(drop_collection=True)
+    # exit()
+    migrate_WT3D(
+        update_tags=False,
+        update_midlines2d=False,
+        update_midlines3d=False,
+        update_cameras=True,
+    )
