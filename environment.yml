@@ -8,6 +8,8 @@ channels:
 dependencies:
   - python = 3.9
   - av = 8.0
+  - flask = 2.0
+  - gunicorn = 20.1
   - h5py = 3.2
   - matplotlib = 3.4
   - mongoengine = 0.22

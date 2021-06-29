@@ -1,0 +1,38 @@
+{% extends '__layout.html' %}
+
+{% block messages %}
+  <div id="messages"></div>
+{% endblock %}
+
+{% block content %}
+
+  <table class="table table-striped table-sm">
+    <thead>
+    <tr>
+      <th scope="col">ID</th>
+      <th scope="col">Experiment</th>
+      <th scope="col">Date</th>
+      <th scope="col">Trial Num.</th>
+      <th scope="col">Num. Frames</th>
+      <th scope="col">FPS</th>
+      <th scope="col">Temperature</th>
+      <th scope="col">Comments</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for trial in trials %}
+    <tr>
+      <td scope="row">{{ trial.id }}</td>
+      <td>{{ trial.experiment.id }}</td>
+      <td>{{ trial.date }}</td>
+      <td>{{ trial.trial_num }}</td>
+      <td>{{ trial.num_frames }}</td>
+      <td>{{ trial.fps }}</td>
+      <td>{{ trial.temperature }}</td>
+      <td>{{ trial.comments }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+{% endblock %}
