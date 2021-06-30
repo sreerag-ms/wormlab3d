@@ -387,7 +387,7 @@ class Manager:
         os.makedirs(self.logs_path + '/events', exist_ok=True)
         os.makedirs(self.logs_path + '/plots', exist_ok=True)
 
-    def save_checkpoint(self):
+    def save_checkpoint(self, L: LossesTorch):
         """
         Save the checkpoint information and run output to the database.
         """
@@ -400,6 +400,7 @@ class Manager:
             run.checkpoint = self.checkpoint
             run.sim_params = self.sim_params
             run.frame_sequence = self.FS_db
+            run.loss_data = L[idx].data
             run.F0 = SwFrameSequence()
             run.F0.x = to_numpy(self.F0[idx].x)
             run.F0.psi = to_numpy(self.F0[idx].psi)
@@ -443,7 +444,7 @@ class Manager:
 
             if self.runtime_args.checkpoint_every_n_steps > 0 \
                     and (step + 1) % self.runtime_args.checkpoint_every_n_steps == 0:
-                self.save_checkpoint()
+                self.save_checkpoint(L)
 
     def _train_step(self) -> LossesTorch:
         """
@@ -477,6 +478,7 @@ class Manager:
 
         # Log losses and make plots
         self.checkpoint.loss = float(L.total.mean())
+        self.checkpoint.loss_data = float(L.data.mean())
         self._log_losses(L)
         self._make_plots()
 

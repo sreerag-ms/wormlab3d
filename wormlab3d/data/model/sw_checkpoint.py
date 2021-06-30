@@ -11,6 +11,7 @@ class SwCheckpoint(Document):
     reg_params = ReferenceField('SwRegularisationParameters', required=True)
     step = IntField(required=True, default=0)
     loss = FloatField(required=True, default=1e10)
+    loss_data = FloatField(required=True, default=1e10)
     metrics = DictField()
 
     frame_sequence_args = DictField()

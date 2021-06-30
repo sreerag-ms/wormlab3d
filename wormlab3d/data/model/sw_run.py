@@ -29,6 +29,7 @@ class SwRun(Document):
     sim_params = ReferenceField('SwSimulationParameters', required=True)
     frame_sequence = ReferenceField('FrameSequence', required=True)
     checkpoint = ReferenceField('SwCheckpoint')
+    loss_data = FloatField()
 
     # Initial midline position and orientation
     F0 = EmbeddedDocumentField(SwFrameSequence, required=True)
