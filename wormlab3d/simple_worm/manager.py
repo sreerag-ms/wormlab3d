@@ -393,7 +393,7 @@ class Manager:
         """
         Save the checkpoint information and run output to the database.
         """
-        logger.info('Saving checkpoint and run record...')
+        logger.info('Saving checkpoint and run records...')
         self.checkpoint.save()
 
         # Create the run record of inputs and optimal outputs for the most recent runs.
@@ -402,7 +402,7 @@ class Manager:
             run.checkpoint = self.checkpoint
             run.sim_params = self.sim_params
             run.frame_sequence = self.FS_db
-            run.loss_data = L[idx].data
+            run.loss_data = float(L[idx].data)
             run.F0 = SwFrameSequence()
             run.F0.x = to_numpy(self.F0[idx].x)
             run.F0.psi = to_numpy(self.F0[idx].psi)
@@ -457,6 +457,7 @@ class Manager:
         FS_target_batch = FrameSequenceBatchTorch.from_list([self.FS_target] * self.optimiser_args.batch_size)
 
         # Forward simulation
+        logger.info('Simulating...')
         FS, L, F0_opt, CS_opt, FS_opt, L_opt = self.worm.forward(
             F0=self.F0,
             CS=self.CS,
@@ -548,6 +549,7 @@ class Manager:
         """
         Generate some example plots and videos.
         """
+        logger.info('Plotting.')
 
         # Select the idxs to plot
         bs = self.optimiser_args.batch_size
@@ -637,7 +639,6 @@ class Manager:
         ], dim=1))
 
         # PCA
-        logger.debug(f'Fitting PCA')
         pca = PCA(svd_solver='randomized', copy=False)
         embeddings = pca.fit_transform(solutions)
 
