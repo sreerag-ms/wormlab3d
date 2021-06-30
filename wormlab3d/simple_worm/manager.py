@@ -191,11 +191,7 @@ class Manager:
         if self.simulation_args.sim_id is not None:
             sim_params = SwSimulationParameters.get(id=self.simulation_args.sim_id)
         else:
-            sim_config = {
-                'worm_length': self.simulation_args.worm_length,
-                'duration': self.simulation_args.duration,
-                'dt': self.simulation_args.dt,
-            }
+            sim_config = self.simulation_args.get_config_dict()
             sim_params = SwSimulationParameters.objects(**sim_config)
             if sim_params.count() > 0:
                 logger.info(
