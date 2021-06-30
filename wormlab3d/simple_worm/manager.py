@@ -11,6 +11,8 @@ import torch
 import torch.nn.functional as F
 from matplotlib.figure import Figure
 from mongoengine import DoesNotExist
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
 from torch.utils.tensorboard import SummaryWriter
 
 from simple_worm.controls import CONTROL_KEYS
@@ -552,11 +554,13 @@ class Manager:
         n_examples = min(self.runtime_args.plot_n_examples, bs)
         idxs = np.random.choice(bs, n_examples, replace=False)
 
+        # Make initial plots for all batch elements
         if pre_step:
-            for idx in idxs:
+            for idx in range(bs):
                 self._plot_F0_components(idx)
                 self._plot_F0_3d(idx)
                 self._plot_CS(idx)
+            self._plot_pca()
             return
 
         if final_step or (
@@ -568,6 +572,7 @@ class Manager:
                 self._plot_F0_components(idx)
                 self._plot_F0_3d(idx)
                 self._plot_CS(idx)
+            self._plot_pca()
 
         if final_step or (
                 self.runtime_args.videos_every_n_steps > -1
@@ -619,6 +624,57 @@ class Manager:
             labels=['Attempt', 'Target']
         )
         self._save_plot(fig, f'3D/{idx:03d}')
+
+    def _plot_pca(self):
+        bs = self.optimiser_args.batch_size
+
+        # Convert controls to matrix form
+        solutions = to_numpy(torch.cat([
+            self.F0.psi,
+            self.CS.alpha.reshape(bs, -1),
+            self.CS.beta.reshape(bs, -1),
+            self.CS.gamma.reshape(bs, -1)
+        ], dim=1))
+
+        # PCA
+        logger.debug(f'Fitting PCA')
+        pca = PCA(svd_solver='randomized', copy=False)
+        embeddings = pca.fit_transform(solutions)
+
+        # tSNE projections
+        tsne = TSNE(n_components=2)
+        tsne_projections = tsne.fit_transform(embeddings)
+
+        # Make plot
+        fig, axes = plt.subplots(3, figsize=(10, 10))
+        cmap = plt.get_cmap('rainbow')
+
+        # Show the overall distribution of singular values
+        ind = np.arange(pca.n_components_)
+        ax = axes[0]
+        ax.bar(ind, pca.singular_values_, align='center')
+        ax.set_xticks(ind)
+        ax.set_title(f'PCA on solutions (n_components={pca.n_components_})')
+        ax.set_xlabel('Singular value')
+
+        # Show the distributions for the samples
+        ax = axes[1]
+        for i, embedding in enumerate(embeddings):
+            ax.plot(embedding, color=cmap((i + 0.5) / bs), label=i)
+        if bs < 10:
+            ax.legend()
+        ax.set_title('Sample distribution')
+        ax.set_xlabel('Singular value')
+        ax.set_ylabel('Contribution')
+
+        # Show the tSNE scatter plot
+        ax = axes[2]
+        ax.set_title('tSNE embedding')
+        fc = cmap((np.arange(bs) + 0.5) / bs)
+        ax.scatter(tsne_projections[:, 0], tsne_projections[:, 1], c=fc)
+
+        fig.tight_layout()
+        self._save_plot(fig, 'PCA')
 
     def _save_plot(self, fig: Figure, plot_type: str):
         """
