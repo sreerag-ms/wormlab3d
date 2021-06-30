@@ -10,7 +10,8 @@ def make_segmentation_mask(
         X: np.ndarray,
         blur_sigma: float = None,
         draw_mode: str = 'line_aa',
-        image_size: Tuple[int] = PREPARED_IMAGE_SIZE
+        image_size: Tuple[int] = PREPARED_IMAGE_SIZE,
+        raise_on_empty: bool = True
 ) -> np.ndarray:
     """
     Turn a list of coordinates into a segmentation mask by drawing the coordinates onto a mask
@@ -51,7 +52,7 @@ def make_segmentation_mask(
         mask_range = mask.max() - mask.min()
         if mask_range > 0:
             mask = (mask - mask.min()) / mask_range
-        else:
+        elif raise_on_empty:
             raise RuntimeError(f'Mask range zero!')
 
     return mask
