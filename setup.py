@@ -25,7 +25,7 @@ setup(
         'torch >= 1.8, < 1.9',
         'scikit-image >= 0.18, < 0.19',
         'scikit-learn >= 0.24, < 0.25',
-        'simple-worm[inv] @ git+https://gitlab.com/tom-ranner/simple-worm@master',
+        'simple-worm @ git+https://gitlab.com/tom-ranner/simple-worm.git',
         'tensorboard >= 2.4, < 2.5',
         'torchvision >= 0.9, < 1.0'
     ],
