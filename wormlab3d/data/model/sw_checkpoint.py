@@ -1,6 +1,7 @@
 import datetime
 
 from mongoengine import *
+from wormlab3d.data.model.sw_run import SwRun
 
 
 class SwCheckpoint(Document):
@@ -51,3 +52,9 @@ class SwCheckpoint(Document):
         super().clean()
         for k, v in self.metrics.items():
             self.metrics[k] = float(v)
+
+    def get_runs(self):
+        """
+        Get the simulation runs associated with this checkpoint.
+        """
+        return SwRun.objects(checkpoint=self)
