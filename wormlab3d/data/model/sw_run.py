@@ -29,7 +29,10 @@ class SwRun(Document):
     sim_params = ReferenceField('SwSimulationParameters', required=True)
     frame_sequence = ReferenceField('FrameSequence', required=True)
     checkpoint = ReferenceField('SwCheckpoint')
+    loss = FloatField()
     loss_data = FloatField()
+    loss_reg = FloatField()
+    reg_losses = DictField()
 
     # Initial midline position and orientation
     F0 = EmbeddedDocumentField(SwFrameSequence, required=True)
@@ -47,6 +50,17 @@ class SwRun(Document):
         'indexes': ['sim_params', 'frame_sequence'],
         'ordering': ['-created'],
     }
+
+    def clean(self):
+        """
+        Convert tensors to floats.
+        """
+        self.loss = float(self.loss)
+        self.loss_data = float(self.loss_data)
+        self.loss_reg = float(self.loss_reg)
+        for k1, d in self.reg_losses.items():
+            for k2, l in d.items():
+                self.reg_losses[k1][k2] = float(l)
 
     def get_prepared_2d_coordinates(self, regenerate: bool = False) -> List[List[np.ndarray]]:
         """

@@ -402,7 +402,10 @@ class Manager:
             run.checkpoint = self.checkpoint
             run.sim_params = self.sim_params
             run.frame_sequence = self.FS_db
-            run.loss_data = float(L[idx].data)
+            run.loss = L[idx].total
+            run.loss_data = L[idx].data
+            run.loss_reg = L[idx].reg
+            run.reg_losses = L[idx].reg_losses_unweighted
             run.F0 = SwFrameSequence()
             run.F0.x = to_numpy(self.F0[idx].x)
             run.F0.psi = to_numpy(self.F0[idx].psi)
