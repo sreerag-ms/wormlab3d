@@ -99,6 +99,10 @@ def solution_pca(
     save_dir = LOGS_PATH + f'/{START_TIMESTAMP}_checkpoint={checkpoint.id}_canonical={canonical}_gamma={include_gamma}_variance={variance_to_capture}'
     interactive()
 
+    # Get losses for colouring the plots
+    losses = np.array([getattr(run, 'loss') for run in runs])
+    rel_scores = 1- (losses - losses.min()) / (losses.max() - losses.min())
+
     # Fit quadratic curves
     polys = []
     for i, j in [[0, 1], [0, 2], [1, 2]]:
@@ -111,7 +115,7 @@ def solution_pca(
         gs = GridSpec(3, 3)
         fig.suptitle(
             f'including gamma = {include_gamma}, canonical={canonical}, captured variance = {variance_to_capture}')
-        cmap = plt.get_cmap('rainbow')
+        cmap = plt.get_cmap('YlOrRd')
 
         # Plot the singular values
         ind = np.arange(pca.n_components_)
@@ -124,7 +128,7 @@ def solution_pca(
         # Show the distributions for the samples
         ax = fig.add_subplot(gs[0, 1])
         for i, embedding in enumerate(embeddings):
-            ax.plot(embedding, color=cmap((i + 0.5) / bs), label=i)
+            ax.plot(embedding, color=cmap(rel_scores[i]), label=i)
         if bs < 10:
             ax.legend()
         ax.set_title('Sample distribution')
@@ -163,7 +167,7 @@ def solution_pca(
             ax.set_title(f'Component = {i}')
 
         # Scatter the correlations between singular values
-        fc = cmap((np.arange(bs) + 0.5) / bs)
+        fc = cmap(rel_scores)
         for col_idx, (i, j) in enumerate([[0, 1], [0, 2], [1, 2]]):
             ax = fig.add_subplot(gs[2, col_idx])
             ax.scatter(embeddings[:, i], embeddings[:, j], c=fc)
@@ -276,9 +280,9 @@ if __name__ == '__main__':
     solution_pca(
         canonical=False,
         include_gamma=True,
-        show_pca=False,
-        save_pca=True,
+        show_pca=True,
+        save_pca=False,
         show_animation=False,
-        save_animation=True,
+        save_animation=False,
         fps=25
     )
