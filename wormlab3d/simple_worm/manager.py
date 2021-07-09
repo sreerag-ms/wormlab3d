@@ -231,6 +231,7 @@ class Manager:
             N=self.sim_params.worm_length,
             dt=self.sim_params.dt,
             batch_size=self.optimiser_args.batch_size,
+            material_parameters=self.sim_params.get_material_parameters(),
             reg_weights=self.regularisation_args.get_reg_weights(),
             inverse_opt_max_iter=self.optimiser_args.inverse_opt_max_iter,
             inverse_opt_tol=self.optimiser_args.inverse_opt_tol,

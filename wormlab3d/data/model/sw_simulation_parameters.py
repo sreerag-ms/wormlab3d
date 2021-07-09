@@ -2,6 +2,8 @@ import datetime
 
 from mongoengine import *
 
+from simple_worm.material_parameters import MaterialParameters
+
 
 class SwSimulationParameters(Document):
     created = DateTimeField(required=True, default=datetime.datetime.utcnow)
@@ -18,3 +20,13 @@ class SwSimulationParameters(Document):
     meta = {
         'ordering': ['-created'],
     }
+
+    def get_material_parameters(self) -> MaterialParameters:
+        return MaterialParameters(
+            K=self.K,
+            K_rot=self.K_rot,
+            A=self.A,
+            B=self.B,
+            C=self.C,
+            D=self.D
+        )
