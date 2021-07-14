@@ -15,7 +15,7 @@ from wormlab3d.nn.models.rdn import RDN
 from wormlab3d.nn.models.rednet import RedNet
 from wormlab3d.nn.models.resnet import ResNet, RES_SHORTCUT_OPTIONS
 
-NETWORK_TYPES = ['densenet', 'fcnet', 'resnet', 'pyramidnet', 'aenet', 'nunet', 'rdn', 'red']
+NETWORK_TYPES = ['densenet', 'fcnet', 'resnet', 'pyramidnet', 'aenet', 'nunet', 'rdn', 'red', 'rotae']
 
 
 class NetworkParameters(Document):
@@ -23,8 +23,8 @@ class NetworkParameters(Document):
     created = DateTimeField(required=True, default=datetime.datetime.utcnow)
 
     # Common parameters
-    input_shape = ListField(IntField(), required=True)
-    output_shape = ListField(IntField(), required=True)
+    input_shape = ListField(required=True)
+    output_shape = ListField(required=True)
     dropout_prob = FloatField(default=0)
 
     meta = {
@@ -211,3 +211,11 @@ class NetworkParametersRED(NetworkParameters):
             'act_out': self.act_out,
         }
         return RedNet(**model_params)
+
+
+class NetworkParametersRotAE(NetworkParameters):
+    c2d_net = ReferenceField(NetworkParameters, required=True)
+    c3d_net = ReferenceField(NetworkParameters, required=True)
+
+    def instantiate_network(self, build_model: bool = True) -> RedNet:
+        pass

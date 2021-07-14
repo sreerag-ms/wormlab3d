@@ -1,1 +1,6 @@
 from wormlab3d.midlines3d.args.dataset_args import DatasetSegmentationMasksArgs
+from wormlab3d.midlines3d.args.dataset_rotae_args import DatasetRotAECoordsArgs
+from wormlab3d.midlines3d.args.network_args import Midline3DNetworkArgs
+from wormlab3d.midlines3d.args.network_rotae_args import RotAENetworkArgs
+from wormlab3d.midlines3d.args.optimiser_rotae_args import RotAEOptimiserArgs
+from wormlab3d.midlines3d.args.runtime_args import Midline3DRuntimeArgs

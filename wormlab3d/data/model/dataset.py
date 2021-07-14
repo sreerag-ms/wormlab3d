@@ -1,5 +1,5 @@
 import datetime
-from typing import List
+from typing import List, Tuple
 
 import numpy as np
 from mongoengine import *
@@ -100,10 +100,100 @@ class Dataset(Document):
 
         return DS
 
+    def get_cameras(self, tt: str) -> List[Cameras]:
+        assert tt in ['train', 'test']
+        if not hasattr(self, f'cams_{tt}'):
+            raise RuntimeError(f'Dataset does not have cams_{tt} property.')
+        cams = getattr(self, f'cams_{tt}')
+        if len(cams) == 0:
+            logger.info('No cameras linked, linking now.')
+            cams = []
+            X = getattr(self, f'X_{tt}')
+            for mask in X:
+                mask = mask.fetch()
+                cams.append(mask.frame.centre_3d.cameras)
+            setattr(self, f'cams_{tt}', cams)
+            self.save()
+        return cams
+
+    def get_camera_coefficients(self, tt: str, rebuild: bool = False) -> List[List[float]]:
+        assert tt in ['train', 'test']
+        if not hasattr(self, f'cam_coeffs_{tt}'):
+            raise RuntimeError(f'Dataset does not have cam_coeffs_{tt} property.')
+        coeffs = getattr(self, f'cam_coeffs_{tt}')
+        if len(coeffs) == 0 or rebuild:
+            if rebuild:
+                logger.info('Rebuilding camera coefficients.')
+            else:
+                logger.info('No camera coefficients generated, generating now.')
+            coeffs = []
+            cams = getattr(self, f'cams_{tt}')
+            for cameras in cams:
+                cameras = cameras.fetch()
+                # Extract camera coefficients
+                fx = np.array([cameras.matrix[c][0, 0] for c in CAMERA_IDXS])
+                fy = np.array([cameras.matrix[c][1, 1] for c in CAMERA_IDXS])
+                cx = np.array([cameras.matrix[c][0, 2] for c in CAMERA_IDXS])
+                cy = np.array([cameras.matrix[c][1, 2] for c in CAMERA_IDXS])
+                R = np.array([cameras.pose[c][:3, :3] for c in CAMERA_IDXS])
+                t = np.array([cameras.pose[c][:3, 3] for c in CAMERA_IDXS])
+                d = np.array([cameras.distortion[c] for c in CAMERA_IDXS])
+                if cameras.shifts is not None:
+                    s = np.array([cameras.shifts.dx, cameras.shifts.dy, cameras.shifts.dz])
+                else:
+                    s = np.zeros(3)
+                coeffs_i = np.concatenate([
+                    fx.reshape(3, 1),
+                    fy.reshape(3, 1),
+                    cx.reshape(3, 1),
+                    cy.reshape(3, 1),
+                    R.reshape(3, 9),
+                    t,
+                    d,
+                    s.reshape(3, 1)
+                ], axis=1).astype(np.float32)
+                coeffs.append(coeffs_i)
+
+            setattr(self, f'cam_coeffs_{tt}', coeffs)
+            self.save()
+
+            exit()
+        return coeffs
+
+    def get_camera_coeffs_range(self) -> Tuple[np.ndarray, np.ndarray]:
+        cc_train = np.array(self.get_camera_coefficients('train'))
+        cc_test = np.array(self.get_camera_coefficients('test'))
+        cc_all = np.concatenate((cc_train, cc_test), axis=0)
+        mean = cc_all.mean(axis=0)
+        amin = cc_all.min(axis=0)
+        amax = cc_all.max(axis=0)
+        arange = (amax - amin)
+        return mean, arange
+
+    def get_points_3d_range(self) -> Tuple[np.ndarray, np.ndarray]:
+        p3d_all = np.concatenate((np.array(self.points_3d_train), np.array(self.points_3d_test)), axis=0)
+        mean = p3d_all.mean(axis=0)
+        amin = p3d_all.min(axis=0)
+        amax = p3d_all.max(axis=0)
+        arange = (amax - amin)
+        return mean, arange
+
+    def get_points_2d_range(self) -> Tuple[np.ndarray, np.ndarray]:
+        p2d_all = np.concatenate((np.array(self.points_2d_train), np.array(self.points_2d_test)), axis=0)
+        mean = p2d_all.mean(axis=0)
+        amin = p2d_all.min(axis=0)
+        amax = p2d_all.max(axis=0)
+        arange = (amax - amin)
+        return mean, arange
+
 
 class DatasetMidline2D(Dataset):
     X_train = ListField(ReferenceField(Midline2D))
     X_test = ListField(ReferenceField(Midline2D))
+    cams_train = ListField(LazyReferenceField(Cameras))
+    cams_test = ListField(LazyReferenceField(Cameras))
+    cam_coeffs_train = ListField(NumpyField(shape=(3, 22), dtype=np.float32, compression=COMPRESS_BLOSC_POINTER))
+    cam_coeffs_test = ListField(NumpyField(shape=(3, 22), dtype=np.float32, compression=COMPRESS_BLOSC_POINTER))
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -127,8 +217,8 @@ class DatasetSegmentationMasks(Dataset):
     X_test = ListField(LazyReferenceField(SegmentationMasks))
     cams_train = ListField(LazyReferenceField(Cameras))
     cams_test = ListField(LazyReferenceField(Cameras))
-    cam_coeffs_train = ListField(NumpyField(shape=(3, 19), dtype=np.float32, compression=COMPRESS_BLOSC_POINTER))
-    cam_coeffs_test = ListField(NumpyField(shape=(3, 19), dtype=np.float32, compression=COMPRESS_BLOSC_POINTER))
+    cam_coeffs_train = ListField(NumpyField(shape=(3, 22), dtype=np.float32, compression=COMPRESS_BLOSC_POINTER))
+    cam_coeffs_test = ListField(NumpyField(shape=(3, 22), dtype=np.float32, compression=COMPRESS_BLOSC_POINTER))
     points_3d_train = ListField(TripletField(FloatField()))
     points_3d_test = ListField(TripletField(FloatField()))
     points_2d_train = ListField(TripletField(ListField(FloatField())))
@@ -149,45 +239,6 @@ class DatasetSegmentationMasks(Dataset):
         self.size_test = len(test)
         if self.size_all > 0:
             self.train_test_split_actual = len(train) / self.size_all
-
-    def get_cameras(self, tt: str) -> List[Cameras]:
-        assert tt in ['train', 'test']
-        cams = getattr(self, f'cams_{tt}')
-        if len(cams) == 0:
-            logger.info('No cameras linked, linking now.')
-            cams = []
-            X = getattr(self, f'X_{tt}')
-            for mask in X:
-                mask = mask.fetch()
-                cams.append(mask.frame.centre_3d.cameras)
-            setattr(self, f'cams_{tt}', cams)
-            self.save()
-        return cams
-
-    def get_camera_coefficients(self, tt: str) -> List[List[float]]:
-        assert tt in ['train', 'test']
-        coeffs = getattr(self, f'cam_coeffs_{tt}')
-        if len(coeffs) == 0:
-            logger.info('No camera coefficients generated, generating now.')
-            coeffs = []
-            cams = getattr(self, f'cams_{tt}')
-            for cameras in cams:
-                cameras = cameras.fetch()
-                # Extract camera coefficients
-                fx = np.array([cameras.matrix[c][0, 0] for c in CAMERA_IDXS])
-                fy = np.array([cameras.matrix[c][1, 1] for c in CAMERA_IDXS])
-                R = np.array([cameras.pose[c][:3, :3] for c in CAMERA_IDXS])
-                t = np.array([cameras.pose[c][:3, 3] for c in CAMERA_IDXS])
-                d = np.array([cameras.distortion[c] for c in CAMERA_IDXS])
-                coeffs_i = np.concatenate([
-                    fx.reshape(3, 1), fy.reshape(3, 1), R.reshape(3, 9), t, d
-                ], axis=1).astype(np.float32)
-                coeffs.append(coeffs_i)
-            setattr(self, f'cam_coeffs_{tt}', coeffs)
-            self.save()
-
-            exit()
-        return coeffs
 
     def get_points_3d(self, tt: str) -> List[float]:
         assert tt in ['train', 'test']

@@ -55,7 +55,7 @@ class DatasetSegmentationMasksLoader(DatasetLoader):
         """
         Fetch the the segmentation masks.
         """
-        index = 5
+        # index = 5
         if self.preload:
             mask: SegmentationMasks = self.masks[index]
             X: np.ndarray = self.Xs[index]
