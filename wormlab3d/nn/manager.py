@@ -119,63 +119,82 @@ class Manager:
     def _get_data_loader(self, train_or_test: str) -> DataLoader:
         pass
 
-    def _init_network(self) -> Tuple[BaseNet, NetworkParameters]:
+    def _init_network(
+            self,
+            net_args: NetworkArgs = None,
+            input_shape: tuple = None,
+            output_shape: tuple = None,
+            prefix: str = None
+    ) -> Tuple[BaseNet, NetworkParameters]:
         """
-        Build the network using the given parameters.
+        Build the network using the given parameters, defaulting to the instance attributes if not provided.
         """
+        if net_args is None:
+            net_args = self.net_args
+        if input_shape is None:
+            input_shape = self.input_shape
+        if output_shape is None:
+            output_shape = self.output_shape
+        if prefix is None:
+            prefix = ''
+        else:
+            prefix = prefix + '-'
+        logger.info(f'Initialising {prefix}network')
+
         net_params = None
         params = {**{
-            'network_type': self.net_args.base_net,
-            'input_shape': self.input_shape,
-            'output_shape': self.output_shape,
-        }, **self.net_args.hyperparameters}
+            'network_type': net_args.base_net,
+            'input_shape': input_shape,
+            'output_shape': output_shape,
+        }, **net_args.hyperparameters}
 
         # Try to load an existing network
-        if self.net_args.load:
+        if net_args.load:
             # If we have a net id then load this from the database
-            if self.net_args.net_id is not None:
-                net_params = NetworkParameters.objects.get(id=self.net_args.net_id)
+            if net_args.net_id is not None:
+                net_params = NetworkParameters.objects.get(id=net_args.net_id)
             else:
                 # Otherwise, try to find one matching the same parameters
                 net_params_matching = NetworkParameters.objects(**params)
                 if net_params_matching.count() > 0:
                     net_params = net_params_matching[0]
-                    logger.info(f'Found {len(net_params_matching)} suitable networks in database, using most recent.')
+                    logger.info(
+                        f'Found {len(net_params_matching)} suitable {prefix}networks in database, using most recent.')
                 else:
-                    logger.info('No suitable networks found in database.')
+                    logger.info(f'No suitable {prefix}networks found in database.')
             if net_params is not None:
-                logger.info(f'Loaded networks (id={net_params.id}, created={net_params.created}).')
+                logger.info(f'Loaded {prefix}network (id={net_params.id}, created={net_params.created}).')
 
         # Not loaded network, so create one
         if net_params is None:
             # Separate classes are used to validate the different available hyperparameters
-            if self.net_args.base_net == 'fcnet':
+            if net_args.base_net == 'fcnet':
                 net_params = NetworkParametersFC(**params)
-            elif self.net_args.base_net == 'aenet':
+            elif net_args.base_net == 'aenet':
                 net_params = NetworkParametersAE(**params)
-            elif self.net_args.base_net == 'resnet':
+            elif net_args.base_net == 'resnet':
                 net_params = NetworkParametersResNet(**params)
-            elif self.net_args.base_net == 'densenet':
+            elif net_args.base_net == 'densenet':
                 net_params = NetworkParametersDenseNet(**params)
-            elif self.net_args.base_net == 'pyramidnet':
+            elif net_args.base_net == 'pyramidnet':
                 net_params = NetworkParametersPyramidNet(**params)
-            elif self.net_args.base_net == 'nunet':
+            elif net_args.base_net == 'nunet':
                 net_params = NetworkParametersNuNet(**params)
-            elif self.net_args.base_net == 'rdn':
+            elif net_args.base_net == 'rdn':
                 net_params = NetworkParametersRDN(**params)
-            elif self.net_args.base_net == 'red':
+            elif net_args.base_net == 'red':
                 net_params = NetworkParametersRED(**params)
             else:
-                raise ValueError(f'Unrecognised base net: {self.net_args.base_net}')
+                raise ValueError(f'Unrecognised base net: {net_args.base_net}')
 
             # Save the network parameters to the database
             net_params.save()
-            logger.info(f'Saved net parameters to database (id={net_params.id})')
+            logger.info(f'Saved {prefix}net parameters to database (id={net_params.id})')
 
         # Instantiate the network
         net = net_params.instantiate_network()
-        logger.info(f'Instantiated network with {net.get_n_params() / 1e6:.4f}M parameters.')
-        logger.debug(f'----------- Network --------------\n\n{net}\n\n')
+        logger.info(f'Instantiated {prefix}network with {net.get_n_params() / 1e6:.4f}M parameters.')
+        logger.debug(f'----------- {prefix}Network --------------\n\n{net}\n\n')
 
         return net, net_params
 

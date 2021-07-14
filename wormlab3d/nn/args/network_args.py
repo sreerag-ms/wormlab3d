@@ -5,7 +5,7 @@ from wormlab3d.data.model.network_parameters import *
 from wormlab3d.nn.args.base_args import BaseArgs
 from wormlab3d.toolkit.util import str2bool
 
-NETWORK_TYPES = ['densenet', 'fcnet', 'resnet', 'pyramidnet', 'aenet', 'nunet', 'rdn', 'red']
+NETWORK_TYPES = ['densenet', 'fcnet', 'resnet', 'pyramidnet', 'aenet', 'nunet', 'rdn', 'red', 'rotae']
 
 
 class NetworkArgs(BaseArgs):
@@ -26,196 +26,206 @@ class NetworkArgs(BaseArgs):
         self.hyperparameters = hyperparameters
 
     @classmethod
-    def add_args(cls, parser: ArgumentParser):
+    def add_args(cls, parser: ArgumentParser, prefix: str = None):
         """
         Add arguments to a command parser.
         """
-        group = parser.add_argument_group('Network Args')
-
-        group.add_argument('--net-id', type=str,
+        group = parser.add_argument_group(
+            'Network Args' + (f'_Prefix={prefix}' if prefix is not None else '')
+        )
+        if prefix is not None:
+            prefix = prefix + '-'
+        else:
+            prefix = ''
+        group.add_argument(f'--{prefix}net-id', type=str,
                            help='Load a network by its database id.')
-        group.add_argument('--load-net', type=str2bool, default=True,
+        group.add_argument(f'--{prefix}load-net', type=str2bool, default=True,
                            help='Try to load an existing network if available matching the given parameters.')
 
         # Add network-specific options
-        if '--net-id' not in sys.argv:
-            subparsers = parser.add_subparsers(title='Base network', dest='base_net',
+        if f'--{prefix}net-id' not in sys.argv:
+            # if prefix == '':
+            #     subparsers = parser.add_subparsers(title='Base network', dest=f'base_net',
+            #                                        help='What type of network to use as the base.')
+            #     subparsers.required = True
+            # else:
+            subparsers = parser.add_subparsers(title='Base network', dest=f'{prefix.replace("-", "_")}base_net',
                                                help='What type of network to use as the base.')
             subparsers.required = True
-            NetworkArgs._add_fcnet_args(subparsers.add_parser('fcnet'))
-            NetworkArgs._add_aenet_args(subparsers.add_parser('aenet'))
-            NetworkArgs._add_resnet_args(subparsers.add_parser('resnet'))
-            NetworkArgs._add_densenet_args(subparsers.add_parser('densenet'))
-            NetworkArgs._add_pyramidnet_args(subparsers.add_parser('pyramidnet'))
-            NetworkArgs._add_nunet_args(subparsers.add_parser('nunet'))
-            NetworkArgs._add_rdn_args(subparsers.add_parser('rdn'))
-            NetworkArgs._add_red_args(subparsers.add_parser('red'))
+            NetworkArgs._add_fcnet_args(subparsers.add_parser('fcnet'), prefix)
+            NetworkArgs._add_aenet_args(subparsers.add_parser('aenet'), prefix)
+            NetworkArgs._add_resnet_args(subparsers.add_parser('resnet'), prefix)
+            NetworkArgs._add_densenet_args(subparsers.add_parser('densenet'), prefix)
+            NetworkArgs._add_pyramidnet_args(subparsers.add_parser('pyramidnet'), prefix)
+            NetworkArgs._add_nunet_args(subparsers.add_parser('nunet'), prefix)
+            NetworkArgs._add_rdn_args(subparsers.add_parser('rdn'), prefix)
+            NetworkArgs._add_red_args(subparsers.add_parser('red'), prefix)
 
         return group
 
     @staticmethod
-    def _add_fcnet_args(parser: Namespace):
+    def _add_fcnet_args(parser: Namespace, prefix: str = None):
         """
         Fully-connected network parameters.
         """
-        parser.add_argument('--layers-config', type=lambda s: [int(item) for item in s.split(',')],
+        parser.add_argument(f'--{prefix}layers-config', type=lambda s: [int(item) for item in s.split(',')],
                             default='100,100',
                             help='Comma delimited list of layer sizes.')
-        parser.add_argument('--dropout-prob', type=float, default=0.2,
+        parser.add_argument(f'--{prefix}dropout-prob', type=float, default=0.2,
                             help='Dropout probability.')
 
     @staticmethod
-    def _parse_fcnet_params(parser):
+    def _parse_fcnet_params(parser, prefix: str = None):
         """
         Fully-connected network parameters.
         """
-        parser.add_argument('--layers-config', type=lambda s: [int(item) for item in s.split(',')],
+        parser.add_argument(f'--{prefix}layers-config', type=lambda s: [int(item) for item in s.split(',')],
                             default='100,100',
                             help='Comma delimited list of layer sizes.')
-        parser.add_argument('--dropout-prob', type=float, default=0.2,
+        parser.add_argument(f'--{prefix}dropout-prob', type=float, default=0.2,
                             help='Dropout probability.')
 
     @staticmethod
-    def _add_aenet_args(parser):
+    def _add_aenet_args(parser, prefix: str = None):
         """
         Auto-encoder network parameters.
         """
-        parser.add_argument('--n-init-channels', type=int, default=16,
+        parser.add_argument(f'--{prefix}n-init-channels', type=int, default=16,
                             help='Number of channels in the first input layer.')
-        parser.add_argument('--growth-rate', type=int, default=8,
+        parser.add_argument(f'--{prefix}growth-rate', type=int, default=8,
                             help='Growth rate for each layer in the blocks (k).')
-        parser.add_argument('--compression-factor', type=float, default=0.5,
+        parser.add_argument(f'--{prefix}compression-factor', type=float, default=0.5,
                             help='Factor to reduce resolution by in transition layers (theta).')
-        parser.add_argument('--block-config-enc', type=lambda s: [int(item) for item in s.split(',')],
+        parser.add_argument(f'--{prefix}block-config-enc', type=lambda s: [int(item) for item in s.split(',')],
                             default='6,6,6',
                             help='Comma delimited list of layers for each encoder block. Number of entries determines number of encoder blocks.')
-        parser.add_argument('--block-config-dec', type=lambda s: [int(item) for item in s.split(',')],
+        parser.add_argument(f'--{prefix}block-config-dec', type=lambda s: [int(item) for item in s.split(',')],
                             default='6,6,6',
                             help='Comma delimited list of layers for each decoder block. Number of entries determines number of decoder blocks.')
-        parser.add_argument('--dropout-prob', type=float, default=0.2,
+        parser.add_argument(f'--{prefix}dropout-prob', type=float, default=0.2,
                             help='Dropout probability.')
-        parser.add_argument('--latent-size', type=int, default=10,
+        parser.add_argument(f'--{prefix}latent-size', type=int, default=10,
                             help='Number of additional latent variables to store.')
 
     @staticmethod
-    def _add_resnet_args(parser):
+    def _add_resnet_args(parser, prefix: str = None):
         """
         ResNet network parameters.
         """
-        parser.add_argument('--n-init-channels', type=int, default=64,
+        parser.add_argument(f'--{prefix}n-init-channels', type=int, default=64,
                             help='Number of channels in the first input layer.')
-        parser.add_argument('--blocks-config', type=lambda s: [int(item) for item in s.split(',')],
+        parser.add_argument(f'--{prefix}blocks-config', type=lambda s: [int(item) for item in s.split(',')],
                             default='3,4,6,3',
                             help='Comma delimited list of layers for each block. Number of entries determines number of blocks.')
-        parser.add_argument('--shortcut-type', type=str, choices=['id', 'conv'], default='id',
+        parser.add_argument(f'--{prefix}shortcut-type', type=str, choices=['id', 'conv'], default='id',
                             help='Shortcut operation to use when dimensions change.')
-        parser.add_argument('--use-bottlenecks', type=str2bool, default=False,
+        parser.add_argument(f'--{prefix}use-bottlenecks', type=str2bool, default=False,
                             help='Use bottleneck type residual layers.')
-        parser.add_argument('--dropout-prob', type=float, default=0.2,
+        parser.add_argument(f'--{prefix}dropout-prob', type=float, default=0.2,
                             help='Dropout probability.')
 
     @staticmethod
-    def _add_densenet_args(parser):
+    def _add_densenet_args(parser, prefix: str = None):
         """
         DenseNet network parameters.
         """
-        parser.add_argument('--n-init-channels', type=int, default=16,
+        parser.add_argument(f'--{prefix}n-init-channels', type=int, default=16,
                             help='Number of channels in the first input layer.')
-        parser.add_argument('--growth-rate', type=int, default=8,
+        parser.add_argument(f'--{prefix}growth-rate', type=int, default=8,
                             help='Growth rate for each layer in the blocks (k).')
-        parser.add_argument('--compression-factor', type=float, default=0.5,
+        parser.add_argument(f'--{prefix}compression-factor', type=float, default=0.5,
                             help='Factor to reduce resolution by in transition layers (theta).')
-        parser.add_argument('--blocks-config', type=lambda s: [int(item) for item in s.split(',')],
+        parser.add_argument(f'--{prefix}blocks-config', type=lambda s: [int(item) for item in s.split(',')],
                             default='6,6,6',
                             help='Comma delimited list of layers for each block. Number of entries determines number of blocks.')
-        parser.add_argument('--dropout-prob', type=float, default=0.2,
+        parser.add_argument(f'--{prefix}dropout-prob', type=float, default=0.2,
                             help='Dropout probability.')
 
     @staticmethod
-    def _add_pyramidnet_args(parser):
+    def _add_pyramidnet_args(parser, prefix: str = None):
         """
         PyramidNet network parameters.
         """
-        parser.add_argument('--n-init-channels', type=int, default=16,
+        parser.add_argument(f'--{prefix}n-init-channels', type=int, default=16,
                             help='Number of channels in the first input layer.')
-        parser.add_argument('--blocks-config', type=lambda s: [int(item) for item in s.split(',')],
+        parser.add_argument(f'--{prefix}blocks-config', type=lambda s: [int(item) for item in s.split(',')],
                             default='3,4,6,3',
                             help='Comma delimited list of layers for each block. Number of entries determines number of blocks.')
-        parser.add_argument('--alpha', type=int, default=420,
+        parser.add_argument(f'--{prefix}alpha', type=int, default=420,
                             help='The widening factor which defines how quickly the pyramid expands at each layer.')
-        parser.add_argument('--shortcut-type', type=str, choices=['id', 'conv'], default='id',
+        parser.add_argument(f'--{prefix}shortcut-type', type=str, choices=['id', 'conv'], default='id',
                             help='Shortcut operation to use when dimensions change.')
-        parser.add_argument('--use-bottlenecks', type=str2bool, default=False,
+        parser.add_argument(f'--{prefix}use-bottlenecks', type=str2bool, default=False,
                             help='Use bottleneck type residual layers.')
-        parser.add_argument('--dropout-prob', type=float, default=0.2,
+        parser.add_argument(f'--{prefix}dropout-prob', type=float, default=0.2,
                             help='Dropout probability.')
 
     @staticmethod
-    def _add_nunet_args(parser):
+    def _add_nunet_args(parser, prefix: str = None):
         """
         U-Net variant (nunet) network parameters.
         """
-        parser.add_argument('--n-init-channels', type=int, default=16,
+        parser.add_argument(f'--{prefix}n-init-channels', type=int, default=16,
                             help='Number of channels in the first input layer.')
-        parser.add_argument('--depth', type=int, default=5,
+        parser.add_argument(f'--{prefix}depth', type=int, default=5,
                             help='Network depth.')
-        parser.add_argument('--up-mode', type=str, choices=['upconv', 'upsample'], default='upconv',
+        parser.add_argument(f'--{prefix}up-mode', type=str, choices=['upconv', 'upsample'], default='upconv',
                             help='How to increase spatial/temporal dims. upconv: transposed convolutions, upsample: bilinear upsampling')
-        parser.add_argument('--dropout-prob', type=float, default=0.2,
+        parser.add_argument(f'--{prefix}dropout-prob', type=float, default=0.2,
                             help='Dropout probability.')
 
     @staticmethod
-    def _add_rdn_args(parser):
+    def _add_rdn_args(parser, prefix: str = None):
         """
         Residual Dense Network (RDN) network parameters.
         """
-        parser.add_argument('--D', type=int, default=1,
+        parser.add_argument(f'--{prefix}D', type=int, default=1,
                             help='Multiscale depth. Defaults to 1 (no multiscale).')
-        parser.add_argument('--K', type=int, default=16,
+        parser.add_argument(f'--{prefix}K', type=int, default=16,
                             help='Primary number of channels.')
-        parser.add_argument('--M', type=int, default=5,
+        parser.add_argument(f'--{prefix}M', type=int, default=5,
                             help='Number of RDBs (Residual Dense Blocks).')
-        parser.add_argument('--N', type=int, default=3,
+        parser.add_argument(f'--{prefix}N', type=int, default=3,
                             help='Number of convolution layers in each RDB.')
-        parser.add_argument('--G', type=int, default=3,
+        parser.add_argument(f'--{prefix}G', type=int, default=3,
                             help='Growth rate in each RDB - how many channels each convolution layer adds.')
-        parser.add_argument('--kernel-size', type=int, default=3,
+        parser.add_argument(f'--{prefix}kernel-size', type=int, default=3,
                             help='Spatial convolution size.')
-        parser.add_argument('--activation', type=str, default='relu',
+        parser.add_argument(f'--{prefix}activation', type=str, default='relu',
                             help='Activation function, relu, elu, gelu.')
-        parser.add_argument('--act-out', type=str, default=False,
+        parser.add_argument(f'--{prefix}act-out', type=str, default=False,
                             help='Apply activation at output, eg tanh.')
-        parser.add_argument('--dropout-prob', type=float, default=0,
+        parser.add_argument(f'--{prefix}dropout-prob', type=float, default=0,
                             help='Dropout probability.')
-        parser.add_argument('--batch-norm', type=str2bool, default=False,
+        parser.add_argument(f'--{prefix}batch-norm', type=str2bool, default=False,
                             help='Apply batch normalisation after convolution and activation.')
 
     @staticmethod
-    def _add_red_args(parser):
+    def _add_red_args(parser, prefix: str = None):
         """
         Recursive Encoding Discriminator (RED) network parameters.
         """
-        parser.add_argument('--latent-size', type=int, required=True,
+        parser.add_argument(f'--{prefix}latent-size', type=int, required=True,
                             help='Size of latent representation vector.')
-        parser.add_argument('--K', type=int, default=16,
+        parser.add_argument(f'--{prefix}K', type=int, default=16,
                             help='Primary number of channels.')
-        parser.add_argument('--M', type=int, default=5,
+        parser.add_argument(f'--{prefix}M', type=int, default=5,
                             help='Number of RDBs (Residual Dense Blocks).')
-        parser.add_argument('--N', type=int, default=3,
+        parser.add_argument(f'--{prefix}N', type=int, default=3,
                             help='Number of convolution layers in each RDB.')
-        parser.add_argument('--G', type=int, default=3,
+        parser.add_argument(f'--{prefix}G', type=int, default=3,
                             help='Growth rate in each RDB - how many channels each convolution layer adds.')
-        parser.add_argument('--discriminator-layers', type=lambda s: [int(item) for item in s.split(',')],
+        parser.add_argument(f'--{prefix}discriminator-layers', type=lambda s: [int(item) for item in s.split(',')],
                             default='', help='Comma delimited list of discriminator layer sizes.')
-        parser.add_argument('--kernel-size', type=int, default=3,
+        parser.add_argument(f'--{prefix}kernel-size', type=int, default=3,
                             help='Spatial convolution size.')
-        parser.add_argument('--activation', type=str, default='relu',
+        parser.add_argument(f'--{prefix}activation', type=str, default='relu',
                             help='Activation function, relu, elu, gelu.')
-        parser.add_argument('--act-out', type=str, default=False,
+        parser.add_argument(f'--{prefix}act-out', type=str, default=False,
                             help='Apply activation at output, eg tanh.')
-        parser.add_argument('--dropout-prob', type=float, default=0,
+        parser.add_argument(f'--{prefix}dropout-prob', type=float, default=0,
                             help='Dropout probability.')
-        parser.add_argument('--batch-norm', type=str2bool, default=False,
+        parser.add_argument(f'--{prefix}batch-norm', type=str2bool, default=False,
                             help='Apply batch normalisation after convolution and activation.')
 
     @staticmethod
@@ -315,7 +325,7 @@ class NetworkArgs(BaseArgs):
 
         return NetworkArgs(
             net_id=args.net_id,
-            load=args.load_dataset,
+            load=args.load_net,
             base_net=args.base_net,
             hyperparameters=hyperparameters,
         )
