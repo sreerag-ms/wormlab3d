@@ -48,7 +48,7 @@ class FCNet(BaseNet):
         return f'FCNet/{",".join(map(str, self.layers_config))}_d={self.dropout_prob}'
 
     def _build_model(self):
-        size = torch.prod(torch.tensor(self.input_shape))
+        size = int(torch.prod(torch.tensor(self.input_shape)))
         self.model = nn.Sequential()
         for i, n in enumerate(self.layers_config):
             self.model.add_module(
@@ -56,13 +56,16 @@ class FCNet(BaseNet):
                 FCLayer(size, n, activation=i != 0)  # skip relu going into first layer
             )
             size = n
+
+        out_size = int(torch.prod(torch.tensor(self.output_shape)))
         self.model.add_module(
             'OutputLayer',
-            FCLayer(size, self.output_shape, activation=self.act_out)
+            FCLayer(size, out_size, activation=self.act_out)
         )
 
         return self.model
 
     def forward(self, x):
         x = x.view(x.shape[0], -1)
-        return self.model(x)
+        x = self.model(x)
+        return x.reshape(x.shape[0], *self.output_shape)
