@@ -101,6 +101,11 @@ class RotAENet(nn.Module):
         self.size = PREPARED_IMAGE_SIZE[0]
         self.blur_sigma = blur_sigma
 
+    def to(self, *args, **kwargs):
+        super().to(*args, **kwargs)
+        self.rng.low = self.rng.low.to(*args, **kwargs)
+        self.rng.high = self.rng.high.to(*args, **kwargs)
+
     def forward(
             self,
             X0: torch.Tensor,
