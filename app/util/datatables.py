@@ -5,38 +5,44 @@ Module to handle conversation between DataTables and MongoDB.
 """
 
 import re
+import json
+
+from mongoengine import Document
 
 
-def mongo_query_params(dt_params):
+def dt_query(dt_params, document: Document):   # TODO: Inheritance type hinting?
     """
-
-    Sample parameters dict (not actual data)
-    ----------------------------------------
-    {'_': '1374248696',
-     'columns[0][data]': '_id',
-     'columns[0][name]': '',
-     'columns[0][orderable]': 'true',
-     'columns[0][search][regex]': 'false',
-     'columns[0][search][value]': '',
-     'columns[0][searchable]': 'true',
-     'columns[1][data]': 'user',
-     'columns[1][name]': '',
-     'columns[1][orderable]': 'true',
-     'columns[1][search][regex]': 'false',
-     'columns[1][search][value]': '',
-     'columns[1][searchable]': 'true',
-     'draw': '2',
-     'length': '100',
-     'order[0][column]': '0',
-     'order[0][dir]': 'asc',
-     'search[regex]': 'false',
-     'search[value]': '',
-     'start': '0'}
 
     :param dt_params: ImmutableMultiDict
         Direct DataTables to a flask route, then pass in request.args from flask.
 
-    :return output: dict
+        Sample parameters dict (not actual data)
+        ----------------------------------------
+        {'_': '1374248696',
+         'columns[0][data]': '_id',
+         'columns[0][name]': '',
+         'columns[0][orderable]': 'true',
+         'columns[0][search][regex]': 'false',
+         'columns[0][search][value]': '',
+         'columns[0][searchable]': 'true',
+         'columns[1][data]': 'user',
+         'columns[1][name]': '',
+         'columns[1][orderable]': 'true',
+         'columns[1][search][regex]': 'false',
+         'columns[1][search][value]': '',
+         'columns[1][searchable]': 'true',
+         'draw': '2',
+         'length': '100',
+         'order[0][column]': '0',
+         'order[0][dir]': 'asc',
+         'search[regex]': 'false',
+         'search[value]': '',
+         'start': '0'}
+    :param document: Document
+        A MongoEngine Document. For example, the Trial table.
+
+    :return output: str
+        A json string containing the queried result and parameters required by DataTables.
     """
 
     # Id range of records to retrieve
@@ -70,8 +76,18 @@ def mongo_query_params(dt_params):
         sort_col = next(sort_cols, None)
         sort_dir = next(sort_dirs, None)
 
-    output = {"sort_list": sort_list,
-              "start_id": start_id,
-              "end_id": end_id}
+    # Form the query set
+    ordered_queryset = document.objects.order_by(*sort_list)
+    # filtered_queryset = ordered_queryset.filter()   # TODO: Implement
+    num_matching_records = ordered_queryset.count()
+    queryset = ordered_queryset[start_id:end_id]
 
-    return output
+    # Set draw, recordsTotal, recordsFilered, data in the response json
+    # Optionally set error as well if there is an error.
+    response = {"data": json.loads(queryset.to_json()),
+                "draw": int(dt_params.get("draw")),  # Cast to int to avoid XSS
+                "recordsTotal": document.objects.count(),
+                "recordsFilered": num_matching_records
+                }
+
+    return json.dumps(response)

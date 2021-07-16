@@ -1,9 +1,10 @@
 import os
 
-from flask import Blueprint, render_template
-
 from wormlab3d.data.model import Experiment
 
+from flask import Blueprint, render_template
+
+# Form blueprint
 bp_experiments = Blueprint('experiments', __name__)
 
 
@@ -15,5 +16,8 @@ def experiments():
         'experiments.html',
         title='Experiments',
         active=active,
-        experiments=Experiment.objects(id__lte=20)   # Only return the first 20 entries
+        ajax_url="/ajax/experiments",
+        source_headers=["_id", "user", "strain", "sex",
+                        "age", "concentration", "worm_length", "legacy_id"],
+        experiments=Experiment.objects.none()   # Let views.api.experiments.ajax_experiments do the query
     )

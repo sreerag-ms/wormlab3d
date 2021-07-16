@@ -4,6 +4,7 @@ from flask import Flask
 
 # Import blueprints
 from .views.api.experiments import bp_api_experiments
+from .views.api.trials import bp_api_trials
 from .views.page.index import bp_index
 from .views.page.experiments import bp_experiments
 from .views.page.trials import bp_trials
@@ -23,6 +24,7 @@ os.environ['script_name'] = 'app'
 
 # Register blueprints on the app (can specify subdomain)
 app.register_blueprint(bp_api_experiments)
+app.register_blueprint(bp_api_trials)
 app.register_blueprint(bp_index)
 app.register_blueprint(bp_experiments)
 app.register_blueprint(bp_trials)
