@@ -12,7 +12,6 @@ bp_trials = Blueprint('trials', __name__)
 def trials():
     active = 'trials'
     os.environ['script_name'] = active
-    print(Trial.objects.first().date)
     return render_template(
         'trials.html',
         title='Trials',

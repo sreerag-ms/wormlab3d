@@ -19,5 +19,6 @@ def experiments():
         ajax_url="/ajax/experiments",
         source_headers=["_id", "user", "strain", "sex",
                         "age", "concentration", "worm_length", "legacy_id"],
+        date_headers=[],
         experiments=Experiment.objects.none()   # Let views.api.experiments.ajax_experiments do the query
     )
