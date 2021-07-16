@@ -22,20 +22,6 @@
             <th scope="col">Comments</th>
           </tr>
         </thead>
-        <tbody>
-          {% for trial in trials %}
-          <tr>
-            <td scope="row">{{ trial.id }}</td>
-            <td>{{ trial.experiment.id }}</td>
-            <td>{{ trial.date }}</td>
-            <td>{{ trial.trial_num }}</td>
-            <td>{{ trial.num_frames }}</td>
-            <td>{{ trial.fps }}</td>
-            <td>{{ trial.temperature }}</td>
-            <td>{{ trial.comments }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
       </table>
     </div>
   </div>

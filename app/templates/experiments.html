@@ -22,20 +22,6 @@
             <th scope="col">Legacy ID</th>
           </tr>
         </thead>
-        <tbody>
-          {% for experiment in experiments %}
-          <tr>
-            <td scope="row">{{ experiment.id }}</td>
-            <td>{{ experiment.user }}</td>
-            <td>{{ experiment.strain }}</td>
-            <td>{{ experiment.sex }}</td>
-            <td>{{ experiment.age }}</td>
-            <td>{{ experiment.concentration }}</td>
-            <td>{{ experiment.worm_length }}</td>
-            <td>{{ experiment.legacy_id }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
       </table>
     </div>
   </div>
