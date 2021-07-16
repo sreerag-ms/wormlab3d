@@ -91,20 +91,18 @@ class RotAENet(nn.Module):
         self.register_buffer('p2d_mean', p2d_mean)
         self.register_buffer('p2d_range', p2d_range)
         self.cams = DynamicCameras(distort=distorted_cameras)
-
-        self.rng = Uniform(
-            low=torch.zeros(3),
-            high=torch.ones(3) * 2 * np.pi
-        )
+        self.register_buffer('rng_low', torch.zeros(3))
+        self.register_buffer('rng_high',torch.ones(3) * 2 * np.pi)
         self.euler_angles = None
         self.rotation_matrix = None
         self.size = PREPARED_IMAGE_SIZE[0]
         self.blur_sigma = blur_sigma
 
-    def to(self, *args, **kwargs):
-        super().to(*args, **kwargs)
-        self.rng.low = self.rng.low.to(*args, **kwargs)
-        self.rng.high = self.rng.high.to(*args, **kwargs)
+    def _get_rng(self) -> Uniform:
+        return Uniform(
+            low=self.rng_low,
+            high=self.rng_high
+        )
 
     def forward(
             self,
@@ -138,7 +136,7 @@ class RotAENet(nn.Module):
 
         # Update setup
         setup_adj = c2d_output[:, 3:].mean(dim=(2, 3))
-        setup = setup + torch.tanh(setup_adj)  # *1e-6
+        setup = setup + torch.tanh(setup_adj)
         cc2 = setup[:, :N_CAM_COEFFICIENTS * 3].reshape_as(camera_coeffs)
         cc2 = cc2 * (self.cam_coeffs_range + 1e-7) + self.cam_coeffs_mean
         p3d2 = setup[:, N_CAM_COEFFICIENTS * 3:N_CAM_COEFFICIENTS * 3 + 3].reshape_as(points_3d_base)
@@ -183,7 +181,8 @@ class RotAENet(nn.Module):
 
     def rotate(self, points_3d: torch.Tensor) -> torch.Tensor:
         # Generate Euler rotation angles and matrix
-        self.euler_angles = self.rng.sample((points_3d.shape[0],))
+        rng = self._get_rng()
+        self.euler_angles = rng.sample((points_3d.shape[0],))
         self.rotation_matrix = euler_angles_to_matrix(self.euler_angles, convention='XYZ')
 
         # Rotate
