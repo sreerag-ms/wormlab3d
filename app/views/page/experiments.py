@@ -15,5 +15,5 @@ def experiments():
         'experiments.html',
         title='Experiments',
         active=active,
-        experiments=Experiment.objects
+        experiments=Experiment.objects(id__lte=20)   # Only return the first 20 entries
     )
