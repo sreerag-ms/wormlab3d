@@ -87,7 +87,7 @@ def dt_query(dt_params, document: Document):   # TODO: Inheritance type hinting?
     response = {"data": json.loads(queryset.to_json()),
                 "draw": int(dt_params.get("draw")),  # Cast to int to avoid XSS
                 "recordsTotal": document.objects.count(),
-                "recordsFilered": num_matching_records
+                "recordsFiltered": num_matching_records
                 }
 
     return json.dumps(response)
