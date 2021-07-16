@@ -5,8 +5,9 @@
     $(document).ready(function() {
         $( "#{{ table_name }}" ).DataTable( {
             order: [ {{ table_order|safe }} ],     {# table_order is not user supplied, so should be ok #}
-            lengthMenu: [ 10, 25, 50, 100 ],
-            dom : '<"row no-gutters"<"col-12 col-md-6"l><"col-12 col-md-6"f>>t<"col-12"p>',
+            pageLength: 25,
+            // lengthMenu: [ 10, 25, 50, 100 ],
+            // dom : '<"row no-gutters"<"col-12 col-md-6"l><"col-12 col-md-6"f>>t<"col-12"p>',
             scrollX: true,
             processing: true,
             serverSide: true,   // Enable server side processing to achieve low loading time pagination/queries
@@ -50,10 +51,7 @@
                                 return timestamp;
                             {% endif %}
 
-                            {# Otherwise (column does not contain date values), just return the data as is. #}
-                            // Otherwise the data type requested (`type`) is type detection or
-                            // sorting data, for which we want to use the integer, so just return
-                            // that, unaltered
+                            {# Return non-date data values as is. #}
                             return data;
                         }
                     },
