@@ -456,13 +456,12 @@ class Manager:
                 str(timedelta(seconds=seconds_left))))
             lr_scheduler.step()
 
-            # # Test every epoch
-            # self.test()
-            # self.tb_logger.add_scalar(f'epoch/test/total', self.checkpoint.loss_test, epoch)
-            # for key, val in self.checkpoint.metrics_test.items():
-            #     self.tb_logger.add_scalar(f'epoch/test/{key}', val, epoch)
-            #     logger.info(f'Test {key}: {val:.4E}')
-            #
+            # Test every epoch
+            self.test()
+            self.tb_logger.add_scalar(f'epoch/test/total', self.checkpoint.loss_test, epoch)
+            for key, val in self.checkpoint.metrics_test.items():
+                self.tb_logger.add_scalar(f'epoch/test/{key}', val, epoch)
+                logger.info(f'Test {key}: {val:.4E}')
 
             if self.runtime_args.checkpoint_every_n_epochs > 0 \
                     and (epoch + 1) % self.runtime_args.checkpoint_every_n_epochs == 0:

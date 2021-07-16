@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+
 from wormlab3d import PREPARED_IMAGE_SIZE
 from wormlab3d.data.model import Midline2D, NetworkParameters
 from wormlab3d.midlines2d.args import DatasetMidline2DArgs
@@ -93,7 +94,7 @@ class ManagerCoords(BaseManager):
         loss_b = F.mse_loss(Y_pred, Y_target.flip(dims=(1,)), reduction='none').sum(dim=(1, 2))
         loss_min = torch.min(loss_a, loss_b)
         loss = loss_min.mean()
-        stats['mse_min'] = loss_min
+        stats['mse_min'] = loss
 
         return loss, stats
 
@@ -126,7 +127,7 @@ class ManagerCoords(BaseManager):
         n_examples = min(self.runtime_args.plot_n_examples, self.runtime_args.batch_size)
         idxs = np.random.choice(self.runtime_args.batch_size, n_examples, replace=False)
         fig, axes = plt.subplots(
-            nrows=5,
+            nrows=3,
             ncols=n_examples,
             figsize=(16, n_examples * 4),
             gridspec_kw=dict(
@@ -162,11 +163,9 @@ class ManagerCoords(BaseManager):
                 X=outputs[idx],
                 blur_sigma=self.dataset_args.blur_sigma,
                 draw_mode='line_aa',
-                image_size=PREPARED_IMAGE_SIZE
+                image_size=PREPARED_IMAGE_SIZE,
+                raise_on_empty=False
             )
-
-            # Calculate squared pixel errors
-            loss = np.square(mask_target - mask_output)
 
             # Shows original (prepped) images with midline annotations
             ax = axes[0, i]
@@ -188,31 +187,17 @@ class ManagerCoords(BaseManager):
             # Augmented images
             ax = axes[1, i]
             ax.imshow(images[idx], cmap='gray', vmin=0, vmax=1)
+            X = outputs[idx]
+            ax.scatter(x=X[:, 0], y=X[:, 1], color='red', s=2, alpha=0.8, marker='x')
             if i == 0:
-                ax.text(-0.1, 0.25, 'Augmented Image', transform=ax.transAxes, rotation='vertical')
-            ax.axis('off')
-
-            # Midline segmentation masks
-            ax = axes[2, i]
-            ax.imshow(mask_target, cmap=plt.cm.Blues, vmin=0, vmax=1)
-            if i == 0:
-                ax.text(-0.1, 0.4, 'Target', transform=ax.transAxes, rotation='vertical')
+                ax.text(-0.1, 0.25, 'Augmented+Output', transform=ax.transAxes, rotation='vertical')
             ax.axis('off')
 
             # Error between target and output
-            ax = axes[3, i]
-            m = ax.imshow(loss, cmap=plt.cm.Reds, vmin=loss.min(), vmax=loss.max())
+            ax = axes[2, i]
+            ax.imshow(mask_target - mask_output, cmap=plt.cm.PRGn, vmin=-1, vmax=1)
             if i == 0:
-                ax.text(-0.1, 0.4, 'Error', transform=ax.transAxes, rotation='vertical')
-            if i == n_examples - 1:
-                fig.colorbar(m, ax=ax, format='%.3f')
-            ax.axis('off')
-
-            # Generated segmentation mask
-            ax = axes[4, i]
-            ax.imshow(mask_output, cmap=plt.cm.Blues, vmin=0, vmax=1)
-            if i == 0:
-                ax.text(-0.1, 0.4, 'Output', transform=ax.transAxes, rotation='vertical')
+                ax.text(-0.1, 0.4, 'Comparison', transform=ax.transAxes, rotation='vertical')
             ax.axis('off')
 
         # plt.show()
