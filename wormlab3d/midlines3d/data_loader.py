@@ -28,7 +28,6 @@ class DatasetSegmentationMasksLoader(DatasetLoader):
         self.cam_coeffs = ds.get_camera_coefficients(tt=train_or_test)
         self.points_3d = ds.get_points_3d(tt=train_or_test)
         self.points_2d = ds.get_points_2d(tt=train_or_test)
-        self.masks_ids = []
         super().__init__(ds, ds_args, train_or_test)
 
     def _preload_data(self):

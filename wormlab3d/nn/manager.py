@@ -504,7 +504,7 @@ class Manager:
                     and (i + 1) % self.runtime_args.checkpoint_every_n_batches == 0:
                 self.save_checkpoint()
 
-            gc.collect()
+        gc.collect()
 
         # Update stats and write debug
         self.checkpoint.loss_train = float(epoch_loss) / num_batches_per_epoch
