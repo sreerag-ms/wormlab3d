@@ -1,16 +1,18 @@
-import gc
+import os
 from typing import Tuple
 
 import numpy as np
 import torch
+from bson import ObjectId
 from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import default_collate
 
-from wormlab3d import logger
+from wormlab3d import logger, DATASET_CACHE_PATH, PREPARED_IMAGE_SIZE
 from wormlab3d.data.model import SegmentationMasks
 from wormlab3d.data.model.dataset import DatasetSegmentationMasks
 from wormlab3d.midlines3d.args import DatasetSegmentationMasksArgs
 from wormlab3d.nn.data_loader import DatasetLoader, make_data_loader
+from wormlab3d.toolkit.util import hash_data
 
 
 class DatasetSegmentationMasksLoader(DatasetLoader):
@@ -32,35 +34,70 @@ class DatasetSegmentationMasksLoader(DatasetLoader):
     def _preload_data(self):
         """
         Load all the prepared segmentation masks in the dataset into memory.
+        Creates a file cache of the masks on disk and loads this if available.
         """
-        logger.info('Preloading data from database.')
-        Xs = []
-        masks = []
+        logger.info('Preloading data.')
+
+        # Collect ids to fetch in bulk
+        mask_ids = []
         for mask in self.masks:
-            mask = mask.fetch()
-            masks.append(mask)
-            Xs.append(mask.X)
+            mask_ids.append(mask.id)
+        self.mask_ids = mask_ids
+        shape = ((len(mask_ids), 3,) + PREPARED_IMAGE_SIZE)
 
-        cams = []
-        for cam in self.cams:
-            cam = cam.fetch()
-            cams.append(cam)
+        # Try to load from file cache if available
+        filename = hash_data([str(m) for m in mask_ids]) + '.npz'
+        path = DATASET_CACHE_PATH + '/' + filename
+        if os.path.exists(path):
+            try:
+                self.Xs = np.memmap(path, dtype=np.float32, mode='r', shape=shape)
+                logger.info(f'Loaded data from {path}.')
+                return
+            except Exception as e:
+                logger.warning(f'Could not load from {path}. {e}')
+        else:
+            logger.info('File cache unavailable, loading from database.')
 
-        # Replace attributes with the loaded lists of documents
-        self.masks = masks
+        # Fetch masks
+        Xs = np.memmap(path, dtype='float32', mode='w+', shape=shape)
+        batch_size = 1000
+        i = 0
+        while len(mask_ids) > 0:
+            mids = mask_ids[:batch_size]
+            mask_ids = mask_ids[batch_size:]
+            pipeline = [
+                {'$match': {'_id': {'$in': mids}}},
+                {'$project': {'_id': 1, 'X': 1}}
+            ]
+            data = list(SegmentationMasks.objects().aggregate(pipeline, batchSize=batch_size))
+
+            # Convert results to dict as order is not preserved
+            dic = {}
+            for datum in data:
+                dic[datum['_id']] = SegmentationMasks.X.to_python(datum['X'])
+
+            # Build Xs array
+            for mid in mids:
+                Xs[i] = dic[mid]
+                i += 1
+        assert i == len(self)
+
+        # Save to file
+        logger.debug(f'Saving file cache to {path}.')
+        Xs.flush()
         self.Xs = Xs
-        self.cams = cams
 
-    def __getitem__(self, index: int) -> Tuple[torch.Tensor, SegmentationMasks, torch.Tensor]:
+    def __getitem__(self, index: int) -> Tuple[torch.Tensor, ObjectId, torch.Tensor]:
         """
         Fetch the the segmentation masks.
         """
         # index = 5
         if self.preload:
-            mask: SegmentationMasks = self.masks[index]
+            mask_id: ObjectId = self.mask_ids[index]
             X: np.ndarray = self.Xs[index]
         else:
             mask: SegmentationMasks = self.masks[index].fetch()
+            mask_id: ObjectId = mask.id
             X: np.ndarray = mask.X
 
         coeffs = torch.tensor(self.cam_coeffs[index])
@@ -71,7 +108,7 @@ class DatasetSegmentationMasksLoader(DatasetLoader):
         # X = np.stack([gauss, gauss, gauss])
 
         # Convert mask to torch tensor and normalise
-        X = torch.from_numpy(X).contiguous().to(torch.float32)
+        X = torch.from_numpy(X.copy()).contiguous().to(torch.float32)
         X_maxs = torch.amax(X, dim=(1, 2), keepdim=True)
         X_mins = torch.amin(X, dim=(1, 2), keepdim=True)
         X_ranges = X_maxs - X_mins
@@ -81,9 +118,7 @@ class DatasetSegmentationMasksLoader(DatasetLoader):
             torch.zeros_like(X)
         )
 
-        gc.collect()
-
-        return X, mask, coeffs, points_3d_base, points_2d_base
+        return X, mask_id, coeffs, points_3d_base, points_2d_base
 
 
 def gauss_test(size, sigma):
@@ -108,7 +143,7 @@ def get_data_loader(
         transposed = list(zip(*batch))
         return [
             default_collate(transposed[0]),  # masks
-            transposed[1],  # segmentation masks (documents)
+            transposed[1],  # segmentation masks object ids
             default_collate(transposed[2]),  # camera coefficients
             default_collate(transposed[3]),  # points 3d
             default_collate(transposed[4]),  # points 2d

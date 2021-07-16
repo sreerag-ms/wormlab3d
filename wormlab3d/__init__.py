@@ -19,6 +19,7 @@ dotenv.load_dotenv(ROOT_PATH + '/.env')
 DATA_PATH = ROOT_PATH + '/data'
 ANNEX_PATH = os.getenv('ANNEX_PATH', str(Path(__file__).parent.parent.parent) + '/worm_data')
 WT3D_PATH = os.getenv('WT3D_PATH', str(Path(__file__).parent.parent.parent) + '/3DWT_Data')
+DATASET_CACHE_PATH = DATA_PATH + '/ds_cache'
 
 # When fetching annexed files on demand, ensure that this much space is always kept free
 MIN_FREE_DISK_SPACE = os.getenv('MIN_FREE_DISK_SPACE', '100G')

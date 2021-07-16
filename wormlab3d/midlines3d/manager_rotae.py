@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
+from bson import ObjectId
 from matplotlib import gridspec
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -137,12 +138,14 @@ class ManagerRotAE(BaseManager):
             self,
             data: Tuple[
                 torch.Tensor,
+                List[ObjectId],
                 torch.Tensor,
-                List[SegmentationMasks]
+                torch.Tensor,
+                torch.Tensor,
             ]
     ) -> Tuple[torch.Tensor, torch.Tensor, Dict]:
         # Split up data from loader and put on correct device
-        X0, masks_docs, cam_coeffs_base, points_3d_base, points_2d_base = data
+        X0, mask_ids, cam_coeffs_base, points_3d_base, points_2d_base = data
         X0 = X0.to(self.device)
         cam_coeffs_base = cam_coeffs_base.to(self.device)
         points_3d_base = points_3d_base.to(self.device)
@@ -183,7 +186,7 @@ class ManagerRotAE(BaseManager):
 
     def _make_plots(
             self,
-            data: Tuple[Tensor, List[SegmentationMasks], Tensor, Tensor, Tensor],
+            data: Tuple[Tensor, List[ObjectId], Tensor, Tensor, Tensor],
             outputs: Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor],
             train_or_test: str,
             end_of_epoch: bool = False
@@ -201,8 +204,13 @@ class ManagerRotAE(BaseManager):
             idxs = np.random.choice(self.runtime_args.batch_size, n_examples, replace=False)
 
             # Unpack variables
-            _, masks_docs, cam_coeffs_base, points_3d_base, points_2d_base = data
+            _, mask_ids, cam_coeffs_base, points_3d_base, points_2d_base = data
             X0, X1, X2, Y0, Y1, Y2 = outputs
+
+            # Fetch masks from database
+            masks_docs = {}
+            for idx in idxs:
+                masks_docs[idx] = SegmentationMasks.objects.get(id=mask_ids[idx])
 
             # Make plots
             self._plot_masks(X0, Y0, X1, Y1, masks_docs, train_or_test, idxs)
@@ -335,7 +343,6 @@ class ManagerRotAE(BaseManager):
         errors = np.square(X0[idxs] - Y0[idxs])
 
         for i, idx in enumerate(idxs):
-            # print('\n\nidx=',idx)
             mask_doc = mask_docs[idx]
             trial = mask_doc.trial
             images = mask_doc.get_images()

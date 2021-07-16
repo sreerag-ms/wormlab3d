@@ -138,7 +138,7 @@ class RotAENet(nn.Module):
 
         # Update setup
         setup_adj = c2d_output[:, 3:].mean(dim=(2, 3))
-        setup = setup + torch.tanh(setup_adj) *1e-6
+        setup = setup + torch.tanh(setup_adj)  # *1e-6
         cc2 = setup[:, :N_CAM_COEFFICIENTS * 3].reshape_as(camera_coeffs)
         cc2 = cc2 * (self.cam_coeffs_range + 1e-7) + self.cam_coeffs_mean
         p3d2 = setup[:, N_CAM_COEFFICIENTS * 3:N_CAM_COEFFICIENTS * 3 + 3].reshape_as(points_3d_base)
@@ -160,12 +160,12 @@ class RotAENet(nn.Module):
 
         # Lift back into 3D
         Z2b = self.c3d_net(Z1)
-        Z2b = torch.tanh(Z2b)
-        assert not is_bad(Z2b)
+        # Z2b = torch.tanh(Z2b)
+        # assert not is_bad(Z2b)
 
         # Un-rotate to recover reconstructed X2
         Y2 = self.unrotate(Z2b)
-        assert not is_bad(Y2)
+        # assert not is_bad(Y2)
 
         # Project to get the reconstructed X1
         Y2a = Y2 + p3d2.unsqueeze(1)
@@ -174,10 +174,10 @@ class RotAENet(nn.Module):
 
         # Render coordinates to get reconstructed X0
         Y1b = Y1 / (X0.shape[-1] / 2)
-        Y1b.retain_grad = True
+        # Y1b.retain_grad = True
         Y0 = self.render(Y1b)
-        Y0.retain_grad = True
-        assert not is_bad(Y0)
+        # Y0.retain_grad = True
+        # assert not is_bad(Y0)
 
         return X1, X2, Y0, Y1, Y2
 
