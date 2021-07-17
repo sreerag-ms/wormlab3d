@@ -1,6 +1,6 @@
 import os
 
-from flask import Blueprint, render_template
+from flask import Blueprint, render_template, flash
 
 from wormlab3d.data.model import Trial
 
@@ -10,6 +10,10 @@ bp_trials = Blueprint('trials', __name__)
 
 @bp_trials.route('/trials', methods=['GET'])
 def trials():
+
+    # Display a tip on how to do multi-column sorting
+    flash("To sort by multiple columns, hold SHIFT then left click.", category="info")
+
     active = 'trials'
     os.environ['script_name'] = active
     return render_template(

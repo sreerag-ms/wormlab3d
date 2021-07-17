@@ -2,7 +2,7 @@ import os
 
 from wormlab3d.data.model import Experiment
 
-from flask import Blueprint, render_template
+from flask import Blueprint, render_template, flash
 
 # Form blueprint
 bp_experiments = Blueprint('experiments', __name__)
@@ -10,6 +10,10 @@ bp_experiments = Blueprint('experiments', __name__)
 
 @bp_experiments.route('/experiments', methods=['GET'])
 def experiments():
+
+    # Display a tip on how to do multi-column sorting
+    flash("To sort by multiple columns, hold SHIFT then left click.", category="info")
+
     active = 'experiments'
     os.environ['script_name'] = active
     return render_template(
