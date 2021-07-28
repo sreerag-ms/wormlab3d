@@ -3,6 +3,7 @@ from abc import abstractmethod
 from typing import Union
 
 from mongoengine import *
+from wormlab3d.midlines3d.rotae_net import RotAENet
 
 from wormlab3d.nn.models.aenet import AENet
 from wormlab3d.nn.models.basenet import BaseNet
@@ -216,6 +217,8 @@ class NetworkParametersRED(NetworkParameters):
 class NetworkParametersRotAE(NetworkParameters):
     c2d_net = ReferenceField(NetworkParameters, required=True)
     c3d_net = ReferenceField(NetworkParameters, required=True)
+    d2d_net = ReferenceField(NetworkParameters)
+    d3d_net = ReferenceField(NetworkParameters)
 
-    def instantiate_network(self, build_model: bool = True) -> RedNet:
+    def instantiate_network(self, build_model: bool = True) -> RotAENet:
         pass

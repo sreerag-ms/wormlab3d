@@ -101,7 +101,7 @@ def load_dataset(dataset_args: DatasetArgs) -> Dataset:
         datasets = Dataset.find_from_args(dataset_args)
         if datasets.count() > 0:
             ds = datasets[0]
-            logger.info(f'Found {len(datasets)} suitable datasets in database, using most recent.')
+            logger.info(f'Found {datasets.count()} suitable datasets in database, using most recent.')
 
     if ds is None:
         raise DoesNotExist()

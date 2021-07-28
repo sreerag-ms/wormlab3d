@@ -12,7 +12,7 @@ import torch.optim as optim
 from torch import nn
 from torch.backends import cudnn
 from torch.optim import Optimizer
-from torch.utils.data import DataLoader as DataLoaderTorch, DataLoader
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from wormlab3d import logger, LOGS_PATH
@@ -104,7 +104,7 @@ class Manager:
     def _generate_dataset(self):
         pass
 
-    def _init_data_loaders(self) -> Tuple[DataLoaderTorch, DataLoaderTorch]:
+    def _init_data_loaders(self) -> Tuple[DataLoader, DataLoader]:
         """
         Get the data loaders.
         """

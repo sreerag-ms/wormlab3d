@@ -6,21 +6,31 @@ import torch
 import torch.nn.functional as F
 from bson import ObjectId
 from matplotlib import gridspec
+from mongoengine import DoesNotExist
 from torch import Tensor
+from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 
 from wormlab3d import PREPARED_IMAGE_SIZE, CAMERA_IDXS, logger
 from wormlab3d.data.model import SegmentationMasks, NetworkParameters
 from wormlab3d.data.model.network_parameters import NetworkParametersRotAE
+from wormlab3d.midlines2d.args import DatasetMidline2DCoordsArgs
+from wormlab3d.midlines2d.data_loader_coords import get_data_loader as get_data_loader_coords
+from wormlab3d.midlines2d.generate_midline2d_dataset import generate_midline2d_dataset
 from wormlab3d.midlines3d.args import *
-from wormlab3d.midlines3d.data_loader import get_data_loader
+from wormlab3d.midlines3d.data_loader import get_data_loader as get_data_loader_masks
 from wormlab3d.midlines3d.dynamic_cameras import N_CAM_COEFFICIENTS
 from wormlab3d.midlines3d.generate_masks_dataset import generate_masks_dataset
 from wormlab3d.midlines3d.rotae_net import RotAENet
 from wormlab3d.nn.args import RuntimeArgs
+from wormlab3d.nn.data_loader import load_dataset
+from wormlab3d.nn.ema import EMA
 from wormlab3d.nn.manager import Manager as BaseManager
 from wormlab3d.nn.models.basenet import BaseNet
 from wormlab3d.toolkit.util import to_numpy
+
+D2D_EMA_RATE = 0.9
+D3D_EMA_RATE = 0.9
 
 
 class ManagerRotAE(BaseManager):
@@ -33,6 +43,12 @@ class ManagerRotAE(BaseManager):
     ):
         super().__init__(runtime_args, dataset_args, net_args, optimiser_args)
 
+        # Register exponential moving averages
+        ema = EMA()
+        ema.register(f'd2d_d.{D2D_EMA_RATE}', decay=D2D_EMA_RATE, val=0.5)
+        ema.register(f'd3d_d.{D3D_EMA_RATE}', decay=D3D_EMA_RATE, val=0.5)
+        self.ema = ema
+
     @property
     def input_shape(self) -> Tuple[int]:
         """A triplet of segmentation masks, one from each camera."""
@@ -43,20 +59,65 @@ class ManagerRotAE(BaseManager):
         """A triplet of projected coordinate renderings, one from each camera."""
         return (3,) + PREPARED_IMAGE_SIZE
 
+    def _init_dataset(self):
+        """
+        Load or create the dataset.
+        """
+        ds = super()._init_dataset()
+
+        # 2D and 3D midlines datasets
+        self.dataset_2d_args = DatasetMidline2DCoordsArgs(**{**vars(self.dataset_args), 'centre_3d_max_error': 0.})
+        # ds_3d_args = DatasetMidline2DCoordsArgs(**vars(self.dataset_args))
+        ds_2d = None
+        ds_3d = None
+        if self.dataset_args.load:
+            try:
+                ds_2d = load_dataset(self.dataset_2d_args)
+            except DoesNotExist:
+                logger.info('No suitable 2D midline datasets found in database.')
+
+        # Not loaded 2D midline dataset, so create one
+        if ds_2d is None:
+            ds_2d = generate_midline2d_dataset(self.dataset_2d_args)
+
+        # todo: 3D midline dataset
+
+        self.ds_2d = ds_2d
+        self.ds_3d = ds_3d
+
+        return ds
+
     def _generate_dataset(self):
         return generate_masks_dataset(self.dataset_args)
 
-    def _get_data_loader(self, train_or_test: str) -> DataLoader:
-        return get_data_loader(
-            ds=self.ds,
-            ds_args=self.dataset_args,
-            train_or_test=train_or_test,
-            batch_size=self.runtime_args.batch_size
+    def _init_data_loaders(self) -> Tuple[DataLoader, DataLoader]:
+        """
+        Get the data loaders.
+        """
+        logger.info('Initialising segmentation masks data loaders.')
+        loaders = {}
+        for tt in ['train', 'test']:
+            loaders[tt] = get_data_loader_masks(
+                ds=self.ds,
+                ds_args=self.dataset_args,
+                train_or_test=tt,
+                batch_size=self.runtime_args.batch_size
+            )
+
+        logger.info('Initialising 2D midlines data loaders.')
+        self.loader_2d = get_data_loader_coords(
+            ds=self.ds_2d,
+            ds_args=self.dataset_2d_args,
+            train_or_test='train',
+            batch_size=self.runtime_args.batch_size * 3
         )
+        # todo: loader3d
+
+        return loaders['train'], loaders['test']
 
     def _init_network(self) -> Tuple[BaseNet, NetworkParameters]:
         """
-        Initialise the network which includes 2-3 subnetworks.
+        Initialise the network which includes 2-4 subnetworks.
         """
         masks_shape = (3,) + PREPARED_IMAGE_SIZE
         n_supplements = N_CAM_COEFFICIENTS * 3 + 3 + 2 * 3
@@ -64,8 +125,11 @@ class ManagerRotAE(BaseManager):
         c2d_output_shape = (3 + n_supplements, self.dataset_args.n_worm_points, 2)
         c3d_input_shape = (3, self.dataset_args.n_worm_points, 2)
         c3d_output_shape = (self.dataset_args.n_worm_points, 3)
+        d2d_input_shape = (self.dataset_args.n_worm_points, 2)
+        d_output_shape = (1,)
+        d3d_input_shape = (self.dataset_args.n_worm_points, 2)
 
-        # Initialise c2d and c3d networks
+        # Initialise networks
         c2d_net, c2d_net_params = super()._init_network(
             net_args=self.net_args.args_c2d,
             input_shape=c2d_input_shape,
@@ -79,10 +143,32 @@ class ManagerRotAE(BaseManager):
             prefix='c3d'
         )
 
+        if self.net_args.use_d2d:
+            d2d_net, d2d_net_params = super()._init_network(
+                net_args=self.net_args.args_d2d,
+                input_shape=d2d_input_shape,
+                output_shape=d_output_shape,
+                prefix='d2d'
+            )
+        else:
+            d2d_net, d2d_net_params = None, None
+
+        if self.net_args.use_d3d:
+            d3d_net, d3d_net_params = super()._init_network(
+                net_args=self.net_args.args_d3d,
+                input_shape=d3d_input_shape,
+                output_shape=d_output_shape,
+                prefix='d3d'
+            )
+        else:
+            d3d_net, d3d_net_params = None, None
+
         params = {**{
             'network_type': 'rotae',
             'c2d_net': c2d_net_params,
             'c3d_net': c3d_net_params,
+            'd2d_net': d2d_net_params,
+            'd3d_net': d3d_net_params,
             'input_shape': (masks_shape, n_supplements),
             'output_shape': (masks_shape, n_supplements, c3d_output_shape),
         }}
@@ -129,21 +215,105 @@ class ManagerRotAE(BaseManager):
             distorted_cameras=True,
         )
 
+        # Discriminators
+        self.d2d_net = d2d_net
+        self.d3d_net = d3d_net
+
         return full_net, net_params
+
+    def _init_optimiser(self) -> Optimizer:
+        """
+        Set up the optimiser.
+        """
+        logger.info('Initialising optimisers.')
+
+        # Build the optimiser for main network
+        cls: Optimizer = getattr(torch.optim, self.optimiser_args.algorithm)
+        optimiser = cls(
+            params=self.net.parameters(),
+            lr=self.optimiser_args.lr_init,
+            weight_decay=self.optimiser_args.weight_decay
+        )
+
+        # Build the optimisers for the discriminators
+        if self.net_args.use_d2d:
+            self.optimiser_d2d = cls(
+                params=self.d2d_net.parameters(),
+                lr=self.optimiser_args.lr_init,
+                weight_decay=self.optimiser_args.weight_decay
+            )
+        if self.net_args.use_d3d:
+            self.optimiser_d3d = cls(
+                params=self.d3d_net.parameters(),
+                lr=self.optimiser_args.lr_init,
+                weight_decay=self.optimiser_args.weight_decay
+            )
+
+        return optimiser
 
     def _init_metrics(self) -> Tuple[Dict[str, callable], List[str]]:
         return {}, []
 
+    def _train_batch(self, data) -> Tuple[Tensor, Tensor, Dict]:
+        """
+        Train on a single batch of data.
+        """
+
+        # Autoencoder training
+        outputs, loss, stats = super()._train_batch(data)
+
+        # Discriminator training
+        X0, X1, X2, Y0, Y1, Y2 = outputs
+        bs = X0.shape[0]
+        adversarial_loss = torch.nn.BCEWithLogitsLoss()
+
+        if self.net_args.use_d2d:
+            # Adversarial ground truths
+            valid = torch.ones(bs * 3, device=self.device)
+            fake = torch.zeros(bs * 3, device=self.device)
+
+            # Use samples from autoencoder
+            X1_fake = X1.detach().reshape(bs * 3, *X1.shape[2:])
+            d_loss_ema = self.ema[f'd2d_d.{D2D_EMA_RATE}']
+            it = iter(self.loader_2d)
+            step = 0
+            while step == 0 or d_loss_ema < 0.5:
+                try:
+                    X1_real = next(it)[1]
+                except StopIteration:
+                    it._reset()
+                    X1_real = next(it)[1]
+                self.optimiser_d2d.zero_grad()
+
+                # Measure discriminator's ability to classify real from generated samples
+                real_loss = adversarial_loss(self.d2d_net(X1_real).squeeze(), valid)
+                fake_loss = adversarial_loss(self.d2d_net(X1_fake).squeeze(), fake)
+                d_loss = (real_loss + fake_loss) / 2
+                d_loss_ema = self.ema(f'd2d_d.{D2D_EMA_RATE}', d_loss)
+                self.tb_logger.add_scalar('d2d/loss', d_loss, self.checkpoint.step)
+                self.tb_logger.add_scalar(f'd2d/loss.{D2D_EMA_RATE}', d_loss_ema, self.checkpoint.step)
+
+                # Only train discriminator if it is worse than chance
+                if d_loss_ema < 0.5:
+                    logger.debug(f'Training d2d step {step} Loss: {d_loss:.5f} EMA: {d_loss_ema:.5f}')
+                    d_loss.backward()
+                    self.optimiser_d2d.step()
+                    self.checkpoint.step += 1
+                step += 1
+            self.tb_logger.add_scalar('d2d/train_steps', step - 1, self.checkpoint.step)
+
+        return outputs, loss, stats
+
     def _process_batch(
             self,
             data: Tuple[
-                torch.Tensor,
+                Tensor,
                 List[ObjectId],
-                torch.Tensor,
-                torch.Tensor,
-                torch.Tensor,
+                Tensor,
+                Tensor,
+                Tensor,
             ]
-    ) -> Tuple[torch.Tensor, torch.Tensor, Dict]:
+    ) -> Tuple[Tensor, Tensor, Dict]:
         # Split up data from loader and put on correct device
         X0, mask_ids, cam_coeffs_base, points_3d_base, points_2d_base = data
         X0 = X0.to(self.device)
@@ -160,9 +330,15 @@ class ManagerRotAE(BaseManager):
 
         return outputs, loss, metrics
 
-    def calculate_losses(self, X0: torch.tensor, X1: torch.tensor, X2: torch.tensor, Y0: torch.tensor, Y1: torch.tensor,
-                         Y2: torch.tensor) \
-            -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    def calculate_losses(
+            self,
+            X0: Tensor,
+            X1: Tensor,
+            X2: Tensor,
+            Y0: Tensor,
+            Y1: Tensor,
+            Y2: Tensor
+    ) -> Tuple[Tensor, Dict[str, Tensor]]:
         """
         Calculate losses
         """
@@ -180,6 +356,28 @@ class ManagerRotAE(BaseManager):
             w = getattr(self.optimiser_args, f'w_{k}')
             weighted_loss = loss * w
             stats[f'MSE_{k}/weighted'] = weighted_loss
+            total_loss += weighted_loss
+
+        if self.net_args.use_d2d:
+            adversarial_loss = torch.nn.BCEWithLogitsLoss()
+            bs = X0.shape[0]
+            valid = torch.ones(bs * 3, device=self.device)
+            X1_fake = X1.reshape(bs * 3, *X1.shape[2:])
+            g_loss = adversarial_loss(self.d2d_net(X1_fake).squeeze(), valid)
+            weighted_loss = g_loss * self.optimiser_args.w_d2d
+            stats['d2d_g'] = g_loss
+            stats['d2d_g/weighted'] = weighted_loss
+            total_loss += weighted_loss
+
+        if self.net_args.use_d3d:
+            adversarial_loss = torch.nn.BCEWithLogitsLoss()
+            bs = X0.shape[0]
+            valid = torch.ones(bs, device=self.device)
+            X2_fake = X2.reshape(bs)
+            g_loss = adversarial_loss(self.d3d_net(X2_fake).squeeze(), valid)
+            weighted_loss = g_loss * self.optimiser_args.w_d3d
+            stats['d3d_g'] = g_loss
+            stats['d3d_g/weighted'] = weighted_loss
             total_loss += weighted_loss
 
         return total_loss, stats
@@ -215,6 +413,11 @@ class ManagerRotAE(BaseManager):
             # Make plots
             self._plot_masks(X0, Y0, X1, Y1, masks_docs, train_or_test, idxs)
             self._plot_3d_midlines(X2, Y2, masks_docs, train_or_test, idxs)
+
+            # Remove database references to free up memory
+            for idx in idxs:
+                del (masks_docs[idx])
+            del masks_docs
 
     def _plot_3d_midlines(
             self,

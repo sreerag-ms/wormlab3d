@@ -10,7 +10,8 @@ class RotAEOptimiserArgs(OptimiserArgs):
             w_masks: float = 1.,
             w_c2d: float = 1.,
             w_c3d: float = 1.,
-            w_disc: float = 1.,
+            w_d2d: float = 1.,
+            w_d3d: float = 1.,
             **kwargs
     ):
         super().__init__(**kwargs)
@@ -19,7 +20,8 @@ class RotAEOptimiserArgs(OptimiserArgs):
         self.w_masks = w_masks
         self.w_c2d = w_c2d
         self.w_c3d = w_c3d
-        self.w_disc = w_disc
+        self.w_d2d = w_d2d
+        self.w_d3d = w_d3d
 
     @classmethod
     def add_args(cls, parser: ArgumentParser):
@@ -32,4 +34,5 @@ class RotAEOptimiserArgs(OptimiserArgs):
         group.add_argument('--w-masks', type=float, default=1., help='Weighting to apply to the masks loss.')
         group.add_argument('--w-c2d', type=float, default=1., help='Weighting to apply to the c2d loss.')
         group.add_argument('--w-c3d', type=float, default=1., help='Weighting to apply to the c3d loss.')
-        group.add_argument('--w-disc', type=float, default=1., help='Weighting to apply to the disc loss.')
+        group.add_argument('--w-d2d', type=float, default=1., help='Weighting to apply to the d2d loss.')
+        group.add_argument('--w-d3d', type=float, default=1., help='Weighting to apply to the d3d loss.')

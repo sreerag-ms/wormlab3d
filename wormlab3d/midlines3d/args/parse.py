@@ -35,8 +35,11 @@ def parse_arguments(rotae: bool = False, printout: bool = True) \
         args, argv = parser.parse_known_args()
 
         # If arguments remain, try parsing again. This allows parsing of multiple subparsers.
-        if argv:
+        max_attempts = 10
+        attempt = 1
+        while argv and attempt < max_attempts:
             args, argv = parser.parse_known_args(args=argv, namespace=args)
+            attempt += 1
         if argv:
             raise RuntimeError(f'Unrecognized arguments: {" ".join(argv)}')
         return args

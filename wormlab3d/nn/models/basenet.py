@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Tuple
 
+import numpy as np
 import torch.nn as nn
 
 
@@ -55,11 +56,9 @@ class OutputLayer(nn.Module):
         super().__init__()
         self.bn = nn.BatchNorm2d(n_channels_in)
         self.relu = nn.ReLU(inplace=True)
-
-        # flat output, eg, classifier
-        if len(output_shape) == 1:
-            self.pool = nn.AdaptiveAvgPool2d(1)
-            self.linear = nn.Linear(n_channels_in, output_shape[0])
+        self.output_shape = output_shape
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.linear = nn.Linear(n_channels_in, np.prod(output_shape))
 
     def forward(self, x):
         x = self.bn(x)
@@ -67,4 +66,5 @@ class OutputLayer(nn.Module):
         x = self.pool(x)
         x = x.squeeze()
         x = self.linear(x)
+        x = x.reshape(x.shape[0], *self.output_shape)
         return x
