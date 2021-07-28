@@ -9,7 +9,7 @@ class EMA:
     def register(self, name: str, val: float = None, decay: float = 0.99):
         """Register a variable to be tracked and what decay to use for it."""
         self.vars[name] = {
-            'val': val if val else None,
+            'val': val,
             'decay': decay
         }
 
