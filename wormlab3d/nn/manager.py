@@ -174,6 +174,8 @@ class Manager:
                 net_params = NetworkParametersAE(**params)
             elif net_args.base_net == 'resnet':
                 net_params = NetworkParametersResNet(**params)
+            elif net_args.base_net == 'resnet1d':
+                net_params = NetworkParametersResNet1d(**params)
             elif net_args.base_net == 'densenet':
                 net_params = NetworkParametersDenseNet(**params)
             elif net_args.base_net == 'pyramidnet':

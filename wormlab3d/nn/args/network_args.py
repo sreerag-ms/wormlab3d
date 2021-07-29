@@ -5,7 +5,7 @@ from wormlab3d.data.model.network_parameters import *
 from wormlab3d.nn.args.base_args import BaseArgs
 from wormlab3d.toolkit.util import str2bool
 
-NETWORK_TYPES = ['densenet', 'fcnet', 'resnet', 'pyramidnet', 'aenet', 'nunet', 'rdn', 'red', 'rotae']
+NETWORK_TYPES = ['densenet', 'fcnet', 'resnet', 'resnet1d', 'pyramidnet', 'aenet', 'nunet', 'rdn', 'red', 'rotae']
 
 
 class NetworkArgs(BaseArgs):
@@ -55,6 +55,7 @@ class NetworkArgs(BaseArgs):
             NetworkArgs._add_fcnet_args(subparsers.add_parser('fcnet'), prefix)
             NetworkArgs._add_aenet_args(subparsers.add_parser('aenet'), prefix)
             NetworkArgs._add_resnet_args(subparsers.add_parser('resnet'), prefix)
+            NetworkArgs._add_resnet_args(subparsers.add_parser('resnet1d'), prefix)
             NetworkArgs._add_densenet_args(subparsers.add_parser('densenet'), prefix)
             NetworkArgs._add_pyramidnet_args(subparsers.add_parser('pyramidnet'), prefix)
             NetworkArgs._add_nunet_args(subparsers.add_parser('nunet'), prefix)
@@ -251,6 +252,15 @@ class NetworkArgs(BaseArgs):
             }
 
         elif args.base_net == 'resnet':
+            hyperparameters = {
+                'n_init_channels': args.n_init_channels,
+                'blocks_config': args.blocks_config,
+                'shortcut_type': args.shortcut_type,
+                'use_bottlenecks': args.use_bottlenecks,
+                'dropout_prob': args.dropout_prob,
+            }
+
+        elif args.base_net == 'resnet1d':
             hyperparameters = {
                 'n_init_channels': args.n_init_channels,
                 'blocks_config': args.blocks_config,

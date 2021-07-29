@@ -10,7 +10,6 @@ from mongoengine import DoesNotExist
 from torch import Tensor
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
-
 from wormlab3d import PREPARED_IMAGE_SIZE, CAMERA_IDXS, logger
 from wormlab3d.data.model import SegmentationMasks, NetworkParameters
 from wormlab3d.data.model.network_parameters import NetworkParametersRotAE
@@ -45,8 +44,8 @@ class ManagerRotAE(BaseManager):
 
         # Register exponential moving averages
         ema = EMA()
-        ema.register(f'd2d_d.{D2D_EMA_RATE}', decay=D2D_EMA_RATE, val=0.5)
-        ema.register(f'd3d_d.{D3D_EMA_RATE}', decay=D3D_EMA_RATE, val=0.5)
+        ema.register(f'd2d/acc.{D2D_EMA_RATE}', decay=D2D_EMA_RATE, val=0.5)
+        ema.register(f'd3d/acc.{D3D_EMA_RATE}', decay=D3D_EMA_RATE, val=0.5)
         self.ema = ema
 
     @property
@@ -125,7 +124,7 @@ class ManagerRotAE(BaseManager):
         c2d_output_shape = (3 + n_supplements, self.dataset_args.n_worm_points, 2)
         c3d_input_shape = (3, self.dataset_args.n_worm_points, 2)
         c3d_output_shape = (self.dataset_args.n_worm_points, 3)
-        d2d_input_shape = (self.dataset_args.n_worm_points, 2)
+        d2d_input_shape = (2, self.dataset_args.n_worm_points)
         d_output_shape = (1,)
         d3d_input_shape = (self.dataset_args.n_worm_points, 2)
 
@@ -274,28 +273,47 @@ class ManagerRotAE(BaseManager):
 
             # Use samples from autoencoder
             X1_fake = X1.detach().reshape(bs * 3, *X1.shape[2:])
-            d_loss_ema = self.ema[f'd2d_d.{D2D_EMA_RATE}']
+            X1_fake = X1_fake.permute(0, 2, 1)
+            d_acc_ema = self.ema[f'd2d/acc.{D2D_EMA_RATE}']
             it = iter(self.loader_2d)
+
             step = 0
-            while step == 0 or d_loss_ema < 0.5:
+            threshold = 0.6
+            max_steps = 100
+            while (step == 0 or d_acc_ema < threshold) and step < max_steps:
                 try:
                     X1_real = next(it)[1]
                 except StopIteration:
-                    it._reset()
+                    logger.debug('Resetting 2D loader.')
+                    it = iter(self.loader_2d)
                     X1_real = next(it)[1]
+                X1_real = (X1_real - torch.tensor([100, 100])).to(self.device)
+                X1_real = X1_real.permute(0, 2, 1)
                 self.optimiser_d2d.zero_grad()
+
+                real_pred = self.d2d_net(X1_real)
+                fake_pred = self.d2d_net(X1_fake)
+
+                real_acc = (real_pred > 0).sum() / (bs * 3)
+                fake_acc = (fake_pred < 0).sum() / (bs * 3)
+                mean_acc = (real_acc + fake_acc) / 2
+                self.tb_logger.add_scalar('d2d/acc/real', real_acc, self.checkpoint.step)
+                self.tb_logger.add_scalar('d2d/acc/fake', fake_acc, self.checkpoint.step)
+                self.tb_logger.add_scalar('d2d/acc/mean', mean_acc, self.checkpoint.step)
+                d_acc_ema = self.ema(f'd2d/acc.{D2D_EMA_RATE}', mean_acc)
+                self.tb_logger.add_scalar(f'd2d/acc.{D2D_EMA_RATE}', d_acc_ema, self.checkpoint.step)
 
                 # Measure discriminator's ability to classify real from generated samples
                 real_loss = adversarial_loss(self.d2d_net(X1_real).squeeze(), valid)
+                # real_loss = -real_pred.mean()
                 fake_loss = adversarial_loss(self.d2d_net(X1_fake).squeeze(), fake)
+                # fake_loss = fake_pred.mean()
                 d_loss = (real_loss + fake_loss) / 2
-                d_loss_ema = self.ema(f'd2d_d.{D2D_EMA_RATE}', d_loss)
                 self.tb_logger.add_scalar('d2d/loss', d_loss, self.checkpoint.step)
-                self.tb_logger.add_scalar(f'd2d/loss.{D2D_EMA_RATE}', d_loss_ema, self.checkpoint.step)
 
-                # Only train discriminator if it is worse than chance
-                if d_loss_ema < 0.5:
-                    logger.debug(f'Training d2d step {step} Loss: {d_loss:.5f} EMA: {d_loss_ema:.5f}')
+                # Only train discriminator if it is worse than threshold
+                if d_acc_ema < threshold:
+                    logger.debug(f'Training d2d step {step} Loss: {d_loss:.5f} EMA: {d_acc_ema:.5f}')
                     d_loss.backward()
                     self.optimiser_d2d.step()
                     self.checkpoint.step += 1
@@ -363,7 +381,9 @@ class ManagerRotAE(BaseManager):
             bs = X0.shape[0]
             valid = torch.ones(bs * 3, device=self.device)
             X1_fake = X1.reshape(bs * 3, *X1.shape[2:])
+            X1_fake = X1_fake.permute(0, 2, 1)
             g_loss = adversarial_loss(self.d2d_net(X1_fake).squeeze(), valid)
+            # g_loss = -self.d2d_net(X1_fake).mean()
             weighted_loss = g_loss * self.optimiser_args.w_d2d
             stats['d2d_g'] = g_loss
             stats['d2d_g/weighted'] = weighted_loss
