@@ -53,7 +53,7 @@
 
                             if (meta.col === 0) {
                                 {# Return non-date data values as a link to the row instance. #}
-                                return "<a href='trials/" + row._id + "'>" + data + "</a>";
+                                return "<a href='{{ active }}/" + row._id + "'>" + data + "</a>";
                             }
 
                             {# Return data as is for all other columns #}
