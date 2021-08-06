@@ -26,7 +26,7 @@
 <div class="container">
   <main class="bd-content">
     {% block container %}
-    <h1 class="bd-title mt-3">{% block title %}{{ title }}{% endblock %}</h1>
+    {% block title %}<h1 class="bd-title mt-3">{{ title }}</h1>{% endblock %}
     {% block messages %}{% include '_messages.html' %}{% endblock %}
     {% block content %}{% endblock %}
     {% endblock %}
