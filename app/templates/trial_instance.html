@@ -1,91 +1,119 @@
 {% extends '__layout.html' %}
 
 
-{#{% block css %}#}
-{#  <link rel="stylesheet" href="https://cdn.plyr.io/3.6.8/plyr.css"/>#}
-{#{% endblock %}#}
-{##}
-{##}
-{#{% block content %}#}
-{#  Trial number {{ instance }}#}
-{##}
-{#  <video id="player" playsinline controls data-poster="../static/worm_data/video_screenshot/043_2.png">   {# the first frame's image #}
-{#    <source src="../static/worm_data/video/043_2.avi" type="video/avi" />#}
-{#  </video>#}
-{##}
-{#{% endblock %}#}
-{##}
-{##}
-{#{% block scripts %}#}
-{#  {% include "player/plyr_js.html" %}#}
-{#{% endblock %}#}
-
-
 {% block css %}
   <link href="https://vjs.zencdn.net/7.11.4/video-js.css" rel="stylesheet" />
 {% endblock %}
 
 
+{% block title %}
+  <div class="p-5 mb-4 bg-light rounded-3">
+    <div class="container-fluid py-5">
+      <div class="d-flex">
+          <h1 class="display-5 fw-bold p-2 flex-grow-1">
+            {{ title }}
+            <a type="button" class="badge rounded-pill bg-primary fs-4" href="{{ url_for('experiment_instance.experiment_instance', _id=trial.experiment.id) }}">
+                Experiment #{{ trial.experiment.id }}
+            </a>
+            <span class="badge rounded-pill bg-secondary oi oi-clock fs-4" id="trial_date"></span>
+          </h1>
+      </div>
+      <p class="col-md-8 fs-4 lead">{{ trial.comments.capitalize() if trial.comments else "No comment." }}</p>
+    </div>
+  </div>
+{% endblock %}
+
+
 {% block content %}
-  <video id="video" class="video-js vjs-default-skin" controls preload="auto" width="640" height="264">
-  </video>
+  <table class="table table-striped table-hover">
+    <thead>
+      <tr>
+        <th scope="col">Attribute</th>
+        <th scope="col">Value</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for attr in attrs %}
+        <tr>
+          <th class="row-3">{{ attr.capitalize()|replace("_", " ") }}</th>
+          <td>{{ trial[attr] }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% for i in range(3) %}
+    <video id="cam_video_{{ i }}" class="video-js vjs-default-skin" controls preload="auto" width="1024" height="1024"></video>
+  {% endfor %}
 {% endblock %}
 
 
 {% block scripts %}
   <script src="https://vjs.zencdn.net/7.11.4/video.min.js"></script>
-
   <script>
+      {# Format date #}
+      $("#trial_date").html(moment("{{ trial.date }}").format("DD-MMM-YYYY"));
+
+      {# Explicitly tell video.js to not collect analytics, although v7 already does not send any data. #}
+      window.HELP_IMPROVE_VIDEOJS = false;
+
       {#
+      Transcoding code
       JS code from https://stackoverflow.com/questions/3639604/html5-audio-video-and-live-transcoding-with-ffmpeg
       Originally by user3612643 (derolf), upgraded for video.js version 7.7.6 by Gustav P Svensson
       #}
+      var videos = [];
+      for (var i = 0; i < 3; i++) {
+          (function(){
+              var video = videos[i];
+              video = videojs("cam_video_" + i);
+              video.src({
+                  src: '/media/{{ video_id }}_' + i + '.avi',
+                  type: 'video/mp4'
+              });
 
-      video = videojs("video");
-      video.src({
-          src: '/media/{{ video_id }}_0.avi',
-          type: 'video/mp4'
-      });
+              // hack duration
+              video.duration = function () {
+                  return video.theDuration;
+              };
+              video.start = 0;
 
-      // hack duration
-      video.duration = function () {
-          return video.theDuration;
-      };
-      video.start = 0;
+              // The original code for "currentTime"
+              video.oldCurrentTime = function currentTime(seconds) {
+                  if (typeof seconds !== 'undefined') {
+                      if (seconds < 0) {
+                          seconds = 0;
+                      }
 
-      // The original code for "currentTime"
-      video.oldCurrentTime = function currentTime(seconds) {
-          if (typeof seconds !== 'undefined') {
-              if (seconds < 0) {
-                  seconds = 0;
-              }
+                      this.techCall_('setCurrentTime', seconds);
+                      return;
+                  }
+                  this.cache_.currentTime = this.techGet_('currentTime') || 0;
+                  return this.cache_.currentTime;
+              };
 
-              this.techCall_('setCurrentTime', seconds);
-              return;
-          }
-          this.cache_.currentTime = this.techGet_('currentTime') || 0;
-          return this.cache_.currentTime;
-      };
+              // Our modified currentTime
+              video.currentTime = function (time) {
+                  if (time == undefined) {
+                      return video.oldCurrentTime() + video.start;
+                  }
+                  video.start = time;
+                  video.oldCurrentTime(0);
+                  video.src({
+                      src: "/media/{{ video_id }}_" + i + ".avi?start=" + time,
+                      type: 'video/mp4'
+                  });
+                  video.play();
+                  return this;
+              };
 
-      // Our modified currentTime
-      video.currentTime = function (time) {
-          if (time == undefined) {
-              return video.oldCurrentTime() + video.start;
-          }
-          video.start = time;
-          video.oldCurrentTime(0);
-          video.src({
-              src: "/media/{{ video_id }}_0.avi?start=" + time,
-              type: 'video/mp4'
-          });
-          video.play();
-          return this;
-      };
+              // Get the duration of the movie
+              $.getJSON("/media/duration/{{ video_id }}_" + i + ".avi", function (data) {
+                  video.theDuration = data.duration;
+              });
 
-      // Get the duration of the movie
-      $.getJSON("/media/duration/{{ video_id }}_0.avi", function (data) {
-          video.theDuration = data.duration;
-      });
+          })();
+      }
   </script>
 {% endblock %}
 

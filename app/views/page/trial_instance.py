@@ -1,8 +1,10 @@
 import os
 
-from flask import Blueprint, render_template, flash
+from flask import Blueprint, render_template
 
 from wormlab3d.data.model import Trial
+
+from app.util.data_model import *
 
 # Form blueprint
 bp_trial_instance = Blueprint('trial_instance', __name__)
@@ -14,6 +16,14 @@ def trial_instance(_id):
     active = 'trial_instance'
     os.environ['script_name'] = active
 
+    attrs = attr_names(Trial,
+                       exclude_underscore=True,
+                       excludes=["id", "pk", "legacy_id", "legacy_data",         # ID and legacy
+                                 "n_frames_min", "n_frames_max", "num_frames",   # Aggregated
+                                 "backgrounds", "videos",                        # File paths
+                                 "experiment", "date", "comments"                # Needs more formatting
+                                 ])
+
     trial = Trial.objects(id=_id)[0]
 
     return render_template(
@@ -22,5 +32,6 @@ def trial_instance(_id):
         active=active,
         _id=_id,
         video_id=f"{trial.legacy_id:03d}",
+        attrs=attrs,
         trial=trial
     )
