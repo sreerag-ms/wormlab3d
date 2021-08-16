@@ -8,7 +8,8 @@ from typing import Tuple
 
 import torch
 import torch.nn.functional as F
-import torch.optim as optim
+from bson.errors import InvalidId
+from bson.objectid import ObjectId
 from torch import nn
 from torch.backends import cudnn
 from torch.optim import Optimizer
@@ -330,9 +331,27 @@ class Manager:
                         )
                         raise DoesNotExist()
                 else:
-                    prev_checkpoint = Checkpoint.objects.get(
-                        id=self.runtime_args.resume_from
-                    )
+                    prev_checkpoint = None
+                    try:
+                        oid = ObjectId(self.runtime_args.resume_from)
+                        prev_checkpoint = Checkpoint.objects.get(id=oid)
+                    except (InvalidId, DoesNotExist):
+                        pass
+
+                    if prev_checkpoint is None:
+                        prev_checkpoints = Checkpoint.objects(
+                            dataset=self.ds,
+                            network_params=self.net_params,
+                            epoch=self.runtime_args.resume_from
+                        ).order_by('-created')
+
+                        if prev_checkpoints.count() == 0:
+                            logger.error(f'Found no checkpoints matching id or epoch.')
+                            raise DoesNotExist()
+                        if len(prev_checkpoints) > 1:
+                            logger.warning(f'Found multiple checkpoints matching epoch, using most recent.')
+                        prev_checkpoint = prev_checkpoints[0]
+
                 logger.info(f'Loaded checkpoint id={prev_checkpoint.id}, created={prev_checkpoint.created}')
                 logger.info(f'Test loss = {prev_checkpoint.loss_test:.6f}')
                 for key, val in prev_checkpoint.metrics_test.items():
@@ -363,6 +382,8 @@ class Manager:
             path = f'{self.get_logs_path(prev_checkpoint)}/checkpoints/{prev_checkpoint.id}.chkpt'
             state = torch.load(path, map_location=self.device)
             self.net.load_state_dict(state['model_state_dict'], strict=False)
+            if self.optimiser_args.algorithm != prev_checkpoint.optimiser_args['algorithm']:
+                self.optimiser.step()
             self.optimiser.load_state_dict(state['optimiser_state_dict'])
             self.net.eval()
             logger.info(f'Loaded state from "{path}"')
@@ -434,6 +455,11 @@ class Manager:
         for group in self.optimiser.param_groups:
             group['lr'] = self.optimiser_args.lr_init
 
+        if starting_epoch > 1:
+            for group in self.optimiser.param_groups:
+                if 'initial_lr' not in group:
+                    group['initial_lr'] = self.optimiser_args.lr_init
+
         # todo: lr scheduler
         milestones = [n_epochs // 2 + starting_epoch, n_epochs // (4 / 3) + starting_epoch]
         lr_scheduler = optim.lr_scheduler.MultiStepLR(
@@ -442,6 +468,7 @@ class Manager:
             gamma=self.optimiser_args.lr_gamma,
             last_epoch=starting_epoch - 1 if starting_epoch > 1 else -1
         )
+        lr_scheduler.last_epoch = starting_epoch - 1 if starting_epoch > 1 else -1
 
         for epoch in range(starting_epoch, final_epoch + 1):
             logger.info('{:-^80}'.format(' Train epoch: {} '.format(epoch)))
@@ -458,13 +485,16 @@ class Manager:
                 str(timedelta(seconds=seconds_left))))
             lr_scheduler.step()
 
-            # Test every epoch
-            self.test()
-            self.tb_logger.add_scalar(f'epoch/test/total', self.checkpoint.loss_test, epoch)
-            for key, val in self.checkpoint.metrics_test.items():
-                self.tb_logger.add_scalar(f'epoch/test/{key}', val, epoch)
-                logger.info(f'Test {key}: {val:.4E}')
+            # Test every n epochs
+            if self.runtime_args.test_every_n_epochs > 0 \
+                    and (epoch + 1) % self.runtime_args.test_every_n_epochs == 0:
+                self.test()
+                self.tb_logger.add_scalar(f'epoch/test/total', self.checkpoint.loss_test, epoch)
+                for key, val in self.checkpoint.metrics_test.items():
+                    self.tb_logger.add_scalar(f'epoch/test/{key}', val, epoch)
+                    logger.info(f'Test {key}: {val:.4E}')
 
+            # Checkpoint every n epochs
             if self.runtime_args.checkpoint_every_n_epochs > 0 \
                     and (epoch + 1) % self.runtime_args.checkpoint_every_n_epochs == 0:
                 self.save_checkpoint()
@@ -531,7 +561,7 @@ class Manager:
         loss.backward()
 
         # Clip gradients
-        nn.utils.clip_grad_norm_(self.net.parameters(), max_norm=100)
+        # nn.utils.clip_grad_norm_(self.net.parameters(), max_norm=100)
 
         self.optimiser.step()
 
