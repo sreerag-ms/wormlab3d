@@ -3,15 +3,22 @@ from collections import OrderedDict
 import torch
 import torch.nn as nn
 from torch.autograd.variable import Variable
+
 from wormlab3d.nn.models.basenet import InputLayer, OutputLayer
 from wormlab3d.nn.models.resnet import ResNet, _ResBlock, _ResLayer, _ResBottleneckLayer, _Shortcut, _ZeroPadChannels
+
+PADDING_MODE = 'replicate'
+
+
+# PADDING_MODE='zeros'
 
 
 class InputLayer1d(InputLayer):
     def __init__(self, n_channels_in, n_channels_out, kernel_size=3, stride=1, padding=1):
         super().__init__(n_channels_in, n_channels_out, kernel_size, stride, padding)
         self.conv = nn.Conv1d(n_channels_in, n_channels_out,
-                              kernel_size=kernel_size, stride=stride, padding=padding, bias=False)
+                              kernel_size=kernel_size, stride=stride, padding=padding, bias=False,
+                              padding_mode=PADDING_MODE)
 
 
 class OutputLayer1d(OutputLayer):
@@ -78,9 +85,11 @@ class _ResLayer1d(_ResLayer):
         conv1_stride = 2 if downsample else 1
 
         self.bn1 = nn.BatchNorm1d(n_channels_in)
-        self.conv1 = nn.Conv1d(n_channels_in, n_channels, kernel_size=3, stride=conv1_stride, padding=1, bias=False)
+        self.conv1 = nn.Conv1d(n_channels_in, n_channels, kernel_size=3, stride=conv1_stride, padding=1, bias=False,
+                               padding_mode=PADDING_MODE)
         self.bn2 = nn.BatchNorm1d(n_channels)
-        self.conv2 = nn.Conv1d(n_channels, n_channels, kernel_size=3, stride=1, padding=1, bias=False)
+        self.conv2 = nn.Conv1d(n_channels, n_channels, kernel_size=3, stride=1, padding=1, bias=False,
+                               padding_mode=PADDING_MODE)
         self.bn3 = nn.BatchNorm1d(n_channels)
 
 
@@ -95,13 +104,15 @@ class _ResBottleneckLayer1d(_ResBottleneckLayer):
         conv1_stride = 2 if downsample else 1
 
         self.bn1 = nn.BatchNorm1d(n_channels_in)
-        self.conv1 = nn.Conv1d(n_channels_in, n_bottleneck_channels, kernel_size=1, stride=1, padding=0, bias=False)
+        self.conv1 = nn.Conv1d(n_channels_in, n_bottleneck_channels, kernel_size=1, stride=1, padding=0, bias=False,
+                               padding_mode=PADDING_MODE)
         self.bn2 = nn.BatchNorm1d(n_bottleneck_channels)
         self.conv2 = nn.Conv1d(n_bottleneck_channels, n_bottleneck_channels, kernel_size=3, stride=conv1_stride,
-                               padding=1, bias=False)
+                               padding=1, bias=False, padding_mode=PADDING_MODE)
         self.bn3 = nn.BatchNorm1d(n_bottleneck_channels)
         self.relu2 = nn.ReLU(inplace=True)
-        self.conv3 = nn.Conv1d(n_bottleneck_channels, n_channels, kernel_size=1, stride=1, padding=0, bias=False)
+        self.conv3 = nn.Conv1d(n_bottleneck_channels, n_channels, kernel_size=1, stride=1, padding=0, bias=False,
+                               padding_mode=PADDING_MODE)
         self.bn4 = nn.BatchNorm1d(n_channels)
 
 
@@ -117,10 +128,10 @@ class _Shortcut1d(_Shortcut):
                 self.shortcut.add_module('bn', nn.BatchNorm1d(n_channels_in))
                 self.shortcut.add_module('relu', nn.ReLU(inplace=True))
                 self.shortcut.add_module('conv', nn.Conv1d(n_channels_in, n_channels_out, kernel_size=1, stride=stride,
-                                                           bias=False))
+                                                           bias=False, padding_mode=PADDING_MODE))
             elif shortcut_type == 'id':
                 if downsample:
-                    self.shortcut.add_module('pool', nn.AvgPool1d(kernel_size=2, stride=2, ceil_mode=True))
+                    self.shortcut.add_module('pool', nn.AvgPool1d(kernel_size=2, stride=2, ceil_mode=False))
                 self.shortcut.add_module('zero_pad', _ZeroPadChannels1d(n_channels_out - n_channels_in))
 
 
