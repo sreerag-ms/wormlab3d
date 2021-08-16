@@ -236,6 +236,7 @@ class NetworkParametersRED(NetworkParameters):
 class NetworkParametersRotAE(NetworkParameters):
     c2d_net = ReferenceField(NetworkParameters, required=True)
     c3d_net = ReferenceField(NetworkParameters, required=True)
+    d0_net = ReferenceField(NetworkParameters)
     d2d_net = ReferenceField(NetworkParameters)
     d3d_net = ReferenceField(NetworkParameters)
 

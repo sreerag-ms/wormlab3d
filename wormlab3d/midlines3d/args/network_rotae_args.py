@@ -9,8 +9,10 @@ class RotAENetworkArgs(NetworkArgs):
             self,
             args_c2d: NetworkArgs,
             args_c3d: NetworkArgs,
+            args_d0: NetworkArgs,
             args_d2d: NetworkArgs,
             args_d3d: NetworkArgs,
+            use_d0: bool = False,
             use_d2d: bool = False,
             use_d3d: bool = False,
             **kwargs
@@ -18,8 +20,10 @@ class RotAENetworkArgs(NetworkArgs):
         super().__init__(base_net='rotae', **kwargs)
         self.args_c2d = args_c2d
         self.args_c3d = args_c3d
+        self.args_d0 = args_d0
         self.args_d2d = args_d2d
         self.args_d3d = args_d3d
+        self.use_d0 = use_d0
         self.use_d2d = use_d2d
         self.use_d3d = use_d3d
 
@@ -34,15 +38,18 @@ class RotAENetworkArgs(NetworkArgs):
                            help='Load a network by its database id.')
         group.add_argument('--load-net', type=str2bool, default=True,
                            help='Try to load an existing network if available matching the given parameters.')
+        group.add_argument('--use-d0', type=str2bool, default=False,
+                           help='Build, train and use a discriminator network for masks overlaid on the images.')
         group.add_argument('--use-d2d', type=str2bool, default=False,
                            help='Build, train and use a discriminator network for 2D midlines.')
         group.add_argument('--use-d3d', type=str2bool, default=False,
                            help='Build, train and use a discriminator network for 3D midlines.')
 
         subparsers = parser.add_subparsers(title='Networks', dest='networks',
-                                           help='Define the different networks: c2d, c3d and (optionally) disc.')
+                                           help='Define the different networks: c2d, c3d and (optionally) d0, d2d, d3d.')
         NetworkArgs.add_args(subparsers.add_parser('c2d'), prefix='c2d')
         NetworkArgs.add_args(subparsers.add_parser('c3d'), prefix='c3d')
+        NetworkArgs.add_args(subparsers.add_parser('d0'), prefix='d0')
         NetworkArgs.add_args(subparsers.add_parser('d2d'), prefix='d2d')
         NetworkArgs.add_args(subparsers.add_parser('d3d'), prefix='d3d')
 
@@ -55,8 +62,11 @@ class RotAENetworkArgs(NetworkArgs):
         hyperparameters = {}
 
         # Create a dummy namespace for each of the sub-networks and extract the parameters.
-        for prefix in ['c2d', 'c3d', 'd2d', 'd3d']:
+        for prefix in ['c2d', 'c3d', 'd0', 'd2d', 'd3d']:
             args_i = Namespace()
+            if prefix == 'd0' and not args.use_d0:
+                net_args[prefix] = args_i
+                continue
             if prefix == 'd2d' and not args.use_d2d:
                 net_args[prefix] = args_i
                 continue
@@ -70,7 +80,8 @@ class RotAENetworkArgs(NetworkArgs):
             hps = NetworkArgs.extract_hyperparameter_args(args_i)
             hyperparameters[prefix] = hps
             args_i.hyperparameters = hps
-            if (prefix == 'd2d' and not args.use_d2d) \
+            if (prefix == 'd0' and not args.use_d0) \
+                    or (prefix == 'd2d' and not args.use_d2d) \
                     or (prefix == 'd3d' and not args.use_d3d):
                 net_args[prefix] = None
             else:
@@ -81,9 +92,11 @@ class RotAENetworkArgs(NetworkArgs):
             load=args.load_net,
             hyperparameters=hyperparameters,
             args_c2d=net_args['c2d'],
-            args_d2d=net_args['d2d'],
             args_c3d=net_args['c3d'],
+            args_d0=net_args['d0'],
+            args_d2d=net_args['d2d'],
             args_d3d=net_args['d3d'],
+            use_d0=args.use_d0,
             use_d2d=args.use_d2d,
             use_d3d=args.use_d3d,
         )

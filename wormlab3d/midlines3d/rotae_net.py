@@ -9,7 +9,6 @@ from torch.distributions import Uniform
 from wormlab3d import PREPARED_IMAGE_SIZE
 from wormlab3d.midlines3d.dynamic_cameras import DynamicCameras, N_CAM_COEFFICIENTS
 from wormlab3d.nn.models.basenet import BaseNet
-from wormlab3d.toolkit.util import is_bad
 
 
 def _axis_angle_rotation(axis: str, angle):
@@ -79,6 +78,7 @@ class RotAENet(nn.Module):
             p2d_range: torch.Tensor,
             distorted_cameras: bool = True,
             blur_sigma: float = 0.2,
+            max_rotation: float = 0.,
     ):
         super().__init__()
         self.c2d_net = c2d_net
@@ -92,16 +92,17 @@ class RotAENet(nn.Module):
         self.register_buffer('p2d_range', p2d_range)
         self.cams = DynamicCameras(distort=distorted_cameras)
         self.register_buffer('rng_low', torch.zeros(3))
-        self.register_buffer('rng_high',torch.ones(3) * 2 * np.pi)
+        self.register_buffer('rng_high', torch.ones(3) * 2 * np.pi / 360)
         self.euler_angles = None
         self.rotation_matrix = None
         self.size = PREPARED_IMAGE_SIZE[0]
         self.blur_sigma = blur_sigma
+        self.max_rotation = max_rotation
 
     def _get_rng(self) -> Uniform:
         return Uniform(
             low=self.rng_low,
-            high=self.rng_high
+            high=self.rng_high * self.max_rotation
         )
 
     def forward(
@@ -116,7 +117,6 @@ class RotAENet(nn.Module):
         Reshape these into 2D coordinates and centre on the image.
         """
         bs = X0.shape[0]
-        device = X0.device
 
         # Normalise the camera coefficients and base points
         cc = (camera_coeffs - self.cam_coeffs_mean) / (self.cam_coeffs_range + 1e-7)
@@ -124,19 +124,22 @@ class RotAENet(nn.Module):
         p2d = (points_2d_base - self.p2d_mean) / (self.p2d_range + 1e-7)
 
         # Include the camera coeffs and base points as input
-        setup = torch.cat([cc.view(bs, -1),p3d.view(bs, -1),p2d.view(bs, -1)], dim=1)
+        setup = torch.cat([cc.view(bs, -1), p3d.view(bs, -1), p2d.view(bs, -1)], dim=1)
         setup_exp = setup[..., None, None]
         setup_exp = setup_exp.expand(bs, setup.shape[1], X0.shape[-2], X0.shape[-1])
         c2d_input = torch.cat([X0, setup_exp], dim=1)
 
         # Use c2d network to generate 2D coordinates (X1) and setup adjustments
         c2d_output = self.c2d_net(c2d_input)
-        X1 = c2d_output[:, :3].reshape(bs, 3, self.n_worm_points, 2)
-        X1 = torch.tanh(X1) * X0.shape[-1] / 2
+        X1a = c2d_output[:, :3].reshape(bs, 3 * 2, self.n_worm_points)
+        X1 = X1a * X0.shape[-1] / 2
+
+        # Render coordinates
+        W0 = self.render(X1a)
 
         # Update setup
         setup_adj = c2d_output[:, 3:].mean(dim=(2, 3))
-        setup = setup + torch.tanh(setup_adj)
+        setup = setup + torch.tanh(setup_adj) * 1e-3
         cc2 = setup[:, :N_CAM_COEFFICIENTS * 3].reshape_as(camera_coeffs)
         cc2 = cc2 * (self.cam_coeffs_range + 1e-7) + self.cam_coeffs_mean
         p3d2 = setup[:, N_CAM_COEFFICIENTS * 3:N_CAM_COEFFICIENTS * 3 + 3].reshape_as(points_3d_base)
@@ -144,40 +147,50 @@ class RotAENet(nn.Module):
         p2d2 = setup[:, -3 * 2:].reshape_as(points_2d_base)
         p2d2 = p2d2 * (self.p2d_range + 1e-7) + self.p2d_mean
 
+        # Expand the new setup along the worm length
+        setup2 = torch.cat([cc2.view(bs, -1), p3d2.view(bs, -1), p2d2.view(bs, -1)], dim=1)
+        setup_exp2 = setup2[..., None]
+        setup_exp2 = setup_exp2.expand(bs, setup2.shape[1], self.n_worm_points)
+
         # Lift the 2D coordinates to 3D
-        X2 = self.c3d_net(X1)
-        X2 = X2.reshape(bs, self.n_worm_points, 3)
+        c3d_input = torch.cat([X1, setup_exp2], dim=1)
+        X2 = self.c3d_net(c3d_input)
 
         # Rotate
-        Z2 = self.rotate(X2)
+        if self.max_rotation > 0:
+            Z2 = self.rotate(X2)
+        else:
+            Z2 = X2
 
-        # Project 3D points to 2D
-        Z2a = Z2 + p3d2.unsqueeze(1)
-        Z1a = self.cams.forward(cc2, Z2a)
-        Z1 = Z1a - p2d2.unsqueeze(2)
+        # Project 3D points to 2D using adjusted cameras
+        Z2a = Z2 + p3d2.unsqueeze(2)
+        Z1a = self.cams.forward(cc2, Z2a.permute(0, 2, 1))
+        Z1b = Z1a - p2d2.unsqueeze(2)
+        Z1c = Z1b.permute(0, 1, 3, 2)
+        Z1 = Z1c.reshape(bs, 3 * 2, self.n_worm_points)
 
         # Lift back into 3D
-        Z2b = self.c3d_net(Z1)
-        # Z2b = torch.tanh(Z2b)
-        # assert not is_bad(Z2b)
+        c3d_input = torch.cat([Z1, setup_exp2], dim=1)
+        Z2 = self.c3d_net(c3d_input)
 
         # Un-rotate to recover reconstructed X2
-        Y2 = self.unrotate(Z2b)
-        # assert not is_bad(Y2)
+        if self.max_rotation > 0:
+            Y2 = self.unrotate(Z2)
+        else:
+            Y2 = Z2
 
         # Project to get the reconstructed X1
-        Y2a = Y2 + p3d2.unsqueeze(1)
-        Y1a = self.cams.forward(cc2, Y2a)
-        Y1 = Y1a - p2d2.unsqueeze(2)
+        Y2a = Y2 + p3d2.unsqueeze(2)
+        Y1a = self.cams.forward(cc2, Y2a.permute(0, 2, 1))
+        Y1b = Y1a - p2d2.unsqueeze(2)
+        Y1c = Y1b.permute(0, 1, 3, 2)
+        Y1 = Y1c.reshape(bs, 3 * 2, self.n_worm_points)
 
         # Render coordinates to get reconstructed X0
-        Y1b = Y1 / (X0.shape[-1] / 2)
-        # Y1b.retain_grad = True
-        Y0 = self.render(Y1b)
-        # Y0.retain_grad = True
-        # assert not is_bad(Y0)
+        Y1b = Y1
+        Y0 = self.render(Y1b / (X0.shape[-1] / 2))
 
-        return X1, X2, Y0, Y1, Y2
+        return W0, X1, X2, Y0, Y1, Y2
 
     def rotate(self, points_3d: torch.Tensor) -> torch.Tensor:
         # Generate Euler rotation angles and matrix
@@ -186,14 +199,16 @@ class RotAENet(nn.Module):
         self.rotation_matrix = euler_angles_to_matrix(self.euler_angles, convention='XYZ')
 
         # Rotate
-        return torch.einsum('buv,bnv->bnu', self.rotation_matrix, points_3d)
+        return torch.einsum('buv,bvn->bun', self.rotation_matrix, points_3d)
 
     def unrotate(self, points_3d: torch.Tensor) -> torch.Tensor:
-        return torch.einsum('buv,bnv->bnu', self.rotation_matrix.transpose(1, 2), points_3d)
+        return torch.einsum('buv,bvn->bun', self.rotation_matrix.transpose(1, 2), points_3d)
 
     def render(self, points):
         # Reshape
         bs = points.shape[0]
+        points = points.reshape(bs, 3, 2, self.n_worm_points)
+        points = points.permute(0, 1, 3, 2)
         points = points.reshape(bs * 3, self.n_worm_points, 2)
         points = points.clamp(min=-1, max=1)
         a = points[:, :-1]
@@ -223,23 +238,14 @@ class RotAENet(nn.Module):
         d = torch.sqrt(d + 1e-6)
         d_norm = torch.exp(-d / (self.blur_sigma**2))
 
-        if is_bad(d_norm):
-            b = 1
-
         # Normalise
         max_d = d_norm.amax(dim=(2, 3), keepdim=True)
         d_norm = torch.where(max_d <= 0, torch.zeros_like(d), d_norm / max_d)
 
-        if is_bad(d_norm):
-            b = 1
-
         # d_norm = d_norm / torch.sum(d_norm, (2, 3), keepdim=True)
         d_norm = d_norm.sum(dim=1)
-
         d_norm = d_norm.clamp(max=1)
 
-        if is_bad(d_norm):
-            b = 1
         # Reshape back to the triplets
         d_norm = d_norm.reshape(bs, 3, self.size, self.size)
 
