@@ -123,7 +123,7 @@ class DatasetSegmentationMasksLoader(DatasetLoader):
         # gauss = gauss_test(size=200, sigma=0.1)
         # X = np.stack([gauss, gauss, gauss])
 
-        images = torch.from_numpy(images.copy()).contiguous().to(torch.float32)
+        images = torch.from_numpy(np.array(images).copy()).contiguous().to(torch.float32)
 
         # Convert mask to torch tensor and normalise
         X = torch.from_numpy(X.copy()).contiguous().to(torch.float32)
