@@ -5,7 +5,6 @@ import numpy as np
 import torch
 from torch import nn
 from torch.distributions import Uniform
-
 from wormlab3d import PREPARED_IMAGE_SIZE
 from wormlab3d.midlines3d.dynamic_cameras import DynamicCameras, N_CAM_COEFFICIENTS
 from wormlab3d.nn.models.basenet import BaseNet
@@ -135,7 +134,7 @@ class RotAENet(nn.Module):
         X1 = X1a * X0.shape[-1] / 2
 
         # Render coordinates
-        W0 = self.render(X1a)
+        W0 = self.render(X1 / (X0.shape[-1] / 2) - 1)
 
         # Update setup
         setup_adj = c2d_output[:, 3:].mean(dim=(2, 3))
@@ -187,8 +186,7 @@ class RotAENet(nn.Module):
         Y1 = Y1c.reshape(bs, 3 * 2, self.n_worm_points)
 
         # Render coordinates to get reconstructed X0
-        Y1b = Y1
-        Y0 = self.render(Y1b / (X0.shape[-1] / 2))
+        Y0 = self.render(Y1 / (X0.shape[-1] / 2) - 1)
 
         return W0, X1, X2, Y0, Y1, Y2
 
