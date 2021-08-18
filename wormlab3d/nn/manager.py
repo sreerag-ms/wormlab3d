@@ -2,6 +2,7 @@ import gc
 import os
 import shutil
 import time
+from collections import OrderedDict
 from datetime import timedelta
 from typing import Dict, List
 from typing import Tuple
@@ -13,6 +14,7 @@ from bson.objectid import ObjectId
 from torch import nn
 from torch.backends import cudnn
 from torch.optim import Optimizer
+from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
@@ -381,7 +383,7 @@ class Manager:
             # Load the network and optimiser parameter states
             path = f'{self.get_logs_path(prev_checkpoint)}/checkpoints/{prev_checkpoint.id}.chkpt'
             state = torch.load(path, map_location=self.device)
-            self.net.load_state_dict(state['model_state_dict'], strict=False)
+            self.net.load_state_dict(self._fix_state(state['model_state_dict']), strict=False)
             if self.optimiser_args.algorithm != prev_checkpoint.optimiser_args['algorithm']:
                 self.optimiser.step()
             self.optimiser.load_state_dict(state['optimiser_state_dict'])
@@ -400,6 +402,12 @@ class Manager:
             )
 
         return checkpoint
+
+    def _fix_state(self, state):
+        new_state = OrderedDict()
+        for k, v in state.items():
+            new_state[k.replace('module.', '')] = v
+        return new_state
 
     def _init_tb_logger(self):
         """Initialise the tensorboard writer."""
@@ -462,7 +470,7 @@ class Manager:
 
         # todo: lr scheduler
         milestones = [n_epochs // 2 + starting_epoch, n_epochs // (4 / 3) + starting_epoch]
-        lr_scheduler = optim.lr_scheduler.MultiStepLR(
+        lr_scheduler = MultiStepLR(
             optimizer=self.optimiser,
             milestones=milestones,
             gamma=self.optimiser_args.lr_gamma,

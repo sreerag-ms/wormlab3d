@@ -315,15 +315,15 @@ class ManagerRotAE(BaseManager):
             state = torch.load(path, map_location=self.device)
             self.net.eval()
             if self.net_args.use_d0:
-                self.d0_net.load_state_dict(state['d0_state_dict'])
+                self.d0_net.load_state_dict(self._fix_state(state['d0_state_dict']))
                 self.optimiser_d0.load_state_dict(state['optimiser_d0_state_dict'])
                 self.d0_net.eval()
             if self.net_args.use_d2d:
-                self.d2d_net.load_state_dict(state['d2d_state_dict'])
+                self.d2d_net.load_state_dict(self._fix_state(state['d2d_state_dict']))
                 self.optimiser_d2d.load_state_dict(state['optimiser_d2d_state_dict'])
                 self.d2d_net.eval()
             if self.net_args.use_d3d:
-                self.d3d_net.load_state_dict(state['d3d_state_dict'])
+                self.d3d_net.load_state_dict(self._fix_state(state['d3d_state_dict']))
                 self.optimiser_d3d.load_state_dict(state['optimiser_d3d_state_dict'])
                 self.d3d_net.eval()
             logger.info(f'Loaded state from "{path}"')
