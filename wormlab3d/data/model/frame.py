@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Union
 
 import numpy as np
 from mongoengine import *
@@ -142,11 +142,15 @@ class Frame(Document):
 
         return centres_2d, centres_2d_thresholds
 
-    def update_centres_2d(self, centres_2d, centres_2d_thresholds):
+    def update_centres_2d(self, centres_2d: Union[list, dict], centres_2d_thresholds):
         """
         Update the 2D centre points and the thresholds they were found at.
         """
-        cam_idxs = centres_2d.keys()
+        if type(centres_2d) == list:
+            assert len(centres_2d) == 3
+            cam_idxs = CAMERA_IDXS
+        else:
+            cam_idxs = centres_2d.keys()
         prev_centres_2d = self.centres_2d.copy()
 
         if len(self.centres_2d) == 3:
