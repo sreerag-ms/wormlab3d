@@ -4,7 +4,6 @@ from typing import List, Union
 
 import numpy as np
 from scipy.optimize import minimize
-
 from wormlab3d import logger, CAMERA_IDXS
 from wormlab3d.data.model.cameras import Cameras
 from wormlab3d.data.model.object_point import ObjectPoint
@@ -35,8 +34,9 @@ def triangulate(
         assert x0.shape == (3,)
 
     logger.debug(f'Triangulating. '
-                 f'Cameras id={cameras.id}. '
-                 f'Reprojection error={cameras.reprojection_error:.4f}. '
+                 f'Cameras id={cameras.id}. ' +
+                 (f'Reprojection error={cameras.reprojection_error:.4f}. '
+                  if cameras.reprojection_error is not None else '') +
                  f'Trial={cameras.trial.id if cameras.trial is not None else "-"}.')
     cams_model = cameras.get_camera_model_triplet()
 
