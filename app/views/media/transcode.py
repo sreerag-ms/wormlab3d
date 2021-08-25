@@ -37,7 +37,6 @@ def media_content(path):
                 byte = f.read(512)
         finally:
             proc.kill()
-            print("transcoding finished")
 
     return Response(response=generate(), status=200, mimetype='video/mp4',
                     headers={'Access-Control-Allow-Origin': '*',
