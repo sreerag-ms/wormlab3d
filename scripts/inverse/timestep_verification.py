@@ -29,7 +29,7 @@ def timestep_verification():
     """
     Loads a simulation run and recomputes the simulation output for different timesteps.
     """
-    dts = [1, 0.5, 0.1, 0.01, 0.001]
+    dts = [1, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001]
     run = get_run()
     checkpoint: SwCheckpoint = run.checkpoint
     sim_params: SwSimulationParameters = checkpoint.sim_params
@@ -61,8 +61,13 @@ def timestep_verification():
         CSi = ControlSequenceNumpy(**controls)
 
         # Run simulation
-        worm = Worm(N, dt, material_parameters=sim_params.get_material_parameters())
-        FS = worm.solve(sim_params.duration, F0=F0.to_fenics(worm), CS=CSi.to_fenics(worm))
+        worm = Worm(N, dt)
+        FS = worm.solve(
+            T=sim_params.duration,
+            MP=sim_params.get_material_parameters(),
+            F0=F0.to_fenics(worm),
+            CS=CSi.to_fenics(worm)
+        )
         outputs.append(FS.to_numpy())
 
     # Use smallest timestep as ground truth
@@ -85,13 +90,17 @@ def timestep_verification():
                 v = torch.from_numpy(v[None, :]).transpose(1, 2)
             else:
                 raise RuntimeError(f'Unrecognised shape for {x}!')
-            v = F.interpolate(v, size=(T, N), mode='bilinear', align_corners=True)
+            if x == 'gamma':
+                size = (T, N - 1)
+            else:
+                size = (T, N)
+            v = F.interpolate(v, size=size, mode='bilinear', align_corners=True)
             v = to_numpy(v.squeeze())
 
             # Calculate squared errors
             if v.ndim == 3:
-                v = v.transpose(1,0,2)
-                v_err = ((v - v_target)**2).sum(axis=(1,2))
+                v = v.transpose(1, 0, 2)
+                v_err = ((v - v_target)**2).sum(axis=(1, 2))
             else:
                 v_err = ((v - v_target)**2).sum(axis=1)
 
@@ -99,13 +108,20 @@ def timestep_verification():
 
     # Make plots
     # interactive()
-    fig, axes = plt.subplots(len(FRAME_KEYS), 1, figsize=(12, 3 * len(FRAME_KEYS)), sharex=True)
+    fig, axes = plt.subplots(len(FRAME_KEYS), 2, figsize=(16, 3 * len(FRAME_KEYS)), sharex=True)
     fig.suptitle(f'Run = {run.id}')
     for i, x in enumerate(FRAME_KEYS):
-        ax = axes[i]
+        ax = axes[i, 0]
         ax.set_title(x)
         for dt, err in errors[x].items():
-            ax.plot(err, label=dt)
+            ax.plot(err, label=f'dt={dt}')
+        ax.legend()
+
+        ax = axes[i, 1]
+        ax.set_title(x)
+        for dt, err in errors[x].items():
+            ax.plot(err, label=f'dt={dt}')
+        ax.set_yscale('log')
         ax.legend()
 
     fig.tight_layout()
