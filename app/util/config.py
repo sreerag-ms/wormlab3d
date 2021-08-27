@@ -1,9 +1,8 @@
 """Config file."""
+from wormlab3d import ANNEX_PATH
 
-port = 8124
-
-# TODO: Put this in __init__ perhaps
-media_folder = "/mnt/d/wormlab/wormlab3d/app/static/worm_data/video"
+port = 8124  # what is this port for?
+media_folder = ANNEX_PATH + '/video'
 
 # transcoder config
 ffmpeg = "ffmpeg"
