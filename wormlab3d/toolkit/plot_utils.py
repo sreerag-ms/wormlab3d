@@ -135,6 +135,7 @@ def generate_interactive_3d_clip_with_projections(
     else:
         x = FS_db.X.transpose(0, 2, 1)
         FS = FrameSequenceNumpy(x=x)
+        CS = None
 
         # Create the midline projection sequence
         logger.debug('Fetching 2d coordinate projections.')
@@ -205,8 +206,11 @@ def generate_interactive_3d_clip_with_projections(
     # 3D midline axes
     mins, maxs = FS.get_bounding_box(zoom=1)
     cla(ax3d)
-    max_ab = max(np.abs(CS.alpha).max(), np.abs(CS.beta).max())
-    fa = FrameArtist(FS[0], n_arrows=12, alpha_max=max_ab, beta_max=max_ab)
+    if CS is None:
+        fa = FrameArtist(FS[0], n_arrows=12)
+    else:
+        max_ab = max(np.abs(CS.alpha).max(), np.abs(CS.beta).max())
+        fa = FrameArtist(FS[0], n_arrows=12, alpha_max=max_ab, beta_max=max_ab)
     fa.add_component_vectors(ax3d, draw_e0=False, C=CS[0] if CS is not None else None)
     fa.add_midline(ax3d)
     ax3d.set_xlim(mins[0], maxs[0])
