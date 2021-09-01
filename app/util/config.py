@@ -1,7 +1,6 @@
 """Config file."""
 from wormlab3d import ANNEX_PATH
 
-port = 8124  # what is this port for?
 media_folder = ANNEX_PATH + '/video'
 
 # transcoder config
