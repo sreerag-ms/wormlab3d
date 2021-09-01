@@ -2,17 +2,20 @@ import gc
 import os
 import shutil
 import time
+from collections import OrderedDict
 from datetime import timedelta
 from typing import Dict, List
 from typing import Tuple
 
 import torch
 import torch.nn.functional as F
-import torch.optim as optim
+from bson.errors import InvalidId
+from bson.objectid import ObjectId
 from torch import nn
 from torch.backends import cudnn
 from torch.optim import Optimizer
-from torch.utils.data import DataLoader as DataLoaderTorch, DataLoader
+from torch.optim.lr_scheduler import MultiStepLR
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from wormlab3d import logger, LOGS_PATH
@@ -104,7 +107,7 @@ class Manager:
     def _generate_dataset(self):
         pass
 
-    def _init_data_loaders(self) -> Tuple[DataLoaderTorch, DataLoaderTorch]:
+    def _init_data_loaders(self) -> Tuple[DataLoader, DataLoader]:
         """
         Get the data loaders.
         """
@@ -119,63 +122,84 @@ class Manager:
     def _get_data_loader(self, train_or_test: str) -> DataLoader:
         pass
 
-    def _init_network(self) -> Tuple[BaseNet, NetworkParameters]:
+    def _init_network(
+            self,
+            net_args: NetworkArgs = None,
+            input_shape: tuple = None,
+            output_shape: tuple = None,
+            prefix: str = None
+    ) -> Tuple[BaseNet, NetworkParameters]:
         """
-        Build the network using the given parameters.
+        Build the network using the given parameters, defaulting to the instance attributes if not provided.
         """
+        if net_args is None:
+            net_args = self.net_args
+        if input_shape is None:
+            input_shape = self.input_shape
+        if output_shape is None:
+            output_shape = self.output_shape
+        if prefix is None:
+            prefix = ''
+        else:
+            prefix = prefix + '-'
+        logger.info(f'Initialising {prefix}network')
+
         net_params = None
         params = {**{
-            'network_type': self.net_args.base_net,
-            'input_shape': self.input_shape,
-            'output_shape': self.output_shape,
-        }, **self.net_args.hyperparameters}
+            'network_type': net_args.base_net,
+            'input_shape': input_shape,
+            'output_shape': output_shape,
+        }, **net_args.hyperparameters}
 
         # Try to load an existing network
-        if self.net_args.load:
+        if net_args.load:
             # If we have a net id then load this from the database
-            if self.net_args.net_id is not None:
-                net_params = NetworkParameters.objects.get(id=self.net_args.net_id)
+            if net_args.net_id is not None:
+                net_params = NetworkParameters.objects.get(id=net_args.net_id)
             else:
                 # Otherwise, try to find one matching the same parameters
                 net_params_matching = NetworkParameters.objects(**params)
                 if net_params_matching.count() > 0:
                     net_params = net_params_matching[0]
-                    logger.info(f'Found {len(net_params_matching)} suitable networks in database, using most recent.')
+                    logger.info(
+                        f'Found {len(net_params_matching)} suitable {prefix}networks in database, using most recent.')
                 else:
-                    logger.info('No suitable networks found in database.')
+                    logger.info(f'No suitable {prefix}networks found in database.')
             if net_params is not None:
-                logger.info(f'Loaded networks (id={net_params.id}, created={net_params.created}).')
+                logger.info(f'Loaded {prefix}network (id={net_params.id}, created={net_params.created}).')
 
         # Not loaded network, so create one
         if net_params is None:
             # Separate classes are used to validate the different available hyperparameters
-            if self.net_args.base_net == 'fcnet':
+            if net_args.base_net == 'fcnet':
                 net_params = NetworkParametersFC(**params)
-            elif self.net_args.base_net == 'aenet':
+            elif net_args.base_net == 'aenet':
                 net_params = NetworkParametersAE(**params)
-            elif self.net_args.base_net == 'resnet':
+            elif net_args.base_net == 'resnet':
                 net_params = NetworkParametersResNet(**params)
-            elif self.net_args.base_net == 'densenet':
+            elif net_args.base_net == 'resnet1d':
+                net_params = NetworkParametersResNet1d(**params)
+            elif net_args.base_net == 'densenet':
                 net_params = NetworkParametersDenseNet(**params)
-            elif self.net_args.base_net == 'pyramidnet':
+            elif net_args.base_net == 'pyramidnet':
                 net_params = NetworkParametersPyramidNet(**params)
-            elif self.net_args.base_net == 'nunet':
+            elif net_args.base_net == 'nunet':
                 net_params = NetworkParametersNuNet(**params)
-            elif self.net_args.base_net == 'rdn':
+            elif net_args.base_net == 'rdn':
                 net_params = NetworkParametersRDN(**params)
-            elif self.net_args.base_net == 'red':
+            elif net_args.base_net == 'red':
                 net_params = NetworkParametersRED(**params)
             else:
-                raise ValueError(f'Unrecognised base net: {self.net_args.base_net}')
+                raise ValueError(f'Unrecognised base net: {net_args.base_net}')
 
             # Save the network parameters to the database
             net_params.save()
-            logger.info(f'Saved net parameters to database (id={net_params.id})')
+            logger.info(f'Saved {prefix}net parameters to database (id={net_params.id})')
 
         # Instantiate the network
         net = net_params.instantiate_network()
-        logger.info(f'Instantiated network with {net.get_n_params() / 1e6:.4f}M parameters.')
-        logger.debug(f'----------- Network --------------\n\n{net}\n\n')
+        logger.info(f'Instantiated {prefix}network with {net.get_n_params() / 1e6:.4f}M parameters.')
+        logger.debug(f'----------- {prefix}Network --------------\n\n{net}\n\n')
 
         return net, net_params
 
@@ -309,9 +333,27 @@ class Manager:
                         )
                         raise DoesNotExist()
                 else:
-                    prev_checkpoint = Checkpoint.objects.get(
-                        id=self.runtime_args.resume_from
-                    )
+                    prev_checkpoint = None
+                    try:
+                        oid = ObjectId(self.runtime_args.resume_from)
+                        prev_checkpoint = Checkpoint.objects.get(id=oid)
+                    except (InvalidId, DoesNotExist):
+                        pass
+
+                    if prev_checkpoint is None:
+                        prev_checkpoints = Checkpoint.objects(
+                            dataset=self.ds,
+                            network_params=self.net_params,
+                            epoch=self.runtime_args.resume_from
+                        ).order_by('-created')
+
+                        if prev_checkpoints.count() == 0:
+                            logger.error(f'Found no checkpoints matching id or epoch.')
+                            raise DoesNotExist()
+                        if len(prev_checkpoints) > 1:
+                            logger.warning(f'Found multiple checkpoints matching epoch, using most recent.')
+                        prev_checkpoint = prev_checkpoints[0]
+
                 logger.info(f'Loaded checkpoint id={prev_checkpoint.id}, created={prev_checkpoint.created}')
                 logger.info(f'Test loss = {prev_checkpoint.loss_test:.6f}')
                 for key, val in prev_checkpoint.metrics_test.items():
@@ -341,7 +383,9 @@ class Manager:
             # Load the network and optimiser parameter states
             path = f'{self.get_logs_path(prev_checkpoint)}/checkpoints/{prev_checkpoint.id}.chkpt'
             state = torch.load(path, map_location=self.device)
-            self.net.load_state_dict(state['model_state_dict'], strict=False)
+            self.net.load_state_dict(self._fix_state(state['model_state_dict']), strict=False)
+            if self.optimiser_args.algorithm != prev_checkpoint.optimiser_args['algorithm']:
+                self.optimiser.step()
             self.optimiser.load_state_dict(state['optimiser_state_dict'])
             self.net.eval()
             logger.info(f'Loaded state from "{path}"')
@@ -358,6 +402,12 @@ class Manager:
             )
 
         return checkpoint
+
+    def _fix_state(self, state):
+        new_state = OrderedDict()
+        for k, v in state.items():
+            new_state[k.replace('module.', '')] = v
+        return new_state
 
     def _init_tb_logger(self):
         """Initialise the tensorboard writer."""
@@ -413,14 +463,20 @@ class Manager:
         for group in self.optimiser.param_groups:
             group['lr'] = self.optimiser_args.lr_init
 
+        if starting_epoch > 1:
+            for group in self.optimiser.param_groups:
+                if 'initial_lr' not in group:
+                    group['initial_lr'] = self.optimiser_args.lr_init
+
         # todo: lr scheduler
         milestones = [n_epochs // 2 + starting_epoch, n_epochs // (4 / 3) + starting_epoch]
-        lr_scheduler = optim.lr_scheduler.MultiStepLR(
+        lr_scheduler = MultiStepLR(
             optimizer=self.optimiser,
             milestones=milestones,
             gamma=self.optimiser_args.lr_gamma,
             last_epoch=starting_epoch - 1 if starting_epoch > 1 else -1
         )
+        lr_scheduler.last_epoch = starting_epoch - 1 if starting_epoch > 1 else -1
 
         for epoch in range(starting_epoch, final_epoch + 1):
             logger.info('{:-^80}'.format(' Train epoch: {} '.format(epoch)))
@@ -437,14 +493,16 @@ class Manager:
                 str(timedelta(seconds=seconds_left))))
             lr_scheduler.step()
 
-            # # Test every epoch
-            # self.test()
-            # self.tb_logger.add_scalar(f'epoch/test/total', self.checkpoint.loss_test, epoch)
-            # for key, val in self.checkpoint.metrics_test.items():
-            #     self.tb_logger.add_scalar(f'epoch/test/{key}', val, epoch)
-            #     logger.info(f'Test {key}: {val:.4E}')
-            #
+            # Test every n epochs
+            if self.runtime_args.test_every_n_epochs > 0 \
+                    and (epoch + 1) % self.runtime_args.test_every_n_epochs == 0:
+                self.test()
+                self.tb_logger.add_scalar(f'epoch/test/total', self.checkpoint.loss_test, epoch)
+                for key, val in self.checkpoint.metrics_test.items():
+                    self.tb_logger.add_scalar(f'epoch/test/{key}', val, epoch)
+                    logger.info(f'Test {key}: {val:.4E}')
 
+            # Checkpoint every n epochs
             if self.runtime_args.checkpoint_every_n_epochs > 0 \
                     and (epoch + 1) % self.runtime_args.checkpoint_every_n_epochs == 0:
                 self.save_checkpoint()
@@ -486,7 +544,7 @@ class Manager:
                     and (i + 1) % self.runtime_args.checkpoint_every_n_batches == 0:
                 self.save_checkpoint()
 
-            gc.collect()
+        gc.collect()
 
         # Update stats and write debug
         self.checkpoint.loss_train = float(epoch_loss) / num_batches_per_epoch
@@ -511,7 +569,7 @@ class Manager:
         loss.backward()
 
         # Clip gradients
-        nn.utils.clip_grad_norm_(self.net.parameters(), max_norm=100)
+        # nn.utils.clip_grad_norm_(self.net.parameters(), max_norm=100)
 
         self.optimiser.step()
 

@@ -1,15 +1,15 @@
-from wormlab3d.midlines2d.args.parse import parse_arguments
-from wormlab3d.midlines2d.manager_coords import ManagerCoords
+from wormlab3d.midlines3d.args.parse import parse_arguments
+from wormlab3d.midlines3d.manager_rotae import ManagerRotAE
 
 
 def train():
     """
-    Trains a network to generate 2D midlines.
+    Trains a network to generate 3D midlines.
     """
-    dataset_args, net_args, runtime_args, optimiser_args = parse_arguments(coordinate_mode=True)
+    dataset_args, net_args, runtime_args, optimiser_args = parse_arguments(rotae=True)
 
     # Construct manager
-    manager = ManagerCoords(
+    manager = ManagerRotAE(
         dataset_args=dataset_args,
         net_args=net_args,
         optimiser_args=optimiser_args,

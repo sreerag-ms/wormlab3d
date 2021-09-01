@@ -15,6 +15,7 @@ class RuntimeArgs(BaseArgs):
             n_epochs: int = 300,
             checkpoint_every_n_epochs: int = 1,
             checkpoint_every_n_batches: int = -1,
+            test_every_n_epochs: int = 1,
             plot_every_n_batches: int = -1,
             plot_n_examples: int = 4,
             track_metrics: List[str] = [],
@@ -29,6 +30,7 @@ class RuntimeArgs(BaseArgs):
         self.n_epochs = n_epochs
         self.checkpoint_every_n_epochs = checkpoint_every_n_epochs
         self.checkpoint_every_n_batches = checkpoint_every_n_batches
+        self.test_every_n_epochs = test_every_n_epochs
         self.plot_every_n_batches = plot_every_n_batches
         self.plot_n_examples = plot_n_examples
         self.track_metrics = track_metrics
@@ -59,6 +61,8 @@ class RuntimeArgs(BaseArgs):
                            help='Save a checkpoint every n epochs, -1 turns this off.')
         group.add_argument('--checkpoint-every-n-batches', type=int, default=-1,
                            help='Save a checkpoint every n batches, -1 turns this off.')
+        group.add_argument('--test-every-n-epochs', type=int, default=1,
+                           help='Test every n epochs, -1 turns this off.')
         group.add_argument('--plot-every-n-batches', type=int, default=-1,
                            help='Plot example inputs and outputs every n batches, -1 turns this off.')
         group.add_argument('--plot-n-examples', type=int, default=4,

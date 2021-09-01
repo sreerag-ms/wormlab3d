@@ -3,7 +3,7 @@ from abc import abstractmethod
 from typing import Union
 
 from mongoengine import *
-
+from wormlab3d.midlines3d.rotae_net import RotAENet
 from wormlab3d.nn.models.aenet import AENet
 from wormlab3d.nn.models.basenet import BaseNet
 from wormlab3d.nn.models.densenet import DenseNet
@@ -14,8 +14,9 @@ from wormlab3d.nn.models.pyramidnet import PyramidNet
 from wormlab3d.nn.models.rdn import RDN
 from wormlab3d.nn.models.rednet import RedNet
 from wormlab3d.nn.models.resnet import ResNet, RES_SHORTCUT_OPTIONS
+from wormlab3d.nn.models.resnet1d import ResNet1d
 
-NETWORK_TYPES = ['densenet', 'fcnet', 'resnet', 'pyramidnet', 'aenet', 'nunet', 'rdn', 'red']
+NETWORK_TYPES = ['densenet', 'fcnet', 'resnet', 'resnet1d', 'pyramidnet', 'aenet', 'nunet', 'rdn', 'red', 'rotae']
 
 
 class NetworkParameters(Document):
@@ -23,8 +24,8 @@ class NetworkParameters(Document):
     created = DateTimeField(required=True, default=datetime.datetime.utcnow)
 
     # Common parameters
-    input_shape = ListField(IntField(), required=True)
-    output_shape = ListField(IntField(), required=True)
+    input_shape = ListField(required=True)
+    output_shape = ListField(required=True)
     dropout_prob = FloatField(default=0)
 
     meta = {
@@ -81,6 +82,25 @@ class NetworkParametersResNet(NetworkParameters):
 
     def instantiate_network(self, build_model: bool = True) -> ResNet:
         return ResNet(
+            input_shape=self.input_shape,
+            output_shape=self.output_shape,
+            n_init_channels=self.n_init_channels,
+            block_config=self.blocks_config,
+            shortcut_type=self.shortcut_type,
+            use_bottlenecks=self.use_bottlenecks,
+            dropout_prob=self.dropout_prob,
+            build_model=build_model
+        )
+
+
+class NetworkParametersResNet1d(NetworkParameters):
+    n_init_channels = IntField(required=True)
+    blocks_config = ListField(IntField(), required=True)
+    shortcut_type = StringField(choices=RES_SHORTCUT_OPTIONS, required=True)
+    use_bottlenecks = BooleanField(required=True)
+
+    def instantiate_network(self, build_model: bool = True) -> ResNet1d:
+        return ResNet1d(
             input_shape=self.input_shape,
             output_shape=self.output_shape,
             n_init_channels=self.n_init_channels,
@@ -211,3 +231,14 @@ class NetworkParametersRED(NetworkParameters):
             'act_out': self.act_out,
         }
         return RedNet(**model_params)
+
+
+class NetworkParametersRotAE(NetworkParameters):
+    c2d_net = ReferenceField(NetworkParameters, required=True)
+    c3d_net = ReferenceField(NetworkParameters, required=True)
+    d0_net = ReferenceField(NetworkParameters)
+    d2d_net = ReferenceField(NetworkParameters)
+    d3d_net = ReferenceField(NetworkParameters)
+
+    def instantiate_network(self, build_model: bool = True) -> RotAENet:
+        pass

@@ -14,5 +14,6 @@ __pycache__
 # Data directories
 /data/db
 /data/backgrounds
+/data/ds_cache
 intermediate-data
 **/worm_data

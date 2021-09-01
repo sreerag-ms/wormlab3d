@@ -41,6 +41,8 @@ def parse_target_arguments() -> Namespace:
                         help='FrameSequence id.')
     parser.add_argument('--sw-run', type=str,
                         help='SwRun id.')
+    parser.add_argument('--sw-checkpoint', type=str,
+                        help='SwCheckpoint id.')
 
     args = parser.parse_args()
 

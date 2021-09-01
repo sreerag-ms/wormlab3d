@@ -11,14 +11,19 @@ import torch
 import torch.nn.functional as F
 from matplotlib.figure import Figure
 from mongoengine import DoesNotExist
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+from torch.utils.tensorboard import SummaryWriter
+
+from simple_worm.controls import CONTROL_KEYS
 from simple_worm.controls_torch import ControlSequenceTorch, ControlSequenceBatchTorch
 from simple_worm.frame_torch import FrameTorch, FrameSequenceBatchTorch, FrameSequenceTorch, FrameBatchTorch
 from simple_worm.losses import REG_LOSS_TYPES, REG_LOSS_VARS
 from simple_worm.losses_torch import LossesTorch
 from simple_worm.plot3d import plot_X_vs_target, plot_FS_3d, generate_scatter_diff_clip, plot_CS, plot_frame_3d, \
     plot_frame_components
+from simple_worm.util_torch import expand_tensor
 from simple_worm.worm_torch import WormModule
-from torch.utils.tensorboard import SummaryWriter
 from wormlab3d import LOGS_PATH, logger
 from wormlab3d.data.model import Checkpoint, FrameSequence, Trial
 from wormlab3d.data.model.sw_checkpoint import SwCheckpoint
@@ -188,11 +193,7 @@ class Manager:
         if self.simulation_args.sim_id is not None:
             sim_params = SwSimulationParameters.get(id=self.simulation_args.sim_id)
         else:
-            sim_config = {
-                'worm_length': self.simulation_args.worm_length,
-                'duration': self.simulation_args.duration,
-                'dt': self.simulation_args.dt,
-            }
+            sim_config = self.simulation_args.get_config_dict()
             sim_params = SwSimulationParameters.objects(**sim_config)
             if sim_params.count() > 0:
                 logger.info(
@@ -229,7 +230,8 @@ class Manager:
         worm = WormModule(
             N=self.sim_params.worm_length,
             dt=self.sim_params.dt,
-            batch_size=1,  # todo
+            batch_size=self.optimiser_args.batch_size,
+            material_parameters=self.sim_params.get_material_parameters(),
             reg_weights=self.regularisation_args.get_reg_weights(),
             inverse_opt_max_iter=self.optimiser_args.inverse_opt_max_iter,
             inverse_opt_tol=self.optimiser_args.inverse_opt_tol,
@@ -243,27 +245,33 @@ class Manager:
         """
         Initialise the optimisable initial frame and control sequence.
         """
+        bs = self.optimiser_args.batch_size
 
         # Generate optimisable initial frame, using known x0 and an estimate of psi0
-        F0 = FrameTorch(
-            x=self.FS_target[0].x,
-            estimate_psi=True,
-            optimise=self.optimiser_args.optimise_F0
+        F0 = FrameBatchTorch(
+            x=expand_tensor(self.FS_target[0].x, bs),
+            estimate_psi=self.optimiser_args.estimate_psi,
+            optimise=self.optimiser_args.optimise_F0,
+            batch_size=bs
         )
 
         # Generate optimisable control sequence
-        CS = ControlSequenceTorch(
+        CS = ControlSequenceBatchTorch(
             worm=self.worm.worm_solver,
             n_timesteps=self.FS_target.x.shape[0],
-            optimise=self.optimiser_args.optimise_CS
+            optimise=self.optimiser_args.optimise_CS,
+            batch_size=bs
         )
 
-        # Add some noise (todo, options)
+        # Add some noise
         with torch.no_grad():
-            F0.psi.normal_(std=2)
-            CS.alpha.normal_(std=1e-3)
-            CS.beta.normal_(std=1e-3)
-            CS.gamma.normal_(std=1e-5)
+            if self.optimiser_args.init_noise_std_psi0 > 0:
+                F0.psi += torch.normal(torch.zeros_like(F0.psi), std=self.optimiser_args.init_noise_std_psi0)
+            for abg in CONTROL_KEYS:
+                std = getattr(self.optimiser_args, f'init_noise_std_{abg}')
+                if std > 0:
+                    v = getattr(CS, abg)
+                    v.data += torch.normal(torch.zeros_like(v), std=self.optimiser_args.init_noise_std_alpha)
 
         return F0, CS
 
@@ -327,20 +335,26 @@ class Manager:
             checkpoint.reg_args = to_dict(self.regularisation_args)
 
             # Load the parameter states
-            run = SwRun.objects(checkpoint=prev_checkpoint).first()
-            self.F0 = FrameTorch(
-                x=torch.from_numpy(run.F0.x),
-                psi=torch.from_numpy(run.F0.psi),
-                optimise=self.optimiser_args.optimise_F0
-            )
-            self.CS = ControlSequenceTorch(
-                alpha=torch.from_numpy(run.CS.alpha),
-                beta=torch.from_numpy(run.CS.beta),
-                gamma=torch.from_numpy(run.CS.gamma),
-                n_timesteps=self.FS_target.x.shape[0],
-                optimise=self.optimiser_args.optimise_CS
-            )
-            logger.info(f'Loaded state from run id={run.id}')
+            runs = SwRun.objects(checkpoint=prev_checkpoint)
+            if runs.count() != self.optimiser_args.batch_size:
+                raise RuntimeError(f'Number of runs matching checkpoint "{prev_checkpoint.id}" ({runs.count()}) '
+                                   f'not equal to batch size ({self.optimiser_args.batch_size}). Unable to resume.')
+            self.F0 = FrameBatchTorch.from_list([
+                FrameTorch(
+                    x=torch.from_numpy(run.F0.x),
+                    psi=torch.from_numpy(run.F0.psi)
+                )
+                for run in runs
+            ], optimise=self.optimiser_args.optimise_F0)
+            self.CS = ControlSequenceBatchTorch.from_list([
+                ControlSequenceTorch(
+                    alpha=torch.from_numpy(run.CS.alpha),
+                    beta=torch.from_numpy(run.CS.beta),
+                    gamma=torch.from_numpy(run.CS.gamma)
+                )
+                for run in runs
+            ], optimise=self.optimiser_args.optimise_CS)
+            logger.info(f'Loaded batch state from {runs.count()} runs.')
 
         # ..or start a new checkpoint
         else:
@@ -358,8 +372,14 @@ class Manager:
         return checkpoint
 
     def _init_tb_logger(self):
-        """Initialise the tensorboard writer."""
-        self.tb_logger = SummaryWriter(self.logs_path + '/events/' + START_TIMESTAMP, flush_secs=5)
+        """
+        Initialise the tensorboard writers - one for each batch item plus one master.
+        """
+        self.tb_logger_main = SummaryWriter(self.logs_path + f'/events/{START_TIMESTAMP}_agg', flush_secs=5)
+        self.tb_loggers = [
+            SummaryWriter(self.logs_path + f'/events/{START_TIMESTAMP}_{idx:03d}', flush_secs=5)
+            for idx in range(self.optimiser_args.batch_size)
+        ]
 
     def configure_paths(self, renew_logs: bool = False):
         """Create the directories."""
@@ -370,29 +390,34 @@ class Manager:
         os.makedirs(self.logs_path + '/events', exist_ok=True)
         os.makedirs(self.logs_path + '/plots', exist_ok=True)
 
-    def save_checkpoint(self):
+    def save_checkpoint(self, L: LossesTorch):
         """
         Save the checkpoint information and run output to the database.
         """
-        logger.info('Saving checkpoint and run record...')
+        logger.info('Saving checkpoint and run records...')
         self.checkpoint.save()
 
-        # Create the run record of inputs and optimal outputs for the most recent run.
-        run = SwRun()
-        run.checkpoint = self.checkpoint
-        run.sim_params = self.sim_params
-        run.frame_sequence = self.FS_db
-        run.F0 = SwFrameSequence()
-        run.F0.x = to_numpy(self.F0.x)
-        run.F0.psi = to_numpy(self.F0.psi)
-        run.CS = SwControlSequence()
-        run.CS.alpha = to_numpy(self.CS.alpha)
-        run.CS.beta = to_numpy(self.CS.beta)
-        run.CS.gamma = to_numpy(self.CS.gamma)
-        run.FS = SwFrameSequence()
-        run.FS.x = to_numpy(self.FS_out.x)
-        run.FS.psi = to_numpy(self.FS_out.psi)
-        run.save()
+        # Create the run record of inputs and optimal outputs for the most recent runs.
+        for idx in range(self.optimiser_args.batch_size):
+            run = SwRun()
+            run.checkpoint = self.checkpoint
+            run.sim_params = self.sim_params
+            run.frame_sequence = self.FS_db
+            run.loss = L[idx].total
+            run.loss_data = L[idx].data
+            run.loss_reg = L[idx].reg
+            run.reg_losses = L[idx].reg_losses_unweighted
+            run.F0 = SwFrameSequence()
+            run.F0.x = to_numpy(self.F0[idx].x)
+            run.F0.psi = to_numpy(self.F0[idx].psi)
+            run.CS = SwControlSequence()
+            run.CS.alpha = to_numpy(self.CS[idx].alpha)
+            run.CS.beta = to_numpy(self.CS[idx].beta)
+            run.CS.gamma = to_numpy(self.CS[idx].gamma)
+            run.FS = SwFrameSequence()
+            run.FS.x = to_numpy(self.FS_out[idx].x)
+            run.FS.psi = to_numpy(self.FS_out[idx].psi)
+            run.save()
 
         # Replace the current checkpoint-buffer with a clone of the just-saved checkpoint.
         self.checkpoint = self.checkpoint.clone()
@@ -407,9 +432,7 @@ class Manager:
         final_step = start_step + n_steps - 1
 
         # Initial plots
-        self._plot_F0_components()
-        self._plot_F0_3d()
-        self._plot_CS()
+        self._make_plots(pre_step=True)
 
         for step in range(start_step, final_step + 1):
             start_time = time.time()
@@ -418,37 +441,33 @@ class Manager:
             seconds_left = float((final_step - step) * time_per_step)
             logger.info(
                 f'[{step + 1}/{final_step + 1}]. '
-                f'Total loss = {L.total:.5E}. '
-                f'Data loss = {L.data:.5e}. '
-                f'Regularisation loss = {L.reg:.5e}. '
+                f'Total loss = {L.total.mean():.5E}. '
+                f'Data loss = {L.data.mean():.5e}. '
+                f'Regularisation loss = {L.reg.mean():.5e}. '
                 f'Time taken: {timedelta(seconds=time_per_step)}. '
                 f'Est. complete in: {timedelta(seconds=seconds_left)}.'
             )
 
             if self.runtime_args.checkpoint_every_n_steps > 0 \
                     and (step + 1) % self.runtime_args.checkpoint_every_n_steps == 0:
-                self.save_checkpoint()
+                self.save_checkpoint(L)
 
     def _train_step(self) -> LossesTorch:
         """
         Run a single inverse optimisation step.
         """
 
-        # Make pseudo-batches
-        F0_batch = FrameBatchTorch.from_list([self.F0])
-        CS_batch = ControlSequenceBatchTorch.from_list([self.CS])
-        FS_target_batch = FrameSequenceBatchTorch.from_list([self.FS_target])
+        # Make target pseudo-batch
+        FS_target_batch = FrameSequenceBatchTorch.from_list([self.FS_target] * self.optimiser_args.batch_size)
 
         # Forward simulation
+        logger.info('Simulating...')
         FS, L, F0_opt, CS_opt, FS_opt, L_opt = self.worm.forward(
-            F0=F0_batch,
-            CS=CS_batch,
+            F0=self.F0,
+            CS=self.CS,
             calculate_inverse=True,
             FS_target=FS_target_batch
         )
-
-        # Remove batch dims
-        FS, L, F0_opt, CS_opt, FS_opt, L_opt = FS[0], L[0], F0_opt[0], CS_opt[0], FS_opt[0], L_opt[0]
 
         # Update the inputs/outputs to the found optimals
         self.FS_out = FS_opt
@@ -464,90 +483,203 @@ class Manager:
         # Increment step counter
         self.checkpoint.step += 1
 
-        # Log losses
-        self.checkpoint.loss = float(L.total)
-        self.tb_logger.add_scalar('loss/total', L.total, self.checkpoint.step)
-        self.tb_logger.add_scalar('loss/data', L.data, self.checkpoint.step)
-        self.tb_logger.add_scalar('loss/reg', L.reg, self.checkpoint.step)
-        for loss in REG_LOSS_TYPES:
-            for k in REG_LOSS_VARS:
-                self.tb_logger.add_scalar(
-                    f'reg_weighted/{loss}/{k}',
-                    L.reg_losses_weighted[loss][k],
-                    self.checkpoint.step
-                )
-                self.tb_logger.add_scalar(
-                    f'reg_unweighted/{loss}/{k}',
-                    L.reg_losses_unweighted[loss][k],
-                    self.checkpoint.step
-                )
-
+        # Log losses and make plots
+        self.checkpoint.loss = float(L.total.mean())
+        self.checkpoint.loss_data = float(L.data.mean())
+        self._log_losses(L)
         self._make_plots()
 
         return L
 
-    def _make_plots(self, final_step: bool = False):
+    def _log_losses(self, L: LossesTorch):
+        """
+        Log the losses to tensorboard.
+        The main tb_logger logs means and variances of each metric.
+        The other loggers log the metrics for each item in the batch.
+        """
+        step = self.checkpoint.step
+
+        # Add aggregate losses - means and variances of each key
+        self.tb_logger_main.add_scalar('loss_batch/total/mean', L.total.mean(), step)
+        self.tb_logger_main.add_scalar('loss_batch/total/var', L.total.var(), step)
+        self.tb_logger_main.add_scalar('loss_batch/data/mean', L.data.mean(), step)
+        self.tb_logger_main.add_scalar('loss_batch/data/var', L.data.var(), step)
+        self.tb_logger_main.add_scalar('loss_batch/reg/mean', L.reg.mean(), step)
+        self.tb_logger_main.add_scalar('loss_batch/reg/var', L.reg.var(), step)
+        for loss in REG_LOSS_TYPES:
+            for k in REG_LOSS_VARS:
+                self.tb_logger_main.add_scalar(
+                    f'reg_weighted_batch/{loss}/{k}/mean',
+                    L.reg_losses_weighted[loss][k].mean(),
+                    step
+                )
+                self.tb_logger_main.add_scalar(
+                    f'reg_weighted_batch/{loss}/{k}/var',
+                    L.reg_losses_weighted[loss][k].var(),
+                    step
+                )
+                self.tb_logger_main.add_scalar(
+                    f'reg_unweighted_batch/{loss}/{k}/mean',
+                    L.reg_losses_unweighted[loss][k].mean(),
+                    step
+                )
+                self.tb_logger_main.add_scalar(
+                    f'reg_unweighted_batch/{loss}/{k}/var',
+                    L.reg_losses_unweighted[loss][k].var(),
+                    step
+                )
+
+        # Log individual losses for each item in the batch
+        for idx in range(self.optimiser_args.batch_size):
+            tbl = self.tb_loggers[idx]
+            Li = L[idx]
+            tbl.add_scalar('loss/total', Li.total, step)
+            tbl.add_scalar('loss/data', Li.data, step)
+            tbl.add_scalar('loss/reg', Li.reg, step)
+            for loss in REG_LOSS_TYPES:
+                for k in REG_LOSS_VARS:
+                    tbl.add_scalar(
+                        f'reg_weighted/{loss}/{k}',
+                        Li.reg_losses_weighted[loss][k],
+                        step
+                    )
+                    tbl.add_scalar(
+                        f'reg_unweighted/{loss}/{k}',
+                        Li.reg_losses_unweighted[loss][k],
+                        step
+                    )
+
+    def _make_plots(self, pre_step: bool = False, final_step: bool = False):
         """
         Generate some example plots and videos.
         """
+        logger.info('Plotting.')
+
+        # Select the idxs to plot
+        bs = self.optimiser_args.batch_size
+        n_examples = min(self.runtime_args.plot_n_examples, bs)
+        idxs = np.random.choice(bs, n_examples, replace=False)
+
+        # Make initial plots for all batch elements
+        if pre_step:
+            for idx in range(bs):
+                self._plot_F0_components(idx)
+                self._plot_F0_3d(idx)
+                self._plot_CS(idx)
+            self._plot_pca()
+            return
+
         if final_step or (
                 self.runtime_args.plot_every_n_steps > -1
                 and (self.checkpoint.step + 1) % self.runtime_args.plot_every_n_steps == 0
         ):
-            self._plot_X()
-            self._plot_F0_components()
-            self._plot_F0_3d()
-            self._plot_CS()
+            for idx in idxs:
+                self._plot_X(idx)
+                self._plot_F0_components(idx)
+                self._plot_F0_3d(idx)
+                self._plot_CS(idx)
+            self._plot_pca()
 
         if final_step or (
                 self.runtime_args.videos_every_n_steps > -1
                 and (self.checkpoint.step + 1) % self.runtime_args.videos_every_n_steps == 0
         ):
-            # self._plot_FS_3d()
-            self._make_diff_vids()
+            for idx in idxs:
+                # self._plot_FS_3d(idx)
+                self._make_diff_vids(idx)
 
-    def _plot_X(self):
+    def _plot_X(self, idx: int):
         """
         Plot the x,y,z midline positions over time as matrices.
         """
         fig = plot_X_vs_target(
-            FS=self.FS_out.to_numpy(),
+            FS=self.FS_out[idx].to_numpy(),
             FS_target=self.FS_target.to_numpy()
         )
-        self._save_plot(fig, 'X')
+        self._save_plot(fig, f'X/{idx:03d}')
 
-    def _plot_F0_components(self):
+    def _plot_F0_components(self, idx: int):
         """
         Plot the psi/e0/e1/e2 frame components as matrices.
         """
         fig = plot_frame_components(
-            F=self.F0.to_numpy(worm=self.worm.worm_solver, calculate_components=True)
+            F=self.F0[idx].to_numpy(worm=self.worm.worm_solver, calculate_components=True)
         )
-        self._save_plot(fig, 'F0')
+        self._save_plot(fig, f'F0/{idx:03d}')
 
-    def _plot_F0_3d(self):
+    def _plot_F0_3d(self, idx: int):
         """
         Plot a 3x3 grid of 3D plots of the same worm frame from different angles.
         """
         fig = plot_frame_3d(
-            F0=self.F0.to_numpy(worm=self.worm.worm_solver, calculate_components=True)
+            F0=self.F0[idx].to_numpy(worm=self.worm.worm_solver, calculate_components=True)
         )
-        self._save_plot(fig, 'F0_3D')
+        self._save_plot(fig, f'F0_3D/{idx:03d}')
 
-    def _plot_CS(self):
+    def _plot_CS(self, idx: int):
         """
         Plot the control sequences as matrices.
         """
-        fig = plot_CS(CS=self.CS.to_numpy())
-        self._save_plot(fig, 'CS')
+        fig = plot_CS(CS=self.CS[idx].to_numpy())
+        self._save_plot(fig, f'CS/{idx:03d}')
 
-    def _plot_FS_3d(self):
+    def _plot_FS_3d(self, idx: int):
         fig = plot_FS_3d(
-            FSs=[self.FS_out.to_numpy(), self.FS_target.to_numpy()],
-            CSs=[self.CS.to_numpy(), None],
+            FSs=[self.FS_out[idx].to_numpy(), self.FS_target.to_numpy()],
+            CSs=[self.CS[idx].to_numpy(), None],
             labels=['Attempt', 'Target']
         )
-        self._save_plot(fig, '3D')
+        self._save_plot(fig, f'3D/{idx:03d}')
+
+    def _plot_pca(self):
+        bs = self.optimiser_args.batch_size
+
+        # Convert controls to matrix form
+        solutions = to_numpy(torch.cat([
+            self.F0.psi,
+            self.CS.alpha.reshape(bs, -1),
+            self.CS.beta.reshape(bs, -1),
+            self.CS.gamma.reshape(bs, -1)
+        ], dim=1))
+
+        # PCA
+        pca = PCA(svd_solver='randomized', copy=False)
+        embeddings = pca.fit_transform(solutions)
+
+        # tSNE projections
+        tsne = TSNE(n_components=2)
+        tsne_projections = tsne.fit_transform(embeddings)
+
+        # Make plot
+        fig, axes = plt.subplots(3, figsize=(10, 10))
+        cmap = plt.get_cmap('rainbow')
+
+        # Show the overall distribution of singular values
+        ind = np.arange(pca.n_components_)
+        ax = axes[0]
+        ax.bar(ind, pca.singular_values_, align='center')
+        ax.set_xticks(ind)
+        ax.set_title(f'PCA on solutions (n_components={pca.n_components_})')
+        ax.set_xlabel('Singular value')
+
+        # Show the distributions for the samples
+        ax = axes[1]
+        for i, embedding in enumerate(embeddings):
+            ax.plot(embedding, color=cmap((i + 0.5) / bs), label=i)
+        if bs < 10:
+            ax.legend()
+        ax.set_title('Sample distribution')
+        ax.set_xlabel('Singular value')
+        ax.set_ylabel('Contribution')
+
+        # Show the tSNE scatter plot
+        ax = axes[2]
+        ax.set_title('tSNE embedding')
+        fc = cmap((np.arange(bs) + 0.5) / bs)
+        ax.scatter(tsne_projections[:, 0], tsne_projections[:, 1], c=fc)
+
+        fig.tight_layout()
+        self._save_plot(fig, 'PCA')
 
     def _save_plot(self, fig: Figure, plot_type: str):
         """
@@ -559,21 +691,20 @@ class Manager:
             path = save_dir + f'/{self.checkpoint.step:05d}.svg'
             plt.savefig(path, bbox_inches='tight')
 
-        self.tb_logger.add_figure(plot_type, fig, self.checkpoint.step)
-        self.tb_logger.flush()
+        self.tb_logger_main.add_figure(plot_type, fig, self.checkpoint.step)
+        self.tb_logger_main.flush()
 
         plt.close(fig)
 
-    def _make_diff_vids(self):
+    def _make_diff_vids(self, idx: int):
         """
         Generate a video clip showing a target sequence, an attempt and the difference.
         """
         logger.info(f'Generating scatter diff clip.')
         generate_scatter_diff_clip(
             FS_target=self.FS_target.to_numpy(),
-            FS_attempt=self.FS_out.to_numpy(),
-            save_dir=self.logs_path + '/vid_diffs',
+            FS_attempt=self.FS_out[idx].to_numpy(),
+            save_dir=self.logs_path + f'/vid_diffs/{idx:03d}',
             save_fn=str(self.checkpoint.step),
-            arrow_scale=10,
             n_arrows=12,
         )

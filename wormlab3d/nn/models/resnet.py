@@ -49,7 +49,7 @@ class ResNet(BaseNet):
         components, n_channels = self._build_model_components()
 
         # Add OutputLayer
-        output_layer = OutputLayer(n_channels_in=n_channels, output_shape=(self.output_shape[0],))
+        output_layer = OutputLayer(n_channels_in=n_channels, output_shape=self.output_shape)
 
         # Construct model
         self.model = nn.Sequential(OrderedDict([
