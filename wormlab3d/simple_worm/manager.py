@@ -15,20 +15,23 @@ from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from torch.utils.tensorboard import SummaryWriter
 
+from simple_worm.control_gates_torch import ControlGateTorch
 from simple_worm.controls import CONTROL_KEYS
 from simple_worm.controls_torch import ControlSequenceTorch, ControlSequenceBatchTorch
 from simple_worm.frame_torch import FrameTorch, FrameSequenceBatchTorch, FrameSequenceTorch, FrameBatchTorch
 from simple_worm.losses import REG_LOSS_TYPES, REG_LOSS_VARS
 from simple_worm.losses_torch import LossesTorch
+from simple_worm.material_parameters import MP_KEYS
+from simple_worm.material_parameters_torch import MaterialParametersTorch, MaterialParametersBatchTorch
 from simple_worm.plot3d import plot_X_vs_target, plot_FS_3d, generate_scatter_diff_clip, plot_CS, plot_frame_3d, \
-    plot_frame_components
+    plot_frame_components, plot_CS_vs_output
 from simple_worm.util_torch import expand_tensor
 from simple_worm.worm_torch import WormModule
 from wormlab3d import LOGS_PATH, logger
 from wormlab3d.data.model import Checkpoint, FrameSequence, Trial
 from wormlab3d.data.model.sw_checkpoint import SwCheckpoint
 from wormlab3d.data.model.sw_regularisation_parameters import SwRegularisationParameters
-from wormlab3d.data.model.sw_run import SwRun, SwControlSequence, SwFrameSequence
+from wormlab3d.data.model.sw_run import SwRun, SwControlSequence, SwFrameSequence, SwMaterialParameters
 from wormlab3d.data.model.sw_simulation_parameters import SwSimulationParameters
 from wormlab3d.simple_worm.args import RuntimeArgs, FrameSequenceArgs, SimulationArgs, OptimiserArgs, RegularisationArgs
 from wormlab3d.toolkit.util import to_dict, to_numpy
@@ -62,7 +65,7 @@ class Manager:
         self.worm = self._init_worm()
 
         # Initialise initial conditions and trainable parameters
-        self.F0, self.CS = self._init_params()
+        self.MP, self.F0, self.CS = self._init_params()
 
         # Checkpoints
         self.checkpoint = self._init_checkpoint()
@@ -197,7 +200,7 @@ class Manager:
             sim_params = SwSimulationParameters.objects(**sim_config)
             if sim_params.count() > 0:
                 logger.info(
-                    f'Found {len(sim_params)} matching simulation parameter records in database, using most recent.')
+                    f'Found {sim_params.count()} matching simulation parameter records in database, using most recent.')
                 sim_params = sim_params[0]
                 logger.info(f'Loaded simulation parameters id={sim_params.id}.')
             else:
@@ -231,7 +234,9 @@ class Manager:
             N=self.sim_params.worm_length,
             dt=self.sim_params.dt,
             batch_size=self.optimiser_args.batch_size,
-            material_parameters=self.sim_params.get_material_parameters(),
+            **self.optimiser_args.get_mp_opt_flags('optimise_MP_'),
+            optimise_F0=self.optimiser_args.optimise_F0,
+            optimise_CS=self.optimiser_args.optimise_CS,
             reg_weights=self.regularisation_args.get_reg_weights(),
             inverse_opt_max_iter=self.optimiser_args.inverse_opt_max_iter,
             inverse_opt_tol=self.optimiser_args.inverse_opt_tol,
@@ -247,6 +252,13 @@ class Manager:
         """
         bs = self.optimiser_args.batch_size
 
+        # Generate optimisable material parameters
+        MP = MaterialParametersTorch(**self.simulation_args.get_mp_dict())
+        MP = MaterialParametersBatchTorch.from_list(
+            batch=[MP] * bs,
+            **self.optimiser_args.get_mp_opt_flags('optimise_')
+        )
+
         # Generate optimisable initial frame, using known x0 and an estimate of psi0
         F0 = FrameBatchTorch(
             x=expand_tensor(self.FS_target[0].x, bs),
@@ -255,25 +267,46 @@ class Manager:
             batch_size=bs
         )
 
+        # Build control gates
+        gates = {}
+        gate_arg_keys = ['block', 'grad_up', 'offset_up', 'grad_down', 'offset_down']
+        for k in CONTROL_KEYS:
+            gate_args = {
+                gak: getattr(self.simulation_args, f'{k}_gate_{gak}')
+                for gak in gate_arg_keys
+            }
+            if any([v is not None for v in gate_args.values()]):
+                gates[f'{k}_gate'] = ControlGateTorch(N=self.sim_params.worm_length, **gate_args)
+
         # Generate optimisable control sequence
         CS = ControlSequenceBatchTorch(
             worm=self.worm.worm_solver,
             n_timesteps=self.FS_target.x.shape[0],
             optimise=self.optimiser_args.optimise_CS,
-            batch_size=bs
+            batch_size=bs,
+            **gates
         )
 
         # Add some noise
         with torch.no_grad():
-            if self.optimiser_args.init_noise_std_psi0 > 0:
-                F0.psi += torch.normal(torch.zeros_like(F0.psi), std=self.optimiser_args.init_noise_std_psi0)
-            for abg in CONTROL_KEYS:
-                std = getattr(self.optimiser_args, f'init_noise_std_{abg}')
-                if std > 0:
-                    v = getattr(CS, abg)
-                    v.data += torch.normal(torch.zeros_like(v), std=self.optimiser_args.init_noise_std_alpha)
+            for k in MP_KEYS:
+                opt_mp = getattr(self.optimiser_args, f'optimise_MP_{k}')
+                std = getattr(self.optimiser_args, f'init_noise_std_{k}')
+                if opt_mp and std > 0:
+                    v = getattr(MP, k)
+                    v.data += torch.normal(torch.zeros_like(v), std=std)
 
-        return F0, CS
+            if self.optimiser_args.optimise_F0 and self.optimiser_args.init_noise_std_psi0 > 0:
+                F0.psi += torch.normal(torch.zeros_like(F0.psi), std=self.optimiser_args.init_noise_std_psi0)
+
+            if self.optimiser_args.optimise_CS:
+                for abg in CONTROL_KEYS:
+                    std = getattr(self.optimiser_args, f'init_noise_std_{abg}')
+                    if std > 0:
+                        v = getattr(CS, abg)
+                        v.data += torch.normal(torch.zeros_like(v), std=std)
+
+        return MP, F0, CS
 
     def _init_checkpoint(self):
         """
@@ -339,6 +372,15 @@ class Manager:
             if runs.count() != self.optimiser_args.batch_size:
                 raise RuntimeError(f'Number of runs matching checkpoint "{prev_checkpoint.id}" ({runs.count()}) '
                                    f'not equal to batch size ({self.optimiser_args.batch_size}). Unable to resume.')
+
+            self.MP = MaterialParametersBatchTorch.from_list(
+                batch=[
+                    run.MP.get_material_parameters()
+                    for run in runs
+                ],
+                **self.optimiser_args.get_mp_opt_flags(prefix='optimise_')
+            )
+
             self.F0 = FrameBatchTorch.from_list([
                 FrameTorch(
                     x=torch.from_numpy(run.F0.x),
@@ -346,6 +388,7 @@ class Manager:
                 )
                 for run in runs
             ], optimise=self.optimiser_args.optimise_F0)
+
             self.CS = ControlSequenceBatchTorch.from_list([
                 ControlSequenceTorch(
                     alpha=torch.from_numpy(run.CS.alpha),
@@ -354,6 +397,7 @@ class Manager:
                 )
                 for run in runs
             ], optimise=self.optimiser_args.optimise_CS)
+
             logger.info(f'Loaded batch state from {runs.count()} runs.')
 
         # ..or start a new checkpoint
@@ -407,6 +451,13 @@ class Manager:
             run.loss_data = L[idx].data
             run.loss_reg = L[idx].reg
             run.reg_losses = L[idx].reg_losses_unweighted
+            run.MP = SwMaterialParameters()
+            run.MP.K = float(self.MP[idx].K)
+            run.MP.K_rot = float(self.MP[idx].K_rot)
+            run.MP.A = float(self.MP[idx].A)
+            run.MP.B = float(self.MP[idx].B)
+            run.MP.C = float(self.MP[idx].C)
+            run.MP.D = float(self.MP[idx].D)
             run.F0 = SwFrameSequence()
             run.F0.x = to_numpy(self.F0[idx].x)
             run.F0.psi = to_numpy(self.F0[idx].psi)
@@ -462,7 +513,8 @@ class Manager:
 
         # Forward simulation
         logger.info('Simulating...')
-        FS, L, F0_opt, CS_opt, FS_opt, L_opt = self.worm.forward(
+        FS, L, MP_opt, F0_opt, CS_opt, FS_opt, L_opt = self.worm.forward(
+            MP=self.MP,
             F0=self.F0,
             CS=self.CS,
             calculate_inverse=True,
@@ -474,7 +526,10 @@ class Manager:
         self.FS_outs.append(FS_opt)
         self.FS_labels.append(f'X_{self.checkpoint.step}')
 
-        # Update F0 and CS to the found optimals
+        # Update MP, F0 and CS to the found optimals
+        for k in MP_KEYS:
+            if getattr(self.optimiser_args, f'optimise_MP_{k}'):
+                setattr(self.MP, k, getattr(MP_opt, k))
         if self.optimiser_args.optimise_F0:
             self.F0 = F0_opt
         if self.optimiser_args.optimise_CS:
@@ -577,7 +632,8 @@ class Manager:
                 self._plot_X(idx)
                 self._plot_F0_components(idx)
                 self._plot_F0_3d(idx)
-                self._plot_CS(idx)
+                # self._plot_CS(idx)
+                self._plot_CS_vs_output(idx)
             self._plot_pca()
 
         if final_step or (
@@ -620,8 +676,20 @@ class Manager:
         """
         Plot the control sequences as matrices.
         """
-        fig = plot_CS(CS=self.CS[idx].to_numpy())
+        fig = plot_CS(CS=self.CS[idx].to_numpy(), dt=self.sim_params.dt)
         self._save_plot(fig, f'CS/{idx:03d}')
+
+    def _plot_CS_vs_output(self, idx: int):
+        """
+        Plot the control sequences as matrices.
+        """
+        fig = plot_CS_vs_output(
+            CS=self.CS[idx].to_numpy(),
+            FS=self.FS_out[idx].to_numpy(),
+            dt=self.sim_params.dt,
+            show_ungated=True
+        )
+        self._save_plot(fig, f'CS_vs_out/{idx:03d}')
 
     def _plot_FS_3d(self, idx: int):
         fig = plot_FS_3d(

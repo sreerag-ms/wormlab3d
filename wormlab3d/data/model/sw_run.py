@@ -5,9 +5,30 @@ import numpy as np
 from mongoengine import *
 
 from simple_worm.controls import CONTROL_KEYS
+from simple_worm.material_parameters import MaterialParameters
+from simple_worm.material_parameters_torch import MaterialParametersTorch
 from wormlab3d import logger
 from wormlab3d.data.numpy_field import NumpyField, COMPRESS_BLOSC_PACK
 from wormlab3d.data.triplet_field import TripletField
+
+
+class SwMaterialParameters(EmbeddedDocument):
+    K = FloatField(required=True)
+    K_rot = FloatField(required=True)
+    A = FloatField(required=True)
+    B = FloatField(required=True)
+    C = FloatField(required=True)
+    D = FloatField(required=True)
+
+    def get_material_parameters(self) -> MaterialParameters:
+        return MaterialParametersTorch(
+            K=self.K,
+            K_rot=self.K_rot,
+            A=self.A,
+            B=self.B,
+            C=self.C,
+            D=self.D
+        )
 
 
 class SwFrameSequence(EmbeddedDocument):
@@ -34,6 +55,9 @@ class SwRun(Document):
     loss_reg = FloatField()
     reg_losses = DictField()
 
+    # Material parameters
+    MP = EmbeddedDocumentField(SwMaterialParameters, required=True)
+
     # Initial midline position and orientation
     F0 = EmbeddedDocumentField(SwFrameSequence, required=True)
 
@@ -47,7 +71,7 @@ class SwRun(Document):
     X_projections = ListField(TripletField(NumpyField(dtype=np.float32, compression=COMPRESS_BLOSC_PACK)))
 
     meta = {
-        'indexes': ['sim_params', 'frame_sequence'],
+        'indexes': ['sim_params', 'frame_sequence', 'created'],
         'ordering': ['-created'],
     }
 

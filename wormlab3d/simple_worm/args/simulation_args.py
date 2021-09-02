@@ -2,6 +2,7 @@ from argparse import ArgumentParser, _ArgumentGroup
 from typing import Union, Dict
 
 from wormlab3d.nn.args.base_args import BaseArgs
+from wormlab3d.toolkit.util import str2bool
 
 
 class SimulationArgs(BaseArgs):
@@ -17,6 +18,21 @@ class SimulationArgs(BaseArgs):
             B: float = 0.,
             C: float = 1.,
             D: float = 0.,
+            alpha_gate_block: bool = None,
+            alpha_gate_grad_up: float = None,
+            alpha_gate_offset_up: float = None,
+            alpha_gate_grad_down: float = None,
+            alpha_gate_offset_down: float = None,
+            beta_gate_block: bool = None,
+            beta_gate_grad_up: float = None,
+            beta_gate_offset_up: float = None,
+            beta_gate_grad_down: float = None,
+            beta_gate_offset_down: float = None,
+            gamma_gate_block: bool = None,
+            gamma_gate_grad_up: float = None,
+            gamma_gate_offset_up: float = None,
+            gamma_gate_grad_down: float = None,
+            gamma_gate_offset_down: float = None,
             **kwargs
     ):
         if sim_id is None:
@@ -39,6 +55,23 @@ class SimulationArgs(BaseArgs):
         self.B = B
         self.C = C
         self.D = D
+
+        # Control gates
+        self.alpha_gate_block = alpha_gate_block
+        self.alpha_gate_grad_up = alpha_gate_grad_up
+        self.alpha_gate_offset_up = alpha_gate_offset_up
+        self.alpha_gate_grad_down = alpha_gate_grad_down
+        self.alpha_gate_offset_down = alpha_gate_offset_down
+        self.beta_gate_block = beta_gate_block
+        self.beta_gate_grad_up = beta_gate_grad_up
+        self.beta_gate_offset_up = beta_gate_offset_up
+        self.beta_gate_grad_down = beta_gate_grad_down
+        self.beta_gate_offset_down = beta_gate_offset_down
+        self.gamma_gate_block = gamma_gate_block
+        self.gamma_gate_grad_up = gamma_gate_grad_up
+        self.gamma_gate_offset_up = gamma_gate_offset_up
+        self.gamma_gate_grad_down = gamma_gate_grad_down
+        self.gamma_gate_offset_down = gamma_gate_offset_down
 
     @classmethod
     def add_args(cls, parser: ArgumentParser) -> _ArgumentGroup:
@@ -66,6 +99,36 @@ class SimulationArgs(BaseArgs):
                            help='The twisting modulus (default=1).')
         group.add_argument('--D', type=float, default=0.,
                            help='The twisting viscosity (default=0).')
+        group.add_argument('--alpha-gate-block', type=str2bool, default=None,
+                           help='Block alpha controls completely.')
+        group.add_argument('--alpha-gate-grad-up', type=float, default=None,
+                           help='Alpha control gate steepness of turning on (head-to-tail).')
+        group.add_argument('--alpha-gate-offset-up', type=float, default=None,
+                           help='Alpha control gate offset for turning on (0=head, 1=tail).')
+        group.add_argument('--alpha-gate-grad-down', type=float, default=None,
+                           help='Alpha control gate steepness of turning off (head-to-tail).')
+        group.add_argument('--alpha-gate-offset-down', type=float, default=None,
+                           help='Alpha control gate offset for turning off (0=head, 1=tail).')
+        group.add_argument('--beta-gate-block', type=str2bool, default=None,
+                           help='Block beta controls completely.')
+        group.add_argument('--beta-gate-grad-up', type=float, default=None,
+                           help='Beta control gate steepness of turning on (head-to-tail).')
+        group.add_argument('--beta-gate-offset-up', type=float, default=None,
+                           help='Beta control gate offset for turning on (0=head, 1=tail).')
+        group.add_argument('--beta-gate-grad-down', type=float, default=None,
+                           help='Beta control gate steepness of turning off (head-to-tail).')
+        group.add_argument('--beta-gate-offset-down', type=float, default=None,
+                           help='Beta control gate offset for turning off (0=head, 1=tail).')
+        group.add_argument('--gamma-gate-block', type=str2bool, default=None,
+                           help='Block gamma controls completely.')
+        group.add_argument('--gamma-gate-grad-up', type=float, default=None,
+                           help='Gamma control gate steepness of turning on (head-to-tail).')
+        group.add_argument('--gamma-gate-offset-up', type=float, default=None,
+                           help='Gamma control gate offset for turning on (0=head, 1=tail).')
+        group.add_argument('--gamma-gate-grad-down', type=float, default=None,
+                           help='Gamma control gate steepness of turning off (head-to-tail).')
+        group.add_argument('--gamma-gate-offset-down', type=float, default=None,
+                           help='Gamma control gate offset for turning off (0=head, 1=tail).')
         return group
 
     def get_config_dict(self) -> Dict[str, Union[int, float]]:
@@ -73,6 +136,41 @@ class SimulationArgs(BaseArgs):
             'worm_length': self.worm_length,
             'duration': self.duration,
             'dt': self.dt,
+            'gates': {
+                'alpha': {
+                    'block': self.alpha_gate_block,
+                    'grad_up': self.alpha_gate_grad_up,
+                    'offset_up': self.alpha_gate_offset_up,
+                    'grad_down': self.alpha_gate_grad_down,
+                    'offset_down': self.alpha_gate_offset_down,
+                },
+                'beta': {
+                    'block': self.beta_gate_block,
+                    'grad_up': self.beta_gate_grad_up,
+                    'offset_up': self.beta_gate_offset_up,
+                    'grad_down': self.beta_gate_grad_down,
+                    'offset_down': self.beta_gate_offset_down,
+                },
+                'gamma': {
+                    'block': self.gamma_gate_block,
+                    'grad_up': self.gamma_gate_grad_up,
+                    'offset_up': self.gamma_gate_offset_up,
+                    'grad_down': self.gamma_gate_grad_down,
+                    'offset_down': self.gamma_gate_offset_down,
+                }
+            },
+
+            # Explicitly set MPs to None here
+            'K': None,
+            'K_rot': None,
+            'A': None,
+            'B': None,
+            'C': None,
+            'D': None,
+        }
+
+    def get_mp_dict(self) -> Dict[str, Union[int, float]]:
+        return {
             'K': self.K,
             'K_rot': self.K_rot,
             'A': self.A,
