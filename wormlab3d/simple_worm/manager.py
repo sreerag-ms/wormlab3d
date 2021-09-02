@@ -2,8 +2,9 @@ import math
 import os
 import shutil
 import time
+from collections import OrderedDict
 from datetime import timedelta
-from typing import Tuple, List
+from typing import Tuple, Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,7 +25,7 @@ from simple_worm.losses_torch import LossesTorch
 from simple_worm.material_parameters import MP_KEYS
 from simple_worm.material_parameters_torch import MaterialParametersTorch, MaterialParametersBatchTorch
 from simple_worm.plot3d import plot_X_vs_target, plot_FS_3d, generate_scatter_diff_clip, plot_CS, plot_frame_3d, \
-    plot_frame_components, plot_CS_vs_output
+    plot_frame_components, plot_CS_vs_output, plot_gates
 from simple_worm.util_torch import expand_tensor
 from simple_worm.worm_torch import WormModule
 from wormlab3d import LOGS_PATH, logger
@@ -72,8 +73,7 @@ class Manager:
 
         # Outputs
         self.FS_out: FrameSequenceTorch
-        self.FS_outs: List[FrameSequenceTorch] = []
-        self.FS_labels: List[str] = []
+        self.MP_log: Dict[int, MaterialParametersBatchTorch] = OrderedDict()
 
     @property
     def logs_path(self) -> str:
@@ -246,7 +246,7 @@ class Manager:
         )
         return worm
 
-    def _init_params(self) -> Tuple[FrameTorch, ControlSequenceTorch]:
+    def _init_params(self) -> Tuple[MaterialParametersBatchTorch, FrameBatchTorch, ControlSequenceBatchTorch]:
         """
         Initialise the optimisable initial frame and control sequence.
         """
@@ -521,11 +521,6 @@ class Manager:
             FS_target=FS_target_batch
         )
 
-        # Update the inputs/outputs to the found optimals
-        self.FS_out = FS_opt
-        self.FS_outs.append(FS_opt)
-        self.FS_labels.append(f'X_{self.checkpoint.step}')
-
         # Update MP, F0 and CS to the found optimals
         for k in MP_KEYS:
             if getattr(self.optimiser_args, f'optimise_MP_{k}'):
@@ -534,6 +529,10 @@ class Manager:
             self.F0 = F0_opt
         if self.optimiser_args.optimise_CS:
             self.CS = CS_opt
+
+        # Log the output
+        self.FS_out = FS_opt
+        self.MP_log[self.checkpoint.step] = self.MP.clone()
 
         # Increment step counter
         self.checkpoint.step += 1
@@ -621,6 +620,7 @@ class Manager:
                 self._plot_F0_components(idx)
                 self._plot_F0_3d(idx)
                 self._plot_CS(idx)
+            self._plot_gates()
             self._plot_pca()
             return
 
@@ -634,6 +634,7 @@ class Manager:
                 self._plot_F0_3d(idx)
                 # self._plot_CS(idx)
                 self._plot_CS_vs_output(idx)
+            self._plot_MPs()
             self._plot_pca()
 
         if final_step or (
@@ -643,6 +644,18 @@ class Manager:
             for idx in idxs:
                 # self._plot_FS_3d(idx)
                 self._make_diff_vids(idx)
+
+    def _plot_gates(self):
+        """
+        Plot the control gates. These are the same across the batch and fixed for the duration.
+        """
+        fig = plot_gates(self.CS)
+
+        # Save plot regardless of setting and don't use tensorboard
+        save_dir = self.logs_path + f'/plots'
+        path = save_dir + f'/gates.svg'
+        plt.savefig(path, bbox_inches='tight')
+        plt.close(fig)
 
     def _plot_X(self, idx: int):
         """
@@ -748,6 +761,33 @@ class Manager:
 
         fig.tight_layout()
         self._save_plot(fig, 'PCA')
+
+    def _plot_MPs(self):
+        """
+        Plot the material parameters values over iterations.
+        """
+        bs = self.optimiser_args.batch_size
+        fig, axes = plt.subplots(2, 3, figsize=(12, 10), sharex=True)
+        row1_keys = ['K', 'A', 'B']
+        row2_keys = ['K_rot', 'C', 'D']
+        steps = list(self.MP_log.keys())
+
+        for row_idx, row_keys in enumerate([row1_keys, row2_keys]):
+            for col_idx, k in enumerate(row_keys):
+                ax = axes[row_idx, col_idx]
+                is_opt = getattr(self.optimiser_args, f'optimise_MP_{k}')
+                ax.set_title(k + (' (optimising)' if is_opt else ''))
+                initial_val = getattr(self.simulation_args, k)
+                ax.axhline(y=initial_val, linestyle=':', alpha=0.5, color='grey')
+                batch_vals = np.stack([
+                    getattr(MP, k)
+                    for _, MP in self.MP_log.items()
+                ])
+                for i in range(bs):
+                    ax.plot(steps, batch_vals[:, i], alpha=0.7)
+
+        fig.tight_layout()
+        self._save_plot(fig, 'MPs')
 
     def _save_plot(self, fig: Figure, plot_type: str):
         """
