@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-
+import numpy as np
 from wormlab3d import logger, CAMERA_IDXS
 from wormlab3d.data.model import SegmentationMasks
 from wormlab3d.data.model.trial import Trial
@@ -32,11 +32,15 @@ def plot_segmentation_masks(
             raise RuntimeError('Either a mask, frame or trial id must be specified.')
 
         masks = SegmentationMasks.objects(**filters)
-        if masks.count() > 0:
-            logger.info(f'Found {len(masks)} in database, using most recent.')
-            masks = masks.first()
+        if masks.count() > 1:
+            logger.info(f'Found {len(masks)} in database, picking at random.')
+            masks = masks[np.random.randint(masks.count())]
+        elif masks.count() > 0:
+            logger.info(f'Found {len(masks)} in database.')
+            masks = masks[0]
         else:
             raise RuntimeError('No masks found in database!')
+        logger.info(f'Loaded mask id = {masks.id}.')
 
     trial = masks.trial
     frame = masks.frame
@@ -72,7 +76,7 @@ def plot_segmentation_masks(
 
 if __name__ == '__main__':
     plot_segmentation_masks(
-        masks_id='607ff754f782c04c8abd026d',
-        # trial_id=1,
+        # masks_id='607ff754f782c04c8abd026d',
+        trial_id=3,
         # frame_num=3343,
     )
