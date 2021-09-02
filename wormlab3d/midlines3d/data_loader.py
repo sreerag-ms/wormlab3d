@@ -11,7 +11,7 @@ from wormlab3d import logger, DATASET_CACHE_PATH, PREPARED_IMAGE_SIZE
 from wormlab3d.data.model import SegmentationMasks, Frame
 from wormlab3d.data.model.dataset import DatasetSegmentationMasks
 from wormlab3d.midlines3d.args import DatasetSegmentationMasksArgs
-from wormlab3d.nn.data_loader import DatasetLoader, make_data_loader
+from wormlab3d.nn.data_loader import DatasetLoader, make_data_loader, get_affine_transforms, get_image_transforms
 from wormlab3d.toolkit.util import hash_data
 
 
@@ -29,6 +29,8 @@ class DatasetSegmentationMasksLoader(DatasetLoader):
         self.cam_coeffs = ds.get_camera_coefficients(tt=train_or_test)
         self.points_3d = ds.get_points_3d(tt=train_or_test)
         self.points_2d = ds.get_points_2d(tt=train_or_test)
+        self.affine_transforms = None
+        self.image_transforms = None
         super().__init__(ds, ds_args, train_or_test)
 
     def _preload_data(self):
@@ -125,6 +127,12 @@ class DatasetSegmentationMasksLoader(DatasetLoader):
 
         images = torch.from_numpy(np.array(images).copy()).contiguous().to(torch.float32)
 
+        # Image transforms are only applied to the image
+        if self.image_transforms is not None:
+            images[0] = self.image_transforms(images[0].unsqueeze(0)).squeeze()
+            images[1] = self.image_transforms(images[1].unsqueeze(0)).squeeze()
+            images[2] = self.image_transforms(images[2].unsqueeze(0)).squeeze()
+
         # Convert mask to torch tensor and normalise
         X = torch.from_numpy(X.copy()).contiguous().to(torch.float32)
         X_maxs = torch.amax(X, dim=(1, 2), keepdim=True)
@@ -137,6 +145,13 @@ class DatasetSegmentationMasksLoader(DatasetLoader):
         )
 
         return images, X, mask_id, coeffs, points_3d_base, points_2d_base
+
+    def _get_transforms(self):
+        if not self.augment:
+            return
+
+        # These are applied to the image only for use in d0
+        self.image_transforms = get_image_transforms()
 
 
 def gauss_test(size, sigma):
