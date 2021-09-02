@@ -10,7 +10,6 @@ from mongoengine import DoesNotExist
 from torch import Tensor, autograd
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
-
 from wormlab3d import PREPARED_IMAGE_SIZE, CAMERA_IDXS, logger
 from wormlab3d.data.model import SegmentationMasks, NetworkParameters
 from wormlab3d.data.model.network_parameters import NetworkParametersRotAE
@@ -342,10 +341,7 @@ class ManagerRotAE(BaseManager):
 
         data = {
             'model_state_dict': self.net.state_dict(),
-            'd0_state_dict': self.d0_net.state_dict(),
-            'd2d_state_dict': self.d2d_net.state_dict(),
             'optimiser_state_dict': self.optimiser.state_dict(),
-            'optimiser_d2d_state_dict': self.optimiser_d2d.state_dict(),
         }
 
         if self.net_args.use_d0:
@@ -453,12 +449,12 @@ class ManagerRotAE(BaseManager):
                 fake_acc = ((fake_pred_X1 < 0).sum() + (fake_pred_Y1 < 0).sum()) / (bs * 3 * 2)
                 mean_acc = (real_acc + fake_acc) / 2
                 acc_diff = (real_acc - fake_acc)**2
-                self.tb_logger.add_scalar('d2d/acc/real', real_acc, self.checkpoint.step)
-                self.tb_logger.add_scalar('d2d/acc/fake', fake_acc, self.checkpoint.step)
-                self.tb_logger.add_scalar('d2d/acc/mean', mean_acc, self.checkpoint.step)
-                d_acc_ema = self.ema(f'd2d/acc.{D2D_EMA_RATE}', mean_acc)
+                self.tb_logger.add_scalar('d2d/acc/real', real_acc.item(), self.checkpoint.step)
+                self.tb_logger.add_scalar('d2d/acc/fake', fake_acc.item(), self.checkpoint.step)
+                self.tb_logger.add_scalar('d2d/acc/mean', mean_acc.item(), self.checkpoint.step)
+                d_acc_ema = self.ema(f'd2d/acc.{D2D_EMA_RATE}', mean_acc.item())
                 self.tb_logger.add_scalar(f'd2d/acc.{D2D_EMA_RATE}', d_acc_ema, self.checkpoint.step)
-                d_acc_diff_ema = self.ema(f'd2d/acc_diff.{D2D_EMA_RATE}', acc_diff)
+                d_acc_diff_ema = self.ema(f'd2d/acc_diff.{D2D_EMA_RATE}', acc_diff.item())
                 self.tb_logger.add_scalar(f'd2d/acc_diff.{D2D_EMA_RATE}', d_acc_diff_ema, self.checkpoint.step)
                 self.tb_logger.add_scalar(f'd2d/T.{D2D_EMA_RATE}', d_acc_ema - d_acc_diff_ema - threshold,
                                           self.checkpoint.step)
@@ -472,25 +468,25 @@ class ManagerRotAE(BaseManager):
                     real_pred, X1_real, real_grad_out, create_graph=True, retain_graph=True, only_inputs=True
                 )[0]
                 real_grad_norm = real_grad.view(bs * 3, -1).pow(2).sum(dim=1)**(p / 2)
-                self.tb_logger.add_scalar(f'd2d_w/real_grad_norm', real_grad_norm.mean(), self.checkpoint.step)
+                self.tb_logger.add_scalar(f'd2d_w/real_grad_norm', real_grad_norm.mean().item(), self.checkpoint.step)
 
                 fake_grad_out = torch.ones((bs * 3, 1), device=self.device)
                 fake_grad = autograd.grad(
                     fake_pred_X1, X1_fake, fake_grad_out, create_graph=True, retain_graph=True, only_inputs=True
                 )[0]
                 fake_grad_norm = fake_grad.view(bs * 3, -1).pow(2).sum(dim=1)**(p / 2)
-                self.tb_logger.add_scalar(f'd2d_w/fake_grad_norm', fake_grad_norm.mean(), self.checkpoint.step)
+                self.tb_logger.add_scalar(f'd2d_w/fake_grad_norm', fake_grad_norm.mean().item(), self.checkpoint.step)
 
                 div_gp = torch.mean(real_grad_norm + fake_grad_norm) * k / 2
-                self.tb_logger.add_scalar(f'd2d_w/div_gp', div_gp, self.checkpoint.step)
+                self.tb_logger.add_scalar(f'd2d_w/div_gp', div_gp.item(), self.checkpoint.step)
 
                 # Balance using a bias estimate
                 real_pred_mean = torch.mean(real_pred)
                 fake_pred_mean = torch.mean(fake_pred_X1 + fake_pred_Y1)
                 bias = real_pred_mean + fake_pred_mean
-                self.tb_logger.add_scalar(f'd2d_w/bias', bias, self.checkpoint.step)
+                self.tb_logger.add_scalar(f'd2d_w/bias', bias.item(), self.checkpoint.step)
                 bias2 = bias**2
-                self.tb_logger.add_scalar(f'd2d_w/bias2', bias2, self.checkpoint.step)
+                self.tb_logger.add_scalar(f'd2d_w/bias2', bias2.item(), self.checkpoint.step)
                 bias2_ema = self.ema(f'd2d/bias2.{D2D_EMA_RATE}', bias2)
                 self.tb_logger.add_scalar(f'd2d_w/bias2.{D2D_EMA_RATE}', bias2_ema, self.checkpoint.step)
 
@@ -507,7 +503,6 @@ class ManagerRotAE(BaseManager):
                 logger.debug(f'Training d2d step {step} Loss: {d_loss:.5f} EMA: {d_acc_ema:.5f}')
                 d_loss.backward()
                 self.optimiser_d2d.step()
-                self.checkpoint.step += 1
                 step += 1
             self.tb_logger.add_scalar('d2d/train_steps', step, self.checkpoint.step)
 
@@ -556,13 +551,12 @@ class ManagerRotAE(BaseManager):
         Calculate losses
         """
         stats = {}
+        total_loss = 0
 
         def mse(pred, target):
             loss = F.mse_loss(pred, target, reduction='sum')
             loss = loss / len(pred)  # return loss per-datum so different batch sizes can be compared
             return loss
-
-        total_loss = 0
 
         def _avg_pool_2d(X_, oob_val=0.):
             # Average pooling with overlap and boundary values
@@ -571,7 +565,7 @@ class ManagerRotAE(BaseManager):
             return ag
 
         def _avg_surface_2d(X_: torch.Tensor):
-            G = -X_
+            G = X_
             GS = [G]
             g = G
             while g.shape[-1] > 1:
@@ -587,14 +581,19 @@ class ManagerRotAE(BaseManager):
 
             return G_avg
 
-        # X0a = _avg_surface_2d(X0)
-        # W0a = _avg_surface_2d(W0)
-        # Y0a = _avg_surface_2d(Y0)
+        X0a = _avg_surface_2d(X0)
+        W0a = _avg_surface_2d(W0)
+        Y0a = _avg_surface_2d(Y0)
+        rXW = X0a.sum(dim=(2, 3), keepdim=True) / W0a.sum(dim=(2, 3), keepdim=True)
+        rXY = X0a.sum(dim=(2, 3), keepdim=True) / Y0a.sum(dim=(2, 3), keepdim=True)
+        W0a = W0a * rXW
+        Y0a = Y0a * rXY
 
-        for k, (pred, target) in {'masks': [X0, Y0], 'masks_coords': [X0, W0], 'c2d': [X1, Y1],
+        # for k, (pred, target) in {'masks': [X0, Y0], 'masks_coords': [X0, W0], 'c2d': [X1, Y1],
+        #                           'c3d': [X2, Y2]}.items():
+        # for k, (pred, target) in {'masks': [X0a, Y0], 'masks_coords': [X0a, W0], 'c2d': [X1, Y1], 'c3d': [X2, Y2]}.items():
+        for k, (pred, target) in {'masks': [X0a, Y0a], 'masks_coords': [X0a, W0a], 'c2d': [X1, Y1],
                                   'c3d': [X2, Y2]}.items():
-            # for k, (pred, target) in {'masks': [X0a, Y0], 'masks_coords': [X0a, W0], 'c2d': [X1, Y1], 'c3d': [X2, Y2]}.items():
-            # for k, (pred, target) in {'masks': [X0a, Y0a], 'masks_coords': [X0a, W0a], 'c2d': [X1, Y1], 'c3d': [X2, Y2]}.items():
             loss = mse(pred, target)
             stats[f'MSE_{k}'] = loss
             w = getattr(self.optimiser_args, f'w_{k}')
@@ -660,6 +659,8 @@ class ManagerRotAE(BaseManager):
                 (self.runtime_args.plot_every_n_batches > -1
                  and (self.checkpoint.step + 1) % self.runtime_args.plot_every_n_batches == 0)
         ):
+            logger.debug('Plotting')
+
             # Select the idxs to plot
             n_examples = min(self.runtime_args.plot_n_examples, self.runtime_args.batch_size)
             idxs = np.random.choice(self.runtime_args.batch_size, n_examples, replace=False)
@@ -674,7 +675,7 @@ class ManagerRotAE(BaseManager):
                 masks_docs[idx] = SegmentationMasks.objects.get(id=mask_ids[idx])
 
             # Make plots
-            self._plot_masks(X0, W0, Y0, X1, Y1, masks_docs, train_or_test, idxs)
+            self._plot_masks(images, X0, W0, Y0, X1, Y1, masks_docs, train_or_test, idxs)
             self._plot_3d_midlines(X2, Y2, masks_docs, train_or_test, idxs)
 
             # Remove database references to free up memory
@@ -757,6 +758,7 @@ class ManagerRotAE(BaseManager):
 
     def _plot_masks(
             self,
+            images_aug: Tensor,
             X0: Tensor,
             W0: Tensor,
             Y0: Tensor,
@@ -769,7 +771,8 @@ class ManagerRotAE(BaseManager):
         """
         Plot the segmentation masks and squared errors.
         """
-        X0, W0, Y0, X1, Y1 = to_numpy(X0), to_numpy(W0), to_numpy(Y0), to_numpy(X1), to_numpy(Y1)
+        images_aug, X0, W0, Y0, X1, Y1 = to_numpy(images_aug), to_numpy(X0), to_numpy(W0), to_numpy(Y0), to_numpy(
+            X1), to_numpy(Y1)
 
         # Colourmap / facecolors
         cmap = plt.cm.get_cmap('plasma')
@@ -816,6 +819,7 @@ class ManagerRotAE(BaseManager):
 
             # Stitch images and masks together
             image_triplet = np.concatenate(images, axis=1)
+            image_aug_triplet = np.concatenate(images_aug[idx], axis=1)
             X0_triplet = np.concatenate(X0[idx], axis=1)
             W0_triplet = np.concatenate(W0[idx], axis=1)
             Y0_triplet = np.concatenate(Y0[idx], axis=1)
@@ -831,7 +835,7 @@ class ManagerRotAE(BaseManager):
                 f'Frame: {mask_doc.frame.frame_num} (id={mask_doc.frame.id})\n'
             )
 
-            ax.imshow(image_triplet, vmin=0, vmax=1, cmap='gray', aspect='auto')
+            ax.imshow(image_aug_triplet, vmin=0, vmax=1, cmap='gray', aspect='auto')
             alphas = X0_triplet.copy()
             alphas[alphas < 0.1] = 0
             alphas[alphas > 0.2] = 1
@@ -849,10 +853,10 @@ class ManagerRotAE(BaseManager):
             ax.imshow(W0_triplet, vmin=0, vmax=1, cmap='Reds', aspect='equal', alpha=alphas)
             ax.axis('off')
             for c in CAMERA_IDXS:
-                p2d = X1[idx][2 * c:2 * c + 2].T
-                p2d = p2d + np.array([100., 100.])
-                p2d[:, 0] += c * 200
-                ax.scatter(p2d[:, 0], p2d[:, 1], **p2d_opts)
+                p2d = X1[idx][2 * c:2 * c + 2]
+                p2d = p2d + np.array([[100.], [100.]])
+                p2d[0] += c * 200
+                ax.scatter(p2d[0], p2d[1], **p2d_opts)
             if i == 0:
                 ax.text(-0.05, 0.1, '$X_1$', transform=ax.transAxes, rotation='vertical')
             ax.axis('off')
@@ -875,10 +879,10 @@ class ManagerRotAE(BaseManager):
             alphas[alphas > 0.6] = 0.8
             ax.imshow(Y0_triplet, vmin=0, vmax=1, cmap='Reds', aspect='equal', alpha=alphas)
             for c in CAMERA_IDXS:
-                p2d = Y1[idx][2 * c:2 * c + 2].T
-                p2d = p2d + np.array([100., 100.])
-                p2d[:, 0] += c * 200
-                ax.scatter(p2d[:, 0], p2d[:, 1], **p2d_opts)
+                p2d = Y1[idx][2 * c:2 * c + 2]
+                p2d = p2d + np.array([[100.], [100.]])
+                p2d[0] += c * 200
+                ax.scatter(p2d[0], p2d[1], **p2d_opts)
             if i == 0:
                 ax.text(-0.05, 0.1, '$Y_1$', transform=ax.transAxes, rotation='vertical')
             ax.axis('off')
