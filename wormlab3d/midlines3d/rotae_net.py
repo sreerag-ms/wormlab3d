@@ -3,7 +3,8 @@ from typing import Tuple
 
 import numpy as np
 import torch
-from torch import nn
+import torch.nn.functional as F
+from torch import nn, autograd
 from torch.distributions import Uniform
 from wormlab3d import PREPARED_IMAGE_SIZE
 from wormlab3d.midlines3d.dynamic_cameras import DynamicCameras, N_CAM_COEFFICIENTS
@@ -61,6 +62,224 @@ def euler_angles_to_matrix(euler_angles, convention: str):
             raise ValueError(f"Invalid letter {letter} in convention string.")
     matrices = map(_axis_angle_rotation, convention, torch.unbind(euler_angles, -1))
     return functools.reduce(torch.matmul, matrices)
+
+
+def render(
+        points_in,
+        size,
+        blur_sigma
+):
+    # Reshape
+    points = points_in.clone()
+
+    bs = points.shape[0]
+    n_worm_points = points.shape[-1]
+
+    points = points.reshape(bs, 3, 2, n_worm_points)
+    points = points.permute(0, 1, 3, 2)
+    points = points.reshape(bs * 3, n_worm_points, 2)
+    points = points.clamp(min=-1, max=1)
+    a = points[:, :-1]
+    b = points[:, 1:]
+
+    def sumprod(x, y, keepdim=True):
+        return torch.sum(x * y, dim=-1, keepdim=keepdim)
+
+    grid = torch.linspace(-1.0, 1.0, size, dtype=torch.float32, device=a.device)
+
+    yv, xv = torch.meshgrid([grid, grid])
+    # 1 x H x W x 2
+    m = torch.cat([xv[..., None], yv[..., None]], dim=-1)[None, None]
+
+    # B x N x 1 x 1 x 2
+    a, b = a[:, :, None, None, :], b[:, :, None, None, :]
+    t_min = sumprod(m - a, b - a) / \
+            torch.max(sumprod(b - a, b - a), torch.tensor(1e-6, device=a.device))
+    t_line = torch.clamp(t_min, 0.0, 1.0)
+
+    # closest points on the line to every image pixel
+    s = a + t_line * (b - a)
+
+    d = sumprod(s - m, s - m, keepdim=False)
+
+    # Blur line
+    d = torch.sqrt(d + 1e-6)
+    d_norm = torch.exp(-d / (blur_sigma**2))
+
+    # Normalise
+    max_d = d_norm.amax(dim=(2, 3), keepdim=True)
+    d_norm = torch.where(max_d <= 0, torch.zeros_like(d), d_norm / max_d)
+
+    # d_norm = d_norm / torch.sum(d_norm, (2, 3), keepdim=True)
+    d_norm = d_norm.sum(dim=1)
+    d_norm = d_norm.clamp(max=1)
+
+    # Reshape back to the triplets
+    d_norm = d_norm.reshape(bs, 3, size, size)
+
+    return d_norm
+
+
+def _avg_pool_2d(X_, oob_val=0.):
+    # Average pooling with overlap and boundary values
+    padded_grad = F.pad(X_, (1, 1, 1, 1), mode='constant', value=oob_val)
+    ag = F.avg_pool2d(input=padded_grad, kernel_size=3, stride=2, padding=0)
+    return ag
+
+
+def _avg_surface_2d(X_: torch.Tensor):
+    G = -X_
+    GS = [G]
+    g = G
+    while g.shape[-1] > 1:
+        g2 = _avg_pool_2d(g, oob_val=0)
+        GS.append(g2)
+        g = g2
+
+    # Got all the grad averages, now add them together and average
+    G_sum = torch.zeros_like(G)
+    for i, g in enumerate(GS):
+        G_sum += F.interpolate(GS[i], PREPARED_IMAGE_SIZE, mode='bilinear', align_corners=False)
+    G_avg = G_sum  # / len(GS)
+
+    return G_avg
+
+
+class RenderFunction(torch.autograd.Function):
+
+    @staticmethod
+    def forward(
+            ctx,
+            points_in,
+            render_target,
+            size,
+            blur_sigma
+    ):
+        # ctx.points_in = points_in
+        # ctx.render_target = render_target
+        # ctx.size = size
+        # ctx.blur_sigma = blur_sigma
+
+        device = points_in.device
+        ctx.save_for_backward(points_in, render_target, torch.tensor(size, device=device), torch.tensor(blur_sigma, device=device))
+
+        render_out = render(points_in, size, blur_sigma)
+
+        return render_out
+
+    @staticmethod
+    def backward(ctx, render_grad):
+        bs = render_grad.shape[0]
+        device = render_grad.device
+        w = render_grad.abs().mean(dim=(2,3))
+        points_in, render_target, size, blur_sigma = ctx.saved_tensors
+        if w.sum() == 0:
+            return torch.zeros_like(points_in), None, None, None
+
+        points_opt = points_in.detach()
+        # blur_sigma = ctx.blur_sigma
+        # blur_sigma = torch.tensor(ctx.blur_sigma, device=device)
+
+        # import matplotlib.pyplot as plt
+        # from matplotlib import cm
+        N = points_opt.shape[-1]
+        # cmap = cm.get_cmap('plasma')
+        # fc = cmap((np.arange(N) + 0.5) / N)
+
+        # points_opt.requires_grad = True
+        n_opt_steps = 10
+        patch_sizes = [5, 11, 23, 47]
+
+        # render_target = ctx.render_target.detach()
+        render_target = -1 * _avg_surface_2d(render_target.detach())
+        # rts = render_target.sum(dim=(2,3))
+
+        for s in range(n_opt_steps):
+            render_out = render(points_opt, size, blur_sigma)
+            render_out = -1 * _avg_surface_2d(render_out)
+
+            # grad_out = (render_out-render_target)**2
+            diff = render_out - render_target
+
+            # find minimum points for each point
+            p2 = torch.round(points_opt * 100 + 100).to(torch.long)
+            p2 = p2.reshape(bs, 3, 2, N)
+            point_targets = torch.zeros_like(p2)
+            for i in range(bs):
+                for j in range(3):
+                    if w[i,j] == 0:
+                        continue
+                    for k in range(N):
+                        best = np.inf
+                        best_loc = torch.tensor([0, 0], device=device)
+                        for p in patch_sizes:
+                            p2a = p2[i, j, :, k]
+
+                            patch = diff[i, j,
+                                    max(0, p2a[1] - p // 2):min(201, p2a[1] + p // 2 + 1),
+                                    max(0, p2a[0] - p // 2):min(201, p2a[0] + p // 2 + 1)]
+                            try:
+                                p_min = patch.min()
+                            except Exception as e:
+                                continue
+
+                            if p_min < best:
+                                best = p_min
+                                rel_pos = (patch == p_min).nonzero()[0] - torch.tensor([p // 2, p // 2], device=device)
+                                best_loc = torch.flip(rel_pos, dims=(0,)) + p2a
+
+                            if best < -0.3:
+                                break
+
+                        point_targets[i, j, :, k] = best_loc
+
+            point_targets_fixed = ((point_targets - 100) / 100).reshape(bs, 6, N)
+            points_grad = points_opt - point_targets_fixed
+            # loss = grad_out.sum()
+
+            # if s % 5 == 0:
+            #     fig, axes = plt.subplots(3, figsize=(7, 12))
+            #
+            #     ax = axes[0]
+            #     ax.imshow(render_target[0,0].detach().numpy())
+            #     ax.set_title('target')
+            #     ax.axis('off')
+            #
+            #     ax = axes[2]
+            #     ax.imshow(render_out[0,0].detach().numpy())
+            #     ax.scatter(points[0,0].detach().numpy()*100+100, points[0,1].detach().numpy()*100+100, s=15, label='orig', c=fc, marker='o')
+            #     ax.scatter(point_targets_fixed[0,0].detach().numpy()*100+100, point_targets_fixed[0,1].detach().numpy()*100+100, s=15, label='targ', c='red', marker='x')
+            #     ax.legend()
+            #     ax.set_title('output')
+            #     ax.axis('off')
+            #
+            #     ax = axes[1]
+            #     ax.imshow(diff[0,0].detach().numpy())
+            #     # plt.imshow(ctx.render_target[0,0].detach().numpy())
+            #     # ax.scatter(points[0,0].detach().numpy()*100+100, points[0,1].detach().numpy()*100+100, s=3, label='pre', c=fc, marker='o')
+            #     ax.axis('off')
+            #     ax.set_title(f'i={s} loss={loss:.3f} sig={blur_sigma:.4f}')
+
+            # Take gradient step
+            points_opt = points_opt.detach() - 1e-1 * points_grad
+
+            # if s % 5 == 0:
+            #     ax.scatter(points[0,0].detach().numpy()*100+100, points[0,1].detach().numpy()*100+100, s=15, label='post', c=fc, marker='+')
+            #     # ax.legend()
+            #     fig.tight_layout()
+            #     plt.show()
+
+        w_exp = torch.repeat_interleave(w, 2, dim=1)
+        points_in_grad = (points_in - points_opt) * w_exp[:, :, None]
+
+        grads = {
+            'points_in': -points_in_grad,
+            'render_target': None,
+            'size': None,
+            'blur_sigma': None
+        }
+
+        return tuple(grads.values())
 
 
 class RotAENet(nn.Module):
@@ -130,11 +349,18 @@ class RotAENet(nn.Module):
 
         # Use c2d network to generate 2D coordinates (X1) and setup adjustments
         c2d_output = self.c2d_net(c2d_input)
-        X1a = c2d_output[:, :3].reshape(bs, 3 * 2, self.n_worm_points)
-        X1 = X1a * X0.shape[-1] / 2
+        X1a = c2d_output[:, :3].reshape(bs, 3 * 2, self.n_worm_points)  # [-1,+1]
+        X1 = X1a * X0.shape[-1] / 2  # [-100,100]
 
         # Render coordinates
-        W0 = self.render(X1 / (X0.shape[-1] / 2) - 1)
+        W0 = self.render(X1 / (X0.shape[-1] / 2))
+        # W0 = render(X1 / (X0.shape[-1] / 2), self.size, self.blur_sigma)
+        # W0 = RenderFunction.apply(
+        #     X1 / (X0.shape[-1] / 2),  # points_in
+        #     X0,
+        #     self.size,
+        #     self.blur_sigma
+        # )
 
         # Update setup
         setup_adj = c2d_output[:, 3:].mean(dim=(2, 3))
@@ -186,7 +412,13 @@ class RotAENet(nn.Module):
         Y1 = Y1c.reshape(bs, 3 * 2, self.n_worm_points)
 
         # Render coordinates to get reconstructed X0
-        Y0 = self.render(Y1 / (X0.shape[-1] / 2) - 1)
+        Y0 = self.render(Y1 / (X0.shape[-1] / 2))  # - 1)
+        # Y0 = RenderFunction.apply(
+        #     Y1 / (X0.shape[-1] / 2),  # points_in
+        #     X0,
+        #     self.size,
+        #     self.blur_sigma
+        # )
 
         return W0, X1, X2, Y0, Y1, Y2
 
