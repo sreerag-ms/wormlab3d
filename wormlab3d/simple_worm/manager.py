@@ -295,6 +295,7 @@ class Manager:
                 if opt_mp and std > 0:
                     v = getattr(MP, k)
                     v.data += torch.normal(torch.zeros_like(v), std=std)
+            MP.clamp()
 
             if self.optimiser_args.optimise_F0 and self.optimiser_args.init_noise_std_psi0 > 0:
                 F0.psi += torch.normal(torch.zeros_like(F0.psi), std=self.optimiser_args.init_noise_std_psi0)
@@ -525,6 +526,7 @@ class Manager:
         for k in MP_KEYS:
             if getattr(self.optimiser_args, f'optimise_MP_{k}'):
                 setattr(self.MP, k, getattr(MP_opt, k))
+        self.MP.clamp()
         if self.optimiser_args.optimise_F0:
             self.F0 = F0_opt
         if self.optimiser_args.optimise_CS:
@@ -616,10 +618,10 @@ class Manager:
 
         # Make initial plots for all batch elements
         if pre_step:
-            for idx in range(bs):
-                self._plot_F0_components(idx)
-                self._plot_F0_3d(idx)
-                self._plot_CS(idx)
+            # for idx in range(bs):
+            #     self._plot_F0_components(idx)
+            #     self._plot_F0_3d(idx)
+            #     self._plot_CS(idx)
             self._plot_gates()
             self._plot_pca()
             return
@@ -631,7 +633,7 @@ class Manager:
             for idx in idxs:
                 self._plot_X(idx)
                 self._plot_F0_components(idx)
-                self._plot_F0_3d(idx)
+                # self._plot_F0_3d(idx)
                 # self._plot_CS(idx)
                 self._plot_CS_vs_output(idx)
             self._plot_MPs()
@@ -780,7 +782,7 @@ class Manager:
                 initial_val = getattr(self.simulation_args, k)
                 ax.axhline(y=initial_val, linestyle=':', alpha=0.5, color='grey')
                 batch_vals = np.stack([
-                    getattr(MP, k)
+                    to_numpy(getattr(MP, k))
                     for _, MP in self.MP_log.items()
                 ])
                 for i in range(bs):
