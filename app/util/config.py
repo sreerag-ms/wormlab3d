@@ -18,13 +18,20 @@ transcode_mime = {
     "jpg": "image/jpg"}
 
 
-ffmpeg_transcode_args_2 = {
-    "*": ["-f", "mp4", "-strict", "experimental", "-preset", "ultrafast", "-movflags", "frag_keyframe+empty_moov+faststart", "pipe:1"],
-    "mp3": ["-f", "mp3", "-codec", "copy", "pipe:1"]}
-
+# Transcoding
 ffmpeg_transcode_args = {
-    "*": " -ss {} -i {} -f {} -vcodec {} -strict experimental -preset ultrafast -movflags frag_keyframe+empty_moov+faststart pipe:1",
-    "mp3": ["-f", "mp3", "-codec", "copy", "pipe:1"]}
+    "*": " -ss {} -i {} -f {} -vcodec {} ",
+    "mp3": " -f mp3 -codex copy "
+}
+
+ffmpeg_screenshot = {
+    "*": " -ss {} -i {} -filter:v {} -frames:v 1 {} "   # ffmpeg -ss 1 -i 100_0.avi -frames:v 1 screenshot.jpg
+}
+
+ffmpeg_common_options = {
+    "*": "-strict experimental -preset ultrafast -movflags frag_keyframe+empty_moov+faststart pipe:1",
+    "mp3": "pipe:1"
+}
 
 ffmpeg_poster_args = ["-f", "mjpeg", "-vf", "scale=512x512", "pipe:1"]
 # "-noaccurate_seek"

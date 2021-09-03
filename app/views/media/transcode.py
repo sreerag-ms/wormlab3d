@@ -25,8 +25,9 @@ def media_content(path):
 
     def generate():
         args = config.ffmpeg_transcode_args["*"]
+        common_options = config.ffmpeg_common_options["*"]
 
-        cmdline = config.ffmpeg + args.format(str(start), d, "mp4", "copy")
+        cmdline = config.ffmpeg + args.format(str(start), d, "mp4", "copy") + common_options
         FNULL = open(os.devnull, 'w')
         proc = subprocess.Popen(cmdline.split(), stdout=subprocess.PIPE, stderr=FNULL)
         try:

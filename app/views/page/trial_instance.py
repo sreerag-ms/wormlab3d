@@ -26,12 +26,15 @@ def trial_instance(_id):
 
     trial = Trial.objects(id=_id)[0]
 
+    filenames = [f"{trial.legacy_id:03d}_{i}.avi" for i in range(3)]
+
     return render_template(
         'trial_instance.html',
         title=f"Trial #{_id}",
         active=active,
         _id=_id,
         video_id=f"{trial.legacy_id:03d}",
+        filenames=filenames,
         attrs=attrs,
         trial=trial
     )
