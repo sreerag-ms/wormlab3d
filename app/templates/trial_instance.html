@@ -81,11 +81,11 @@
 {% block scripts %}
   <script src="https://vjs.zencdn.net/7.11.4/video.min.js"></script>
   <script>
-      {# Format date #}
+      // Format date
       $("#trial_date").html("<i class=\"oi oi-clock\"></i>" + moment("{{ trial.date }}").format("DD-MMM-YYYY"));
 
 
-      {# Explicitly tell video.js to not collect analytics, although v7 already does not send any data. #}
+      // Explicitly tell video.js to not collect analytics, although v7 already does not send any data.
       window.HELP_IMPROVE_VIDEOJS = false;
 
 
@@ -180,7 +180,7 @@
       {#videojs.setFormatTime(customTimeFormat);#}
 
 
-      {# Frame-based viewer buttons #}
+      // Frame-based viewer buttons
       let frame_num = 0;
       $("#btn-prev_frame").on('click', () => {
           frame_num = Math.max(0, frame_num - 1);
@@ -190,11 +190,33 @@
           {% endfor %}
       });
       $("#btn-next_frame").on('click', () => {
+          // Disable next frame button until images are screenshotted
+          $("#btn-next_frame").attr("disabled", true);
+
           frame_num = Math.min({{ trial.n_frames_min }}, frame_num + 1);
 
           {% for i in range(3) %}
               $("#img-cam" + {{ i }}).attr("src", "{{ url_for('extract_img.screenshot', path=filenames[i], trial_num=trial.id, cam_num=i, fps=trial.fps)|safe }}&frame_num=" + frame_num);
           {% endfor %}
+
+          // Asynchronously re-enable the button when all the images have been screenshotted in the app's dir
+          $.ajax({
+              type: "GET",
+              data: {
+                  frame_num: frame_num
+              },
+              url: "{{ url_for("extract_img.completion", video_id=video_id) }}",
+              success: function(data) {
+                  console.log("success. data:");
+                  console.log(data);
+                  // Enable button
+                  $("#btn-next_frame").attr("disabled", false);
+              },
+              error: function(data) {
+                  console.log("failed. images not created after timeout (5s)");
+                  console.log(data);
+              }
+          });
       });
   </script>
 {% endblock %}
