@@ -4,8 +4,9 @@ from typing import Tuple
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch import nn, autograd
+from torch import nn
 from torch.distributions import Uniform
+
 from wormlab3d import PREPARED_IMAGE_SIZE
 from wormlab3d.midlines3d.dynamic_cameras import DynamicCameras, N_CAM_COEFFICIENTS
 from wormlab3d.nn.models.basenet import BaseNet
@@ -161,7 +162,8 @@ class RenderFunction(torch.autograd.Function):
         # ctx.blur_sigma = blur_sigma
 
         device = points_in.device
-        ctx.save_for_backward(points_in, render_target, torch.tensor(size, device=device), torch.tensor(blur_sigma, device=device))
+        ctx.save_for_backward(points_in, render_target, torch.tensor(size, device=device),
+                              torch.tensor(blur_sigma, device=device))
 
         render_out = render(points_in, size, blur_sigma)
 
@@ -171,7 +173,7 @@ class RenderFunction(torch.autograd.Function):
     def backward(ctx, render_grad):
         bs = render_grad.shape[0]
         device = render_grad.device
-        w = render_grad.abs().mean(dim=(2,3))
+        w = render_grad.abs().mean(dim=(2, 3))
         points_in, render_target, size, blur_sigma = ctx.saved_tensors
         if w.sum() == 0:
             return torch.zeros_like(points_in), None, None, None
@@ -207,7 +209,7 @@ class RenderFunction(torch.autograd.Function):
             point_targets = torch.zeros_like(p2)
             for i in range(bs):
                 for j in range(3):
-                    if w[i,j] == 0:
+                    if w[i, j] == 0:
                         continue
                     for k in range(N):
                         best = np.inf

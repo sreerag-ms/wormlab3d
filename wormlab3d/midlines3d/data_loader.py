@@ -11,7 +11,7 @@ from wormlab3d import logger, DATASET_CACHE_PATH, PREPARED_IMAGE_SIZE
 from wormlab3d.data.model import SegmentationMasks, Frame
 from wormlab3d.data.model.dataset import DatasetSegmentationMasks
 from wormlab3d.midlines3d.args import DatasetSegmentationMasksArgs
-from wormlab3d.nn.data_loader import DatasetLoader, make_data_loader, get_affine_transforms, get_image_transforms
+from wormlab3d.nn.data_loader import DatasetLoader, make_data_loader, get_image_transforms
 from wormlab3d.toolkit.util import hash_data
 
 
