@@ -633,7 +633,7 @@ class Manager:
             for idx in idxs:
                 self._plot_X(idx)
                 self._plot_F0_components(idx)
-                # self._plot_F0_3d(idx)
+                self._plot_F0_3d(idx)
                 # self._plot_CS(idx)
                 self._plot_CS_vs_output(idx)
             self._plot_MPs()
