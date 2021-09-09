@@ -716,6 +716,8 @@ class Manager:
 
     def _plot_pca(self):
         bs = self.optimiser_args.batch_size
+        if bs == 1:
+            return
 
         # Convert controls to matrix form
         solutions = to_numpy(torch.cat([
