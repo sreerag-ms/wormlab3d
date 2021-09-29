@@ -125,14 +125,6 @@ def generate_prepared_images(
 
 if __name__ == '__main__':
     generate_prepared_images(
-        # # Poor error, spot obscured in one view
-        # trial_id=186,
-        # frame_num=823
-
-        # Lots of 2d points
-        # trial_id=301,
-        # frame_num=79
-
         missing_only=True,
         fix_missing_centres=False,
         max_3d_error=100,
