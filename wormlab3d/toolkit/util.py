@@ -37,6 +37,8 @@ def parse_target_arguments() -> Namespace:
                         help='Midline3D id.')
     parser.add_argument('--midline3d-source', type=str, default=M3D_SOURCE_RECONST, choices=M3D_SOURCES,
                         help='Midline3D source.')
+    parser.add_argument('--midline3d-source-file', type=str,
+                        help='Midline3D source file.')
     parser.add_argument('--frame-sequence', type=str,
                         help='FrameSequence id.')
     parser.add_argument('--sw-run', type=str,

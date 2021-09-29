@@ -1,7 +1,5 @@
 import math
 
-import numpy as np
-
 from wormlab3d import logger
 from wormlab3d.data.model import Trial, FrameSequence
 from wormlab3d.simple_worm.args import FrameSequenceArgs
@@ -27,7 +25,8 @@ def get_frame_sequence() -> FrameSequence:
     fsa = FrameSequenceArgs(
         trial=args.trial,
         start_frame=args.frame_num,
-        midline_source=args.midline3d_source
+        midline_source=args.midline3d_source,
+        midline_source_file=args.midline3d_source_file,
     )
     FS_db = FrameSequence.find_from_args(fsa, n_frames)
     if FS_db.count() > 0:
@@ -36,17 +35,22 @@ def get_frame_sequence() -> FrameSequence:
         return FS_db
 
     # Create a new one
+    logger.info(f'Found no matching frame sequences in database, creating new.')
     f0 = args.frame_num
     fn = f0 + n_frames
     frame_nums = range(f0, fn)
     seq = []
     for frame_num in frame_nums:
         frame = trial.get_frame(frame_num)
-        midlines = frame.get_midlines3d(filters={'source': args.midline3d_source})
+        logger.debug(f'Loading 3D midline for frame #{frame_num} (id={frame.id}).')
+        filters = {'source': args.midline3d_source}
+        if args.midline3d_source_file is not None:
+            filters['source_file'] = args.midline3d_source_file
+        midlines = frame.get_midlines3d(filters)
         if len(midlines) > 1:
             logger.info(
-                f'Found {len(midlines)} 3D midlines for trial_id = {trial.id}, frame_num = {frame_num}. Picking at random..')
-            midline = midlines[np.random.randint(len(midlines))]
+                f'Found {len(midlines)} 3D midlines for trial_id = {trial.id}, frame_num = {frame_num}. Picking with lowest error..')
+            midline = midlines[0]
         elif len(midlines) == 1:
             midline = midlines[0]
         else:

@@ -13,6 +13,7 @@ class FrameSequenceArgs(BaseArgs):
             trial: int = None,
             start_frame: str = None,
             midline_source: str = M3D_SOURCE_RECONST,
+            midline_source_file: str = None,
             **kwargs
     ):
         self.fs_id = fs_id
@@ -24,6 +25,7 @@ class FrameSequenceArgs(BaseArgs):
         self.trial_id = trial
         self.start_frame = start_frame
         self.midline_source = midline_source
+        self.midline_source_file = midline_source_file
 
     @classmethod
     def add_args(cls, parser: ArgumentParser) -> _ArgumentGroup:
@@ -41,4 +43,6 @@ class FrameSequenceArgs(BaseArgs):
                            help='Starting frame number of the sequence.')
         group.add_argument('--midline-source', type=str, default=M3D_SOURCE_RECONST, choices=M3D_SOURCES,
                            help='Source to use for the reconstructed midline.')
+        group.add_argument('--midline-source-file', type=str,
+                           help='Source file to use for the reconstructed midline.')
         return group

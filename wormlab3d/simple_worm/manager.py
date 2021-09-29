@@ -164,19 +164,24 @@ class Manager:
         Generate a frame sequence matching the given arguments and save it to the database.
         """
         logger.info('Generating frame sequence.')
-        trial = Trial.objects.get(id=self.frame_sequence_args.trial_id)
+        fsa = self.frame_sequence_args
+        trial = Trial.objects.get(id=fsa.trial_id)
         n_frames = math.ceil(self.simulation_args.duration * trial.fps)
-        f0 = self.frame_sequence_args.start_frame
+        f0 = fsa.start_frame
         fn = f0 + n_frames
         frame_nums = range(f0, fn)
         seq = []
         for frame_num in frame_nums:
             frame = trial.get_frame(frame_num)
-            midlines = frame.get_midlines3d(filters={'source': self.frame_sequence_args.midline_source})
+            logger.debug(f'Loading 3D midline for frame #{frame_num} (id={frame.id}).')
+            filters = {'source': fsa.midline_source}
+            if fsa.midline_source_file is not None:
+                filters['source_file'] = fsa.midline_source_file
+            midlines = frame.get_midlines3d(filters)
             if len(midlines) > 1:
                 logger.info(
-                    f'Found {len(midlines)} 3D midlines for trial_id = {trial.id}, frame_num = {frame_num}. Picking at random..')
-                midline = midlines[np.random.randint(len(midlines))]
+                    f'Found {len(midlines)} 3D midlines for trial_id = {trial.id}, frame_num = {frame_num}. Picking with lowest error..')
+                midline = midlines[0]
             elif len(midlines) == 1:
                 midline = midlines[0]
             else:
