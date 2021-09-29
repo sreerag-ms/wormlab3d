@@ -35,7 +35,7 @@ from wormlab3d.data.model.sw_regularisation_parameters import SwRegularisationPa
 from wormlab3d.data.model.sw_run import SwRun, SwControlSequence, SwFrameSequence, SwMaterialParameters
 from wormlab3d.data.model.sw_simulation_parameters import SwSimulationParameters
 from wormlab3d.simple_worm.args import RuntimeArgs, FrameSequenceArgs, SimulationArgs, OptimiserArgs, RegularisationArgs
-from wormlab3d.toolkit.util import to_dict, to_numpy
+from wormlab3d.toolkit.util import to_dict, to_numpy, hash_data
 
 START_TIMESTAMP = time.strftime('%Y%m%d_%H%M')
 
@@ -94,7 +94,11 @@ class Manager:
         regs_dir = f'/{checkpoint.reg_params.created:%Y%m%d_%H:%M}' \
                    f'_{checkpoint.reg_params.id}'
 
-        return LOGS_PATH + sim_dir + FS_dir + regs_dir
+        solver_dir = f'/{checkpoint.optimiser_args["inverse_opt_library"]}' \
+                   f'_{checkpoint.optimiser_args["inverse_opt_method"]}' \
+                   f'_{hash_data(checkpoint.optimiser_args["inverse_opt_opts"])}'
+
+        return LOGS_PATH + sim_dir + FS_dir + regs_dir + solver_dir
 
     def _init_frame_sequence(self) -> Tuple[FrameSequence, FrameSequenceTorch]:
         """
@@ -238,8 +242,14 @@ class Manager:
             optimise_F0=self.optimiser_args.optimise_F0,
             optimise_CS=self.optimiser_args.optimise_CS,
             reg_weights=self.regularisation_args.get_reg_weights(),
+            max_alpha_beta=self.optimiser_args.max_alpha_beta,
+            max_gamma=self.optimiser_args.max_gamma,
+            inverse_opt_library=self.optimiser_args.inverse_opt_library,
+            inverse_opt_method=self.optimiser_args.inverse_opt_method,
             inverse_opt_max_iter=self.optimiser_args.inverse_opt_max_iter,
             inverse_opt_tol=self.optimiser_args.inverse_opt_tol,
+            inverse_opt_opts=self.optimiser_args.inverse_opt_opts,
+            mkl_threads=self.optimiser_args.mkl_threads,
             parallel=self.runtime_args.parallel_solvers > 0,
             n_workers=self.runtime_args.parallel_solvers,
             quiet=False

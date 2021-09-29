@@ -111,7 +111,7 @@ def print_args(args: Namespace):
     logger.info(log)
 
 
-def hash_data(data):
+def hash_data(data) -> str:
     """Generates a generic md5 hash string for arbitrary data."""
     return hashlib.md5(json.dumps(data, sort_keys=True).encode('utf-8')).hexdigest()
 
