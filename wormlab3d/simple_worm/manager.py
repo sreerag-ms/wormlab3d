@@ -29,7 +29,7 @@ from simple_worm.plot3d import plot_X_vs_target, plot_FS_3d, generate_scatter_di
 from simple_worm.util_torch import expand_tensor
 from simple_worm.worm_torch import WormModule
 from wormlab3d import LOGS_PATH, logger
-from wormlab3d.data.model import Checkpoint, FrameSequence, Trial
+from wormlab3d.data.model import FrameSequence, Trial
 from wormlab3d.data.model.sw_checkpoint import SwCheckpoint
 from wormlab3d.data.model.sw_regularisation_parameters import SwRegularisationParameters
 from wormlab3d.data.model.sw_run import SwRun, SwControlSequence, SwFrameSequence, SwMaterialParameters
@@ -339,7 +339,7 @@ class Manager:
                         )
                         raise DoesNotExist()
                 else:
-                    prev_checkpoint = Checkpoint.objects.get(
+                    prev_checkpoint = SwCheckpoint.objects.get(
                         id=self.runtime_args.resume_from
                     )
                 logger.info(f'Loaded checkpoint id={prev_checkpoint.id}, created={prev_checkpoint.created}')
@@ -394,7 +394,8 @@ class Manager:
                 ControlSequenceTorch(
                     alpha=torch.from_numpy(run.CS.alpha),
                     beta=torch.from_numpy(run.CS.beta),
-                    gamma=torch.from_numpy(run.CS.gamma)
+                    gamma=torch.from_numpy(run.CS.gamma),
+                    **self.CS.get_gates('clone')
                 )
                 for run in runs
             ], optimise=self.optimiser_args.optimise_CS)
@@ -618,10 +619,9 @@ class Manager:
 
         # Make initial plots for all batch elements
         if pre_step:
-            # for idx in range(bs):
-            #     self._plot_F0_components(idx)
-            #     self._plot_F0_3d(idx)
-            #     self._plot_CS(idx)
+            for idx in range(bs):
+                self._plot_F0_components(idx)
+                self._plot_F0_3d(idx)
             self._plot_gates()
             self._plot_pca()
             return
@@ -716,6 +716,8 @@ class Manager:
 
     def _plot_pca(self):
         bs = self.optimiser_args.batch_size
+
+        # Can't do PCA when not running in batch mode
         if bs == 1:
             return
 
@@ -770,6 +772,8 @@ class Manager:
         """
         Plot the material parameters values over iterations.
         """
+        if not any(list(self.optimiser_args.get_mp_opt_flags().values())):
+            return
         bs = self.optimiser_args.batch_size
         fig, axes = plt.subplots(2, 3, figsize=(12, 10), sharex=True)
         row1_keys = ['K', 'A', 'B']
