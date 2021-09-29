@@ -31,6 +31,10 @@ class OptimiserArgs(BaseArgs):
             init_noise_std_gamma: float,
             inverse_opt_max_iter: int = 2,
             inverse_opt_tol: float = 1e-8,
+            multiscale_mode: bool = False,
+            multiscale_max_dt: float = 1,
+            multiscale_min_length: int = 10,
+            multiscale_stages: int = 2,
             **kwargs
     ):
         self.batch_size = batch_size
@@ -55,6 +59,13 @@ class OptimiserArgs(BaseArgs):
         self.init_noise_std_gamma = init_noise_std_gamma
         self.inverse_opt_max_iter = inverse_opt_max_iter
         self.inverse_opt_tol = inverse_opt_tol
+        self.multiscale_mode = multiscale_mode
+        self.multiscale_max_dt = multiscale_max_dt
+        self.multiscale_min_length = multiscale_min_length
+        self.multiscale_stages = multiscale_stages
+        if self.multiscale_mode:
+            assert self.multiscale_stages > 1, \
+                'Number of multiscale stages must be > 1 (otherwise it isn\'t multiscale!).'
 
     @classmethod
     def add_args(cls, parser: ArgumentParser) -> _ArgumentGroup:
@@ -110,6 +121,16 @@ class OptimiserArgs(BaseArgs):
                            help='Maximum number of inverse optimisation iterations per step.')
         group.add_argument('--inverse-opt-tol', type=float, default=1e-8,
                            help='Inverse optimisation stopping tolerance.')
+
+        # Multiscale optimisation
+        group.add_argument('--multiscale-mode', type=bool, default=False,
+                           help='Enable multiscale optimisation mode. Default=False.')
+        group.add_argument('--multiscale-max-dt', type=float, default=1,
+                           help='Maximum timestep to use in multiscale optimisation mode. Default=1s.')
+        group.add_argument('--multiscale-min-length', type=int, default=10,
+                           help='Minimum worm length to use in multiscale optimisation mode. Default=1s.')
+        group.add_argument('--multiscale-stages', type=int, default=2,
+                           help='Number of multiscale stages. Must be > 1. Default=2.')
         return group
 
     def get_mp_opt_flags(self, prefix: str = '') -> Dict[str, bool]:
