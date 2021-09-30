@@ -149,22 +149,27 @@ class OptimiserArgs(BaseArgs):
                            help='Maximum number of inverse optimisation iterations per step.')
         group.add_argument('--inverse-opt-tol', type=float, default=INVERSE_OPT_TOL_DEFAULT,
                            help='Inverse optimisation stopping tolerance.')
-        group.add_argument(
-            '--inverse-opt-opts',
-            action=type(
-                '', (Action,),
-                dict(__call__=lambda self, parser, namespace, values, option_string:
-                getattr(namespace, self.dest).update(
-                    dict([
-                        v.split('=') for v in values.replace(';', ',').split(',')
-                        if len(v.split('=')) == 2
-                    ])
-                ))
-            ),
-            default={},
-            metavar='KEY1=VAL1,KEY2=VAL2;KEY3=VAL3...',
-            help='Inverse optimisation additional options.'
-        )
+
+        def guess_type(x: str):
+            try:
+                y = float(x)
+            except ValueError:
+                try:
+                    y = int(x)
+                except ValueError:
+                    y = x
+            return y
+
+        class StoreDictKeyPair(Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                my_dict = {}
+                for kv in values.split(','):
+                    k, v = kv.split('=')
+                    my_dict[k] = guess_type(v)
+                setattr(namespace, self.dest, my_dict)
+
+        group.add_argument('--inverse-opt-opts', action=StoreDictKeyPair, metavar='KEY1=VAL1,KEY2=VAL2...',
+                           help='Inverse optimisation additional options.')
         group.add_argument('--mkl-threads', type=int, default=MKL_THREADS_DEFAULT,
                            help='Number of MKL threads to use.')
 
