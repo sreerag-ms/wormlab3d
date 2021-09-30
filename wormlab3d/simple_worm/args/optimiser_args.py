@@ -40,6 +40,8 @@ class OptimiserArgs(BaseArgs):
             inverse_opt_tol: float = INVERSE_OPT_TOL_DEFAULT,
             inverse_opt_opts: dict = None,
             mkl_threads: int = MKL_THREADS_DEFAULT,
+            chunked_mode: bool = False,
+            n_chunks: int = 1,
             multiscale_mode: bool = False,
             multiscale_max_dt: float = 1,
             multiscale_min_length: int = 10,
@@ -76,6 +78,15 @@ class OptimiserArgs(BaseArgs):
             inverse_opt_opts = {}
         self.inverse_opt_opts = inverse_opt_opts
         self.mkl_threads = mkl_threads
+
+        # Chunks
+        self.chunked_mode = chunked_mode
+        self.n_chunks = n_chunks
+        if self.chunked_mode:
+            assert batch_size == 1, 'Batch size must be 1 in chunked mode.'
+            assert n_chunks > 1, 'Number of chunks must be > 1 in chunked mode.'
+
+        # todo: Multi-scale mode
         self.multiscale_mode = multiscale_mode
         self.multiscale_max_dt = multiscale_max_dt
         self.multiscale_min_length = multiscale_min_length
@@ -172,6 +183,12 @@ class OptimiserArgs(BaseArgs):
                            help='Inverse optimisation additional options.')
         group.add_argument('--mkl-threads', type=int, default=MKL_THREADS_DEFAULT,
                            help='Number of MKL threads to use.')
+
+        # Chunked mode
+        group.add_argument('--chunked-mode', type=bool, default=False,
+                           help='Split the sequence into chunks optimisation mode. Default=False.')
+        group.add_argument('--n-chunks', type=int, default=1,
+                           help='Number of chunks to use in chunked mode. Must be set > 1.')
 
         # Multiscale optimisation
         group.add_argument('--multiscale-mode', type=bool, default=False,

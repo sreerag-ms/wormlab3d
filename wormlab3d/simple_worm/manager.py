@@ -4,7 +4,7 @@ import shutil
 import time
 from collections import OrderedDict
 from datetime import timedelta
-from typing import Tuple, Dict
+from typing import Tuple, Dict, List, Optional, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,10 +12,6 @@ import torch
 import torch.nn.functional as F
 from matplotlib.figure import Figure
 from mongoengine import DoesNotExist
-from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
-from torch.utils.tensorboard import SummaryWriter
-
 from simple_worm.control_gates_torch import ControlGateTorch
 from simple_worm.controls import CONTROL_KEYS
 from simple_worm.controls_torch import ControlSequenceTorch, ControlSequenceBatchTorch
@@ -28,6 +24,9 @@ from simple_worm.plot3d import plot_X_vs_target, plot_FS_3d, generate_scatter_di
     plot_frame_components, plot_CS_vs_output, plot_gates
 from simple_worm.util_torch import expand_tensor
 from simple_worm.worm_torch import WormModule
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+from torch.utils.tensorboard import SummaryWriter
 from wormlab3d import LOGS_PATH, logger
 from wormlab3d.data.model import FrameSequence, Trial
 from wormlab3d.data.model.sw_checkpoint import SwCheckpoint
@@ -57,27 +56,35 @@ class Manager:
         self.regularisation_args = regularisation_args
 
         # Target frame sequence (from data)
-        self.FS_db, self.FS_target = self._init_frame_sequence()
+        self.FS_db, self.FS_target, self.FS_target_chunks, self.FS_target_chunk_steps = self._init_frame_sequence()
 
         # Initialise configurations
         self.sim_params, self.reg_params = self._init_configuration()
 
-        # Initialise worm simulator
-        self.worm = self._init_worm()
+        # Initialise worm simulator(s)
+        self.worm, self.worm_stitched = self._init_worms()
 
         # Initialise initial conditions and trainable parameters
-        self.MP, self.F0, self.CS = self._init_params()
+        self.MP, self.F0, self.CS, self.CS_stitched = self._init_params()
 
         # Checkpoints
         self.checkpoint = self._init_checkpoint()
 
         # Outputs
         self.FS_out: FrameSequenceTorch
+        self.FS_out_stitched: FrameSequenceTorch
         self.MP_log: Dict[int, MaterialParametersBatchTorch] = OrderedDict()
 
     @property
     def logs_path(self) -> str:
         return self.get_logs_path(self.checkpoint)
+
+    @property
+    def batch_size(self) -> int:
+        if self.optimiser_args.chunked_mode:
+            return self.optimiser_args.n_chunks
+        else:
+            return self.optimiser_args.batch_size
 
     @staticmethod
     def get_logs_path(checkpoint: SwCheckpoint) -> str:
@@ -95,14 +102,18 @@ class Manager:
                    f'_{checkpoint.reg_params.id}'
 
         solver_dir = f'/{checkpoint.optimiser_args["inverse_opt_library"]}' \
-                   f'_{checkpoint.optimiser_args["inverse_opt_method"]}' \
-                   f'_{hash_data(checkpoint.optimiser_args["inverse_opt_opts"])}'
+                     f'_{checkpoint.optimiser_args["inverse_opt_method"]}' \
+                     f'_{hash_data(checkpoint.optimiser_args["inverse_opt_opts"])}'
+
+        if 'chunked_mode' in checkpoint.optimiser_args and checkpoint.optimiser_args['chunked_mode']:
+            solver_dir += f'_chunks={checkpoint.optimiser_args["n_chunks"]}'
 
         return LOGS_PATH + sim_dir + FS_dir + regs_dir + solver_dir
 
-    def _init_frame_sequence(self) -> Tuple[FrameSequence, FrameSequenceTorch]:
+    def _init_frame_sequence(self) \
+            -> Tuple[FrameSequence, FrameSequenceTorch, List[FrameSequenceTorch], Optional[np.ndarray]]:
         """
-        Load or create the target frame sequence.
+        Load or create the target frame sequence and the chunks if required.
         """
         FS_db = None
 
@@ -121,7 +132,9 @@ class Manager:
         x = torch.from_numpy(FS_db.X)
 
         # Resample the worm points if required
-        T = int(self.simulation_args.duration / self.simulation_args.dt)
+        duration = self.simulation_args.duration
+        dt = self.simulation_args.dt
+        T = int(duration / dt)
         T_data = x.shape[0]
         N = self.simulation_args.worm_length
         N_data = x.shape[1]
@@ -135,7 +148,35 @@ class Manager:
         assert x.shape == (T, 3, N)
         FS = FrameSequenceTorch(x=x)
 
-        return FS_db, FS
+        # Chunk the FS if required
+        FS_chunks = []
+        FS_chunk_steps = []
+        if self.optimiser_args.chunked_mode:
+            n_chunks = self.optimiser_args.n_chunks
+            chunk_duration = duration / n_chunks
+            overlap = max(dt * 2, chunk_duration * 0.1)
+            T_chunk = int((chunk_duration + overlap / 2) / dt)
+            timesteps = np.arange(0, duration, dt)
+            start_times = list(np.linspace(0, duration - chunk_duration, n_chunks) - overlap / 2)
+            start_idxs = []
+            for i, t in enumerate(timesteps):
+                if t >= start_times[0] or i + T_chunk == T:
+                    start_times.pop(0)
+                    start_idxs.append(i)
+                    if len(start_times) == 0:
+                        break
+            start_idxs = np.array(start_idxs)
+            end_idxs = start_idxs + T_chunk
+
+            for c in range(n_chunks):
+                FS_chunks.append(FS[start_idxs[c]:end_idxs[c]])
+                if c > 0:
+                    assert start_idxs[c] < end_idxs[c - 1]
+                    assert len(FS_chunks[c]) == len(FS_chunks[c - 1])
+
+            FS_chunk_steps = np.array([start_idxs, end_idxs]).T
+
+        return FS_db, FS, FS_chunks, FS_chunk_steps
 
     def _load_frame_sequence(self) -> FrameSequence:
         """
@@ -206,6 +247,11 @@ class Manager:
             sim_params = SwSimulationParameters.get(id=self.simulation_args.sim_id)
         else:
             sim_config = self.simulation_args.get_config_dict()
+
+            # Update duration to the chunk duration when in chunked mode
+            if self.optimiser_args.chunked_mode:
+                sim_config['duration'] = self.FS_target_chunks[0].n_timesteps * self.simulation_args.dt
+
             sim_params = SwSimulationParameters.objects(**sim_config)
             if sim_params.count() > 0:
                 logger.info(
@@ -235,51 +281,77 @@ class Manager:
 
         return sim_params, reg_params
 
-    def _init_worm(self) -> WormModule:
+    def _init_worms(self) -> Union[WormModule, Optional[WormModule]]:
         """
-        Create the worm simulator.
+        Create the worm simulators.
         """
+        oa = self.optimiser_args
         worm = WormModule(
             N=self.sim_params.worm_length,
             dt=self.sim_params.dt,
-            batch_size=self.optimiser_args.batch_size,
-            **self.optimiser_args.get_mp_opt_flags('optimise_MP_'),
-            optimise_F0=self.optimiser_args.optimise_F0,
-            optimise_CS=self.optimiser_args.optimise_CS,
+            batch_size=self.batch_size,
+            **oa.get_mp_opt_flags('optimise_MP_'),
+            optimise_F0=oa.optimise_F0,
+            optimise_CS=oa.optimise_CS,
             reg_weights=self.regularisation_args.get_reg_weights(),
-            max_alpha_beta=self.optimiser_args.max_alpha_beta,
-            max_gamma=self.optimiser_args.max_gamma,
-            inverse_opt_library=self.optimiser_args.inverse_opt_library,
-            inverse_opt_method=self.optimiser_args.inverse_opt_method,
-            inverse_opt_max_iter=self.optimiser_args.inverse_opt_max_iter,
-            inverse_opt_tol=self.optimiser_args.inverse_opt_tol,
-            inverse_opt_opts=self.optimiser_args.inverse_opt_opts,
-            mkl_threads=self.optimiser_args.mkl_threads,
+            max_alpha_beta=oa.max_alpha_beta,
+            max_gamma=oa.max_gamma,
+            inverse_opt_library=oa.inverse_opt_library,
+            inverse_opt_method=oa.inverse_opt_method,
+            inverse_opt_max_iter=oa.inverse_opt_max_iter,
+            inverse_opt_tol=oa.inverse_opt_tol,
+            inverse_opt_opts=oa.inverse_opt_opts,
+            mkl_threads=oa.mkl_threads,
             parallel=self.runtime_args.parallel_solvers > 0,
             n_workers=self.runtime_args.parallel_solvers,
             quiet=False
         )
-        return worm
 
-    def _init_params(self) -> Tuple[MaterialParametersBatchTorch, FrameBatchTorch, ControlSequenceBatchTorch]:
+        worm_stitched = None
+        if oa.chunked_mode:
+            worm_stitched = WormModule(
+                N=self.sim_params.worm_length,
+                dt=self.sim_params.dt,
+                batch_size=1,
+                optimise_F0=False,
+                optimise_CS=False,
+                reg_weights=self.regularisation_args.get_reg_weights(),
+                quiet=False
+            )
+
+        return worm, worm_stitched
+
+    def _init_params(self) \
+            -> Tuple[
+                MaterialParametersBatchTorch,
+                FrameBatchTorch,
+                ControlSequenceBatchTorch,
+                Optional[ControlSequenceBatchTorch]
+            ]:
         """
         Initialise the optimisable initial frame and control sequence.
         """
-        bs = self.optimiser_args.batch_size
+        oa = self.optimiser_args
 
         # Generate optimisable material parameters
         MP = MaterialParametersTorch(**self.simulation_args.get_mp_dict())
         MP = MaterialParametersBatchTorch.from_list(
-            batch=[MP] * bs,
-            **self.optimiser_args.get_mp_opt_flags('optimise_')
+            batch=[MP] * self.batch_size,
+            **oa.get_mp_opt_flags('optimise_')
         )
 
         # Generate optimisable initial frame, using known x0 and an estimate of psi0
+        if oa.chunked_mode:
+            x0 = torch.zeros(oa.n_chunks, 3, self.sim_params.worm_length)
+            for i in range(oa.n_chunks):
+                x0[i] = self.FS_target_chunks[i][0].x
+        else:
+            x0 = expand_tensor(self.FS_target[0].x, self.batch_size)
         F0 = FrameBatchTorch(
-            x=expand_tensor(self.FS_target[0].x, bs),
-            estimate_psi=self.optimiser_args.estimate_psi,
-            optimise=self.optimiser_args.optimise_F0,
-            batch_size=bs
+            x=x0,
+            estimate_psi=oa.estimate_psi,
+            optimise=oa.optimise_F0,
+            batch_size=self.batch_size
         )
 
         # Build control gates
@@ -294,35 +366,46 @@ class Manager:
                 gates[f'{k}_gate'] = ControlGateTorch(N=self.sim_params.worm_length, **gate_args)
 
         # Generate optimisable control sequence
+        if oa.chunked_mode:
+            n_timesteps = self.FS_target_chunks[0].n_timesteps
+            CS_stitched = ControlSequenceBatchTorch(
+                worm=self.worm_stitched.worm_solver,
+                n_timesteps=self.FS_target.n_timesteps,
+                batch_size=1,
+                **gates
+            )
+        else:
+            n_timesteps = self.FS_target.n_timesteps
+            CS_stitched = None
         CS = ControlSequenceBatchTorch(
             worm=self.worm.worm_solver,
-            n_timesteps=self.FS_target.x.shape[0],
-            optimise=self.optimiser_args.optimise_CS,
-            batch_size=bs,
+            n_timesteps=n_timesteps,
+            optimise=oa.optimise_CS,
+            batch_size=self.batch_size,
             **gates
         )
 
         # Add some noise
         with torch.no_grad():
             for k in MP_KEYS:
-                opt_mp = getattr(self.optimiser_args, f'optimise_MP_{k}')
-                std = getattr(self.optimiser_args, f'init_noise_std_{k}')
+                opt_mp = getattr(oa, f'optimise_MP_{k}')
+                std = getattr(oa, f'init_noise_std_{k}')
                 if opt_mp and std > 0:
                     v = getattr(MP, k)
                     v.data += torch.normal(torch.zeros_like(v), std=std)
             MP.clamp()
 
-            if self.optimiser_args.optimise_F0 and self.optimiser_args.init_noise_std_psi0 > 0:
-                F0.psi += torch.normal(torch.zeros_like(F0.psi), std=self.optimiser_args.init_noise_std_psi0)
+            if oa.optimise_F0 and oa.init_noise_std_psi0 > 0:
+                F0.psi += torch.normal(torch.zeros_like(F0.psi), std=oa.init_noise_std_psi0)
 
-            if self.optimiser_args.optimise_CS:
+            if oa.optimise_CS:
                 for abg in CONTROL_KEYS:
-                    std = getattr(self.optimiser_args, f'init_noise_std_{abg}')
+                    std = getattr(oa, f'init_noise_std_{abg}')
                     if std > 0:
                         v = getattr(CS, abg)
                         v.data += torch.normal(torch.zeros_like(v), std=std)
 
-        return MP, F0, CS
+        return MP, F0, CS, CS_stitched
 
     def _init_checkpoint(self):
         """
@@ -385,9 +468,9 @@ class Manager:
 
             # Load the parameter states
             runs = SwRun.objects(checkpoint=prev_checkpoint)
-            if runs.count() != self.optimiser_args.batch_size:
+            if runs.count() != self.batch_size:
                 raise RuntimeError(f'Number of runs matching checkpoint "{prev_checkpoint.id}" ({runs.count()}) '
-                                   f'not equal to batch size ({self.optimiser_args.batch_size}). Unable to resume.')
+                                   f'not equal to batch size ({self.batch_size}). Unable to resume.')
 
             self.MP = MaterialParametersBatchTorch.from_list(
                 batch=[
@@ -439,7 +522,7 @@ class Manager:
         self.tb_logger_main = SummaryWriter(self.logs_path + f'/events/{START_TIMESTAMP}_agg', flush_secs=5)
         self.tb_loggers = [
             SummaryWriter(self.logs_path + f'/events/{START_TIMESTAMP}_{idx:03d}', flush_secs=5)
-            for idx in range(self.optimiser_args.batch_size)
+            for idx in range(self.batch_size)
         ]
 
     def configure_paths(self, renew_logs: bool = False):
@@ -459,7 +542,7 @@ class Manager:
         self.checkpoint.save()
 
         # Create the run record of inputs and optimal outputs for the most recent runs.
-        for idx in range(self.optimiser_args.batch_size):
+        for idx in range(self.batch_size):
             run = SwRun()
             run.checkpoint = self.checkpoint
             run.sim_params = self.sim_params
@@ -524,9 +607,14 @@ class Manager:
         """
         Run a single inverse optimisation step.
         """
+        oa = self.optimiser_args
 
-        # Make target pseudo-batch
-        FS_target_batch = FrameSequenceBatchTorch.from_list([self.FS_target] * self.optimiser_args.batch_size)
+        if oa.chunked_mode:
+            # Make target batches
+            FS_target_batch = FrameSequenceBatchTorch.from_list(self.FS_target_chunks)
+        else:
+            # Make target pseudo-batch (all the same)
+            FS_target_batch = FrameSequenceBatchTorch.from_list([self.FS_target] * self.batch_size)
 
         # Forward simulation
         logger.info('Simulating...')
@@ -540,13 +628,54 @@ class Manager:
 
         # Update MP, F0 and CS to the found optimals
         for k in MP_KEYS:
-            if getattr(self.optimiser_args, f'optimise_MP_{k}'):
+            if getattr(oa, f'optimise_MP_{k}'):
                 setattr(self.MP, k, getattr(MP_opt, k))
         self.MP.clamp()
-        if self.optimiser_args.optimise_F0:
+        if oa.optimise_F0:
             self.F0 = F0_opt
-        if self.optimiser_args.optimise_CS:
+        if oa.optimise_CS:
             self.CS = CS_opt
+
+        # Stitch together the chunks
+        if oa.chunked_mode:
+            # Update overlapped regions to the average from both sides
+            n_chunks = oa.n_chunks
+            for i in range(n_chunks - 1):
+                for k in CONTROL_KEYS:
+                    controls = self.CS.controls[k]
+                    cs = self.FS_target_chunk_steps
+
+                    # From where the next one starts
+                    from_idx = cs[i + 1][0] - cs[i][1]
+                    prev_chunk_overlap = controls[i, from_idx:]
+
+                    # To where the previous one ends
+                    to_idx = cs[i][1] - cs[i + 1][0]
+                    next_chunk_overlap = controls[i + 1, :to_idx]
+
+                    # Set both overlapping sections to the mean
+                    assert prev_chunk_overlap.shape == next_chunk_overlap.shape
+                    mean_overlap = (prev_chunk_overlap + next_chunk_overlap) / 2
+                    self.CS.controls[k][i, from_idx:] = mean_overlap
+                    self.CS.controls[k][i + 1, :to_idx] = mean_overlap
+
+                    # Update the stitched controls
+                    self.CS_stitched.controls[k][0, cs[i][0]:cs[i][1]] = self.CS.controls[k][i]
+                    if i == n_chunks - 2:
+                        self.CS_stitched.controls[k][0, cs[i + 1][0]:cs[i + 1][1]] = self.CS.controls[k][i + 1]
+
+            # Use the stitched controls and F0 from the first chunk to generate full output
+            logger.info('Simulating stitched...')
+            FS_stitched, L_stitched = self.worm_stitched.forward(
+                MP=MaterialParametersBatchTorch.from_list([self.MP[0]]),
+                F0=FrameBatchTorch.from_list([self.F0[0]]),
+                CS=self.CS_stitched,
+                calculate_inverse=False,
+                FS_target=FrameSequenceBatchTorch.from_list([self.FS_target])
+            )
+            self.FS_out_stitched = FS_stitched
+        else:
+            L_stitched = None
 
         # Log the output
         self.FS_out = FS_opt
@@ -558,51 +687,52 @@ class Manager:
         # Log losses and make plots
         self.checkpoint.loss = float(L.total.mean())
         self.checkpoint.loss_data = float(L.data.mean())
-        self._log_losses(L)
+        self._log_losses(L, L_stitched)
         self._make_plots()
 
         return L
 
-    def _log_losses(self, L: LossesTorch):
+    def _log_losses(self, L: LossesTorch, L_stitched: LossesTorch = None):
         """
         Log the losses to tensorboard.
-        The main tb_logger logs means and variances of each metric.
+        The main tb_logger logs means and variances of each metric and stitched outputs.
         The other loggers log the metrics for each item in the batch.
         """
         step = self.checkpoint.step
+        bk = 'chunk' if self.optimiser_args.chunked_mode else 'batch'
 
         # Add aggregate losses - means and variances of each key
-        self.tb_logger_main.add_scalar('loss_batch/total/mean', L.total.mean(), step)
-        self.tb_logger_main.add_scalar('loss_batch/total/var', L.total.var(), step)
-        self.tb_logger_main.add_scalar('loss_batch/data/mean', L.data.mean(), step)
-        self.tb_logger_main.add_scalar('loss_batch/data/var', L.data.var(), step)
-        self.tb_logger_main.add_scalar('loss_batch/reg/mean', L.reg.mean(), step)
-        self.tb_logger_main.add_scalar('loss_batch/reg/var', L.reg.var(), step)
+        self.tb_logger_main.add_scalar(f'loss_{bk}/total/mean', L.total.mean(), step)
+        self.tb_logger_main.add_scalar(f'loss_{bk}/total/var', L.total.var(), step)
+        self.tb_logger_main.add_scalar(f'loss_{bk}/data/mean', L.data.mean(), step)
+        self.tb_logger_main.add_scalar(f'loss_{bk}/data/var', L.data.var(), step)
+        self.tb_logger_main.add_scalar(f'loss_{bk}/reg/mean', L.reg.mean(), step)
+        self.tb_logger_main.add_scalar(f'loss_{bk}/reg/var', L.reg.var(), step)
         for loss in REG_LOSS_TYPES:
             for k in REG_LOSS_VARS:
                 self.tb_logger_main.add_scalar(
-                    f'reg_weighted_batch/{loss}/{k}/mean',
+                    f'reg_weighted_{bk}/{loss}/{k}/mean',
                     L.reg_losses_weighted[loss][k].mean(),
                     step
                 )
                 self.tb_logger_main.add_scalar(
-                    f'reg_weighted_batch/{loss}/{k}/var',
+                    f'reg_weighted_{bk}/{loss}/{k}/var',
                     L.reg_losses_weighted[loss][k].var(),
                     step
                 )
                 self.tb_logger_main.add_scalar(
-                    f'reg_unweighted_batch/{loss}/{k}/mean',
+                    f'reg_unweighted_{bk}/{loss}/{k}/mean',
                     L.reg_losses_unweighted[loss][k].mean(),
                     step
                 )
                 self.tb_logger_main.add_scalar(
-                    f'reg_unweighted_batch/{loss}/{k}/var',
+                    f'reg_unweighted_{bk}/{loss}/{k}/var',
                     L.reg_losses_unweighted[loss][k].var(),
                     step
                 )
 
         # Log individual losses for each item in the batch
-        for idx in range(self.optimiser_args.batch_size):
+        for idx in range(self.batch_size):
             tbl = self.tb_loggers[idx]
             Li = L[idx]
             tbl.add_scalar('loss/total', Li.total, step)
@@ -621,6 +751,25 @@ class Manager:
                         step
                     )
 
+        # Log stitched losses
+        if L_stitched is not None:
+            tbl = self.tb_logger_main
+            tbl.add_scalar('loss_stitched/total', L_stitched.total.mean(), step)
+            tbl.add_scalar('loss_stitched/data', L_stitched.data.mean(), step)
+            tbl.add_scalar('loss_stitched/reg', L_stitched.reg, step)
+            for loss in REG_LOSS_TYPES:
+                for k in REG_LOSS_VARS:
+                    tbl.add_scalar(
+                        f'reg_weighted/{loss}/{k}',
+                        L_stitched.reg_losses_weighted[loss][k],
+                        step
+                    )
+                    tbl.add_scalar(
+                        f'reg_unweighted/{loss}/{k}',
+                        L_stitched.reg_losses_unweighted[loss][k],
+                        step
+                    )
+
     def _make_plots(self, pre_step: bool = False, final_step: bool = False):
         """
         Generate some example plots and videos.
@@ -628,7 +777,7 @@ class Manager:
         logger.info('Plotting.')
 
         # Select the idxs to plot
-        bs = self.optimiser_args.batch_size
+        bs = self.batch_size
         n_examples = min(self.runtime_args.plot_n_examples, bs)
         idxs = np.random.choice(bs, n_examples, replace=False)
 
@@ -654,6 +803,10 @@ class Manager:
             self._plot_MPs()
             self._plot_pca()
 
+            if self.optimiser_args.chunked_mode:
+                self._plot_X_stitched()
+                self._plot_CS_vs_output_stitched()
+
         if final_step or (
                 self.runtime_args.videos_every_n_steps > -1
                 and (self.checkpoint.step + 1) % self.runtime_args.videos_every_n_steps == 0
@@ -661,6 +814,9 @@ class Manager:
             for idx in idxs:
                 # self._plot_FS_3d(idx)
                 self._make_diff_vids(idx)
+
+            if self.optimiser_args.chunked_mode:
+                self._make_diff_vids_stitched()
 
     def _plot_gates(self):
         """
@@ -678,11 +834,26 @@ class Manager:
         """
         Plot the x,y,z midline positions over time as matrices.
         """
+        if self.optimiser_args.chunked_mode:
+            FS_target = self.FS_target_chunks[idx]
+        else:
+            FS_target = self.FS_target
+
         fig = plot_X_vs_target(
             FS=self.FS_out[idx].to_numpy(),
-            FS_target=self.FS_target.to_numpy()
+            FS_target=FS_target.to_numpy()
         )
         self._save_plot(fig, f'X/{idx:03d}')
+
+    def _plot_X_stitched(self):
+        """
+        Plot the stitched x,y,z midline positions over time as matrices.
+        """
+        fig = plot_X_vs_target(
+            FS=self.FS_out_stitched[0].to_numpy(),
+            FS_target=self.FS_target.to_numpy()
+        )
+        self._save_plot(fig, f'X/stitched')
 
     def _plot_F0_components(self, idx: int):
         """
@@ -721,6 +892,18 @@ class Manager:
         )
         self._save_plot(fig, f'CS_vs_out/{idx:03d}')
 
+    def _plot_CS_vs_output_stitched(self):
+        """
+        Plot the stitched control sequences as matrices.
+        """
+        fig = plot_CS_vs_output(
+            CS=self.CS_stitched[0].to_numpy(),
+            FS=self.FS_out_stitched[0].to_numpy(),
+            dt=self.sim_params.dt,
+            show_ungated=True
+        )
+        self._save_plot(fig, f'CS_vs_out/stitched')
+
     def _plot_FS_3d(self, idx: int):
         fig = plot_FS_3d(
             FSs=[self.FS_out[idx].to_numpy(), self.FS_target.to_numpy()],
@@ -730,7 +913,7 @@ class Manager:
         self._save_plot(fig, f'3D/{idx:03d}')
 
     def _plot_pca(self):
-        bs = self.optimiser_args.batch_size
+        bs = self.batch_size
 
         # Can't do PCA when not running in batch mode
         if bs == 1:
@@ -789,7 +972,7 @@ class Manager:
         """
         if not any(list(self.optimiser_args.get_mp_opt_flags().values())):
             return
-        bs = self.optimiser_args.batch_size
+        bs = self.batch_size
         fig, axes = plt.subplots(2, 3, figsize=(12, 10), sharex=True)
         row1_keys = ['K', 'A', 'B']
         row2_keys = ['K_rot', 'C', 'D']
@@ -831,11 +1014,28 @@ class Manager:
         """
         Generate a video clip showing a target sequence, an attempt and the difference.
         """
-        logger.info(f'Generating scatter diff clip.')
+        logger.info(f'Generating scatter diff clip for idx={idx}.')
+        if self.optimiser_args.chunked_mode:
+            FS_target = self.FS_target_chunks[idx]
+        else:
+            FS_target = self.FS_target
         generate_scatter_diff_clip(
-            FS_target=self.FS_target.to_numpy(),
+            FS_target=FS_target.to_numpy(),
             FS_attempt=self.FS_out[idx].to_numpy(),
             save_dir=self.logs_path + f'/vid_diffs/{idx:03d}',
+            save_fn=str(self.checkpoint.step),
+            n_arrows=12,
+        )
+
+    def _make_diff_vids_stitched(self):
+        """
+        Generate a video clip showing a target sequence, an attempt and the difference.
+        """
+        logger.info(f'Generating stitched scatter diff clip.')
+        generate_scatter_diff_clip(
+            FS_target=self.FS_target.to_numpy(),
+            FS_attempt=self.FS_out_stitched[0].to_numpy(),
+            save_dir=self.logs_path + f'/vid_diffs/stitched',
             save_fn=str(self.checkpoint.step),
             n_arrows=12,
         )
