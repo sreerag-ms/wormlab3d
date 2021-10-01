@@ -11,7 +11,7 @@ class FrameSequenceArgs(BaseArgs):
             fs_id: str = None,
             load_fs: bool = True,
             trial: int = None,
-            start_frame: str = None,
+            start_frame: int = None,
             midline_source: str = M3D_SOURCE_RECONST,
             midline_source_file: str = None,
             **kwargs
@@ -19,10 +19,10 @@ class FrameSequenceArgs(BaseArgs):
         self.fs_id = fs_id
         if fs_id is not None:
             assert load_fs, 'Frame sequence id defined, this is incompatible with load=False.'
-        else:
-            assert all(v is not None for v in [trial, start_frame]), 'Frame sequence not well defined.'
         self.load = load_fs
         self.trial_id = trial
+        if start_frame is None:
+            start_frame = 0
         self.start_frame = start_frame
         self.midline_source = midline_source
         self.midline_source_file = midline_source_file
