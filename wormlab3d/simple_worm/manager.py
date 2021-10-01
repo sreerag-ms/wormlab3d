@@ -35,7 +35,7 @@ from wormlab3d.data.model.sw_run import SwRun, SwControlSequence, SwFrameSequenc
 from wormlab3d.data.model.sw_simulation_parameters import SwSimulationParameters
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.simple_worm.args import RuntimeArgs, FrameSequenceArgs, SimulationArgs, OptimiserArgs, RegularisationArgs
-from wormlab3d.toolkit.util import to_dict, to_numpy, hash_data
+from wormlab3d.toolkit.util import to_dict, to_numpy, hash_data, is_bad
 
 START_TIMESTAMP = time.strftime('%Y%m%d_%H%M')
 
@@ -156,7 +156,7 @@ class Manager:
             n_chunks = self.optimiser_args.n_chunks
             chunk_duration = duration / n_chunks
             overlap = max(dt * 2, chunk_duration * 0.1)
-            T_chunk = int((chunk_duration + overlap / 2) / dt)
+            T_chunk = int((chunk_duration + overlap) / dt)
             timesteps = np.arange(0, duration, dt)
             start_times = list(np.linspace(0, duration - chunk_duration, n_chunks) - overlap / 2)
             start_idxs = []
@@ -344,17 +344,21 @@ class Manager:
         # Generate the NaturalFrame sequence to approximate twist and curvatures
         NFS_target: List[NaturalFrame] = []
         NFS_target_chunks: List[List[NaturalFrame]] = []
-        NF_prev: NaturalFrame = None
+        NF_prev: List[NaturalFrame] = []
+        buffer_size = 20
         for F in self.FS_target:
             NF = NaturalFrame(X=F.x.numpy().T)
 
             # Correct any sign flips
-            if NF_prev is not None:
+            if len(NF_prev) > 0:
+                m1_prev = np.mean([p.m1 for p in NF_prev], axis=0)
+                m2_prev = np.mean([p.m2 for p in NF_prev], axis=0)
+
                 # Check distances from previous frame to all pi/2 rotations of current frame
-                d0 = np.sum((NF.m1 - NF_prev.m1)**2 + (NF.m2 - NF_prev.m2)**2)
-                d1 = np.sum((NF.m1 + NF_prev.m2)**2 + (NF.m2 - NF_prev.m1)**2)
-                d2 = np.sum((NF.m1 + NF_prev.m1)**2 + (NF.m2 + NF_prev.m2)**2)
-                d3 = np.sum((NF.m1 - NF_prev.m2)**2 + (NF.m2 + NF_prev.m1)**2)
+                d0 = np.sum((NF.m1 - m1_prev)**2 + (NF.m2 - m2_prev)**2)
+                d1 = np.inf  # np.sum((NF.m1 + m2_prev)**2 +(NF.m2 - m1_prev)**2)
+                d2 = np.sum((NF.m1 + m1_prev)**2 + (NF.m2 + m2_prev)**2)
+                d3 = np.inf  # np.sum((NF.m1 - m2_prev)**2 +(NF.m2 + m1_prev)**2)
 
                 # If the distance is smallest to a rotated frame then rotate the frame to fix
                 closest_rotation_idx = np.argmin(np.array([d0, d1, d2, d3]))
@@ -373,7 +377,9 @@ class Manager:
                         NF.psi += 3 * np.pi / 2
 
             NFS_target.append(NF)
-            NF_prev = NF
+            NF_prev.append(NF)
+            if len(NF_prev) > buffer_size:
+                NF_prev.pop(0)
 
         # Chunk the NaturalFrame sequence if needed
         if oa.chunked_mode:
@@ -384,16 +390,15 @@ class Manager:
                 )
 
         # Generate optimisable initial frame, using known x0 and an estimate of psi0
+        psi0 = torch.zeros(self.batch_size, self.sim_params.worm_length)
         if oa.chunked_mode:
             x0 = torch.zeros(oa.n_chunks, 3, self.sim_params.worm_length)
-            psi0 = torch.zeros(oa.n_chunks, self.sim_params.worm_length)
             for i in range(oa.n_chunks):
                 x0[i] = self.FS_target_chunks[i][0].x
                 if oa.estimate_psi:
                     psi0[i] = torch.from_numpy(NFS_target_chunks[i][0].psi)
         else:
             x0 = expand_tensor(self.FS_target[0].x, self.batch_size)
-            psi0 = torch.zeros(self.batch_size, self.sim_params.worm_length)
             if oa.estimate_psi:
                 psi0[:] = torch.from_numpy(NFS_target[0].psi)
         F0 = FrameBatchTorch(
@@ -691,9 +696,13 @@ class Manager:
             if getattr(oa, f'optimise_MP_{k}'):
                 setattr(self.MP, k, getattr(MP_opt, k))
         self.MP.clamp()
+
         if oa.optimise_F0:
+            assert not is_bad(F0_opt.psi)
             self.F0 = F0_opt
         if oa.optimise_CS:
+            for k in CONTROL_KEYS:
+                assert not is_bad(CS_opt.controls[k])
             self.CS = CS_opt
 
         # Stitch together the chunks
