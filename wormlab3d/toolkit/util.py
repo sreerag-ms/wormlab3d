@@ -13,10 +13,9 @@ if TYPE_CHECKING:
     from wormlab3d.data.model import Trial
 
 
-def parse_target_arguments() -> Namespace:
+def build_target_arguments_parser() -> ArgumentParser:
     """
-    Parse command line arguments and build parameter holders.
-    This is used for multiple scripts to avoid repetition.
+    Generic command line parser for multiple scripts to avoid repetition.
     """
     parser = ArgumentParser(description='Wormlab3D script.')
     parser.add_argument('--experiment', type=int,
@@ -45,7 +44,15 @@ def parse_target_arguments() -> Namespace:
                         help='SwRun id.')
     parser.add_argument('--sw-checkpoint', type=str,
                         help='SwCheckpoint id.')
+    return parser
 
+
+def parse_target_arguments() -> Namespace:
+    """
+    Parse command line arguments and build parameter holders.
+    This is used for multiple scripts to avoid repetition.
+    """
+    parser = build_target_arguments_parser()
     args = parser.parse_args()
 
     return args
