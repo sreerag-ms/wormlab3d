@@ -33,6 +33,7 @@ from wormlab3d.data.model.sw_checkpoint import SwCheckpoint
 from wormlab3d.data.model.sw_regularisation_parameters import SwRegularisationParameters
 from wormlab3d.data.model.sw_run import SwRun, SwControlSequence, SwFrameSequence, SwMaterialParameters
 from wormlab3d.data.model.sw_simulation_parameters import SwSimulationParameters
+from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.simple_worm.args import RuntimeArgs, FrameSequenceArgs, SimulationArgs, OptimiserArgs, RegularisationArgs
 from wormlab3d.toolkit.util import to_dict, to_numpy, hash_data
 
@@ -340,16 +341,65 @@ class Manager:
             **oa.get_mp_opt_flags('optimise_')
         )
 
+        # Generate the NaturalFrame sequence to approximate twist and curvatures
+        NFS_target: List[NaturalFrame] = []
+        NFS_target_chunks: List[List[NaturalFrame]] = []
+        NF_prev: NaturalFrame = None
+        for F in self.FS_target:
+            NF = NaturalFrame(X=F.x.numpy().T)
+
+            # Correct any sign flips
+            if NF_prev is not None:
+                # Check distances from previous frame to all pi/2 rotations of current frame
+                d0 = np.sum((NF.m1 - NF_prev.m1)**2 + (NF.m2 - NF_prev.m2)**2)
+                d1 = np.sum((NF.m1 + NF_prev.m2)**2 + (NF.m2 - NF_prev.m1)**2)
+                d2 = np.sum((NF.m1 + NF_prev.m1)**2 + (NF.m2 + NF_prev.m2)**2)
+                d3 = np.sum((NF.m1 - NF_prev.m2)**2 + (NF.m2 + NF_prev.m1)**2)
+
+                # If the distance is smallest to a rotated frame then rotate the frame to fix
+                closest_rotation_idx = np.argmin(np.array([d0, d1, d2, d3]))
+                if closest_rotation_idx != 0:
+                    if closest_rotation_idx == 1:
+                        NF.m1 = -NF.m2
+                        NF.m2 = NF.m1
+                        NF.psi += np.pi / 2
+                    elif closest_rotation_idx == 2:
+                        NF.m1 = -NF.m1
+                        NF.m2 = -NF.m2
+                        NF.psi += np.pi
+                    elif closest_rotation_idx == 3:
+                        NF.m1 = NF.m2
+                        NF.m2 = -NF.m1
+                        NF.psi += 3 * np.pi / 2
+
+            NFS_target.append(NF)
+            NF_prev = NF
+
+        # Chunk the NaturalFrame sequence if needed
+        if oa.chunked_mode:
+            for i in range(oa.n_chunks):
+                idxs = self.FS_target_chunk_steps[i]
+                NFS_target_chunks.append(
+                    NFS_target[idxs[0]:idxs[1]]
+                )
+
         # Generate optimisable initial frame, using known x0 and an estimate of psi0
         if oa.chunked_mode:
             x0 = torch.zeros(oa.n_chunks, 3, self.sim_params.worm_length)
+            psi0 = torch.zeros(oa.n_chunks, self.sim_params.worm_length)
             for i in range(oa.n_chunks):
                 x0[i] = self.FS_target_chunks[i][0].x
+                if oa.estimate_psi:
+                    psi0[i] = torch.from_numpy(NFS_target_chunks[i][0].psi)
         else:
             x0 = expand_tensor(self.FS_target[0].x, self.batch_size)
+            psi0 = torch.zeros(self.batch_size, self.sim_params.worm_length)
+            if oa.estimate_psi:
+                psi0[:] = torch.from_numpy(NFS_target[0].psi)
         F0 = FrameBatchTorch(
             x=x0,
-            estimate_psi=oa.estimate_psi,
+            psi=psi0,
+            estimate_psi=False,  # Use our own estimate of psi if required
             optimise=oa.optimise_F0,
             batch_size=self.batch_size
         )
@@ -384,6 +434,16 @@ class Manager:
             batch_size=self.batch_size,
             **gates
         )
+
+        if oa.estimate_CS:
+            with torch.no_grad():
+                for i in range(self.batch_size):
+                    if oa.chunked_mode:
+                        src = NFS_target_chunks[i]
+                    else:
+                        src = NFS_target
+                    CS.controls['alpha'][i] = torch.tensor([F.m1 for F in src])
+                    CS.controls['beta'][i] = torch.tensor([F.m2 for F in src])
 
         # Add some noise
         with torch.no_grad():

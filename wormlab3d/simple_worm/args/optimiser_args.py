@@ -14,6 +14,7 @@ class OptimiserArgs(BaseArgs):
             self,
             batch_size: int,
             estimate_psi: bool,
+            estimate_CS: bool,
             optimise_MP_K: bool,
             optimise_MP_K_rot: bool,
             optimise_MP_A: bool,
@@ -50,6 +51,7 @@ class OptimiserArgs(BaseArgs):
     ):
         self.batch_size = batch_size
         self.estimate_psi = estimate_psi
+        self.estimate_CS = estimate_CS
         self.optimise_MP_K = optimise_MP_K
         self.optimise_MP_K_rot = optimise_MP_K_rot
         self.optimise_MP_A = optimise_MP_A
@@ -105,6 +107,8 @@ class OptimiserArgs(BaseArgs):
                            help='Number of optimisations to run concurrently from different initial starting points.')
         group.add_argument('--estimate-psi', type=str2bool, default=True,
                            help='Estimate initial value of psi from the initial midline position.')
+        group.add_argument('--estimate-CS', type=str2bool, default=False,
+                           help='Estimate initial value of controls by using the natural frame.')
 
         # Optimisation flags
         group.add_argument('--optimise-MP-K', type=str2bool, default=False,
@@ -185,13 +189,13 @@ class OptimiserArgs(BaseArgs):
                            help='Number of MKL threads to use.')
 
         # Chunked mode
-        group.add_argument('--chunked-mode', type=bool, default=False,
+        group.add_argument('--chunked-mode', type=str2bool, default=False,
                            help='Split the sequence into chunks optimisation mode. Default=False.')
         group.add_argument('--n-chunks', type=int, default=1,
                            help='Number of chunks to use in chunked mode. Must be set > 1.')
 
         # Multiscale optimisation
-        group.add_argument('--multiscale-mode', type=bool, default=False,
+        group.add_argument('--multiscale-mode', type=str2bool, default=False,
                            help='Enable multiscale optimisation mode. Default=False.')
         group.add_argument('--multiscale-max-dt', type=float, default=1,
                            help='Maximum timestep to use in multiscale optimisation mode. Default=1s.')
