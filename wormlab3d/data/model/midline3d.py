@@ -10,6 +10,7 @@ from wormlab3d.data.model.model import Model
 from wormlab3d.data.numpy_field import NumpyField, COMPRESS_BLOSC_PACK
 from wormlab3d.data.triplet_field import TripletField
 from wormlab3d.midlines2d.masks_from_coordinates import make_segmentation_mask
+from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.toolkit.camera_model_triplet import CameraModelTriplet
 
 M3D_SOURCE_WT3D = 'WT3D'
@@ -38,6 +39,9 @@ class Midline3D(Document):
     source = StringField(choices=M3D_SOURCES, required=True)
     source_file = StringField()
     model = ReferenceField(Model)
+
+    # Natural frame representation
+    natural_frame = NumpyField(dtype=np.complex64, compression=COMPRESS_BLOSC_PACK)
 
     # Specify collection name otherwise it puts an underscore in it
     meta = {
@@ -145,3 +149,21 @@ class Midline3D(Document):
               & (X[:, 0] < PREPARED_IMAGE_SIZE[0] - 0.5)
               & (X[:, 1] < PREPARED_IMAGE_SIZE[1] - 0.5)]
         return X
+
+    def get_natural_frame(self, regenerate: bool=False) -> np.ndarray:
+        """
+        Get the natural frame (m1+i.m2) representation.
+        """
+        if self.natural_frame is not None and not regenerate:
+            return self.natural_frame
+
+        if self.natural_frame is None:
+            logger.debug(f'Natural frame not available for midline={self.id}, generating now.')
+        else:
+            logger.debug(f'Generating natural frame representation for midline={self.id}.')
+
+        nf = NaturalFrame(self.X)
+        self.natural_frame = nf.mc
+        self.save()
+
+        return self.natural_frame
