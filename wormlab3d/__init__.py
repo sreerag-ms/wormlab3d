@@ -35,6 +35,9 @@ CAMERA_IDXS = [0, 1, 2]
 N_WORM_POINTS = 50
 # N_WORM_POINTS = 3
 
+# Timestamp for when the script was started, can be used for log names
+START_TIMESTAMP = time.strftime('%Y%m%d_%H%M')
+
 
 # || ------------------------------ DATABASE ------------------------------- ||
 
@@ -49,7 +52,7 @@ DB_PASSWORD = os.getenv('DB_PASSWORD')
 cwd = os.getcwd()
 dir_name = os.path.dirname(sys.argv[0]).replace(cwd, '').lstrip('/')
 SCRIPT_PATH = (cwd + '/' + dir_name).rstrip('/')
-LOGS_PATH = ROOT_PATH + '/logs' + SCRIPT_PATH[len(ROOT_PATH):] + '/' + os.path.basename(sys.argv[0]).rstrip('.py')
+LOGS_PATH = ROOT_PATH + '/logs' + SCRIPT_PATH[len(ROOT_PATH):] + '/' + os.path.basename(sys.argv[0])[:-3]
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 WRITE_LOG_FILES = os.getenv('WRITE_LOG_FILES', False)
 
