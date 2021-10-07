@@ -100,9 +100,18 @@ class SwRun(Document):
             logger.debug(f'Generating projected coordinates for simulation run={self.id}.')
 
         prepared_coords = []
-        for i, midline in enumerate(self.frame_sequence.midlines):
+        midlines = self.frame_sequence.midlines
+        n_midlines = len(midlines)
+        n_timesteps = self.FS.x.shape[0]
+
+        # Use the nearest midline to do the projections
+        if n_midlines != n_timesteps:
+            midline_idxs = np.arange(0, n_midlines, n_midlines / n_timesteps).astype(np.int32)
+        else:
+            midline_idxs = np.arange(n_midlines)
+        for i, midline_idx in enumerate(midline_idxs):
             X = self.FS.x[i].T + self.frame_sequence.centre
-            prepared_coords.append(midline.prepare_2d_coordinates(X=X))
+            prepared_coords.append(midlines[midline_idx].prepare_2d_coordinates(X=X))
 
         self.X_projections = prepared_coords
         self.save()
