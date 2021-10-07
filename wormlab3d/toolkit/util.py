@@ -7,7 +7,6 @@ from typing import Tuple, List, TYPE_CHECKING
 import torch
 
 from wormlab3d import logger, CAMERA_IDXS
-from wormlab3d.data.model.midline3d import M3D_SOURCE_RECONST, M3D_SOURCES
 
 if TYPE_CHECKING:
     from wormlab3d.data.model import Trial
@@ -17,6 +16,7 @@ def build_target_arguments_parser() -> ArgumentParser:
     """
     Generic command line parser for multiple scripts to avoid repetition.
     """
+    from wormlab3d.data.model.midline3d import M3D_SOURCE_RECONST, M3D_SOURCES
     parser = ArgumentParser(description='Wormlab3D script.')
     parser.add_argument('--experiment', type=int,
                         help='Experiment by id.')
