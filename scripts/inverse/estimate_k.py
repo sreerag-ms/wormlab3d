@@ -4,6 +4,7 @@ from typing import List
 
 import matplotlib.pyplot as plt
 import numpy as np
+
 from simple_worm.frame import FrameSequenceNumpy
 from simple_worm.material_parameters import MP_DEFAULT_K
 from simple_worm.util import estimate_K_from_x
@@ -84,7 +85,10 @@ def get_data(args: Namespace):
     else:
         for i in range(args.n_samples):
             args.frame_num = np.random.choice(trial.n_frames_min - n_sample_frames)
-            FSs.append(get_FS_numpy(save=False))
+            try:
+                FSs.append(get_FS_numpy(save=False))
+            except RuntimeError as e:
+                logger.warning(e)
 
     return FSs
 
@@ -99,7 +103,7 @@ def do_estimation(FSs: List[FrameSequenceNumpy], args: Namespace):
 
 def plot_results(res, args):
     plt.hist(res, bins=20)
-    plt.title(f'Trial={args.trial}. Num samples={args.n_samples}. Sample duration={args.duration:.2f}s. K0={args.K0}.')
+    plt.title(f'Trial={args.trial}. Num samples={len(res)}. Sample duration={args.duration:.2f}s. K0={args.K0}.')
     plt.ylabel('frequency')
     plt.xlabel('K_est')
     plt.show()
