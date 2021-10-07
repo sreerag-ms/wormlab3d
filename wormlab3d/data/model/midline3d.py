@@ -46,7 +46,7 @@ class Midline3D(Document):
     # Specify collection name otherwise it puts an underscore in it
     meta = {
         'collection': 'midline3d',
-        'indexes': ['frame', 'source']
+        'indexes': ['frame', 'source', 'source_file']
     }
 
     def get_segmentation_masks(self, blur_sigma: float = None, draw_mode: str = 'line_aa') -> np.ndarray:
