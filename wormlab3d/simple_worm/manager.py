@@ -129,24 +129,24 @@ class Manager:
         if FS_db is None:
             FS_db = self._generate_frame_sequence()  # persists to the database
 
-        # Create the simulation target frame sequence
-        x = torch.from_numpy(FS_db.X)
+        # Create the simulation target frame sequence (leaving the first frame for F0)
+        x = torch.from_numpy(FS_db.X[1:])
 
         # Resample the worm points if required
         duration = self.simulation_args.duration
         dt = self.simulation_args.dt
-        T = int(duration / dt)
-        T_data = x.shape[0]
+        n_frames = int(duration / dt)
+        n_frames_data = x.shape[0]
         N = self.simulation_args.worm_length
         N_data = x.shape[1]
-        if T != T_data or N != N_data:
+        if n_frames != n_frames_data or N != N_data:
             x = x.permute(2, 0, 1).unsqueeze(0)
-            x = F.interpolate(x, size=(T, N), mode='bilinear', align_corners=True)
+            x = F.interpolate(x, size=(n_frames, N), mode='bilinear', align_corners=True)
             x = x.squeeze(0).permute(1, 2, 0)
 
         # Permute dimensions for compatibility with simple-worm
         x = x.permute(0, 2, 1)
-        assert x.shape == (T, 3, N)
+        assert x.shape == (n_frames, 3, N)
         FS = FrameSequenceTorch(x=x)
 
         # Chunk the FS if required
@@ -156,18 +156,18 @@ class Manager:
             n_chunks = self.optimiser_args.n_chunks
             chunk_duration = duration / n_chunks
             overlap = max(dt * 2, chunk_duration * 0.1)
-            T_chunk = int((chunk_duration + overlap) / dt)
+            n_frames_chunk = int((chunk_duration + overlap) / dt)
             timesteps = np.arange(0, duration, dt)
             start_times = list(np.linspace(0, duration - chunk_duration, n_chunks) - overlap / 2)
             start_idxs = []
             for i, t in enumerate(timesteps):
-                if t >= start_times[0] or i + T_chunk == T:
+                if t >= start_times[0] or i + n_frames_chunk == n_frames:
                     start_times.pop(0)
                     start_idxs.append(i)
                     if len(start_times) == 0:
                         break
             start_idxs = np.array(start_idxs)
-            end_idxs = start_idxs + T_chunk
+            end_idxs = start_idxs + n_frames_chunk
 
             for c in range(n_chunks):
                 FS_chunks.append(FS[start_idxs[c]:end_idxs[c]])
@@ -189,7 +189,7 @@ class Manager:
         else:
             # Otherwise, try to find one matching the same parameters
             trial = Trial.objects.get(id=self.frame_sequence_args.trial_id)
-            n_frames = math.ceil(self.simulation_args.duration * trial.fps)
+            n_frames = math.ceil(self.simulation_args.duration * trial.fps) + 1
             FS_db = FrameSequence.find_from_args(self.frame_sequence_args, n_frames)
             if FS_db.count() > 0:
                 logger.info(f'Found {len(FS_db)} matching frame sequences in database, using most recent.')
@@ -208,7 +208,7 @@ class Manager:
         logger.info('Generating frame sequence.')
         fsa = self.frame_sequence_args
         trial = Trial.objects.get(id=fsa.trial_id)
-        n_frames = math.ceil(self.simulation_args.duration * trial.fps)
+        n_frames = math.ceil(self.simulation_args.duration * trial.fps) + 1
         f0 = fsa.start_frame
         fn = f0 + n_frames
         frame_nums = range(f0, fn)
@@ -251,7 +251,7 @@ class Manager:
 
             # Update duration to the chunk duration when in chunked mode
             if self.optimiser_args.chunked_mode:
-                sim_config['duration'] = self.FS_target_chunks[0].n_timesteps * self.simulation_args.dt
+                sim_config['duration'] = self.FS_target_chunks[0].n_frames * self.simulation_args.dt
 
             sim_params = SwSimulationParameters.objects(**sim_config)
             if sim_params.count() > 0:
@@ -404,7 +404,7 @@ class Manager:
         F0 = FrameBatchTorch(
             x=x0,
             psi=psi0,
-            estimate_psi=False,  # Use our own estimate of psi if required
+            estimate_psi=False,  # Use the NF estimate of psi if required
             optimise=oa.optimise_F0,
             batch_size=self.batch_size
         )
@@ -422,15 +422,15 @@ class Manager:
 
         # Generate optimisable control sequence
         if oa.chunked_mode:
-            n_timesteps = self.FS_target_chunks[0].n_timesteps
+            n_timesteps = self.FS_target_chunks[0].n_frames
             CS_stitched = ControlSequenceBatchTorch(
                 worm=self.worm_stitched.worm_solver,
-                n_timesteps=self.FS_target.n_timesteps,
+                n_timesteps=self.FS_target.n_frames,
                 batch_size=1,
                 **gates
             )
         else:
-            n_timesteps = self.FS_target.n_timesteps
+            n_timesteps = self.FS_target.n_frames
             CS_stitched = None
         CS = ControlSequenceBatchTorch(
             worm=self.worm.worm_solver,

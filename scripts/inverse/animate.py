@@ -110,7 +110,7 @@ def generate_3d_clip_with_projections(
         frame_idxs = np.arange(n_frames)
 
     # Load the camera image sequences
-    IS = np.zeros((FS.n_timesteps, 3, *PREPARED_IMAGE_SIZE))
+    IS = np.zeros((FS.n_frames, 3, *PREPARED_IMAGE_SIZE))
     for i, frame_idx in enumerate(frame_idxs):
         frame = frames[frame_idx]
         if not frame.is_ready():
@@ -203,7 +203,7 @@ def generate_3d_clip_with_projections(
     ani = animation.FuncAnimation(
         fig,
         update,
-        frames=FS.n_timesteps,
+        frames=FS.n_frames,
         blit=True,
         interval=1 / fps
     )
