@@ -2,11 +2,32 @@ from argparse import ArgumentParser, _ArgumentGroup, Action
 from typing import Dict
 
 from simple_worm.material_parameters import MP_KEYS
+from simple_worm.worm import LINEAR_SOLVER_DEFAULT
 from simple_worm.worm_inv import MAX_ALPHA_BETA_DEFAULT, MAX_GAMMA_DEFAULT, INVERSE_OPT_LIBRARY_DEFAULT, \
     INVERSE_OPT_METHOD_DEFAULT, INVERSE_OPT_MAX_ITER_DEFAULT, INVERSE_OPT_TOL_DEFAULT, MKL_THREADS_DEFAULT, \
     INVERSE_SOLVER_LIBRARY_OPTIONS
 from wormlab3d.nn.args.base_args import BaseArgs
 from wormlab3d.toolkit.util import str2bool
+
+
+def guess_type(x: str):
+    try:
+        y = float(x)
+    except ValueError:
+        try:
+            y = int(x)
+        except ValueError:
+            y = x
+    return y
+
+
+class StoreDictKeyPair(Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        my_dict = {}
+        for kv in values.split(','):
+            k, v = kv.split('=')
+            my_dict[k] = guess_type(v)
+        setattr(namespace, self.dest, my_dict)
 
 
 class OptimiserArgs(BaseArgs):
@@ -33,6 +54,8 @@ class OptimiserArgs(BaseArgs):
             init_noise_std_alpha: float,
             init_noise_std_beta: float,
             init_noise_std_gamma: float,
+            forward_solver: str = LINEAR_SOLVER_DEFAULT,
+            forward_solver_opts: dict = None,
             max_alpha_beta: float = MAX_ALPHA_BETA_DEFAULT,
             max_gamma: float = MAX_GAMMA_DEFAULT,
             inverse_opt_library: str = INVERSE_OPT_LIBRARY_DEFAULT,
@@ -70,6 +93,10 @@ class OptimiserArgs(BaseArgs):
         self.init_noise_std_alpha = init_noise_std_alpha
         self.init_noise_std_beta = init_noise_std_beta
         self.init_noise_std_gamma = init_noise_std_gamma
+        self.forward_solver = forward_solver
+        if forward_solver_opts is None:
+            forward_solver_opts = {}
+        self.forward_solver_opts = forward_solver_opts
         self.max_alpha_beta = max_alpha_beta
         self.max_gamma = max_gamma
         self.inverse_opt_library = inverse_opt_library
@@ -150,6 +177,12 @@ class OptimiserArgs(BaseArgs):
         group.add_argument('--init-noise-std-gamma', type=float, default=0.001,
                            help='Add normally-distributed, zero-mean noise to the initial gamma estimate with this standard deviation.')
 
+        # Forward solver options
+        group.add_argument('--forward-solver', type=str, default=LINEAR_SOLVER_DEFAULT,
+                           help='Which linear solver to use for the forward solve.')
+        group.add_argument('--forward-solver-opts', action=StoreDictKeyPair, metavar='KEY1=VAL1,KEY2=VAL2...',
+                           help='Forward linear solver additional options.')
+
         # Inverse solver options
         group.add_argument('--max-alpha-beta', type=float, default=MAX_ALPHA_BETA_DEFAULT,
                            help='Maximum allowed alpha or beta. Used to define bounds for inverse solver.')
@@ -164,25 +197,6 @@ class OptimiserArgs(BaseArgs):
                            help='Maximum number of inverse optimisation iterations per step.')
         group.add_argument('--inverse-opt-tol', type=float, default=INVERSE_OPT_TOL_DEFAULT,
                            help='Inverse optimisation stopping tolerance.')
-
-        def guess_type(x: str):
-            try:
-                y = float(x)
-            except ValueError:
-                try:
-                    y = int(x)
-                except ValueError:
-                    y = x
-            return y
-
-        class StoreDictKeyPair(Action):
-            def __call__(self, parser, namespace, values, option_string=None):
-                my_dict = {}
-                for kv in values.split(','):
-                    k, v = kv.split('=')
-                    my_dict[k] = guess_type(v)
-                setattr(namespace, self.dest, my_dict)
-
         group.add_argument('--inverse-opt-opts', action=StoreDictKeyPair, metavar='KEY1=VAL1,KEY2=VAL2...',
                            help='Inverse optimisation additional options.')
         group.add_argument('--mkl-threads', type=int, default=MKL_THREADS_DEFAULT,

@@ -291,6 +291,8 @@ class Manager:
             N=self.sim_params.worm_length,
             dt=self.sim_params.dt,
             batch_size=self.batch_size,
+            forward_solver=self.optimiser_args.forward_solver,
+            forward_solver_opts=self.optimiser_args.forward_solver_opts,
             **oa.get_mp_opt_flags('optimise_MP_'),
             optimise_F0=oa.optimise_F0,
             optimise_CS=oa.optimise_CS,
