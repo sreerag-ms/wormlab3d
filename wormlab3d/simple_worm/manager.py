@@ -57,7 +57,7 @@ class Manager:
         self.regularisation_args = regularisation_args
 
         # Target frame sequence (from data)
-        self.FS_db, self.FS_target, self.FS_target_chunks, self.FS_target_chunk_steps = self._init_frame_sequence()
+        self.target, self.F0_target, self.FS_target, self.FS_target_chunks, self.FS_target_chunk_steps = self._init_frame_sequence()
 
         # Initialise configurations
         self.sim_params, self.reg_params = self._init_configuration()
@@ -94,10 +94,13 @@ class Manager:
                   f'_dt={checkpoint.sim_args["dt"]:04.2f}' \
                   f'_{checkpoint.sim_params.id}'
 
-        FS_dir = f'/{checkpoint.frame_sequence_args["trial_id"]:03d}' \
-                 f'_{checkpoint.frame_sequence_args["start_frame"]}' \
-                 f'_{checkpoint.frame_sequence_args["midline_source"]}' \
-                 f'_{checkpoint.frame_sequence.id}'
+        if checkpoint.frame_sequence_args['sw_run_id'] is not None:
+            FS_dir = f'/run={checkpoint.frame_sequence_args["sw_run_id"]}'
+        else:
+            FS_dir = f'/{checkpoint.frame_sequence_args["trial_id"]:03d}' \
+                     f'_{checkpoint.frame_sequence_args["start_frame"]}' \
+                     f'_{checkpoint.frame_sequence_args["midline_source"]}' \
+                     f'_{checkpoint.frame_sequence.id}'
 
         regs_dir = f'/{checkpoint.reg_params.created:%Y%m%d_%H:%M}' \
                    f'_{checkpoint.reg_params.id}'
@@ -112,7 +115,7 @@ class Manager:
         return LOGS_PATH + sim_dir + FS_dir + regs_dir + solver_dir
 
     def _init_frame_sequence(self) \
-            -> Tuple[FrameSequence, FrameSequenceTorch, List[FrameSequenceTorch], Optional[np.ndarray]]:
+            -> Tuple[FrameSequence, FrameTorch, FrameSequenceTorch, List[FrameSequenceTorch], Optional[np.ndarray]]:
         """
         Load or create the target frame sequence and the chunks if required.
         """
@@ -129,8 +132,15 @@ class Manager:
         if FS_db is None:
             FS_db = self._generate_frame_sequence()  # persists to the database
 
-        # Create the simulation target frame sequence (leaving the first frame for F0)
-        x = torch.from_numpy(FS_db.X[1:])
+        # Create the simulation target frame sequence
+        if isinstance(FS_db, FrameSequence):
+            x = torch.from_numpy(FS_db.X)
+        elif isinstance(FS_db, SwRun):
+            x = torch.cat([
+                torch.from_numpy(FS_db.F0.x).unsqueeze(0),
+                torch.from_numpy(FS_db.FS.x)
+            ])
+            x = x.permute(2, 0, 1)
 
         # Resample the worm points if required
         duration = self.simulation_args.duration
@@ -147,7 +157,10 @@ class Manager:
         # Permute dimensions for compatibility with simple-worm
         x = x.permute(0, 2, 1)
         assert x.shape == (n_frames, 3, N)
-        FS = FrameSequenceTorch(x=x)
+
+        # Extract the first frame
+        F0 = FrameTorch(x=x[0])
+        FS = FrameSequenceTorch(x=x[1:])
 
         # Chunk the FS if required
         FS_chunks = []
@@ -177,27 +190,42 @@ class Manager:
 
             FS_chunk_steps = np.array([start_idxs, end_idxs]).T
 
-        return FS_db, FS, FS_chunks, FS_chunk_steps
+        return FS_db, F0, FS, FS_chunks, FS_chunk_steps
 
-    def _load_frame_sequence(self) -> FrameSequence:
+    def _load_frame_sequence(self) -> Union[FrameSequence, SwRun]:
         """
         Load an existing frame sequence from the database.
         """
-        # If we have a fs id then load this from the database
-        if self.frame_sequence_args.fs_id is not None:
-            FS_db = FrameSequence.objects.get(id=self.frame_sequence_args.fs_id)
+        fsa = self.frame_sequence_args
+
+        # If we have a fs id then load this from the database.
+        if fsa.fs_id is not None:
+            FS_db = FrameSequence.objects.get(id=fsa.fs_id)
+
+        # If we have a simulation run id then load this from the database.
+        elif fsa.sw_run_id is not None:
+            try:
+                run = SwRun.objects.get(id=fsa.sw_run_id)
+            except DoesNotExist:
+                # Raise a different exception as we can't create it otherwise.
+                raise RuntimeError(f'SwRun id={fsa.sw_run_id} not found in database.')
+            FS_db = run
+
+        # Otherwise, try to find one matching the same parameters.
         else:
-            # Otherwise, try to find one matching the same parameters
-            trial = Trial.objects.get(id=self.frame_sequence_args.trial_id)
+            trial = Trial.objects.get(id=fsa.trial_id)
             n_frames = math.ceil(self.simulation_args.duration * trial.fps) + 1
-            FS_db = FrameSequence.find_from_args(self.frame_sequence_args, n_frames)
+            FS_db = FrameSequence.find_from_args(fsa, n_frames)
             if FS_db.count() > 0:
                 logger.info(f'Found {len(FS_db)} matching frame sequences in database, using most recent.')
                 FS_db = FS_db[0]
             else:
                 raise DoesNotExist()
 
-        logger.info(f'Loaded frame sequence id={FS_db.id}.')
+        if isinstance(FS_db, FrameSequence):
+            logger.info(f'Loaded frame sequence id={FS_db.id}.')
+        elif isinstance(FS_db, SwRun):
+            logger.info(f'Loaded target simulation run id={FS_db.id}.')
 
         return FS_db
 
@@ -348,7 +376,7 @@ class Manager:
         NFS_target_chunks: List[List[NaturalFrame]] = []
         NF_prev: List[NaturalFrame] = []
         buffer_size = 20
-        for F in self.FS_target:
+        for F in [self.F0_target, *self.FS_target]:
             NF = NaturalFrame(X=F.x.numpy().T)
 
             # Correct any sign flips
@@ -400,7 +428,7 @@ class Manager:
                 if oa.estimate_psi:
                     psi0[i] = torch.from_numpy(NFS_target_chunks[i][0].psi)
         else:
-            x0 = expand_tensor(self.FS_target[0].x, self.batch_size)
+            x0 = expand_tensor(self.F0_target.x, self.batch_size)
             if oa.estimate_psi:
                 psi0[:] = torch.from_numpy(NFS_target[0].psi)
         F0 = FrameBatchTorch(
@@ -486,12 +514,12 @@ class Manager:
         if self.runtime_args.resume:
             try:
                 if self.runtime_args.resume_from in ['latest', 'best']:
-                    order_by = '-created' if self.runtime_args.resume_from == 'latest' else '+loss'
-                    prev_checkpoints = SwCheckpoint.objects(
-                        frame_sequence=self.FS_db,
+                    prev_checkpoints = SwCheckpoint.find_checkpoint(
+                        target=self.target,
                         sim_params=self.sim_params,
-                        reg_params=self.reg_params
-                    ).order_by(order_by)
+                        reg_params=self.reg_params,
+                        order=self.runtime_args.resume_from
+                    )
                     if prev_checkpoints.count() > 0:
                         logger.info(
                             f'Found {prev_checkpoints.count()} previous checkpoints. '
@@ -500,7 +528,7 @@ class Manager:
                         prev_checkpoint = prev_checkpoints[0]
                     else:
                         logger.error(
-                            f'Found no checkpoints for FS={self.FS_db.id}, sim={self.sim_params.id} and reg={self.reg_params.id}'
+                            f'Found no checkpoints for target={self.target.id}, sim={self.sim_params.id} and reg={self.reg_params.id}'
                         )
                         raise DoesNotExist()
                 else:
@@ -570,7 +598,6 @@ class Manager:
         # ..or start a new checkpoint
         else:
             checkpoint = SwCheckpoint(
-                frame_sequence=self.FS_db,
                 sim_params=self.sim_params,
                 reg_params=self.reg_params,
                 frame_sequence_args=to_dict(self.frame_sequence_args),
@@ -579,6 +606,7 @@ class Manager:
                 sim_args=to_dict(self.simulation_args),
                 reg_args=to_dict(self.regularisation_args),
             )
+            checkpoint.set_target(self.target)
 
         return checkpoint
 
@@ -611,9 +639,9 @@ class Manager:
         # Create the run record of inputs and optimal outputs for the most recent runs.
         for idx in range(self.batch_size):
             run = SwRun()
+            run.set_target(self.target)
             run.checkpoint = self.checkpoint
             run.sim_params = self.sim_params
-            run.frame_sequence = self.FS_db
             run.loss = L[idx].total
             run.loss_data = L[idx].data
             run.loss_reg = L[idx].reg

@@ -1,5 +1,5 @@
 import datetime
-from typing import List
+from typing import List, Union
 
 import numpy as np
 from mongoengine import *
@@ -8,6 +8,7 @@ from simple_worm.controls import CONTROL_KEYS
 from simple_worm.material_parameters import MaterialParameters
 from simple_worm.material_parameters_torch import MaterialParametersTorch
 from wormlab3d import logger
+from wormlab3d.data.model.frame_sequence import FrameSequence
 from wormlab3d.data.numpy_field import NumpyField, COMPRESS_BLOSC_PACK
 from wormlab3d.data.triplet_field import TripletField
 
@@ -48,7 +49,8 @@ class SwControlSequence(EmbeddedDocument):
 class SwRun(Document):
     created = DateTimeField(required=True, default=datetime.datetime.utcnow)
     sim_params = ReferenceField('SwSimulationParameters', required=True)
-    frame_sequence = ReferenceField('FrameSequence', required=True)
+    frame_sequence = ReferenceField('FrameSequence')
+    sim_run_target = ReferenceField('SwRun')
     checkpoint = ReferenceField('SwCheckpoint')
     loss = FloatField()
     loss_data = FloatField()
@@ -75,13 +77,27 @@ class SwRun(Document):
         'ordering': ['-created'],
     }
 
+    def set_target(self, target: Union[FrameSequence, 'SwRun']):
+        """
+        Target can either be a FrameSequence or a SwRun instance.
+        """
+        if isinstance(target, SwRun):
+            self.sim_run_target = target
+        elif isinstance(target, FrameSequence):
+            self.frame_sequence = target
+        else:
+            raise RuntimeError(f'Unrecognised target type: {type(target).__name__}.')
+
     def clean(self):
         """
         Convert tensors to floats.
         """
-        self.loss = float(self.loss)
-        self.loss_data = float(self.loss_data)
-        self.loss_reg = float(self.loss_reg)
+        if self.loss is not None:
+            self.loss = float(self.loss)
+        if self.loss_data is not None:
+            self.loss_data = float(self.loss_data)
+        if self.loss_reg is not None:
+            self.loss_reg = float(self.loss_reg)
         for k1, d in self.reg_losses.items():
             for k2, l in d.items():
                 self.reg_losses[k1][k2] = float(l)
