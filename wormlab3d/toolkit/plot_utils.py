@@ -31,6 +31,15 @@ def clear_axes(ax):
     ax.get_zaxis().set_ticks([])
 
 
+def tex_mode():
+    """Use latex font rendering."""
+    plt.rcParams.update({
+        'text.usetex': True,
+        'font.family': 'sans-serif',
+        'font.sans-serif': ['Helvetica']})
+    plt.rc('text.latex', preamble=r'\usepackage{amsmath}')
+
+
 class CameraImageArtist:
     """
     Draw camera images and midline coordinates.
