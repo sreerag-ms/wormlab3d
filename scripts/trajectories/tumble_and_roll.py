@@ -265,7 +265,7 @@ def tumble_roll():
     parser = build_target_arguments_parser()
     parser.add_argument('--rebuild-cache', type=str2bool, help='Rebuild the trajectory cache.', default=False)
     parser.add_argument('--deltas', type=lambda s: [int(item) for item in s.split(',')], default=[1, 10, 100],
-                        help='Initial value of K for the optimiser.')
+                        help='Time lag sizes.')
     parser.add_argument('--trajectory-point', type=float, default=0.5, help='Number between 0 (head) and 1 (tail).')
     parser.add_argument('--n-frames', type=int, help='Number of frames to use.')
     parser.add_argument('--projection', type=str, choices=['xy', 'yz', 'zx'],
