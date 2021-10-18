@@ -25,9 +25,9 @@ def generate_centres_2d(
     """
     trials, cam_idxs = resolve_targets(experiment_id, trial_id, camera_idx, frame_num)
     if missing_only:
-        logger.info(f'Generating any missing 2D centre points for {trials.count()} trials.')
+        logger.info(f'Generating any missing 2D centre points for {len(trials)} trials.')
     else:
-        logger.info(f'(Re)generating ALL 2D centre points for {trials.count()} trials.')
+        logger.info(f'(Re)generating ALL 2D centre points for {len(trials)} trials.')
 
     if min_brightness is None:
         min_brightness = MIN_REQ_THRESHOLD / contour_threshold_ratio
@@ -179,9 +179,9 @@ def generate_centres_3d(
     trials, cam_idxs = resolve_targets(experiment_id, trial_id, None, frame_num)
     trial_ids = [t.id for t in trials]
     if missing_only:
-        logger.info(f'Generating any missing 3D centre points for {trials.count()} trials.')
+        logger.info(f'Generating any missing 3D centre points for {len(trials)} trials.')
     else:
-        logger.info(f'(Re)generating ALL 3D centre points for {trials.count()} trials.')
+        logger.info(f'(Re)generating ALL 3D centre points for {len(trials)} trials.')
 
     # Iterate over matching trials
     for trial_id in trial_ids:

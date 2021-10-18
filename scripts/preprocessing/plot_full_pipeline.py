@@ -12,7 +12,7 @@ from wormlab3d.toolkit.triangulate import triangulate
 from wormlab3d.toolkit.util import parse_target_arguments
 
 MAX_RESULTS = 5
-save_plot = True
+save_plot = False
 contour_threshold_ratio: float = CONT_THRESH_RATIO_DEFAULT
 
 plt.rcParams.update({

@@ -1,13 +1,17 @@
 import datetime
+from typing import Union
 
 from mongoengine import *
+
+from wormlab3d.data.model.frame_sequence import FrameSequence
 from wormlab3d.data.model.sw_run import SwRun
 
 
 class SwCheckpoint(Document):
     created = DateTimeField(required=True, default=datetime.datetime.utcnow)
     cloned_from = ReferenceField('SwCheckpoint')
-    frame_sequence = ReferenceField('FrameSequence', required=True)
+    frame_sequence = ReferenceField('FrameSequence')
+    sim_run_target = ReferenceField('SwRun')
     sim_params = ReferenceField('SwSimulationParameters', required=True)
     reg_params = ReferenceField('SwRegularisationParameters', required=True)
     step = IntField(required=True, default=0)
@@ -33,6 +37,7 @@ class SwCheckpoint(Document):
         return SwCheckpoint(
             cloned_from=self,
             frame_sequence=self.frame_sequence,
+            sim_run_target=self.sim_run_target,
             sim_params=self.sim_params,
             reg_params=self.reg_params,
             step=self.step,
@@ -44,6 +49,17 @@ class SwCheckpoint(Document):
             sim_args=self.sim_args,
             reg_args=self.reg_args,
         )
+
+    def set_target(self, target: Union[FrameSequence, SwRun]):
+        """
+        Target can either be a FrameSequence or a SwRun instance.
+        """
+        if isinstance(target, SwRun):
+            self.sim_run_target = target
+        elif isinstance(target, FrameSequence):
+            self.frame_sequence = target
+        else:
+            raise RuntimeError(f'Unrecognised target type: {type(target).__name__}')
 
     def clean(self):
         """
@@ -58,3 +74,31 @@ class SwCheckpoint(Document):
         Get the simulation runs associated with this checkpoint.
         """
         return SwRun.objects(checkpoint=self)
+
+    @queryset_manager
+    def find_checkpoint(
+            doc_cls,
+            queryset,
+            target: Union['FrameSequence', 'SwRun'],
+            sim_params: 'SwSimulationParameters',
+            reg_params: 'SwRegularisationParameters',
+            order: str = 'best'
+    ):
+        """
+        Find a checkpoint matching the target (frame sequence or simulation run) and other parameters.
+        """
+        filters = {
+            'sim_params': sim_params,
+            'reg_params': reg_params
+        }
+
+        if isinstance(target, SwRun):
+            filters['sim_run_target'] = target.id
+        elif isinstance(target, FrameSequence):
+            filters['frame_sequence'] = target.id
+        else:
+            raise RuntimeError(f'Unrecognised target type: {type(target)}')
+
+        order_by = '-created' if order == 'latest' else '+loss'
+
+        return queryset.filter(**filters).order_by(order_by)

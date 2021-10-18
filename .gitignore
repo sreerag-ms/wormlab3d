@@ -15,4 +15,5 @@ __pycache__
 /data/db
 /data/backgrounds
 /data/ds_cache
+/data/trajectory_cache
 intermediate-data

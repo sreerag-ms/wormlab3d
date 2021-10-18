@@ -25,9 +25,9 @@ def generate_prepared_images(
     trials, _ = resolve_targets(experiment_id, trial_id, frame_num=frame_num)
     trial_ids = [t.id for t in trials]
     if missing_only:
-        logger.info(f'Generating any missing prepared images for {trials.count()} trials.')
+        logger.info(f'Generating any missing prepared images for {len(trial_ids)} trials.')
     else:
-        logger.info(f'(Re)generating ALL prepared images for {trials.count()} trials.')
+        logger.info(f'(Re)generating ALL prepared images for {len(trial_ids)} trials.')
 
     # Iterate over matching trials
     for trial_id in trial_ids:
@@ -125,14 +125,6 @@ def generate_prepared_images(
 
 if __name__ == '__main__':
     generate_prepared_images(
-        # # Poor error, spot obscured in one view
-        # trial_id=186,
-        # frame_num=823
-
-        # Lots of 2d points
-        # trial_id=301,
-        # frame_num=79
-
         missing_only=True,
         fix_missing_centres=False,
         max_3d_error=100,

@@ -11,6 +11,7 @@ dependencies:
   - h5py = 3.2
   - matplotlib = 3.4
   - mongoengine = 0.22
+  - mpi4py = 3.0.3  # pin to earlier version to avoid warnings...
   - numpy = 1.20
   - opencv = 4.5
   - pims = 0.5
