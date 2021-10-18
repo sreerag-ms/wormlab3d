@@ -12,6 +12,10 @@ import torch
 import torch.nn.functional as F
 from matplotlib.figure import Figure
 from mongoengine import DoesNotExist
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+from torch.utils.tensorboard import SummaryWriter
+
 from simple_worm.control_gates_torch import ControlGateTorch
 from simple_worm.controls import CONTROL_KEYS
 from simple_worm.controls_torch import ControlSequenceTorch, ControlSequenceBatchTorch
@@ -24,9 +28,6 @@ from simple_worm.plot3d import plot_X_vs_target, plot_FS_3d, generate_scatter_di
     plot_frame_components, plot_CS_vs_output, plot_gates
 from simple_worm.util_torch import expand_tensor
 from simple_worm.worm_torch import WormModule
-from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
-from torch.utils.tensorboard import SummaryWriter
 from wormlab3d import LOGS_PATH, logger
 from wormlab3d.data.model import FrameSequence, Trial
 from wormlab3d.data.model.sw_checkpoint import SwCheckpoint
@@ -120,6 +121,10 @@ class Manager:
         Load or create the target frame sequence and the chunks if required.
         """
         FS_db = None
+        duration = self.simulation_args.duration
+        dt = self.simulation_args.dt
+        n_frames = int(duration / dt) + 1
+        N = self.simulation_args.worm_length
 
         # Try to load an existing frame sequence
         if self.frame_sequence_args.load:
@@ -135,32 +140,41 @@ class Manager:
         # Create the simulation target frame sequence
         if isinstance(FS_db, FrameSequence):
             x = torch.from_numpy(FS_db.X)
+            psi = torch.zeros(n_frames, N)
         elif isinstance(FS_db, SwRun):
             x = torch.cat([
                 torch.from_numpy(FS_db.F0.x).unsqueeze(0),
                 torch.from_numpy(FS_db.FS.x)
             ])
-            x = x.permute(2, 0, 1)
+            x = x.permute(0, 2, 1)
+            psi = torch.cat([
+                torch.from_numpy(FS_db.F0.psi).unsqueeze(0),
+                torch.from_numpy(FS_db.FS.psi)
+            ])
 
         # Resample the worm points if required
-        duration = self.simulation_args.duration
-        dt = self.simulation_args.dt
-        n_frames = int(duration / dt)
         n_frames_data = x.shape[0]
-        N = self.simulation_args.worm_length
         N_data = x.shape[1]
         if n_frames != n_frames_data or N != N_data:
             x = x.permute(2, 0, 1).unsqueeze(0)
             x = F.interpolate(x, size=(n_frames, N), mode='bilinear', align_corners=True)
             x = x.squeeze(0).permute(1, 2, 0)
 
+        # Resample the psi angles if required
+        n_frames_data = psi.shape[0]
+        N_data = psi.shape[1]
+        if n_frames != n_frames_data or N != N_data:
+            psi = psi.unsqueeze(-1).permute(2, 0, 1).unsqueeze(0)
+            psi = F.interpolate(psi, size=(n_frames, N), mode='bilinear', align_corners=True)
+            psi = psi.squeeze(0).permute(1, 2, 0).squeeze(-1)
+
         # Permute dimensions for compatibility with simple-worm
         x = x.permute(0, 2, 1)
         assert x.shape == (n_frames, 3, N)
 
         # Extract the first frame
-        F0 = FrameTorch(x=x[0])
-        FS = FrameSequenceTorch(x=x[1:])
+        F0 = FrameTorch(x=x[0], psi=psi[0])
+        FS = FrameSequenceTorch(x=x[1:], psi=psi[1:])
 
         # Chunk the FS if required
         FS_chunks = []
@@ -492,6 +506,9 @@ class Manager:
 
             if oa.optimise_F0 and oa.init_noise_std_psi0 > 0:
                 F0.psi += torch.normal(torch.zeros_like(F0.psi), std=oa.init_noise_std_psi0)
+
+            if not oa.optimise_F0 and isinstance(self.target, SwRun):
+                F0.psi[:] = self.F0_target.psi
 
             if oa.optimise_CS:
                 for abg in CONTROL_KEYS:
@@ -887,6 +904,8 @@ class Manager:
                 self._plot_F0_3d(idx)
             self._plot_gates()
             self._plot_pca()
+            if isinstance(self.target, SwRun):
+                self._plot_target_run_F0_CS()
             return
 
         if final_step or (
@@ -926,6 +945,27 @@ class Manager:
         # Save plot regardless of setting and don't use tensorboard
         save_dir = self.logs_path + f'/plots'
         path = save_dir + f'/gates.svg'
+        plt.savefig(path, bbox_inches='tight')
+        plt.close(fig)
+
+    def _plot_target_run_F0_CS(self):
+        """
+        Plot the target SwRun control sequence and F0 components.
+        """
+        assert isinstance(self.target, SwRun), 'Target must be an instance of SwRun.'
+        save_dir = self.logs_path + f'/plots'
+
+        # F0 components
+        fig = plot_frame_components(
+            self.F0_target.to_numpy(self.worm.worm_solver, calculate_components=True)
+        )
+        path = save_dir + f'/run_F0.svg'
+        plt.savefig(path, bbox_inches='tight')
+        plt.close(fig)
+
+        # Control Sequence
+        fig = plot_CS(self.target.CS)
+        path = save_dir + f'/run_CS.svg'
         plt.savefig(path, bbox_inches='tight')
         plt.close(fig)
 
