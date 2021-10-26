@@ -1,5 +1,6 @@
 import json
 import os
+from argparse import Namespace
 from multiprocessing import Pool
 from typing import Tuple, Dict, Any
 
@@ -9,7 +10,7 @@ from simple_worm.material_parameters import MP_DEFAULT_K
 from simple_worm.util import estimate_K_from_x
 from wormlab3d import logger, DATA_PATH, N_WORKERS
 from wormlab3d.toolkit.util import hash_data
-from wormlab3d.trajectories.util import get_trajectory
+from wormlab3d.trajectories.cache import get_trajectory
 
 K_ESTIMATES_CACHE_PATH = DATA_PATH + '/K_estimates_cache'
 
@@ -153,3 +154,21 @@ def generate_or_load_K_estimates_cache(
         json.dump(meta, f)
 
     return K_ests, meta
+
+
+def get_K_estimates_from_args(args: Namespace) -> np.ndarray:
+    """
+    Generate or load the K estimates from parameters set in an argument namespace.
+    """
+    K_ests, meta = generate_or_load_K_estimates_cache(
+        trial_id=args.trial,
+        midline_source=args.midline3d_source,
+        midline_source_file=args.midline3d_source_file,
+        start_frame=args.start_frame,
+        end_frame=args.end_frame,
+        smoothing_window=args.smoothing_window,
+        n_sample_frames=args.K_sample_frames,
+        K0=args.K0,
+        rebuild_cache=args.rebuild_cache
+    )
+    return K_ests
