@@ -46,7 +46,7 @@ def generate_target(
     import matplotlib.pyplot as plt
 
 
-    N = 100  #simulation_args.worm_length
+    N = 40  #simulation_args.worm_length
     MP = MaterialParameters(**simulation_args.get_mp_dict())
     gamma_pref = np.linspace(start=-1, stop=1, num=N-1) * 5
     # gamma_pref = np.ones(N - 1) * 5
@@ -59,11 +59,11 @@ def generate_target(
         gamma=gamma_pref,
     )
 
-    fig, axes = plt.subplots(3)
+    fig, axes = plt.subplots(4)
 
     # Run once to get initial configuration
     T_setup = 0.5
-    dt_setup = 0.01
+    dt_setup = 0.0001
     n_timesteps_setup = int(T_setup / dt_setup)
     CS = ControlSequenceNumpy([C] * n_timesteps_setup)
     worm = Worm(N, dt_setup)
@@ -91,10 +91,15 @@ def generate_target(
 
     axes[2].set_title('After solve - recalculation')
     axes[2].plot(f2n(project(gamma0, worm.Q)))
+
+    axes[3].set_title('Residual over time')
+    res = [F.gamma_res for F in FS]
+    axes[3].plot(res)
+
     fig.tight_layout()
     plt.show()
 
-    exit()
+    # exit()
 
 
     # plot_CS_vs_output(CS, FS.to_numpy())
@@ -105,7 +110,7 @@ def generate_target(
     dt = simulation_args.dt
     n_timesteps = int(T / dt)
     Fn = FS[-1].to_numpy()
-    F0 = FrameNumpy(x=Fn.x, psi=Fn.psi, calculate_components=False)
+    F0 = FrameNumpy(x=Fn.x, psi=Fn.psi, calculate_components=True)
     worm = Worm(N, dt, plot_it=True)
     # Fn = FS[-1].clone()
     # F0 = FrameFenics(
