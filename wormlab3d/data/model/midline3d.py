@@ -129,11 +129,11 @@ class Midline3D(Document):
         frame_num = self.frame.frame_num
         offsets = np.zeros(cams.count())
         for i, cam in enumerate(cams):
-            if cam.frame.frame_num is not None:
+            if cam.frame is not None and cam.frame.frame_num is not None:
                 offsets[i] = abs(cam.frame.frame_num - frame_num)
             else:
                 offsets[i] = np.inf
-        best_cams = cams[np.argmin(offsets)]
+        best_cams = cams[int(np.argmin(offsets))]
 
         return best_cams
 

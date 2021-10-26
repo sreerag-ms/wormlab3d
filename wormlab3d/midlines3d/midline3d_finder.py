@@ -1,41 +1,33 @@
 import os
+import os
 import time
-from typing import Tuple, Union, Dict
+from typing import Tuple, Union, Dict, List
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
 from matplotlib.figure import Figure
+from matplotlib.gridspec import GridSpec
 from mongoengine import DoesNotExist
-from torch import nn
 from torch.backends import cudnn
 from torch.optim import Optimizer
 from torch.utils.tensorboard import SummaryWriter
-
-from wormlab3d import CAMERA_IDXS, PREPARED_IMAGE_SIZE
-from wormlab3d import logger, LOGS_PATH
-from wormlab3d.data.model import SegmentationMasks, Trial, Frame, Cameras, MFCheckpoint, MFModelParameters
+from wormlab3d import logger, LOGS_PATH, ROOT_PATH
+from wormlab3d.data.model import Trial, Cameras, MFCheckpoint, MFModelParameters, Checkpoint
 from wormlab3d.midlines3d.args.network_args import ENCODING_MODE_DELTA_VECTORS, ENCODING_MODE_DELTA_ANGLES, \
-    ENCODING_MODE_DELTA_ANGLES_BASIS, MAX_DECAY_FACTOR, ENCODING_MODE_POINTS
+    ENCODING_MODE_POINTS
 from wormlab3d.midlines3d.args_finder import ModelArgs, OptimiserArgs, RuntimeArgs, SourceArgs
 from wormlab3d.midlines3d.args_finder.optimiser_args import LOSS_CURVE_TARGET_MASKS
-from wormlab3d.midlines3d.dynamic_cameras import DynamicCameras
+from wormlab3d.midlines3d.frame_state import FrameState, TrialState, BUFFER_NAMES, PARAMETER_NAMES
+from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel, avg_pool_2d
 from wormlab3d.nn.args.optimiser_args import LOSS_MSE, LOSS_LOGDIFF, LOSS_KL
-from wormlab3d.toolkit.util import is_bad, to_numpy, to_dict
+from wormlab3d.nn.models.basenet import BaseNet
+from wormlab3d.toolkit.util import is_bad, to_numpy, to_dict, hash_data
 
 START_TIMESTAMP = time.strftime('%Y%m%d_%H%M')
 cmap_cloud = 'autumn_r'
 cmap_curve = 'YlGnBu'
-
-PARAMETERS = [
-    'cam_coeffs',
-    'cloud_points',
-    'curve_parameters',
-    'curve_length',
-    'blur_sigmas_cloud',
-    'blur_sigmas_curve',
-]
 
 PRINT_KEYS = [
     'cloud_points_scores/mean',
@@ -47,196 +39,6 @@ PRINT_KEYS = [
     'loss/worm_length',
     'worm_length'
 ]
-
-
-def _avg_pool_2d(grad, oob_grad_val=0., mode='constant'):
-    # Average pooling with overlap and boundary values
-    padded_grad = F.pad(grad, (1, 1, 1, 1), mode=mode, value=oob_grad_val)
-    ag = F.avg_pool2d(input=padded_grad, kernel_size=3, stride=2, padding=0)
-    return ag
-
-
-def render_points(points, blur_sigmas):
-    n_worm_points = points.shape[2]
-    bs = points.shape[0]
-    device = points.device
-
-    # Shift to [-1,+1]
-    points = (points - 100) / 100
-
-    # Reshape
-    points = points.reshape(bs * 3, n_worm_points, 2)
-    points = points.clamp(min=-1, max=1)
-
-    # Build x and y grids
-    grid = torch.linspace(-1.0, 1.0, PREPARED_IMAGE_SIZE[0], dtype=torch.float32, device=device)
-    yv, xv = torch.meshgrid([grid, grid])
-
-    # 1 x 1 x H x W x 2
-    m = torch.cat([xv[..., None], yv[..., None]], dim=-1)[None, None]
-    p2 = points[:, :, None, None, :]
-
-    # Make (un-normalised) gaussian blobs centred at the coordinates
-    mmp2 = m - p2
-    dst = mmp2[..., 0]**2 + mmp2[..., 1]**2
-    blobs = torch.exp(-(dst / (2 * blur_sigmas**2)[:, :, None, None]))
-
-    # Mask is the sum of the blobs
-    masks = blobs.sum(dim=1)
-
-    # Normalise
-    masks = masks.clamp(max=1.)
-    sum_ = masks.sum(dim=(1, 2), keepdim=True)
-    sum_ = sum_.clamp(min=1e-8)
-    masks_normed = masks / sum_
-
-    # Reshape
-    masks_normed = masks_normed.reshape(bs, 3, *PREPARED_IMAGE_SIZE)
-    blobs = blobs.reshape(bs, 3, n_worm_points, *PREPARED_IMAGE_SIZE)
-
-    return masks_normed, blobs
-
-
-def render_curve(points, blur_sigmas):
-    n_worm_points = points.shape[2]
-    bs = points.shape[0]
-
-    # Shift to [-1,+1]
-    points = (points - 100) / 100
-
-    # Reshape
-    points = points.reshape(bs * 3, n_worm_points, 2)
-    points = points.clamp(min=-1, max=1)
-    a = points[:, :-1]
-    b = points[:, 1:]
-
-    def sumprod(x, y, keepdim=True):
-        return torch.sum(x * y, dim=-1, keepdim=keepdim)
-
-    grid = torch.linspace(-1.0, 1.0, PREPARED_IMAGE_SIZE[0], dtype=torch.float32, device=a.device)
-
-    yv, xv = torch.meshgrid([grid, grid])
-    # 1 x H x W x 2
-    m = torch.cat([xv[..., None], yv[..., None]], dim=-1)[None, None]
-
-    # B x N x 1 x 1 x 2
-    a, b = a[:, :, None, None, :], b[:, :, None, None, :]
-    t_min = sumprod(m - a, b - a) / \
-            torch.max(sumprod(b - a, b - a), torch.tensor(1e-6, device=a.device))
-    t_line = torch.clamp(t_min, 0.0, 1.0)
-
-    # closest points on the line to every image pixel
-    s = a + t_line * (b - a)
-
-    d = sumprod(s - m, s - m, keepdim=False)
-
-    # Blur line
-    d = torch.sqrt(d + 1e-6)
-    sig = (blur_sigmas[:, 1:] + blur_sigmas[:, :-1]) / 2
-    lines = torch.exp(-d / (sig**2)[:, :, None, None])
-    # lines = torch.exp(-(dst / (2 * blur_sigmas**2)[:, :, None, None]))
-
-    # Sum the lines together to make the render
-    masks = lines.sum(dim=1)
-    masks = masks.clamp(max=1)
-
-    # Normalise and reshape
-    sum_ = masks.sum(dim=(1, 2), keepdim=True)
-    sum_ = sum_.clamp(min=1e-8)
-    masks = (masks / sum_).reshape(bs, 3, *PREPARED_IMAGE_SIZE)
-
-    return masks
-
-
-class ParameterHolder(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self):
-        raise RuntimeError('The forward method of this model is not enabled!')
-
-    def get(self, key: str) -> torch.Tensor:
-        return self._parameters[key]
-
-    def set(self, key: str, value: torch.Tensor, requires_grad: bool = False):
-        if key in self._parameters:
-            self._parameters[key].data = value
-        else:
-            self.register_parameter(key, nn.Parameter(value, requires_grad=requires_grad))
-
-
-class ProjectRenderScoreModel(nn.Module):
-    def __init__(
-            self,
-            points_3d_base: torch.Tensor,
-            points_2d_base: torch.Tensor,
-    ):
-        super().__init__()
-        self.cams = DynamicCameras()
-        self.register_buffer('points_2d_base', points_2d_base)
-        self.register_buffer('points_3d_base', points_3d_base)
-
-        # todo Grow the worm out slowly
-        self.register_buffer('decay_factor', torch.tensor(MAX_DECAY_FACTOR, dtype=torch.float32))
-
-    def forward(self):
-        raise RuntimeError('The forward method of this model is not enabled!')
-
-    def forward_cloud(
-            self,
-            cam_coeffs: torch.Tensor,
-            cloud_points: torch.Tensor,
-            masks_target: torch.Tensor,
-            blur_sigmas_cloud: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        # Render the point cloud
-        cloud_points_2d = self._project_to_2d(cam_coeffs, cloud_points)
-        masks_cloud, blobs = render_points(cloud_points_2d, blur_sigmas_cloud)
-
-        # Normalise blobs
-        sum_ = blobs.sum(dim=(2, 3), keepdim=True)
-        sum_ = sum_.clamp(min=1e-8)
-        blobs_normed = blobs / sum_
-
-        # Calculate points scores
-        cloud_points_scores = (blobs_normed * masks_target.unsqueeze(2)).sum(dim=(3, 4)).mean(dim=1)
-
-        return masks_cloud, cloud_points_scores
-
-    def forward_curve(
-            self,
-            cam_coeffs: torch.Tensor,
-            curve_points: torch.Tensor,
-            blur_sigmas_curve: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        # Render the curve
-        curve_points_2d = self._project_to_2d(cam_coeffs, curve_points)
-        masks_curves = render_curve(curve_points_2d, blur_sigmas_curve)
-
-        # todo: Get the point scores for the curve points
-        curve_points_scores = torch.zeros_like(blur_sigmas_curve)
-
-        return masks_curves, curve_points_scores
-
-    def _project_to_2d(
-            self,
-            cam_coeffs: torch.Tensor,
-            points_3d: torch.Tensor
-    ):
-        bs = cam_coeffs.shape[0]
-        device = cam_coeffs.device
-
-        # Add the 3d centre point offset to centre on the camera
-        points_3d = points_3d + self.points_3d_base
-
-        # Project 3D points to 2D
-        points_2d = self.cams.forward(cam_coeffs, points_3d)
-
-        # Re-centre according to 2D base points plus a (100,100) to put it in the centre of the cropped image
-        image_centre_pt = torch.ones((bs, 1, 1, 2), dtype=torch.float32, device=device) * PREPARED_IMAGE_SIZE[0] / 2
-        points_2d = points_2d - self.points_2d_base.unsqueeze(1) + image_centre_pt
-
-        return points_2d
 
 
 class Midline3DFinder:
@@ -253,17 +55,15 @@ class Midline3DFinder:
         self.model_args = model_args
         self.optimiser_args = optimiser_args
 
-        # Store tensor parameters in a module
-        self.parameters = ParameterHolder()
-
-        # Load objects from the database
-        self._init_sources()
+        # Initialise the skeletoniser
+        self.skelnet = self._init_skelnet()
 
         # Initialise the model
         self.model, self.model_params = self._init_model()
 
-        # Initialise initial conditions and trainable parameters
-        self._init_parameters()
+        # Load the trial and initialise trainable parameters
+        self.masks = None  # todo
+        self._init_trial()
 
         # Runtime params
         self.device = self._init_devices()
@@ -283,63 +83,62 @@ class Midline3DFinder:
 
     @staticmethod
     def get_logs_path(checkpoint: MFCheckpoint) -> str:
+        if checkpoint.masks is not None:
+            return LOGS_PATH + \
+                   f'/trial_{checkpoint.masks.frame.trial.id}' \
+                   f'/frame_{checkpoint.masks.frame.frame_num:06d}_{checkpoint.masks.id}' \
+                   f'/{checkpoint.model_params.created:%Y%m%d_%H:%M}_{checkpoint.model_params.id}'
+
+        identifiers = {
+            'model_params': str(checkpoint.model_params.id),
+            **to_dict(checkpoint.source_args),
+            **to_dict(checkpoint.optimiser_args)
+        }
+        arg_hash = hash_data(identifiers)
+
         return LOGS_PATH + \
-               f'/trial_{checkpoint.masks.frame.trial.id}' \
-               f'/frame_{checkpoint.masks.frame.frame_num:06d}_{checkpoint.masks.id}' \
-               f'/{checkpoint.model_params.created:%Y%m%d_%H:%M}_{checkpoint.model_params.id}'
+               f'/trial_{checkpoint.trial.id}' \
+               f'/{arg_hash}'
 
     @property
     def step(self):
         return self.checkpoint.step_cc + self.checkpoint.step_curve
 
-    def __getattr__(self, key):
-        """
-        Allow parameters to be accessed as member variables.
-        """
-        return self.parameters.get(key)
+    # def __getattr__(self, key):
+    #     """
+    #     Allow parameters to be accessed as member variables.
+    #     """
+    #     return self.parameters.get(key)
 
-    def _init_sources(self):
+    def _init_skelnet(self) -> BaseNet:
         """
-        Load the masks instance and related objects from the database,
+        Build the skeletoniser network.
         """
-        logger.info(f'Initialising sources.')
-        self.masks: SegmentationMasks = SegmentationMasks.objects.get(id=self.source_args.masks_id)
-        self.trial: Trial = self.masks.trial
-        self.images = self.masks.get_images()
-        self.frame: Frame = self.masks.frame
-        self.cameras: Cameras = self.frame.get_cameras()
-        self.cam_coeffs_db = self._extract_camera_coefficients()
+        if self.source_args.masks_id is not None:
+            return
 
-        # Initialise the target, setting anything above threshold to 1 and normalising
-        masks_target = torch.from_numpy(self.masks.X)
-        masks_target[masks_target > self.source_args.masks_target_ceil_threshold] = 1
-        masks_target = masks_target / masks_target.sum(axis=(1, 2), keepdim=True)
-        self.parameters.set('masks_target', masks_target)
+        assert self.model_args.skeletoniser_id is not None, \
+            'A checkpoint id for the skeletoniser must be provided.'
 
-        # Base points
-        self.parameters.set('points_3d_base', torch.tensor(self.frame.centre_3d.point_3d))
-        self.parameters.set('points_2d_base', torch.tensor(self.frame.centre_3d.reprojected_points_2d))
+        cp = Checkpoint.objects.get(id=self.model_args.skeletoniser_id)
+        logger.info(f'Loaded skeletoniser checkpoint (id={cp.id}, created={cp.created}).')
 
-        # Worm length (needed?)
-        self.worm_length_db = torch.tensor(self.trial.experiment.worm_length)
-        logger.debug(f'Worm length (db) = {self.worm_length_db}')
+        # Instantiate the network
+        net = cp.network_params.instantiate_network()
+        logger.info(f'Instantiated SkelNet with {net.get_n_params() / 1e6:.4f}M parameters.')
+        logger.debug(f'----------- SkelNet --------------\n\n{net}\n\n')
 
-    def _extract_camera_coefficients(self) -> torch.Tensor:
-        """
-        Load the camera coefficients from the database object.
-        """
-        fx = np.array([self.cameras.matrix[c][0, 0] for c in CAMERA_IDXS])
-        fy = np.array([self.cameras.matrix[c][1, 1] for c in CAMERA_IDXS])
-        cx = np.array([self.cameras.matrix[c][0, 2] for c in CAMERA_IDXS])
-        cy = np.array([self.cameras.matrix[c][1, 2] for c in CAMERA_IDXS])
-        R = np.array([self.cameras.pose[c][:3, :3] for c in CAMERA_IDXS])
-        t = np.array([self.cameras.pose[c][:3, 3] for c in CAMERA_IDXS])
-        d = np.array([self.cameras.distortion[c] for c in CAMERA_IDXS])
-        s = np.array([[0, ]] * 3)
-        cam_coeffs = np.concatenate([
-            fx.reshape(3, 1), fy.reshape(3, 1), cx.reshape(3, 1), cy.reshape(3, 1), R.reshape(3, 9), t, d, s
-        ], axis=1).astype(np.float32)
-        return torch.from_numpy(cam_coeffs)
+        # Load the network parameter states
+        path = ROOT_PATH + '/logs/scripts/midlines2d/train' \
+                           f'/{cp.dataset.created:%Y%m%d_%H:%M}_{cp.dataset.id}' \
+                           f'/{cp.network_params.created:%Y%m%d_%H:%M}_{cp.network_params.id}' \
+                           f'/checkpoints/{cp.id}.chkpt'
+        state = torch.load(path, map_location=torch.device('cpu'))
+        net.load_state_dict(state['model_state_dict'], strict=False)
+        net.eval()
+        logger.info(f'Loaded SkelNet state from "{path}"')
+
+        return net
 
     def _init_model(self) -> Tuple[ProjectRenderScoreModel, MFModelParameters]:
         """
@@ -373,88 +172,71 @@ class Midline3DFinder:
             logger.info(f'Saved model parameters to database (id={model_params.id})')
 
         # Instantiate the model
-        model = ProjectRenderScoreModel(
-            points_3d_base=self.points_3d_base,
-            points_2d_base=self.points_2d_base,
-        )
+        model = ProjectRenderScoreModel()
 
         return model, model_params
 
-    def _init_parameters(self):
+    def _init_trial(self):
         """
-        Initialise the camera coefficients, the cloud points and the curve parameters.
+        Load the trial.
         """
-        logger.info(f'Initialising parameters.')
-        mp = self.model_params
+        logger.info('Initialising trial state.')
+        self.trial: Trial = Trial.objects.get(id=self.source_args.trial_id)
 
-        # Initial camera coefficients are cloned from the database
-        cam_coeffs = self.cam_coeffs_db.clone().detach()
+        # Worm length (needed?)
+        self.worm_length_db = torch.tensor(self.trial.experiment.worm_length)
+        logger.debug(f'Worm length (db) = {self.worm_length_db:.2f}.')
 
-        # Distribute initial cloud points randomly on surface of a sphere
-        mean = torch.zeros(mp.n_cloud_points, 3)
-        x = torch.normal(mean=mean, std=1)
-        x = x / torch.norm(x, dim=-1, keepdim=True) * 0.4
-        cloud_points = x
+        # Prepare trial state
+        self.trial_state = TrialState(
+            trial=self.trial,
+            start_frame=self.source_args.start_frame,
+            end_frame=self.source_args.end_frame,
+            model_params=self.model_params,
+            optimiser_args=self.optimiser_args
+        )
 
-        # Curve encoding varies depending on mode
-        curve_parameters = []
-        if mp.curve_mode == ENCODING_MODE_POINTS:
-            cc0 = torch.linspace(-np.sqrt(3) / 6, np.sqrt(3) / 6, mp.n_curve_points)
-            curve_parameters.append(torch.stack([cc0] * 3, axis=1))
-        elif mp.curve_mode == ENCODING_MODE_DELTA_VECTORS:
-            offset0 = torch.zeros(3)
-            curve_parameters.append(offset0)
-            delta_vectors0 = torch.normal(mean=torch.zeros(3 * mp.n_curve_points), std=0.2)
-            curve_parameters.append(delta_vectors0)
-        else:
-            offset0 = torch.zeros(3)
-            curve_parameters.append(offset0)
-            pre_angles0 = torch.rand(size=(4,)) * 2 - 1
-            curve_parameters.append(pre_angles0)
+        # Prepare batch state
+        self.frame_batch: List[FrameState] = []
+        for i in range(self.optimiser_args.window_size):
+            self.frame_batch.append(self._init_frame_state(self.trial_state.frame_nums[i]))
 
-            if mp.curve_mode == ENCODING_MODE_DELTA_ANGLES:
-                delta_angles0 = torch.normal(mean=torch.zeros(2 * (mp.n_curve_points - 1)), std=0.1)
-                curve_parameters.append(delta_angles0)
-            elif mp.curve_mode == ENCODING_MODE_DELTA_ANGLES_BASIS:
-                amps0 = torch.normal(mean=torch.zeros(2 * mp.n_curve_basis_fns), std=1)
-                phases0 = torch.normal(mean=torch.zeros(2 * mp.n_curve_basis_fns), std=1)
-                curve_parameters.append(amps0)
-                curve_parameters.append(phases0)
-        curve_parameters = torch.cat(curve_parameters)
+        # Initialise parameters
+        for k in BUFFER_NAMES + PARAMETER_NAMES:
+            # setattr(self, k, torch.stack([fs.get_state(k) for fs in self.frame_batch]))
+            setattr(self, k, [fs.get_state(k) for fs in self.frame_batch])
 
-        # Curve length
-        curve_length = self.worm_length_db.clone().detach()
+    def _init_frame_state(self, frame_num: int) -> FrameState:
+        """
+        Load the frame
+        """
+        frame = self.trial.get_frame(frame_num)
+        logger.info(f'Initialising frame state for frame #{frame_num} (id={frame.id}).')
 
-        # Blur sigmas
-        blur_sigmas_cloud = torch.ones(mp.n_cloud_points) * mp.blur_sigmas_cloud_init
-        blur_sigmas_curve = torch.ones(mp.n_curve_points) * mp.blur_sigmas_curve_init
+        # Generate segmentation masks for the next frame
+        logger.debug('Generating masks.')
+        images = torch.from_numpy(np.stack(frame.images))  # .unsqueeze(0)
+        masks = torch.zeros_like(images)  # self.skelnet.forward(images)
+        masks[masks > self.source_args.masks_target_ceil_threshold] = 1
+        masks = masks / masks.sum(axis=(1, 2), keepdim=True)
 
-        # Add batch dims
-        self.masks_target = self.masks_target.unsqueeze(0)
-        self.points_3d_base = self.points_3d_base.unsqueeze(0)
-        self.points_2d_base = self.points_2d_base.unsqueeze(0)
-        cam_coeffs = cam_coeffs.unsqueeze(0)
-        cloud_points = cloud_points.unsqueeze(0)
-        curve_parameters = curve_parameters.unsqueeze(0)
-        curve_length = curve_length.unsqueeze(0)
-        blur_sigmas_cloud = blur_sigmas_cloud.unsqueeze(0)
-        blur_sigmas_curve = blur_sigmas_curve.unsqueeze(0)
+        # Load cameras
+        cameras: Cameras = frame.get_cameras()
 
-        # Store them in the parameter holder
-        oa = self.optimiser_args
-        self.parameters.set('cam_coeffs', cam_coeffs, oa.optimise_cam_coeffs)
-        self.parameters.set('cloud_points', cloud_points, oa.optimise_cloud)
-        self.parameters.set('curve_parameters', curve_parameters, oa.optimise_curve)
-        self.parameters.set('curve_length', curve_length, oa.optimise_curve_length)
-        self.parameters.set('blur_sigmas_cloud', blur_sigmas_cloud, oa.optimise_cloud_sigmas)
-        self.parameters.set('blur_sigmas_curve', blur_sigmas_curve, oa.optimise_curve_sigmas)
+        # Initialise frame state
+        frame_state = FrameState(
+            frame_num=frame_num,
+            images=images,
+            masks_target=masks,
+            cameras=cameras,
+            points_3d_base=torch.tensor(frame.centre_3d.point_3d),
+            points_2d_base=torch.tensor(frame.centre_3d.reprojected_points_2d),
+            worm_length_db=self.worm_length_db,
+            model_params=self.model_params,
+            optimiser_args=self.optimiser_args,
+        )
 
-        # Setup blank tensors for the outputs
-        self.masks_cloud = torch.zeros_like(self.masks_target)
-        self.masks_curve = torch.zeros_like(self.masks_target)
-        self.curve_points = torch.zeros(1, mp.n_curve_points, 3)
-        self.cloud_points_scores = torch.zeros(1, mp.n_cloud_points)
-        self.curve_points_scores = torch.zeros(1, mp.n_curve_points)
+        return frame_state
 
     def _init_optimisers(self) -> Tuple[Optimizer, Optimizer]:
         """
@@ -466,9 +248,9 @@ class Midline3DFinder:
         cls_cc: Optimizer = getattr(torch.optim, oa.algorithm_cc)
         optimiser_cc = cls_cc(
             [
-                {'params': (self.cam_coeffs,), 'lr': oa.lr_cam_coeffs},
-                {'params': (self.cloud_points,), 'lr': oa.lr_cloud_points},
-                {'params': (self.blur_sigmas_cloud,), 'lr': oa.lr_cloud_sigmas},
+                {'params': self.cam_coeffs, 'lr': oa.lr_cam_coeffs},
+                {'params': self.cloud_points, 'lr': oa.lr_cloud_points},
+                {'params': self.blur_sigmas_cloud, 'lr': oa.lr_cloud_sigmas},
             ],
             amsgrad=True,
             weight_decay=0
@@ -477,9 +259,9 @@ class Midline3DFinder:
         cls_curve: Optimizer = getattr(torch.optim, oa.algorithm_cc)
         optimiser_curve = cls_curve(
             params=[
-                {'params': (self.curve_parameters,), 'lr': oa.lr_curve_points},
-                {'params': (self.curve_length,), 'lr': oa.lr_curve_points},
-                {'params': (self.blur_sigmas_curve,), 'lr': oa.lr_curve_sigmas},
+                {'params': self.curve_parameters, 'lr': oa.lr_curve_points},
+                {'params': self.curve_length, 'lr': oa.lr_curve_points},
+                {'params': self.blur_sigmas_curve, 'lr': oa.lr_curve_sigmas},
             ],
             weight_decay=0
         )
@@ -502,20 +284,19 @@ class Midline3DFinder:
         else:
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         if device.type == 'cuda':
-            logger.info('Using GPU')
+            logger.info('Using GPU.')
             cudnn.benchmark = True  # optimises code for constant input sizes
 
             # Move modules to the gpu
             for k, v in vars(self).items():
                 if isinstance(v, torch.nn.Module):
                     v.to(device)
-
-            # Move target masks to gpu
-            self.masks_target = self.masks_target.to(device)
+            for frame_state in self.frame_batch:
+                frame_state.to(device)
         else:
             if cpu_or_gpu == 'gpu':
                 raise RuntimeError('GPU requested but not available. Aborting.')
-            logger.info('Using CPU')
+            logger.info('Using CPU.')
 
         return device
 
@@ -537,10 +318,18 @@ class Midline3DFinder:
                         order_by = '+loss_cc'
                     else:
                         order_by = '+loss_curve'
-                    prev_checkpoints = MFCheckpoint.objects(
-                        masks=self.masks,
-                        model_params=self.model_params
-                    ).order_by(order_by)
+
+                    if self.source_args.masks_id is not None:
+                        prev_checkpoints = MFCheckpoint.objects(
+                            masks=self.masks,
+                            model_params=self.model_params
+                        ).order_by(order_by)
+                    else:
+                        prev_checkpoints = MFCheckpoint.objects(
+                            trial=self.trial,
+                            model_params=self.model_params
+                        ).order_by(order_by)
+
                     if prev_checkpoints.count() > 0:
                         logger.info(
                             f'Found {prev_checkpoints.count()} previous checkpoints. '
@@ -548,15 +337,18 @@ class Midline3DFinder:
                         )
                         prev_checkpoint = prev_checkpoints[0]
                     else:
+                        src = f'trial={self.trial.id}' if self.source_args.trial_id is not None else f'masks={self.masks.id}'
                         logger.error(
-                            f'Found no checkpoints for masks={self.masks.id} and model={self.model_params.id}.'
+                            f'Found no checkpoints for {src} and model={self.model_params.id}.'
                         )
                         raise DoesNotExist()
                 else:
                     prev_checkpoint = MFCheckpoint.objects.get(
                         id=self.runtime_args.resume_from
                     )
-                logger.info(f'Loaded checkpoint id={prev_checkpoint.id}, created={prev_checkpoint.created}')
+                logger.info(f'Loaded checkpoint id={prev_checkpoint.id}, created={prev_checkpoint.created}.')
+                if self.source_args.trial_id is not None:
+                    logger.info(f'Frame number = {prev_checkpoint.frame_num}')
                 logger.info(f'Loss cc = {prev_checkpoint.loss_cc:.6f}')
                 logger.info(f'Loss curve = {prev_checkpoint.loss_curve:.6f}')
                 if len(prev_checkpoint.metrics_cc) > 0:
@@ -587,8 +379,9 @@ class Midline3DFinder:
             # Load the parameter states
             path = f'{self.get_logs_path(prev_checkpoint)}/checkpoints/{prev_checkpoint.id}.chkpt'
             state = torch.load(path, map_location=self.device)
-            for p in PARAMETERS:
-                self.parameters.set(p, state[p])
+            for i, fs in enumerate(self.frame_batch):
+                for p in PARAMETER_NAMES:
+                    fs.set_state(p, state[p][i])
             if self.optimiser_args.algorithm_cc != prev_checkpoint.optimiser_args['algorithm_cc']:
                 self.optimiser_cc.step()
             if self.optimiser_args.algorithm_curve != prev_checkpoint.optimiser_args['algorithm_curve']:
@@ -600,6 +393,7 @@ class Midline3DFinder:
         # ..or start a new checkpoint
         else:
             checkpoint = MFCheckpoint(
+                trial=self.trial,
                 masks=self.masks,
                 model_params=self.model_params,
                 runtime_args=to_dict(self.runtime_args),
@@ -621,6 +415,7 @@ class Midline3DFinder:
         os.makedirs(self.logs_path + '/checkpoints', exist_ok=True)
         os.makedirs(self.logs_path + '/events', exist_ok=True)
         os.makedirs(self.logs_path + '/plots', exist_ok=True)
+        os.makedirs(self.logs_path + '/videos', exist_ok=True)
 
     def save_checkpoint(self):
         """
@@ -630,8 +425,8 @@ class Midline3DFinder:
         self.checkpoint.save()
         path = f'{self.logs_path}/checkpoints/{self.checkpoint.id}.chkpt'
         params = {
-            p: self.parameters.get(p)
-            for p in PARAMETERS
+            p: torch.stack([fs.get_state(p) for fs in self.frame_batch])
+            for p in PARAMETER_NAMES
         }
         torch.save({
             **params,
@@ -642,32 +437,85 @@ class Midline3DFinder:
         # Replace the current checkpoint-buffer with a clone of the just-saved checkpoint
         self.checkpoint = self.checkpoint.clone()
 
-    def train(self, n_steps_cc: int, n_steps_curve: int):
+        # Update checkpoint in TrialState
+        self.trial_state.checkpoint = self.checkpoint
+
+    def process_trial(self):
         """
-        Train the model.
+        Process the trial.
         """
+        oa = self.optimiser_args
         self._configure_paths()
         self._init_tb_logger()
-
-        # todo: fix this
-        self.model.decay_factor = torch.tensor(0., device=self.device)
 
         # Initial plots
         self._make_plots(pre_step=True, show_curve=self.checkpoint.step_curve > 0)
 
+        # Train
+        w2 = int((oa.window_size - 1) / 2)
+        first_frame = self.checkpoint.frame_num
+        n_frames = len(self.trial_state) - first_frame + 1
+
+        for i, frame_num in enumerate(range(first_frame, self.trial_state.frame_nums[-1])):
+            logger.info(f'======== Training frame #{frame_num} ({i}/{n_frames}) ========')
+
+            # Reset counters and train the batch
+            self.checkpoint.frame_num = frame_num
+            self.checkpoint.step_cc = 0
+            self.checkpoint.step_curve = 0
+
+            if i == 0:
+                self.train(oa.n_steps_cc_init, oa.n_steps_curve_init)
+            else:
+                self.train(oa.n_steps_cc, oa.n_steps_curve)
+
+            # Save the state
+            active_idx = min(i, w2)
+            self.trial_state.update_frame_state(frame_num, self.frame_batch[active_idx])
+            self.trial_state.save()
+
+            # Roll window
+            if i > w2:
+                for j in range(oa.window_size):
+                    curr_frame = self.frame_batch[j]
+
+                    if j + 1 < oa.window_size:
+                        next_frame = self.frame_batch[j + 1]
+                    elif i + w2 < len(self.trial_state):
+                        next_frame = self._init_frame_state(i + w2)
+
+                    with torch.no_grad():
+                        for n in BUFFER_NAMES + PARAMETER_NAMES:
+                            curr_frame.set_state(n, next_frame.get_state(n))
+                    curr_frame.frame_num = next_frame.frame_num
+
+                    if j < active_idx:
+                        self.frame_batch[j].freeze()
+
+            # Checkpoint
+            if self.runtime_args.checkpoint_every_n_frames > 0 \
+                    and frame_num % self.runtime_args.checkpoint_every_n_frames == 0:
+                self.save_checkpoint()
+
+    def train(self, n_steps_cc: int, n_steps_curve: int):
+        """
+        Train a batch of frames.
+        """
+        oa = self.optimiser_args
+
         # Train cc
-        if n_steps_cc > 0 and (self.optimiser_args.optimise_cloud or self.optimiser_args.optimise_cam_coeffs):
+        if n_steps_cc > 0 and (oa.optimise_cloud or oa.optimise_cam_coeffs):
             self._train_cc(n_steps_cc)
 
         # Train curve
-        if n_steps_curve > 0 and self.optimiser_args.optimise_curve:
+        if n_steps_curve > 0 and oa.optimise_curve:
             self._train_curve(n_steps_curve)
 
     def _train_cc(self, n_steps: int):
         """
         Train the camera coefficients and cloud points.
         """
-        logger.info('======== Training the camera coefficients and cloud points ========')
+        logger.info('----- Training the camera coefficients and cloud points -----')
         start_step = self.checkpoint.step_cc + 1
         final_step = start_step + n_steps
 
@@ -706,19 +554,27 @@ class Midline3DFinder:
         """
         Train the cam coeffs and cloud points for a single step.
         """
+        cam_coeffs = torch.stack(self.cam_coeffs)
+        cloud_points = torch.stack(self.cloud_points)
+        masks_target = torch.stack(self.masks_target)
+        blur_sigmas_cloud = torch.stack(self.blur_sigmas_cloud)
+        points_3d_base = torch.stack(self.points_3d_base)
+        points_2d_base = torch.stack(self.points_2d_base)
 
         # Run the parameters through the model to get the outputs
         masks_cloud, cloud_points_scores = self.model.forward_cloud(
-            cam_coeffs=self.cam_coeffs,
-            cloud_points=self.cloud_points,
-            masks_target=self.masks_target,
-            blur_sigmas_cloud=self.blur_sigmas_cloud,
+            cam_coeffs=cam_coeffs,
+            cloud_points=cloud_points,
+            masks_target=masks_target,
+            blur_sigmas_cloud=blur_sigmas_cloud,
+            points_3d_base=points_3d_base,
+            points_2d_base=points_2d_base,
         )
 
         # Calculate gradients and take optimisation step
         loss, stats = self._calculate_renders_losses(
             render=masks_cloud,
-            target=self.masks_target,
+            target=masks_target,
             metric=self.optimiser_args.loss_cc,
             multiscale=self.optimiser_args.loss_cc_multiscale,
         )
@@ -732,13 +588,19 @@ class Midline3DFinder:
         stats = {**stats, **{
             'cloud_points_scores/mean': cloud_points_scores.mean(),
             'cloud_points_scores/var': cloud_points_scores.var(),
-            'blur_sigmas_cloud/mean': self.blur_sigmas_cloud.mean(),
-            'blur_sigmas_cloud/var': self.blur_sigmas_cloud.var(),
+            'blur_sigmas_cloud/mean': blur_sigmas_cloud.mean(),
+            'blur_sigmas_cloud/var': blur_sigmas_cloud.var(),
             'n_relocated': n_relocated
         }}
 
         self.masks_cloud = masks_cloud
         self.cloud_points_scores = cloud_points_scores
+
+        # Update batch state
+        for i, fs in enumerate(self.frame_batch):
+            fs.set_state('masks_cloud', masks_cloud[i])
+            fs.set_state('cloud_points_scores', cloud_points_scores[i])
+            fs.set_stats(stats)
 
         return loss, stats
 
@@ -784,17 +646,19 @@ class Midline3DFinder:
         """
         Train the curve parameters.
         """
-        logger.info('======== Training the curve parameters ========')
+        logger.info('----- Training the curve parameters -----')
         start_step = self.checkpoint.step_curve + 1
         final_step = start_step + n_steps
 
         # Calculate the cloud masks (this doesn't change now)
         with torch.no_grad():
             self.masks_cloud, self.cloud_points_scores = self.model.forward_cloud(
-                cam_coeffs=self.cam_coeffs,
-                cloud_points=self.cloud_points,
-                masks_target=self.masks_target,
-                blur_sigmas_cloud=self.blur_sigmas_cloud,
+                cam_coeffs=torch.stack(self.cam_coeffs),
+                cloud_points=torch.stack(self.cloud_points),
+                masks_target=torch.stack(self.masks_target),
+                blur_sigmas_cloud=torch.stack(self.blur_sigmas_cloud),
+                points_3d_base=torch.stack(self.points_3d_base),
+                points_2d_base=torch.stack(self.points_2d_base),
             )
 
             # Calculate the initial curve points
@@ -838,16 +702,6 @@ class Midline3DFinder:
                     and self.step % self.runtime_args.checkpoint_every_n_steps == 0:
                 self.save_checkpoint()
 
-            # # Update decay factor
-            # if step > n_warmup_steps:
-            #     self.model.decay_factor = torch.tensor(max(0, 1 - step / (n_adjustment_steps / 2)) * MAX_DECAY_FACTOR)
-            #
-            # # Set max curvature
-            # if step > (n_warmup_steps + n_straight_steps):
-            #     x = (step - n_warmup_steps - n_straight_steps) / (n_steps - n_warmup_steps - n_straight_steps)
-            #     max_revolutions = torch.tensor(min(1, max(0, x))) * self.max_revolutions_absolute
-            #     self.max_revolutions = max_revolutions
-
     def _train_step_curve(self) -> Tuple[torch.Tensor, Dict[str, float]]:
         """
         Train the curve parameters for a single step.
@@ -855,9 +709,11 @@ class Midline3DFinder:
 
         # Run the parameters through the model to get the outputs
         masks_curve, curve_points_scores = self.model.forward_curve(
-            cam_coeffs=self.cam_coeffs,
-            curve_points=self.curve_points,
-            blur_sigmas_curve=self.blur_sigmas_curve,
+            cam_coeffs=torch.stack(self.cam_coeffs),
+            curve_points=torch.stack(self.curve_points),
+            blur_sigmas_curve=torch.stack(self.blur_sigmas_curve),
+            points_3d_base=torch.stack(self.points_3d_base),
+            points_2d_base=torch.stack(self.points_2d_base),
         )
 
         loss_render = torch.tensor(0., device=self.device)
@@ -892,13 +748,19 @@ class Midline3DFinder:
             'loss/render': loss_render.item(),
             'loss/curve': loss_curve.item(),
             'worm_length': self.curve_length.mean(),
-            'decay_factor': self.model.decay_factor,
             'curve_points_scores/mean': curve_points_scores.mean(),
             'curve_points_scores/var': curve_points_scores.var(),
             'blur_sigmas_curve/mean': self.blur_sigmas_curve.mean(),
             'blur_sigmas_curve/var': self.blur_sigmas_curve.var(),
             # 'max_revolutions': self.max_revolutions,
         }}
+
+        # Update batch state
+        for i, fs in enumerate(self.frame_batch):
+            fs.set_state('masks_curve', self.masks_curve[i])
+            fs.set_state('curve_points_scores', self.curve_points_scores[i])
+            fs.set_state('curve_points', self.curve_points[i])
+            fs.set_stats(stats)
 
         return loss, stats
 
@@ -1046,9 +908,9 @@ class Midline3DFinder:
 
         def loss_(m, x, y):
             if m == LOSS_MSE:
-                l = F.mse_loss(x, y)
+                l = F.mse_loss(x, y, reduction='mean')
             elif m == LOSS_KL:
-                l = F.kl_div(x, y)
+                l = F.kl_div(x, y, reduction='batchmean')
             elif m == LOSS_LOGDIFF:
                 l = torch.sum((torch.log(1 + x) - torch.log(1 + y))**2)
             return l
@@ -1066,8 +928,8 @@ class Midline3DFinder:
                 stats[f'loss/{metric}_{masks_rep.shape[-1]}'] = loss.item()
 
                 # Downsample using 3x3 average pooling with stride of 2
-                masks_rep = _avg_pool_2d(masks_rep, oob_grad_val=0)
-                target_rep = _avg_pool_2d(target_rep, oob_grad_val=0)
+                masks_rep = avg_pool_2d(masks_rep, oob_grad_val=0)
+                target_rep = avg_pool_2d(target_rep, oob_grad_val=0)
                 k += 1
         else:
             loss = loss_(metric, render, target)
@@ -1118,12 +980,6 @@ class Midline3DFinder:
             # Remaining parameters are the delta angles
             delta_angles = torch.tanh(parameters.reshape((bs, 2, -1))) * max_delta_angle
 
-            # # Apply decay to delta angles so they go to 0 (ie, straight lines)
-            # if self.decay_factor is not None:
-            #     decay = torch.exp(
-            #         -torch.arange(N, device=self.device) / N * self.decay_factor).repeat(bs)
-            #     delta_angles = delta_angles * decay[1:].reshape((1, 1, N - 1))
-
             # Sum the initial angles with the delta angles to give the progression
             delta_thetas = torch.cat([theta0.unsqueeze(1), delta_angles[:, 0]], dim=-1)
             delta_phis = torch.cat([phi0.unsqueeze(1), delta_angles[:, 1]], dim=-1)
@@ -1170,30 +1026,90 @@ class Midline3DFinder:
         """
         Generate some plots.
         """
-        # Select the idxs to plot
-        bs = 1  # self.optimiser_args.batch_size
-        n_examples = min(self.runtime_args.plot_n_examples, bs)
-        idxs = np.random.choice(bs, n_examples, replace=False)
+        logger.info('Plotting.')
+        bs = len(self.frame_batch)
 
         # Make initial plots for all batch elements
         if pre_step:
-            for idx in range(bs):
-                self._plot_3d(idx, show_cloud, show_curve)
+            if bs > 1:
+                self._plot_3d_batch(show_cloud, show_curve)
+            else:
+                self._plot_3d(0, show_cloud, show_curve)
             return
 
         if final_step or (
                 self.runtime_args.plot_every_n_steps > -1
                 and self.step % self.runtime_args.plot_every_n_steps == 0
         ):
-            logger.info('Plotting.')
-            for idx in idxs:
-                self._plot_3d(idx, show_cloud, show_curve,
+            if bs > 1:
+                self._plot_3d_batch(show_cloud, show_curve,
+                                    self.optimiser_args.loss_3d_cloud_threshold if show_curve else 0)
+            else:
+                self._plot_3d(0, show_cloud, show_curve,
                               self.optimiser_args.loss_3d_cloud_threshold if show_curve else 0)
+                # self._plot_2d(0, show_cloud, show_curve)
+
+            for idx in range(bs):
                 self._plot_2d(idx, show_cloud, show_curve)
                 if plot_sigmas:
                     self._plot_sigmas(idx)
                 if plot_scores:
                     self._plot_scores(idx)
+
+    def _plot_3d_batch(
+            self,
+            show_cloud: bool = True,
+            show_curve: bool = True,
+            cloud_point_threshold: float = 0,
+    ):
+        """
+        Make a grid of 3D scatter plots showing either or both of the cloud points and the curve points.
+        """
+        ws = self.optimiser_args.window_size
+        n_rows = int(np.floor(np.sqrt(ws)))
+        n_cols = int(np.ceil(np.sqrt(ws)))
+
+        # Rotate the perspective on every plot
+        self.plot_3d_azim += 15
+
+        fig = plt.figure()
+        gs = GridSpec(n_rows, n_cols)
+        idx = 0
+
+        for i in range(n_rows):
+            for j in range(n_cols):
+                if idx >= len(self.frame_batch):
+                    break
+                ax = fig.add_subplot(gs[i, j], projection='3d')
+                ax.view_init(azim=self.plot_3d_azim)
+                ax.set_title(f'Frame #{self.frame_batch[idx].frame_num}')
+
+                # Cloud points
+                if show_cloud:
+                    cloud_points = self.cloud_points[idx]
+                    scores = self.cloud_points_scores[idx]
+                    if cloud_point_threshold > 0:
+                        above_threshold = scores > cloud_point_threshold
+                        scores = scores[above_threshold]
+                        cloud_points = cloud_points[above_threshold]
+                    x, y, z = (to_numpy(cloud_points[:, j]) for j in range(3))
+                    s1 = ax.scatter(x, y, z, c=to_numpy(scores), cmap='autumn_r', s=20, alpha=0.4)
+                    # fig.colorbar(s1)
+
+                # Curve points
+                if show_curve:
+                    curve_points = self.curve_points[idx]
+                    scores = self.curve_points_scores[idx]
+                    x, y, z = (to_numpy(curve_points[:, j]) for j in range(3))
+                    # s2 = ax.scatter(x, y, z, c=to_numpy(scores), cmap='YlGnBu', s=50, marker='x', alpha=0.9)
+                    s2 = ax.scatter(x, y, z, color='black', s=75, marker='x', alpha=0.9)
+                    # fig.colorbar(s2)
+
+                idx += 1
+
+        fig.suptitle(f'step_cc: {self.checkpoint.step_cc}. step_curve: {self.checkpoint.step_curve}.')
+        fig.tight_layout()
+        self._save_plot(fig, '3d_batch')
 
     def _plot_3d(
             self,

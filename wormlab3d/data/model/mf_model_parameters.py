@@ -7,6 +7,7 @@ from wormlab3d.midlines3d.args.network_args import ENCODING_MODES
 
 class MFModelParameters(Document):
     created = DateTimeField(required=True, default=datetime.datetime.utcnow)
+    skeletoniser = ReferenceField('Checkpoint')
     n_cloud_points = IntField(required=True)
     n_curve_points = IntField(required=True)
     curve_mode = StringField(required=True, choices=ENCODING_MODES)

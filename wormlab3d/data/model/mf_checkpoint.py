@@ -6,9 +6,11 @@ from mongoengine import *
 class MFCheckpoint(Document):
     created = DateTimeField(required=True, default=datetime.datetime.utcnow)
     cloned_from = ReferenceField('MFCheckpoint')
+    trial = ReferenceField('Trial')
     masks = ReferenceField('SegmentationMasks')
     model_params = ReferenceField('MFModelParameters', required=True)
 
+    frame_num = IntField(required=True, default=0)
     step_cc = IntField(required=True, default=0)
     step_curve = IntField(required=True, default=0)
     loss_cc = FloatField(required=True, default=1e10)

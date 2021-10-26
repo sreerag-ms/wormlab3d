@@ -15,6 +15,12 @@ LOSS_CURVE_TARGETS = [
 class OptimiserArgs(BaseArgs):
     def __init__(
             self,
+            window_size: int = 9,
+            n_steps_cc_init: int = 100,
+            n_steps_curve_init: int = 100,
+            n_steps_cc: int = 500,
+            n_steps_curve: int = 1000,
+
             optimise_cam_coeffs: bool = True,
             optimise_cloud: bool = True,
             optimise_curve: bool = True,
@@ -29,6 +35,8 @@ class OptimiserArgs(BaseArgs):
             loss_curve_3d: bool = False,
             loss_3d_cloud_threshold: float = 1e-4,
             loss_curve_target: str = LOSS_CURVE_TARGET_CLOUD,
+            loss_cloud_temporal_smoothing: float = 1e-4,
+            loss_curve_temporal_smoothing: float = 1e-4,
 
             algorithm_cc: str = OPTIMISER_ADAM,
             algorithm_curve: str = OPTIMISER_ADAM,
@@ -44,9 +52,12 @@ class OptimiserArgs(BaseArgs):
             lr_curve_sigmas: float = 1e-3,
             **kwargs
     ):
-        # assert loss in LOSSES
-        assert algorithm_cc in OPTIMISER_ALGORITHMS
-        # self.loss = loss
+        assert window_size % 2 == 1, 'Window size must be an odd number.'
+        self.window_size = window_size
+        self.n_steps_cc_init = n_steps_cc_init
+        self.n_steps_curve_init = n_steps_curve_init
+        self.n_steps_cc = n_steps_cc
+        self.n_steps_curve = n_steps_curve
 
         self.optimise_cam_coeffs = optimise_cam_coeffs
         self.optimise_cloud = optimise_cloud
@@ -64,7 +75,10 @@ class OptimiserArgs(BaseArgs):
         self.loss_curve_target = loss_curve_target
         assert not (self.loss_curve_3d and self.loss_curve_target == LOSS_CURVE_TARGET_MASKS), \
             'Can\'t have 2D masks comparisons in 3D!'
+        self.loss_cloud_temporal_smoothing = loss_cloud_temporal_smoothing
+        self.loss_curve_temporal_smoothing = loss_curve_temporal_smoothing
 
+        assert algorithm_cc in OPTIMISER_ALGORITHMS
         self.algorithm_cc = algorithm_cc
         self.algorithm_curve = algorithm_curve
 
@@ -84,6 +98,17 @@ class OptimiserArgs(BaseArgs):
         Add arguments to a command parser.
         """
         group = parser.add_argument_group('Optimiser Args')
+
+        group.add_argument('--window-size', type=int, default=9,
+                           help='Sliding window size.')
+        group.add_argument('--n-steps-cc-init', type=int, default=100,
+                           help='Number of steps to train the camera coefficients and cloud points on the first batch.')
+        group.add_argument('--n-steps-curve-init', type=int, default=100,
+                           help='Number of steps to train the curve parameters for on the first batch.')
+        group.add_argument('--n-steps-cc', type=int, default=500,
+                           help='Number of steps to train the camera coefficients and cloud points.')
+        group.add_argument('--n-steps-curve', type=int, default=10000,
+                           help='Number of steps to train the curve parameters for.')
 
         group.add_argument('--optimise-cam-coeffs', type=str2bool, default=True,
                            help='Optimise the camera coefficients. Default = True.')
@@ -112,6 +137,10 @@ class OptimiserArgs(BaseArgs):
                            help='Exclude any cloud points scoring below this threshold for curve fitting. Default=1e-4.')
         group.add_argument('--loss-curve-target', type=str, default=LOSS_CURVE_TARGET_CLOUD, choices=LOSS_CURVE_TARGETS,
                            help='What to compare the rendered curve against, either "cloud" or "masks". Only "cloud" is valid in 3D.')
+        group.add_argument('--loss-cloud-temporal-smoothing', type=float, default=1e-4,
+                           help='Temporal smoothing for the cloud points.')
+        group.add_argument('--loss-curve-temporal-smoothing', type=float, default=1e-4,
+                           help='Temporal smoothing for the curve points.')
 
         group.add_argument('--algorithm-cc', type=str, choices=OPTIMISER_ALGORITHMS, default=OPTIMISER_ADAM,
                            help='Optimisation algorithm for the camera coefficients, cloud points and cloud sigmas.')
@@ -120,8 +149,8 @@ class OptimiserArgs(BaseArgs):
 
         group.add_argument('--relocate-every-n-steps', type=int, default=1,
                            help='Relocate cloud points with low scores near to points with high scores every n steps. Default=1.')
-        group.add_argument('--relocate-score-threshold', type=float, default=None,
-                           help='Maximum number of points to relocate at a time. Default=1e-4.')
+        group.add_argument('--relocate-score-threshold', type=float, default=1e-4,
+                           help='Threshold below which points may be relocated. Default=1e-4.')
         group.add_argument('--relocate-max-points', type=int, default=None,
                            help='Maximum number of points to relocate at a time. Default=n_cloud_points*0.01.')
 

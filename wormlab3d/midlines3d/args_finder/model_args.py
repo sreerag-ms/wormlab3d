@@ -8,6 +8,7 @@ from wormlab3d.toolkit.util import str2bool
 class ModelArgs(BaseArgs):
     def __init__(
             self,
+            skeletoniser_id: str = None,
             load: bool = True,
             model_id: str = None,
             n_cloud_points: int = 1000,
@@ -20,6 +21,7 @@ class ModelArgs(BaseArgs):
             max_revolutions: int = 2,
             **kwargs
     ):
+        self.skeletoniser_id = skeletoniser_id
         self.load = load
         self.model_id = model_id
         self.n_cloud_points = n_cloud_points
@@ -40,6 +42,8 @@ class ModelArgs(BaseArgs):
         Add arguments to a command parser.
         """
         group = parser.add_argument_group('Model Args')
+        group.add_argument('--skeletoniser-id', type=str,
+                           help='Load a skeletoniser model by its database id.')
         group.add_argument('--load-model', type=str2bool, default=True,
                            help='Try to load an existing network if available matching the given parameters.')
         group.add_argument('--model-id', type=str,

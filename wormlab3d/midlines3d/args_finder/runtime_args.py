@@ -11,8 +11,6 @@ class RuntimeArgs(BaseArgs):
             resume_from: str = 'latest',
             gpu_only: bool = False,
             cpu_only: bool = False,
-            n_steps_cc: int = 500,
-            n_steps_curve: int = 5000,
             checkpoint_every_n_steps: int = -1,
             plot_every_n_steps: int = -1,
             plot_n_examples: int = 1,
@@ -23,8 +21,6 @@ class RuntimeArgs(BaseArgs):
         self.resume_from = resume_from
         self.gpu_only = gpu_only
         self.cpu_only = cpu_only
-        self.n_steps_cc = n_steps_cc
-        self.n_steps_curve = n_steps_curve
         self.checkpoint_every_n_steps = checkpoint_every_n_steps
         self.plot_every_n_steps = plot_every_n_steps
         self.plot_n_examples = plot_n_examples
@@ -48,10 +44,6 @@ class RuntimeArgs(BaseArgs):
                            help='Abort if no gpus are detected.')
         group.add_argument('--cpu-only', action='store_true',
                            help='Only run on CPU. Otherwise will use GPU if available.')
-        group.add_argument('--n-steps-cc', type=int, default=500,
-                           help='Number of steps to train the camera coefficients and cloud points.')
-        group.add_argument('--n-steps-curve', type=int, default=10000,
-                           help='Number of steps to train the curve parameters for.')
         group.add_argument('--checkpoint-every-n-steps', type=int, default=-1,
                            help='Save a checkpoint every n steps, -1 turns this off. Default=-1.')
         group.add_argument('--plot-every-n-steps', type=int, default=-1,
