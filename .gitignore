@@ -16,4 +16,5 @@ __pycache__
 /data/backgrounds
 /data/ds_cache
 /data/trajectory_cache
+/data/K_estimates_cache
 intermediate-data

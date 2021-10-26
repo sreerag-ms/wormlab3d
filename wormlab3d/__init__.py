@@ -38,6 +38,9 @@ N_WORM_POINTS = 50
 # Timestamp for when the script was started, can be used for log names
 START_TIMESTAMP = time.strftime('%Y%m%d_%H%M')
 
+# Number of parallel workers to use for tasks
+N_WORKERS = os.getenv('N_WORKERS', 8)
+
 
 # || ------------------------------ DATABASE ------------------------------- ||
 
