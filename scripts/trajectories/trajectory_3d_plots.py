@@ -6,6 +6,7 @@ import numpy as np
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d.simple_worm.estimate_k import get_K_estimates_from_args
 from wormlab3d.trajectories.args import get_args
+from wormlab3d.trajectories.brownian_particle import BrownianParticle
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.util import calculate_planarity, calculate_speeds, calculate_htd
 
@@ -145,6 +146,36 @@ def plot_trajectory_planarity():
         plt.show()
 
 
+def plot_brownian_trajectory():
+    """
+    Generate and plot trajectory of a randomly generated brownian particle.
+    """
+    D = 100
+    n_steps = 1000
+    total_time = 1
+    p = BrownianParticle(D=D)
+    X = p.generate_trajectory(n_steps=n_steps, total_time=total_time)
+    x, y, z = X.T
+
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.add_subplot(projection='3d')
+    s = ax.scatter(x, y, z, c=np.linspace(0, 1, len(X)), cmap='jet', s=10, alpha=0.4)
+    fig.colorbar(s)
+    ax.set_title(f'Brownian particle. D={D}, n_steps={n_steps}, total_time={total_time}.')
+
+    fig.tight_layout()
+    if save_plots:
+        os.makedirs(LOGS_PATH, exist_ok=True)
+        plt.savefig(
+            LOGS_PATH + '/' + START_TIMESTAMP +
+            f'_brownian_particle'
+            f'_D={D}_n={n_steps}_T={total_time}'
+            f'.{img_extension}'
+        )
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     # from simple_worm.plot3d import interactive
     # interactive()
@@ -152,3 +183,4 @@ if __name__ == '__main__':
     plot_trajectory_signed_speed()
     plot_trajectory_K()
     plot_trajectory_planarity()
+    plot_brownian_trajectory()

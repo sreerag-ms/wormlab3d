@@ -4,10 +4,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.trajectories.args import get_args
+from wormlab3d.trajectories.brownian_particle import BrownianParticle
+from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.displacement import calculate_displacements, plot_displacement_histograms, \
     calculate_displacement_projections, plot_displacement_projections_histograms, plot_squared_displacements_over_time, \
     calculate_transitions_and_dwells_multiple_deltas, calculate_msd, plot_msd, plot_msd_multiple
-from wormlab3d.trajectories.cache import get_trajectory_from_args
 
 # tex_mode()
 
@@ -228,6 +229,102 @@ def msd_wt3d_vs_reconst():
             plt.show()
 
 
+def msd_brownian():
+    args = get_args()
+    n_runs = 10
+
+    # Use same brownian parameters for all simulations
+    fps = 25
+    total_time = 13 * 60
+    n_steps = total_time * fps
+    D = 1
+
+    # Define deltas
+    deltas = np.arange(args.min_delta, args.max_delta, step=args.delta_step)
+    deltas_s = deltas / fps
+
+    # Set up plot
+    fig, ax = plt.subplots(1, figsize=(12, 10))
+    ax.set_title(f'MSD of Brownian Particle. D={D}, n_steps={n_steps}, total_time={total_time}s.')
+    ax.set_ylabel('$MSD=<(x(t+\Delta)-x(t))^2>_t$')
+    ax.set_xlabel('$\Delta s$')
+    ax.set_yscale('log')
+    ax.set_xscale('log')
+
+    for i in range(n_runs):
+        # Generate the brownian trajectory
+        p = BrownianParticle(D=D)
+        trajectory = p.generate_trajectory(n_steps=n_steps, total_time=total_time)
+        msds = calculate_msd(trajectory, deltas)
+        msd_vals = np.array(list(msds.values()))
+        ax.plot(deltas_s, msd_vals)
+
+    fig.tight_layout()
+
+    if save_plots:
+        os.makedirs(LOGS_PATH, exist_ok=True)
+        plt.savefig(
+            LOGS_PATH + '/' + START_TIMESTAMP +
+            f'_msd'
+            f'_brownian_particle'
+            f'_D={D}_n={n_steps}_T={total_time}'
+            f'_d={args.min_delta}-{args.max_delta}'
+            f'_ds={args.delta_step}'
+            '.svg'
+        )
+    if show_plots:
+        plt.show()
+
+
+def msd_brownian_varying_Ds():
+    args = get_args()
+
+    # Use same time window for all simulations
+    fps = 25
+    total_time = 10 * 60
+    n_steps = total_time * fps
+
+    # Define deltas
+    deltas = np.arange(args.min_delta, args.max_delta, step=args.delta_step)
+    deltas_s = deltas / fps
+
+    # Vary the diffusion coefficient
+    Ds = [0.1, 1, 10, 100]
+
+    # Set up plot
+    fig, ax = plt.subplots(1, figsize=(12, 10))
+    ax.set_title(f'MSD of Brownian Particle. n_steps={n_steps}, total_time={total_time}s.')
+    ax.set_ylabel('$MSD=<(x(t+\Delta)-x(t))^2>_t$')
+    ax.set_xlabel('$\Delta s$')
+    ax.set_yscale('log')
+    ax.set_xscale('log')
+
+    for D in Ds:
+        # Generate the brownian trajectory
+        p = BrownianParticle(D=D)
+        trajectory = p.generate_trajectory(n_steps=n_steps, total_time=total_time)
+        msds = calculate_msd(trajectory, deltas)
+        msd_vals = np.array(list(msds.values()))
+        ax.plot(deltas_s, msd_vals, label=f'D={D}')
+
+    ax.legend()
+    fig.tight_layout()
+
+    if save_plots:
+        os.makedirs(LOGS_PATH, exist_ok=True)
+        plt.savefig(
+            LOGS_PATH + '/' + START_TIMESTAMP +
+            f'_msd'
+            f'_brownian_particle'
+            f'_D={",".join([str(D) for D in Ds])}_n={n_steps}_T={total_time}'
+            f'_d={args.min_delta}-{args.max_delta}'
+            f'_ds={args.delta_step}'
+            '.svg'
+        )
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     displacement()
     displacement_projections()
@@ -235,3 +332,5 @@ if __name__ == '__main__':
     msd()
     msd_multiple()
     msd_wt3d_vs_reconst()
+    msd_brownian()
+    msd_brownian_varying_Ds()

@@ -1,8 +1,10 @@
 import os
 
 import matplotlib.pyplot as plt
+import numpy as np
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d.trajectories.args import get_args
+from wormlab3d.trajectories.brownian_particle import BrownianParticle
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 
 # tex_mode()
@@ -98,6 +100,42 @@ def plot_trajectory_2d_wt3d_vs_reconst():
         plt.show()
 
 
+def plot_brownian_trajectory_2d():
+    D = 100
+    n_steps = 1000
+    total_time = 1
+    p = BrownianParticle(D=D)
+    X = p.generate_trajectory(n_steps=n_steps, total_time=total_time)
+    projections = ['xy', 'yz', 'xz']
+
+    fig, axes = plt.subplots(3, figsize=(6, 10))
+
+    for i, p in enumerate(projections):
+        if p == 'xy':
+            X_ = np.delete(X, 2, 1)
+        elif p == 'yz':
+            X_ = np.delete(X, 0, 1)
+        elif p == 'xz':
+            X_ = np.delete(X, 1, 1)
+        axes[i].set_title(p)
+        axes[i].plot(X_[:, 0], X_[:, 1])
+
+    fig.suptitle(f'Brownian trajectory. D={D}, n_steps={n_steps}, total_time={total_time}.')
+    fig.tight_layout()
+
+    if save_plots:
+        os.makedirs(LOGS_PATH, exist_ok=True)
+        plt.savefig(
+            LOGS_PATH + '/' + START_TIMESTAMP +
+            f'_brownian_particle'
+            f'_D={D}_n={n_steps}_T={total_time}'
+            '.svg'
+        )
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     plot_trajectory_2d()
     plot_trajectory_2d_wt3d_vs_reconst()
+    plot_brownian_trajectory_2d()

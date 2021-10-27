@@ -7,6 +7,7 @@ import numpy as np
 from wormlab3d import logger, DATA_PATH
 from wormlab3d.data.model import Midline3D
 from wormlab3d.toolkit.util import hash_data
+from wormlab3d.trajectories.util import smooth_trajectory
 
 TRAJECTORY_CACHE_PATH = DATA_PATH + '/trajectory_cache'
 SMOOTHING_WINDOW_TYPES = ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']
