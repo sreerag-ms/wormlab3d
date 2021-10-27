@@ -34,6 +34,8 @@ def get_args(
                                  'Leave empty (default) to return full trajectory.')
         parser.add_argument('--projection', type=str, choices=['3D', 'x', 'y', 'z', 'xy', 'yz', 'xz'], default='3D',
                             help='Use a projection of the midline, or not (default=3D).')
+        parser.add_argument('--smoothing-window', type=int,
+                            help='Smooth the trajectory using average in a sliding window. Size defined in number of frames.')
 
     # MSD arguments
     if include_msd_options:
@@ -49,7 +51,6 @@ def get_args(
     # K estimation arguments
     if include_K_options:
         parser.add_argument('--K0', type=float, default=MP_DEFAULT_K, help='Initial value of K for the optimiser.')
-        parser.add_argument('--smoothing-window', type=int, default=5, help='Smooth trajectory with moving average.')
         parser.add_argument('--K-sample-frames', type=int, default=5,
                             help='Number of frames from which to calculate the K estimate.')
 

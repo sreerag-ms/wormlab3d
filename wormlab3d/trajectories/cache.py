@@ -82,6 +82,7 @@ def get_trajectory_from_args(args: Namespace) -> np.ndarray:
         end_frame=args.end_frame,
         projection=args.projection,
         trajectory_point=args.trajectory_point,
+        smoothing_window=args.smoothing_window,
         rebuild_cache=args.rebuild_cache
     )
 
