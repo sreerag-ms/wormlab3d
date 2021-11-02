@@ -1,6 +1,9 @@
+from typing import List, Tuple
+
 import numpy as np
 from sklearn.decomposition import PCA
 from wormlab3d import DATA_PATH
+from wormlab3d.data.model import Frame, Tag
 
 TRAJECTORY_CACHE_PATH = DATA_PATH + '/trajectory_cache'
 SMOOTHING_WINDOW_TYPES = ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']
@@ -75,20 +78,29 @@ def calculate_planarity(X: np.ndarray, window_size: int) -> np.ndarray:
     """
     Calculate the planarity as the relative contribution of the 3rd PCA component in a sliding window.
     """
+    ratios = calculate_pca_singular_value_variance_ratios(X, window_size)
+    planarities = 1 - ratios[:, 2]
+    return planarities
+
+
+def calculate_pca_singular_value_variance_ratios(X: np.ndarray, window_size: int) -> np.ndarray:
+    """
+    Calculate the PCA singular value variance ratios in a sliding window.
+    """
     X_padded = np.r_[
         np.ones((int(np.floor(window_size / 2)), *X.shape[1:])) * X[0],
         X,
         np.ones((int(np.ceil(window_size / 2)), *X.shape[1:])) * X[-1],
     ]
 
-    planarities = np.zeros(len(X))
+    ratios = np.zeros((len(X), 3))
     for i in range(len(X)):
         pca = PCA(svd_solver='full', copy=True, n_components=3)
         shapes = X_padded[i:i + window_size].reshape((window_size * X.shape[1], 3))
         pca.fit(shapes)
-        planarities[i] = 1 - pca.explained_variance_ratio_[2]
+        ratios[i] = pca.explained_variance_ratio_
 
-    return planarities
+    return ratios
 
 
 def prune_slowest_frames(
@@ -124,3 +136,25 @@ def prune_slowest_frames(
             j += 1
 
     return X_pruned
+
+
+def fetch_annotations(trial_id: str) -> Tuple[List[Tag], List[np.ndarray]]:
+    """
+    Load frame annotations.
+    """
+    pipeline = [
+        {'$match': {'trial': trial_id}},
+        {'$project': {'_id': 0, 'frame_num': 1, 'tags': 1}},
+        {'$unwind': '$tags'},
+        {'$group': {'_id': '$tags', 'frames': {'$addToSet': '$frame_num'}}},
+        {'$sort': {'_id': 1}}
+    ]
+    data = list(Frame.objects().aggregate(pipeline))
+
+    tags = []
+    frame_nums = []
+    for datum in data:
+        tags.append(Tag.objects.get(id=datum['_id']))
+        frame_nums.append(np.sort(datum['frames']))
+
+    return tags, frame_nums

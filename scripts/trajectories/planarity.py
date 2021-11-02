@@ -23,7 +23,7 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
         excludes = []
     fn = LOGS_PATH + '/' + START_TIMESTAMP + f'_{method}'
 
-    for k in ['trial', 'frames', 'src', 'aggregation', 'deltas', 'u']:
+    for k in ['trial', 'frames', 'src', 'aggregation', 'deltas', 'u', 'smoothing_window', 'projection']:
         if k in excludes:
             continue
         if k == 'trial':
@@ -43,6 +43,8 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
             fn += f'_d={",".join([str(d) for d in args.deltas])}'
         elif k == 'u':
             fn += f'_u={args.trajectory_point}'
+        elif k == 'smoothing_window' and args.smoothing_window is not None:
+            fn += f'_sw={args.smoothing_window}'
         elif k == 'projection':
             fn += f'_p={args.projection}'
 
@@ -98,13 +100,10 @@ def planarity_vs_delta():
     ax.set_xlabel('$\Delta s$')
     ax.set_ylabel('Planarity')
     ax.set_title(f'Planarity vs Delta (time window). Trial {args.trial}.')
-
     fig.tight_layout()
 
     if save_plots:
-        plt.savefig(
-            make_filename('planarity_vs_delta', args)
-        )
+        plt.savefig(make_filename('planarity_vs_delta', args))
     if show_plots:
         plt.show()
 
@@ -113,3 +112,4 @@ if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
     planarity_vs_delta()
+    # singular_values_over_time()
