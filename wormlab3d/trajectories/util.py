@@ -73,7 +73,7 @@ def calculate_htd(X: np.ndarray) -> np.ndarray:
 
 def calculate_planarity(X: np.ndarray, window_size: int) -> np.ndarray:
     """
-    Calculate the planarity as the magnitude of the 3rd PCA component in a sliding window.
+    Calculate the planarity as the relative contribution of the 3rd PCA component in a sliding window.
     """
     X_padded = np.r_[
         np.ones((int(np.floor(window_size / 2)), *X.shape[1:])) * X[0],
@@ -82,13 +82,11 @@ def calculate_planarity(X: np.ndarray, window_size: int) -> np.ndarray:
     ]
 
     planarities = np.zeros(len(X))
-    for i in range(len(X) - window_size):
-        pca = PCA(svd_solver='full', copy=False, n_components=3)
+    for i in range(len(X)):
+        pca = PCA(svd_solver='full', copy=True, n_components=3)
         shapes = X_padded[i:i + window_size].reshape((window_size * X.shape[1], 3))
         pca.fit(shapes)
-        planarities[i] = np.abs(pca.singular_values_[2])
-        # planarities[i] = 1 - pca.explained_variance_ratio_[2]
-        # planarities[i] = pca.singular_values_[2]/pca.singular_values_.sum()
+        planarities[i] = 1 - pca.explained_variance_ratio_[2]
 
     return planarities
 
