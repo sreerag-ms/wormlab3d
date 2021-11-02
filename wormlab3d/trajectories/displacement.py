@@ -5,9 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 
-from wormlab3d import logger
-
-N_WORKERS = 8
+from wormlab3d import logger, N_WORKERS
 
 DEFAULT_FPS = 25
 
@@ -260,6 +258,7 @@ def plot_squared_displacements_over_time(
 def plot_msd(
         msd: np.ndarray,
         fps: int = DEFAULT_FPS,
+        title: str = 'MSD'
 ) -> Figure:
     """
     Plot the mean squared displacement on a log-log scale.
@@ -268,11 +267,12 @@ def plot_msd(
     msd_vals = np.array(list(msd.values()))
     fig, ax = plt.subplots(1, figsize=(12, 10), sharex=True, sharey=True)
     ax.plot(deltas, msd_vals)
-    ax.set_title(f'MSD')
+    ax.set_title(title)
     ax.set_ylabel('$MSD=<(x(t+\Delta)-x(t))^2>_t$')
     ax.set_xlabel('$\Delta s$')
     ax.set_yscale('log')
     ax.set_xscale('log')
+    ax.grid()
     fig.tight_layout()
     return fig
 
@@ -281,6 +281,7 @@ def plot_msd_multiple(
         msd: Dict[float, Dict[str, np.ndarray]],
         deltas: List[int],
         fps: int = DEFAULT_FPS,
+        title: str = 'MSD'
 ) -> Figure:
     """
     Plot multiple mean squared displacements across different points and projections.
@@ -300,11 +301,12 @@ def plot_msd_multiple(
             msd_vals = np.array(list(msds_up.values()))
             ax.plot(deltas, msd_vals, label=f'u={u:.1f}, p={p}', linestyle=linestyles[p], color=colors[i], alpha=0.5)
 
-    ax.set_title(f'MSD')
+    ax.set_title(title)
     ax.set_ylabel('$MSD=<(x(t+\Delta)-x(t))^2>_t$')
     ax.set_xlabel('$\Delta s$')
     ax.set_yscale('log')
     ax.set_xscale('log')
+    ax.grid()
     ax.legend()
     fig.tight_layout()
     return fig

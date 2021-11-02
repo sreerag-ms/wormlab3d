@@ -1,19 +1,20 @@
 import os
 from argparse import Namespace
+from multiprocessing import Pool
 from typing import List
 
 import matplotlib.pyplot as plt
+import numpy as np
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
+from wormlab3d import logger, N_WORKERS
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
-from wormlab3d.trajectories.displacement import calculate_displacements, plot_displacement_histograms, \
-    calculate_displacement_projections, plot_displacement_projections_histograms, plot_squared_displacements_over_time, \
-    calculate_transitions_and_dwells_multiple_deltas
+from wormlab3d.trajectories.util import calculate_planarity
 
 # tex_mode()
 
 show_plots = True
-save_plots = True
+save_plots = False
 img_extension = 'png'
 
 
@@ -48,41 +49,61 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
     return fn + '.' + img_extension
 
 
-def displacement():
-    args = get_args()
-    trajectory = get_trajectory_from_args(args)
-    displacements = calculate_displacements(trajectory, args.deltas, args.aggregation)
-    plot_displacement_histograms(displacements)
-    if save_plots:
-        plt.savefig(
-            make_filename('histograms', args)
+def calculate_planarity_wrapper(args):
+    logger.info(f'Calculating planarity for window size = {args[1]}.')
+    return calculate_planarity(args[0], window_size=args[1])
+
+
+def calculate_planarity_parallel(
+        X: np.ndarray,
+        deltas: np.ndarray,
+):
+    """
+    Calculate the planarities in parallel.
+    """
+    N = len(X)
+    with Pool(processes=N_WORKERS) as pool:
+        res_list = pool.map(
+            calculate_planarity_wrapper,
+            [[X, delta] for delta in deltas]
         )
-    if show_plots:
-        plt.show()
+
+    res = np.zeros((2, len(deltas) * N))
+    for i, delta in enumerate(deltas):
+        res[:, i * N:(i + 1) * N] = np.array([
+            np.ones(N) * delta,
+            res_list[i],
+        ])
+    return res
 
 
-def displacement_projections():
+def planarity_vs_delta():
     args = get_args()
-    trajectory = get_trajectory_from_args(args)
-    displacements = calculate_displacement_projections(trajectory, args.deltas)
-    plot_displacement_projections_histograms(displacements)
+    X = get_trajectory_from_args(args)
+    N = len(X)
+    deltas = np.arange(args.min_delta, args.max_delta, step=args.delta_step)
+
+    res = calculate_planarity_parallel(X, deltas)
+
+    # res = np.zeros((2, len(deltas) * N))
+    # for i, delta in enumerate(deltas):
+    #     res[:, i * N:(i+1)*N] = np.array([
+    #         np.ones(N) * delta,
+    #         calculate_planarity(X, window_size=delta),
+    #     ])
+
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.add_subplot()
+    ax.scatter(x=res[0], y=res[1], s=2, alpha=0.4)
+    ax.set_xlabel('$\Delta s$')
+    ax.set_ylabel('Planarity')
+    ax.set_title(f'Planarity vs Delta (time window). Trial {args.trial}.')
+
+    fig.tight_layout()
+
     if save_plots:
         plt.savefig(
-            make_filename('histograms_projections', args, excludes=['projection'])
-        )
-    if show_plots:
-        plt.show()
-
-
-def displacement_over_time():
-    args = get_args()
-    trajectory = get_trajectory_from_args(args)
-    displacements = calculate_displacements(trajectory, args.deltas, args.aggregation)
-    dwells = calculate_transitions_and_dwells_multiple_deltas(displacements)
-    plot_squared_displacements_over_time(displacements, dwells)
-    if save_plots:
-        plt.savefig(
-            make_filename('traces', args)
+            make_filename('planarity_vs_delta', args)
         )
     if show_plots:
         plt.show()
@@ -91,6 +112,4 @@ def displacement_over_time():
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
-    # displacement()
-    # displacement_projections()
-    displacement_over_time()
+    planarity_vs_delta()
