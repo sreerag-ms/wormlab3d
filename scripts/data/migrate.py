@@ -8,7 +8,6 @@ import h5py
 import numpy as np
 import scipy.io as sio
 from mongoengine import DoesNotExist
-
 from wormlab3d import WT3D_PATH, logger, CAMERA_IDXS, ANNEX_PATH, DATA_PATH
 from wormlab3d.data.model import *
 from wormlab3d.data.model.cameras import CAM_SOURCE_ANNEX, CAM_SOURCE_WT3D
@@ -21,6 +20,7 @@ CAMERA_SHIFTS_DIR = ANNEX_PATH + '/calib/shifts'
 BACKGROUND_IMAGES_DIR = 'background'
 MIDLINES_2D_DIR = ANNEX_PATH + '/midlines'
 MIDLINES_3D_DIR = ANNEX_PATH + '/reconst'
+TAGS_DIR = ANNEX_PATH + '/tags'
 TAGS_MAT_PATH = DATA_PATH + '/Behavior_Dictionary.mat'
 
 fields = [
@@ -60,6 +60,7 @@ def print_runinfo_data():
 
 
 def clear_db():
+    raise RuntimeError('This exception needs removing if you really want to run this!')
     # Drop collections
     Cameras.drop_collection()
     Experiment.drop_collection()
@@ -254,15 +255,131 @@ def migrate_tags():
     }
 
     for row in mat['Behavior_Dictionary'][0]:
+        tag_id = int(row['ID'])
+
+        # Check for existing
+        try:
+            Tag.objects.get(id=tag_id)
+            continue
+        except DoesNotExist:
+            pass
+
+        # Create new
         tag = Tag()
         for key_from, key_to in key_map.items():
             val = row[key_from].squeeze()
             if key_from == 'ID':
-                val = int(val)
+                val = tag_id
             else:
                 val = str(val).strip()
             setattr(tag, key_to, val)
+        logger.info(f'Creating new tag id={tag_id}')
         tag.save()
+
+    # Collate tags
+    aliases = {
+        'helical': ['helix', 'coil', 'coiled'],
+        'bwd': ['back'],
+        'omg': ['omega'],
+        'still': ['stuck', 'still/stuck']
+    }
+    tags = {}
+    for tag in Tag.objects:
+        k = tag.short_name.lower()
+        tags[k] = tag
+        if k in aliases:
+            for alias in aliases[k]:
+                tags[alias] = tag
+
+    # Migrate tags from worm_data
+    unrecognised_tags = {}
+    files = os.listdir(TAGS_DIR)
+    failed = []
+    logger.info(f'{len(files)} tags csv files found.')
+    for i, filename in enumerate(files):
+        logger.info(f'Processing file {i + 1}/{len(files)}: {filename}')
+        if not filename.endswith('.csv'):
+            continue
+
+        # Get trial
+        clip_num = int(filename.strip('.csv'))
+        try:
+            trial = Trial.objects.get(legacy_id=clip_num)
+        except DoesNotExist:
+            failed.append(filename)
+            continue
+
+        # Parse tags
+        n_frames_altered = 0
+        unrecognised_tags_in_trial = []
+        with open(TAGS_DIR + '/' + filename) as f:
+            for line in f.readlines():
+                if line[0] == '#':
+                    continue
+                if line == '\n':
+                    continue
+
+                vals = line.rstrip('\n').split(',')
+
+                # Get frame range
+                try:
+                    first_frame, last_frame = (int(v) for v in vals[0].split('-'))
+                except Exception as e1:
+                    try:
+                        first_frame, last_frame = int(vals[0]), int(vals[0])
+                    except Exception as e2:
+                        logger.warning(f'Failed to extract frame range: {vals[0]}\n{e1}\n{e2}')
+                        continue
+                n_frames_in_range = last_frame - first_frame + 1
+
+                if last_frame < first_frame:
+                    logger.warning(f'Frame range incorrect: {vals[0]}. Skipping.')
+                    continue
+
+                if last_frame > trial.n_frames_max:
+                    logger.warning(
+                        f'Last frame ({last_frame}) exceeds max according to trial ({trial.n_frames_max}). Adding anyway.')
+
+                # Other values should be tags (also some junk)
+                range_tags = []
+                for v in vals[1:]:
+                    if v.lower() in tags:
+                        range_tags.append(tags[v.lower()].id)
+                    elif len(v.split(' ')) == 1 and len(v) > 0:
+                        if v not in unrecognised_tags:
+                            unrecognised_tags[v] = {
+                                'n_trials': 1,
+                                'n_frames': n_frames_in_range,
+                            }
+                        else:
+                            if v not in unrecognised_tags_in_trial:
+                                unrecognised_tags[v]['n_trials'] += 1
+                                unrecognised_tags_in_trial.append(v)
+                            unrecognised_tags[v]['n_frames'] += n_frames_in_range
+                if len(range_tags) == 0:
+                    continue
+
+                # Attach tags to all frames in range
+                n_frames_altered += n_frames_in_range
+                logger.info(f'Adding {len(range_tags)} tags to frames {first_frame} - {last_frame}.')
+                Frame.objects(
+                    trial=trial,
+                    frame_num__gte=first_frame,
+                    frame_num__lte=last_frame
+                ).update(
+                    add_to_set__tags=range_tags
+                )
+
+        logger.info(f'Altered tags for {n_frames_altered} frames.')
+
+    # Show any failures
+    if len(unrecognised_tags):
+        dbg = '\nUnrecognised tags:\n'
+        for ut, stats in unrecognised_tags.items():
+            dbg += f'{ut:<20} {stats["n_trials"]:>15} trials {stats["n_frames"]:>15} frames \n'
+        logger.warning(dbg)
+    if len(failed):
+        logger.error('\n=== FAILED:' + '\n'.join(failed) + '\n')
 
 
 def migrate_runinfo():
@@ -775,17 +892,18 @@ def migrate_WT3D(
 
 
 if __name__ == '__main__':
+    exit()
     # print_runinfo_data()
     # clear_db()
-    # migrate_tags()
     # migrate_runinfo()
+    # migrate_tags()
     # migrate_midlines2d()
     # migrate_midlines3d(drop_collection=False)
     # migrate_shifts(drop_collection=True)
     # exit()
-    migrate_WT3D(
-        update_tags=False,
-        update_midlines2d=False,
-        update_midlines3d=False,
-        update_cameras=True,
-    )
+    # migrate_WT3D(
+    #     update_tags=False,
+    #     update_midlines2d=False,
+    #     update_midlines3d=False,
+    #     update_cameras=True,
+    # )
