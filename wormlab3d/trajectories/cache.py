@@ -7,7 +7,7 @@ import numpy as np
 from wormlab3d import logger, DATA_PATH
 from wormlab3d.data.model import Midline3D
 from wormlab3d.toolkit.util import hash_data
-from wormlab3d.trajectories.util import smooth_trajectory
+from wormlab3d.trajectories.util import smooth_trajectory, prune_slowest_frames
 
 TRAJECTORY_CACHE_PATH = DATA_PATH + '/trajectory_cache'
 SMOOTHING_WINDOW_TYPES = ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']
@@ -19,9 +19,10 @@ def get_trajectory(
         midline_source_file: str = None,
         start_frame: int = None,
         end_frame: int = None,
+        smoothing_window: int = None,
+        prune_slowest_ratio: float = None,
         projection: str = None,
         trajectory_point: float = None,
-        smoothing_window: int = None,
         rebuild_cache: bool = False
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
     """
@@ -39,6 +40,9 @@ def get_trajectory(
 
     if smoothing_window is not None:
         X = smooth_trajectory(X, window_len=smoothing_window)
+
+    if prune_slowest_ratio is not None:
+        X = prune_slowest_frames(X, cut_ratio=prune_slowest_ratio)
 
     if projection is not None and projection != '3D':
         if projection == 'xy':
@@ -80,9 +84,10 @@ def get_trajectory_from_args(args: Namespace) -> np.ndarray:
         midline_source_file=args.midline3d_source_file,
         start_frame=args.start_frame,
         end_frame=args.end_frame,
+        smoothing_window=args.smoothing_window,
+        prune_slowest_ratio=args.prune_slowest_ratio,
         projection=args.projection,
         trajectory_point=args.trajectory_point,
-        smoothing_window=args.smoothing_window,
         rebuild_cache=args.rebuild_cache
     )
 

@@ -91,3 +91,38 @@ def calculate_planarity(X: np.ndarray, window_size: int) -> np.ndarray:
         # planarities[i] = pca.singular_values_[2]/pca.singular_values_.sum()
 
     return planarities
+
+
+def prune_slowest_frames(
+        X: np.ndarray,
+        cut_ratio: float = 0.1,
+) -> np.ndarray:
+    """
+    Remove slowest speed frames.
+    """
+    assert X.ndim == 3, 'Pruning slowest frames requires the full trajectory.'
+    assert 0 < cut_ratio < 1, 'cut_ratio must be between 0 and 1.'
+    speeds = calculate_speeds(X)
+    com = X.mean(axis=1)
+    N = len(X)
+    n_frames_to_cut = int(N * cut_ratio)
+    N_pruned = N - n_frames_to_cut
+    frame_idxs_to_cut = np.argsort(speeds)[:n_frames_to_cut]
+    frame_idxs_to_cut.sort()
+
+    X_pruned = np.zeros((N_pruned, *X.shape[1:]))
+    speeds_pruned = np.zeros(N_pruned)
+    j = 0
+    com_adj = np.zeros(3)
+
+    for i in range(N):
+        if len(frame_idxs_to_cut) > 0 and i == frame_idxs_to_cut[0]:
+            frame_idxs_to_cut = frame_idxs_to_cut[1:]
+            if (len(frame_idxs_to_cut) == 0 or i + 1 != frame_idxs_to_cut[0]) and i < N - 1:
+                com_adj = com[i + 1] - com[i]
+        else:
+            X_pruned[j] = X[i] - com_adj
+            speeds_pruned[j] = speeds[i]
+            j += 1
+
+    return X_pruned
