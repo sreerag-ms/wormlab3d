@@ -69,7 +69,8 @@ def check_crossings():
             LOGS_PATH + '/' + START_TIMESTAMP +
             f'_trial={args.trial}'
             f'_{args.midline3d_source}'
-            f'_sw={args.smoothing_window}'
+            f'_sw={args.smoothing_window}' +
+            (f'_dir={args.directionality}' if args.directionality is not None else '') +
             f'_min-dt={min_dt}'
             f'.{img_extension}'
         )

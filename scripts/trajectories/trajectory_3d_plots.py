@@ -11,7 +11,7 @@ from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.util import calculate_planarity, calculate_speeds, calculate_htd
 
 show_plots = True
-save_plots = False
+save_plots = True
 img_extension = 'png'
 
 
@@ -179,8 +179,8 @@ def plot_brownian_trajectory():
 if __name__ == '__main__':
     # from simple_worm.plot3d import interactive
     # interactive()
-    plot_trajectory_head_tail_distance()
-    plot_trajectory_signed_speed()
-    plot_trajectory_K()
-    plot_trajectory_planarity()
+    # plot_trajectory_head_tail_distance()
+    # plot_trajectory_signed_speed()
+    # plot_trajectory_K()
+    # plot_trajectory_planarity()
     plot_brownian_trajectory()

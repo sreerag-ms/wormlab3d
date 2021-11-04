@@ -71,6 +71,7 @@ def generate_K_estimates_cache_data(
         start_frame: int = None,
         end_frame: int = None,
         smoothing_window: int = None,
+        directionality: str = None,
         n_sample_frames: int = 5,
         K0: float = MP_DEFAULT_K,
         rebuild_cache: bool = False
@@ -82,6 +83,7 @@ def generate_K_estimates_cache_data(
         start_frame=start_frame,
         end_frame=end_frame,
         smoothing_window=smoothing_window,
+        directionality=directionality,
         rebuild_cache=rebuild_cache
     )
 
@@ -101,6 +103,7 @@ def generate_or_load_K_estimates_cache(
         start_frame: int = None,
         end_frame: int = None,
         smoothing_window: int = None,
+        directionality: str = None,
         n_sample_frames: int = 5,
         K0: float = MP_DEFAULT_K,
         rebuild_cache: bool = False
@@ -120,6 +123,8 @@ def generate_or_load_K_estimates_cache(
         'n_sample_frames': n_sample_frames,
         'K0': K0
     }
+    if directionality is not None:
+        args['directionality'] = directionality
     arg_hash = hash_data(args)
     filename_meta = f'{arg_hash}K.meta'
     filename_K = f'{arg_hash}K.npz'
@@ -167,6 +172,7 @@ def get_K_estimates_from_args(args: Namespace) -> np.ndarray:
         start_frame=args.start_frame,
         end_frame=args.end_frame,
         smoothing_window=args.smoothing_window,
+        directionality=args.directionality,
         n_sample_frames=args.K_sample_frames,
         K0=args.K0,
         rebuild_cache=args.rebuild_cache

@@ -1,13 +1,13 @@
 import json
 import os
 from argparse import Namespace
-from typing import Tuple, List, Any, Dict
+from typing import Tuple, List, Any, Dict, Union
 
 import numpy as np
 from wormlab3d import logger, DATA_PATH
 from wormlab3d.data.model import Midline3D
 from wormlab3d.toolkit.util import hash_data
-from wormlab3d.trajectories.util import smooth_trajectory, prune_slowest_frames
+from wormlab3d.trajectories.util import smooth_trajectory, prune_slowest_frames, prune_directionality
 
 TRAJECTORY_CACHE_PATH = DATA_PATH + '/trajectory_cache'
 SMOOTHING_WINDOW_TYPES = ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']
@@ -20,6 +20,7 @@ def get_trajectory(
         start_frame: int = None,
         end_frame: int = None,
         smoothing_window: int = None,
+        directionality: str = None,
         prune_slowest_ratio: float = None,
         projection: str = None,
         trajectory_point: float = None,
@@ -37,12 +38,18 @@ def get_trajectory(
         rebuild_cache=rebuild_cache
     )
     N = X.shape[1]
+    meta['frame_nums'] = np.arange(meta['start_frame'], meta['end_frame'] + 1)
 
     if smoothing_window is not None:
         X = smooth_trajectory(X, window_len=smoothing_window)
 
+    if directionality is not None and directionality != 'both':
+        X, kept_idxs = prune_directionality(X, directionality=directionality)
+        meta['frame_nums'] = meta['frame_nums'][kept_idxs]
+
     if prune_slowest_ratio is not None:
-        X = prune_slowest_frames(X, cut_ratio=prune_slowest_ratio)
+        X, kept_idxs = prune_slowest_frames(X, cut_ratio=prune_slowest_ratio)
+        meta['frame_nums'] = meta['frame_nums'][kept_idxs]
 
     if projection is not None and projection != '3D':
         if projection == 'xy':
@@ -73,10 +80,9 @@ def get_trajectory(
     return X, meta
 
 
-def get_trajectory_from_args(args: Namespace) -> np.ndarray:
+def get_trajectory_from_args(args: Namespace, return_meta: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, dict]]:
     """
     Get the trajectory using parameters from an argument namespace.
-    (Discard the metadata).
     """
     X, meta = get_trajectory(
         trial_id=args.trial,
@@ -85,13 +91,17 @@ def get_trajectory_from_args(args: Namespace) -> np.ndarray:
         start_frame=args.start_frame,
         end_frame=args.end_frame,
         smoothing_window=args.smoothing_window,
+        directionality=args.directionality,
         prune_slowest_ratio=args.prune_slowest_ratio,
         projection=args.projection,
         trajectory_point=args.trajectory_point,
         rebuild_cache=args.rebuild_cache
     )
 
-    return X
+    if return_meta:
+        return X, meta
+    else:
+        return X
 
 
 def generate_trajectory_cache_data(

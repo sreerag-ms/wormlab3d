@@ -137,5 +137,5 @@ def plot_brownian_trajectory_2d():
 
 if __name__ == '__main__':
     plot_trajectory_2d()
-    plot_trajectory_2d_wt3d_vs_reconst()
-    plot_brownian_trajectory_2d()
+    # plot_trajectory_2d_wt3d_vs_reconst()
+    # plot_brownian_trajectory_2d()

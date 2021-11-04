@@ -24,7 +24,7 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
         excludes = []
     fn = LOGS_PATH + '/' + START_TIMESTAMP + f'_{method}'
 
-    for k in ['trial', 'frames', 'src', 'smoothing_window', 'Knf', 'K0', 'pw']:
+    for k in ['trial', 'frames', 'src', 'smoothing_window', 'directionality', 'Knf', 'K0', 'pw']:
         if k in excludes:
             continue
         if k == 'trial':
@@ -40,6 +40,8 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
             fn += f'_{args.midline3d_source}'
         elif k == 'smoothing_window' and args.smoothing_window is not None:
             fn += f'_sw={args.smoothing_window}'
+        elif k == 'directionality' and args.directionality is not None:
+            fn += f'_dir={args.directionality}'
         elif k == 'Knf':
             fn += f'_Knf={args.K_sample_frames}'
         elif k == 'K0':
@@ -52,7 +54,7 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
 
 def traces():
     args = get_args()
-    X = get_trajectory_from_args(args)
+    X, meta = get_trajectory_from_args(args, return_meta=True)
     N = len(X)
     fps = 25
     ts = np.linspace(0, N / fps, N)
@@ -75,7 +77,7 @@ def traces():
     htd = calculate_htd(X)
 
     logger.info('Fetching annotations.')
-    tags, frame_nums = fetch_annotations(trial_id=args.trial)
+    tags, frame_idxs = fetch_annotations(trial_id=args.trial, frame_nums=meta['frame_nums'])
 
     fig, axes = plt.subplots(5, figsize=(12, 12), sharex=True, gridspec_kw={
         'height_ratios': [0.3, 1, 1, 1, 1],
@@ -90,7 +92,7 @@ def traces():
     ax = axes[0]
     ys = np.arange(len(tags))
     for i, tag in enumerate(tags):
-        ts_tag = frame_nums[i] / fps
+        ts_tag = frame_idxs[i] / fps
         lbl = tag.name.replace(' ', '\n')
         ax.scatter(ts_tag, np.ones_like(ts_tag) * ys[-i - 1] / 10, label=lbl, s=5, marker='s')
     ax.legend(loc='upper left', bbox_to_anchor=(0.862, 0.97), bbox_transform=fig.transFigure, markerscale=3)
@@ -134,7 +136,9 @@ def traces():
         frames_str_title = f' (frames={start_frame}-{end_frame})'
     title = f'Trial={args.trial}{frames_str_title}. Src={args.midline3d_source}. ' + \
             (f'Smoothing window={args.smoothing_window} frames. ' if args.smoothing_window is not None else '') + \
-            (f'Pruned slowest={args.prune_slowest_ratio * 100:.1f}%. ' if args.prune_slowest_ratio is not None else '')
+            (f'Pruned slowest={args.prune_slowest_ratio * 100:.1f}%. '
+             if args.prune_slowest_ratio is not None else '') + \
+            (f'Directionality={args.directionality}. ' if args.directionality is not None else '')
     fig.suptitle(title)
 
     fig.tight_layout()

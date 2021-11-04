@@ -20,7 +20,7 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
         excludes = []
     fn = LOGS_PATH + '/' + START_TIMESTAMP + f'_{method}'
 
-    for k in ['trial', 'frames', 'src', 'u', 'smoothing_window', 'projection']:
+    for k in ['trial', 'frames', 'src', 'u', 'smoothing_window', 'directionality', 'projection']:
         if k in excludes:
             continue
         if k == 'trial':
@@ -38,6 +38,8 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
             fn += f'_u={args.trajectory_point}'
         elif k == 'smoothing_window' and args.smoothing_window is not None:
             fn += f'_sw={args.smoothing_window}'
+        elif k == 'directionality' and args.directionality is not None:
+            fn += f'_dir={args.directionality}'
         elif k == 'projection' and args.projection is not None:
             fn += f'_p={args.projection}'
 

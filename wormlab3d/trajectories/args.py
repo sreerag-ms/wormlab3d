@@ -31,6 +31,8 @@ def get_args(
     if include_trajectory_options:
         parser.add_argument('--smoothing-window', type=int,
                             help='Smooth the trajectory using average in a sliding window. Size defined in number of frames.')
+        parser.add_argument('--directionality', type=str, choices=['forwards', 'backwards'],
+                            help='Use only forwards/backwards frames. Default=both.')
         parser.add_argument('--prune-slowest-ratio', type=float,
                             help='Prune the slowest x% frames from the trajectory, stitching together afterwards.')
         parser.add_argument('--trajectory-point', type=float, default=None,

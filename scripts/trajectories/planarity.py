@@ -23,7 +23,8 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
         excludes = []
     fn = LOGS_PATH + '/' + START_TIMESTAMP + f'_{method}'
 
-    for k in ['trial', 'frames', 'src', 'aggregation', 'deltas', 'u', 'smoothing_window', 'projection']:
+    for k in ['trial', 'frames', 'src', 'aggregation', 'deltas', 'u', 'smoothing_window', 'directionality',
+              'projection']:
         if k in excludes:
             continue
         if k == 'trial':
@@ -45,6 +46,8 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
             fn += f'_u={args.trajectory_point}'
         elif k == 'smoothing_window' and args.smoothing_window is not None:
             fn += f'_sw={args.smoothing_window}'
+        elif k == 'directionality' and args.directionality is not None:
+            fn += f'_dir={args.directionality}'
         elif k == 'projection':
             fn += f'_p={args.projection}'
 
@@ -80,19 +83,13 @@ def calculate_planarity_parallel(
 
 
 def planarity_vs_delta():
+    """
+    Plot the planarity across different time windows.
+    """
     args = get_args()
     X = get_trajectory_from_args(args)
-    N = len(X)
     deltas = np.arange(args.min_delta, args.max_delta, step=args.delta_step)
-
     res = calculate_planarity_parallel(X, deltas)
-
-    # res = np.zeros((2, len(deltas) * N))
-    # for i, delta in enumerate(deltas):
-    #     res[:, i * N:(i+1)*N] = np.array([
-    #         np.ones(N) * delta,
-    #         calculate_planarity(X, window_size=delta),
-    #     ])
 
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_subplot()
@@ -112,4 +109,3 @@ if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
     planarity_vs_delta()
-    # singular_values_over_time()

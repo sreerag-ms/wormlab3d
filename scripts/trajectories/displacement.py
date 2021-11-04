@@ -22,7 +22,7 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
         excludes = []
     fn = LOGS_PATH + '/' + START_TIMESTAMP + f'_{method}'
 
-    for k in ['trial', 'frames', 'src', 'aggregation', 'deltas', 'u']:
+    for k in ['trial', 'frames', 'src', 'directionality', 'aggregation', 'deltas', 'u']:
         if k in excludes:
             continue
         if k == 'trial':
@@ -36,6 +36,8 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
             fn += frames_str_fn
         elif k == 'src':
             fn += f'_{args.midline3d_source}'
+        elif k == 'directionality' and args.directionality is not None:
+            fn += f'_dir={args.directionality}'
         elif k == 'aggregation':
             fn += f'_{args.aggregation}'
         elif k == 'deltas':

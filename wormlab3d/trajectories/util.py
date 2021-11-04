@@ -103,6 +103,29 @@ def calculate_pca_singular_value_variance_ratios(X: np.ndarray, window_size: int
     return ratios
 
 
+def prune_directionality(
+        X: np.ndarray,
+        directionality: str = None,
+) -> np.ndarray:
+    """
+    Remove forward- or backwards-locomotion frames.
+    """
+    assert directionality in ['forwards', 'backwards']
+    speeds = calculate_speeds(X, signed=True)
+
+    # If directionality is forwards, remove backwards frames
+    if directionality == 'forwards':
+        frame_idxs_to_cut = (speeds < 0).nonzero()[0]
+
+    # If directionality is backwards, remove forwards frames
+    else:
+        frame_idxs_to_cut = (speeds > 0).nonzero()[0]
+
+    X_pruned, kept_idxs = _prune_frames(X, frame_idxs_to_cut)
+
+    return X_pruned, kept_idxs
+
+
 def prune_slowest_frames(
         X: np.ndarray,
         cut_ratio: float = 0.1,
@@ -110,40 +133,62 @@ def prune_slowest_frames(
     """
     Remove slowest speed frames.
     """
-    assert X.ndim == 3, 'Pruning slowest frames requires the full trajectory.'
     assert 0 < cut_ratio < 1, 'cut_ratio must be between 0 and 1.'
     speeds = calculate_speeds(X)
-    com = X.mean(axis=1)
     N = len(X)
     n_frames_to_cut = int(N * cut_ratio)
-    N_pruned = N - n_frames_to_cut
     frame_idxs_to_cut = np.argsort(speeds)[:n_frames_to_cut]
+    X_pruned, kept_idxs = _prune_frames(X, frame_idxs_to_cut)
+
+    return X_pruned, kept_idxs
+
+
+def _prune_frames(
+        X: np.ndarray,
+        frame_idxs_to_cut: np.ndarray
+):
+    """
+    Prune the given frame idxs from the trajectory.
+    """
+    assert X.ndim == 3, 'Pruning requires the full trajectory.'
+    N = len(X)
+    N_pruned = N - len(frame_idxs_to_cut)
     frame_idxs_to_cut.sort()
 
     X_pruned = np.zeros((N_pruned, *X.shape[1:]))
-    speeds_pruned = np.zeros(N_pruned)
     j = 0
+    k = -1
+    com = X.mean(axis=1)
     com_adj = np.zeros(3)
+    kept_idxs = []
 
     for i in range(N):
         if len(frame_idxs_to_cut) > 0 and i == frame_idxs_to_cut[0]:
+            next_cut_idx = frame_idxs_to_cut[0]
+            if k == -1:
+                k = next_cut_idx - 1 if next_cut_idx > 0 else 0
             frame_idxs_to_cut = frame_idxs_to_cut[1:]
             if (len(frame_idxs_to_cut) == 0 or i + 1 != frame_idxs_to_cut[0]) and i < N - 1:
-                com_adj = com[i + 1] - com[i]
+                com_adj = com[k] - com[i + 1] + com_adj
+                k = -1
         else:
-            X_pruned[j] = X[i] - com_adj
-            speeds_pruned[j] = speeds[i]
+            kept_idxs.append(i)
+            X_pruned[j] = X[i] + com_adj
             j += 1
 
-    return X_pruned
+    return X_pruned, kept_idxs
 
 
-def fetch_annotations(trial_id: str) -> Tuple[List[Tag], List[np.ndarray]]:
+def fetch_annotations(trial_id: str, frame_nums: np.ndarray = None) -> Tuple[List[Tag], List[np.ndarray]]:
     """
     Load frame annotations.
     """
+    matches = {'trial': trial_id}
+    if frame_nums is not None:
+        matches['frame_num'] = {'$in': frame_nums.tolist()}
+
     pipeline = [
-        {'$match': {'trial': trial_id}},
+        {'$match': matches},
         {'$project': {'_id': 0, 'frame_num': 1, 'tags': 1}},
         {'$unwind': '$tags'},
         {'$group': {'_id': '$tags', 'frames': {'$addToSet': '$frame_num'}}},
@@ -152,9 +197,11 @@ def fetch_annotations(trial_id: str) -> Tuple[List[Tag], List[np.ndarray]]:
     data = list(Frame.objects().aggregate(pipeline))
 
     tags = []
-    frame_nums = []
+    frame_idxs = []
     for datum in data:
         tags.append(Tag.objects.get(id=datum['_id']))
-        frame_nums.append(np.sort(datum['frames']))
+        tag_frame_nums = np.sort(datum['frames'])
+        tag_frame_idxs = np.isin(frame_nums, tag_frame_nums).nonzero()[0]
+        frame_idxs.append(tag_frame_idxs)
 
-    return tags, frame_nums
+    return tags, frame_idxs

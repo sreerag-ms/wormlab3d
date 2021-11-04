@@ -22,7 +22,7 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None, appe
         excludes = []
     fn = LOGS_PATH + '/' + START_TIMESTAMP + f'_{method}'
 
-    for k in ['trial', 'frames', 'src', 'deltas', 'delta_step', 'u']:
+    for k in ['trial', 'frames', 'src', 'directionality', 'deltas', 'delta_step', 'u']:
         if k in excludes:
             continue
         if k == 'trial':
@@ -36,6 +36,8 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None, appe
             fn += frames_str_fn
         elif k == 'src':
             fn += f'_{args.midline3d_source}'
+        elif k == 'directionality' and args.directionality is not None:
+            fn += f'_dir={args.directionality}'
         elif k == 'deltas':
             fn += f'_d={args.min_delta}-{args.max_delta}'
         elif k == 'delta_step':
@@ -60,7 +62,9 @@ def make_title(args: Namespace) -> str:
 
     title = f'MSD. Trial={args.trial}{frames_str_title}. Src={args.midline3d_source}. ' + \
             (f'Smoothing window={args.smoothing_window}. ' if args.smoothing_window is not None else '') + \
-            (f'Pruned slowest={args.prune_slowest_ratio * 100:.1f}%. ' if args.prune_slowest_ratio is not None else '')
+            (f'Pruned slowest={args.prune_slowest_ratio * 100:.1f}%. '
+             if args.prune_slowest_ratio is not None else '') + \
+            (f'Directionality={args.directionality}. ' if args.directionality is not None else '')
 
     return title
 
