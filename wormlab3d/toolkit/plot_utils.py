@@ -40,6 +40,12 @@ def tex_mode():
     plt.rc('text.latex', preamble=r'\usepackage{amsmath}')
 
 
+def equal_aspect_ratio(ax: Axes):
+    """Fix equal aspect ratio for 3D plots."""
+    limits = np.array([getattr(ax, f'get_{axis}lim')() for axis in 'xyz'])
+    ax.set_box_aspect(np.ptp(limits, axis = 1))
+
+
 class CameraImageArtist:
     """
     Draw camera images and midline coordinates.

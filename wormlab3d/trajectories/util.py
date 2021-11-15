@@ -179,13 +179,13 @@ def _prune_frames(
     return X_pruned, kept_idxs
 
 
-def fetch_annotations(trial_id: str, frame_nums: np.ndarray = None) -> Tuple[List[Tag], List[np.ndarray]]:
+def fetch_annotations(trial_id: str, frame_nums: List[int] = None) -> Tuple[List[Tag], List[np.ndarray]]:
     """
     Load frame annotations.
     """
     matches = {'trial': trial_id}
     if frame_nums is not None:
-        matches['frame_num'] = {'$in': frame_nums.tolist()}
+        matches['frame_num'] = {'$in': frame_nums}
 
     pipeline = [
         {'$match': matches},
