@@ -11,7 +11,7 @@ from wormlab3d.toolkit.util import build_target_arguments_parser, str2bool
 from wormlab3d.trajectories.util import SMOOTHING_WINDOW_TYPES, smooth_trajectory
 
 show_plots = True
-save_plots = True
+save_plots = False
 
 
 def get_data(args: Namespace) -> np.ndarray:
@@ -66,6 +66,37 @@ def plot_results(K_ests: List[float], args: Namespace):
         plt.show()
 
 
+def plot_histogram(K_ests: List[float], args: Namespace):
+    fig, ax = plt.subplots(1, figsize=(10, 8))
+
+    start_frame = 0 if args.frame_num is None else args.frame_num
+    frame_nums = np.arange(len(K_ests)) + start_frame
+
+    ax.hist(K_ests, bins=100, density=True, facecolor='green', alpha=0.75)
+    ax.set_title(
+        f'Trial={args.trial}. '
+        f'Sample duration={args.K_sample_frames} frames. '
+        f'K0={args.K0}. '
+        f'Smoothing window={args.smoothing_window} frames.'
+    )
+    ax.set_ylabel('count')
+    ax.set_xlabel('K_est')
+
+    if save_plots:
+        os.makedirs(LOGS_PATH, exist_ok=True)
+        plt.savefig(
+            LOGS_PATH + '/' + START_TIMESTAMP +
+            f'_histogram_trial={args.trial}'
+            f'_frames={frame_nums[0]}-{frame_nums[-1]}'
+            f'_sample={args.K_sample_frames:.2f}s'
+            f'_K0={args.K0}'
+            f'_w={args.smoothing_window}'
+            '.svg'
+        )
+    if show_plots:
+        plt.show()
+
+
 def plot_xyz(X: np.ndarray):
     fig, axes = plt.subplots(3, figsize=(10, 8))
     window_len = 5
@@ -99,6 +130,7 @@ def estimate_K():
         args.frame_num = 0
     K_ests = get_data(args)
     plot_results(K_ests, args)
+    plot_histogram(K_ests, args)
 
 
 if __name__ == '__main__':
