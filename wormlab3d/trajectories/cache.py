@@ -5,7 +5,7 @@ from typing import Tuple, List, Any, Dict, Union
 
 import numpy as np
 from wormlab3d import logger, DATA_PATH
-from wormlab3d.data.model import Midline3D
+from wormlab3d.data.model import Midline3D, Frame
 from wormlab3d.toolkit.util import hash_data
 from wormlab3d.trajectories.util import smooth_trajectory, prune_slowest_frames, prune_directionality
 
@@ -77,6 +77,9 @@ def get_trajectory(
             assert 0 <= u < N, f'Incompatible trajectory point: {u}.'
             X = X[:, u]
 
+    # Convert frame nums to a list of ints
+    meta['frame_nums'] = meta['frame_nums'].tolist()
+
     return X, meta
 
 
@@ -114,35 +117,37 @@ def generate_trajectory_cache_data(
     """
     Load trial midlines from the database and stitch together a contiguous block.
     """
-    matches = {'source': midline_source}
-    if midline_source_file is not None:
-        matches['source_file'] = midline_source_file
 
     # Filter the frames by trial id and (optionally) frame numbers
-    frame_matches = {'frame.trial': trial_id}
+    frame_matches = {'trial': trial_id}
     if start_frame is not None or end_frame is not None:
         frame_num_constraints = {}
         if start_frame is not None:
             frame_num_constraints['$gte'] = start_frame
         if end_frame is not None:
             frame_num_constraints['$lte'] = end_frame
-        frame_matches['frame.frame_num'] = frame_num_constraints
+        frame_matches['frame_num'] = frame_num_constraints
+
+    # Filter the midlines by appropriate source
+    midline_matches = {'midline.source': midline_source}
+    if midline_source_file is not None:
+        midline_matches['midline.source_file'] = midline_source_file
 
     pipeline = [
-        {'$match': matches},
-        {'$lookup': {'from': 'frame', 'localField': 'frame', 'foreignField': '_id', 'as': 'frame'}},
-        {'$unwind': {'path': '$frame'}},
         {'$match': frame_matches},
+        {'$lookup': {'from': 'midline3d', 'localField': '_id', 'foreignField': 'frame', 'as': 'midline'}},
+        {'$unwind': {'path': '$midline'}},
+        {'$match': midline_matches},
         {'$project': {
             '_id': 0,
-            'frame_id': '$frame._id',
-            'frame_num': '$frame.frame_num',
-            'midline_id': '$_id',
-            'midline_error': '$error',
+            'frame_id': '$_id',
+            'frame_num': '$frame_num',
+            'midline_id': '$midline._id',
+            'midline_error': '$midline.error',
         }},
         {'$sort': {'frame_num': 1, 'midline_error': 1}},
     ]
-    cursor = Midline3D.objects().aggregate(pipeline)
+    cursor = Frame.objects().aggregate(pipeline)
 
     # Fetch results
     frame_ids = []
@@ -178,6 +183,9 @@ def generate_trajectory_cache_data(
         raise RuntimeError(f'Last frame found ({res["frame_num"]}) not equal to requested start frame {end_frame}.')
 
     n_results = len(midline_ids)
+    if n_results == 0:
+        raise RuntimeError('No results found!')
+
     logger.info(f'Fetched midlines for frames {frame_nums[0]}-{frame_nums[-1]} ({n_results}).')
 
     # Collate the midline data
@@ -247,10 +255,10 @@ def generate_or_load_trajectory_cache(
             with open(path_meta, 'r') as f:
                 meta = json.load(f)
             X = np.memmap(path_X, dtype=np.float32, mode='r', shape=tuple(meta['shape']))
-            logger.info(f'Loaded data from {path_X}.')
+            logger.info(f'Loaded trajectory data from {path_X}.')
             return X, meta
         except Exception as e:
-            logger.warning(f'Could not load from {path_X}. {e}')
+            logger.warning(f'Could not load trajectory from {path_X}. {e}')
     elif not rebuild_cache:
         logger.info('Trajectory file cache unavailable, building.')
     else:
