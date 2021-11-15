@@ -29,12 +29,13 @@ def est_K_wrapper(args) -> float:
 
 
 def _calculate_estimates_parallel(X: np.ndarray, n_sample_frames: int, K0: float) -> np.ndarray:
-    end_frame = X.shape[0] - n_sample_frames
+    N = X.shape[0] - n_sample_frames
+    w2 = int(np.floor(n_sample_frames / 2))
 
     with Pool(processes=N_WORKERS) as pool:
         K_ests = pool.map(
             est_K_wrapper,
-            [[X, i, n_sample_frames, K0] for i in range(end_frame)]
+            [[X, i + w2, n_sample_frames, K0] for i in range(N)]
         )
     K_ests = np.array(K_ests)
 
@@ -42,25 +43,28 @@ def _calculate_estimates_parallel(X: np.ndarray, n_sample_frames: int, K0: float
 
 
 def _calculate_estimates(X: np.ndarray, n_sample_frames: int, K0: float) -> np.ndarray:
-    K_ests = []
-    end_frame = X.shape[0] - n_sample_frames
+    N = X.shape[0] - n_sample_frames
+    w2 = int(np.floor(n_sample_frames / 2))
+    K_ests = np.zeros(N)
 
-    i = 0
-    while i < end_frame:
-        K0 = K0 if len(K_ests) == 0 else K_ests[-1]
-        K_est = est_K(X, i, n_sample_frames, K0)
-        K_ests.append(K_est)
-        i += 1
-    K_ests = np.array(K_ests)
+    for i in range(N):
+        K0 = K0 if i == 0 else K_ests[i - 1]
+        K_est = est_K(X, i + w2, n_sample_frames, K0)
+        K_ests[i] = K_est
 
     return K_ests
 
 
 def calculate_K_estimates(X: np.ndarray, n_sample_frames: int, K0: float) -> np.ndarray:
+    X_padded = np.r_[
+        np.ones((int(np.floor(n_sample_frames / 2)), *X.shape[1:])) * X[0],
+        X,
+        np.ones((int(np.ceil(n_sample_frames / 2)), *X.shape[1:])) * X[-1],
+    ]
     if N_WORKERS > 1:
-        K_ests = _calculate_estimates_parallel(X, n_sample_frames, K0)
+        K_ests = _calculate_estimates_parallel(X_padded, n_sample_frames, K0)
     else:
-        K_ests = _calculate_estimates(X, n_sample_frames, K0)
+        K_ests = _calculate_estimates(X_padded, n_sample_frames, K0)
     return K_ests
 
 
@@ -72,6 +76,7 @@ def generate_K_estimates_cache_data(
         end_frame: int = None,
         smoothing_window: int = None,
         directionality: str = None,
+        prune_slowest_ratio: float = None,
         n_sample_frames: int = 5,
         K0: float = MP_DEFAULT_K,
         rebuild_cache: bool = False
@@ -84,6 +89,7 @@ def generate_K_estimates_cache_data(
         end_frame=end_frame,
         smoothing_window=smoothing_window,
         directionality=directionality,
+        prune_slowest_ratio=prune_slowest_ratio,
         rebuild_cache=rebuild_cache
     )
 
@@ -104,6 +110,7 @@ def generate_or_load_K_estimates_cache(
         end_frame: int = None,
         smoothing_window: int = None,
         directionality: str = None,
+        prune_slowest_ratio: float = None,
         n_sample_frames: int = 5,
         K0: float = MP_DEFAULT_K,
         rebuild_cache: bool = False
@@ -125,6 +132,8 @@ def generate_or_load_K_estimates_cache(
     }
     if directionality is not None:
         args['directionality'] = directionality
+    if prune_slowest_ratio is not None:
+        args['prune_slowest_ratio'] = prune_slowest_ratio
     arg_hash = hash_data(args)
     filename_meta = f'{arg_hash}K.meta'
     filename_K = f'{arg_hash}K.npz'
@@ -173,6 +182,7 @@ def get_K_estimates_from_args(args: Namespace) -> np.ndarray:
         end_frame=args.end_frame,
         smoothing_window=args.smoothing_window,
         directionality=args.directionality,
+        prune_slowest_ratio=args.prune_slowest_ratio,
         n_sample_frames=args.K_sample_frames,
         K0=args.K0,
         rebuild_cache=args.rebuild_cache
