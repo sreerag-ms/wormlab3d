@@ -64,11 +64,6 @@ def traces():
 
     logger.info('Calculating K ests.')
     K_ests = get_K_estimates_from_args(args)
-    K_ests = np.r_[
-        np.ones(int(np.ceil((len(ts) - len(K_ests)) / 2))) * K_ests[0],
-        K_ests,
-        np.ones(int(np.floor((len(ts) - len(K_ests)) / 2))) * K_ests[0],
-    ]
 
     logger.info('Calculating speeds.')
     speeds = calculate_speeds(X, signed=True)
@@ -97,6 +92,7 @@ def traces():
         ax.scatter(ts_tag, np.ones_like(ts_tag) * ys[-i - 1] / 10, label=lbl, s=5, marker='s')
     ax.legend(loc='upper left', bbox_to_anchor=(0.862, 0.97), bbox_transform=fig.transFigure, markerscale=3)
     ax.axis('off')
+    ax.grid()
 
     # PCA axis
     ax = axes[1]
@@ -106,12 +102,14 @@ def traces():
     ax.legend()
     ax.set_ylabel('Explained variance ratio')
     ax.set_title('PCA singular values variance ratios.')
+    ax.grid()
 
     # K estimates
     ax = axes[2]
     ax.plot(ts, K_ests)
     ax.set_ylabel('K')
     ax.set_title(f'K estimate ({args.K_sample_frames} frames, K0={args.K0}).')
+    ax.grid()
 
     # Speeds
     ax = axes[3]
@@ -119,12 +117,14 @@ def traces():
     ax.plot(ts, speeds)
     ax.set_ylabel('Speed')
     ax.set_title('Speed.')
+    ax.grid()
 
     # HTD
     ax = axes[4]
     ax.plot(ts, htd)
     ax.set_ylabel('HTD')
     ax.set_title('HTD.')
+    ax.grid()
 
     ax.set_xlabel('Time (s)')
 

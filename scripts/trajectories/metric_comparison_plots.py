@@ -11,7 +11,7 @@ from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.util import calculate_speeds, calculate_htd, calculate_planarity
 
 show_plots = True
-save_plots = True
+save_plots = False
 img_extension = 'png'
 
 
@@ -93,9 +93,6 @@ def plot_speed_vs_K():
     X = get_trajectory_from_args(args)
     speeds = calculate_speeds(X, signed=True)
 
-    # Trim the speeds to match number of K_ests
-    speeds = speeds[int(np.floor(args.K_sample_frames / 2)):-int(np.ceil(args.K_sample_frames / 2))]
-
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_subplot()
     ax.scatter(x=speeds, y=K_ests, s=2, alpha=0.4)
@@ -142,9 +139,6 @@ def plot_HTD_vs_K():
     X = get_trajectory_from_args(args)
     htd = calculate_htd(X)
 
-    # Trim the HTDs to match number of K_ests
-    htd = htd[int(np.floor(args.K_sample_frames / 2)):-int(np.ceil(args.K_sample_frames / 2))]
-
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_subplot()
     ax.scatter(x=htd, y=K_ests, s=2, alpha=0.4)
@@ -190,9 +184,6 @@ def plot_planarity_vs_K():
     X = get_trajectory_from_args(args)
     planarity = calculate_planarity(X, window_size=args.planarity_window)
     K_ests = get_K_estimates_from_args(args)
-
-    # Trim the planarities to match number of K_ests
-    planarity = planarity[int(np.floor(args.K_sample_frames / 2)):-int(np.ceil(args.K_sample_frames / 2))]
 
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_subplot()
