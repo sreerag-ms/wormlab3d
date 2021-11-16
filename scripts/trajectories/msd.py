@@ -14,7 +14,7 @@ from wormlab3d.trajectories.displacement import calculate_msd, plot_msd, plot_ms
 tex_mode()
 
 show_plots = True
-save_plots = False
+save_plots = True
 img_extension = 'png'
 
 
@@ -387,7 +387,7 @@ def msd_active_particle():
 
 def msd_active_particles():
     args = get_args()
-    n_runs_per_momentum = 1
+    n_runs_per_momentum = 5
 
     # Use same parameters for all simulations
     fps = 25
@@ -516,6 +516,6 @@ if __name__ == '__main__':
     # msd_brownian()
     # msd_brownian_projections()
     # msd_brownian_varying_Ds()
-    msd_active_particle()
+    # msd_active_particle()
     msd_active_particles()
     msd_confined_particle()

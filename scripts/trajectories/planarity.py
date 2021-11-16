@@ -1,20 +1,18 @@
 import os
 from argparse import Namespace
-from multiprocessing import Pool
 from typing import List
 
 import matplotlib.pyplot as plt
 import numpy as np
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
-from wormlab3d import logger, N_WORKERS
+from wormlab3d import logger
 from wormlab3d.trajectories.args import get_args
-from wormlab3d.trajectories.cache import get_trajectory_from_args
-from wormlab3d.trajectories.util import calculate_planarity
+from wormlab3d.trajectories.pca import get_pca_cache_from_args
 
 # tex_mode()
 
 show_plots = True
-save_plots = False
+save_plots = True
 img_extension = 'png'
 
 
@@ -54,46 +52,34 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
     return fn + '.' + img_extension
 
 
-def calculate_planarity_wrapper(args):
-    logger.info(f'Calculating planarity for window size = {args[1]}.')
-    return calculate_planarity(args[0], window_size=args[1])
-
-
-def calculate_planarity_parallel(
-        X: np.ndarray,
-        deltas: np.ndarray,
-):
-    """
-    Calculate the planarities in parallel.
-    """
-    N = len(X)
-    with Pool(processes=N_WORKERS) as pool:
-        res_list = pool.map(
-            calculate_planarity_wrapper,
-            [[X, delta] for delta in deltas]
-        )
-
-    res = np.zeros((2, len(deltas) * N))
-    for i, delta in enumerate(deltas):
-        res[:, i * N:(i + 1) * N] = np.array([
-            np.ones(N) * delta,
-            res_list[i],
-        ])
-    return res
-
-
 def planarity_vs_delta():
     """
     Plot the planarity across different time windows.
     """
     args = get_args()
-    X = get_trajectory_from_args(args)
     deltas = np.arange(args.min_delta, args.max_delta, step=args.delta_step)
-    res = calculate_planarity_parallel(X, deltas)
+    # deltas = np.array([101])
+    delta_ts = deltas / 25
 
-    fig = plt.figure(figsize=(10, 10))
+    # Calculate planarities across different time windows
+    planarities = []
+    for window_size in deltas:
+        args.window_size = int(window_size)
+        logger.info(f'Fetching PCA data for window size = {int(window_size)}.')
+        pca_cache = get_pca_cache_from_args(args)
+        planarities.append(1 - pca_cache.explained_variance_ratio[:, 2])
+
+    fig = plt.figure(figsize=(14, 10))
     ax = fig.add_subplot()
-    ax.scatter(x=res[0], y=res[1], s=2, alpha=0.4)
+
+    parts = plt.violinplot(planarities, delta_ts, widths=args.delta_step / 25, showmeans=True, showmedians=True)
+    parts['cmedians'].set_color('green')
+    parts['cmedians'].set_alpha(0.7)
+    parts['cmedians'].set_linestyle(':')
+    parts['cmeans'].set_color('red')
+    parts['cmeans'].set_alpha(0.7)
+    parts['cmeans'].set_linestyle('--')
+
     ax.set_xlabel('$\Delta s$')
     ax.set_ylabel('Planarity')
     ax.set_title(f'Planarity vs Delta (time window). Trial {args.trial}.')

@@ -3,12 +3,12 @@ from argparse import Namespace
 from typing import List
 
 import matplotlib.pyplot as plt
-import numpy as np
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d.simple_worm.estimate_k import get_K_estimates_from_args
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
-from wormlab3d.trajectories.util import calculate_speeds, calculate_htd, calculate_planarity
+from wormlab3d.trajectories.pca import get_planarity_from_args
+from wormlab3d.trajectories.util import calculate_speeds, calculate_htd
 
 show_plots = True
 save_plots = False
@@ -160,7 +160,7 @@ def plot_speed_vs_planarity():
     args = get_args()
     X = get_trajectory_from_args(args)
     speeds = calculate_speeds(X, signed=True)
-    planarity = calculate_planarity(X, window_size=args.planarity_window)
+    planarity = get_planarity_from_args(args)
 
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_subplot()
@@ -181,8 +181,7 @@ def plot_planarity_vs_K():
     Plot planarity against K estimate.
     """
     args = get_args()
-    X = get_trajectory_from_args(args)
-    planarity = calculate_planarity(X, window_size=args.planarity_window)
+    planarity = get_planarity_from_args(args)
     K_ests = get_K_estimates_from_args(args)
 
     fig = plt.figure(figsize=(10, 10))
@@ -205,7 +204,7 @@ def plot_planarity_vs_HTD():
     """
     args = get_args()
     X = get_trajectory_from_args(args)
-    planarity = calculate_planarity(X, window_size=args.planarity_window)
+    planarity = get_planarity_from_args(args)
     htd = calculate_htd(X)
 
     fig = plt.figure(figsize=(10, 10))

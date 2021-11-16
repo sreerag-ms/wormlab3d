@@ -1,7 +1,6 @@
 from typing import List, Tuple
 
 import numpy as np
-from sklearn.decomposition import PCA
 from wormlab3d import DATA_PATH
 from wormlab3d.data.model import Frame, Tag
 
@@ -72,35 +71,6 @@ def calculate_htd(X: np.ndarray) -> np.ndarray:
     """
     htd = np.linalg.norm(X[:, 0] - X[:, -1], axis=1)
     return htd
-
-
-def calculate_planarity(X: np.ndarray, window_size: int) -> np.ndarray:
-    """
-    Calculate the planarity as the relative contribution of the 3rd PCA component in a sliding window.
-    """
-    ratios = calculate_pca_singular_value_variance_ratios(X, window_size)
-    planarities = 1 - ratios[:, 2]
-    return planarities
-
-
-def calculate_pca_singular_value_variance_ratios(X: np.ndarray, window_size: int) -> np.ndarray:
-    """
-    Calculate the PCA singular value variance ratios in a sliding window.
-    """
-    X_padded = np.r_[
-        np.ones((int(np.floor(window_size / 2)), *X.shape[1:])) * X[0],
-        X,
-        np.ones((int(np.ceil(window_size / 2)), *X.shape[1:])) * X[-1],
-    ]
-
-    ratios = np.zeros((len(X), 3))
-    for i in range(len(X)):
-        pca = PCA(svd_solver='full', copy=True, n_components=3)
-        shapes = X_padded[i:i + window_size].reshape((window_size * X.shape[1], 3))
-        pca.fit(shapes)
-        ratios[i] = pca.explained_variance_ratio_
-
-    return ratios
 
 
 def prune_directionality(

@@ -9,8 +9,8 @@ from wormlab3d import logger
 from wormlab3d.simple_worm.estimate_k import get_K_estimates_from_args
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
-from wormlab3d.trajectories.util import fetch_annotations, calculate_speeds, calculate_htd, \
-    calculate_pca_singular_value_variance_ratios
+from wormlab3d.trajectories.pca import get_pca_cache_from_args
+from wormlab3d.trajectories.util import fetch_annotations, calculate_speeds, calculate_htd
 
 # tex_mode()
 
@@ -60,7 +60,8 @@ def traces():
     ts = np.linspace(0, N / fps, N)
 
     logger.info('Calculating singular values.')
-    ratios = calculate_pca_singular_value_variance_ratios(X, window_size=args.planarity_window)
+    pcas = get_pca_cache_from_args(args)
+    ratios = pcas.explained_variance_ratio
 
     logger.info('Calculating K ests.')
     K_ests = get_K_estimates_from_args(args)

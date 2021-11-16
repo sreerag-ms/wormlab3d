@@ -12,7 +12,8 @@ from wormlab3d.toolkit.plot_utils import tex_mode, equal_aspect_ratio
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.brownian_particle import BrownianParticle, ActiveParticle, BoundedParticle, ConfinedParticle
 from wormlab3d.trajectories.cache import get_trajectory_from_args
-from wormlab3d.trajectories.util import calculate_planarity, calculate_speeds, calculate_htd
+from wormlab3d.trajectories.pca import get_planarity_from_args
+from wormlab3d.trajectories.util import calculate_speeds, calculate_htd
 
 show_plots = True
 save_plots = True
@@ -154,7 +155,7 @@ def plot_trajectory_planarity():
     """
     args = get_args()
     X_full, X_slice = get_trajectory(args)
-    planarity = calculate_planarity(X_full, window_size=args.planarity_window)
+    planarity = get_planarity_from_args(args)
 
     make_plot(
         title=f'Planarity. Trial {args.trial}. PCA window: {args.planarity_window} frames.',
