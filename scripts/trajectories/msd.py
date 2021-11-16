@@ -5,15 +5,16 @@ from typing import List
 import matplotlib.pyplot as plt
 import numpy as np
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
+from wormlab3d.toolkit.plot_utils import tex_mode
 from wormlab3d.trajectories.args import get_args
-from wormlab3d.trajectories.brownian_particle import BrownianParticle
+from wormlab3d.trajectories.brownian_particle import BrownianParticle, ActiveParticle, ConfinedParticle
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.displacement import calculate_msd, plot_msd, plot_msd_multiple
 
-# tex_mode()
+tex_mode()
 
 show_plots = True
-save_plots = True
+save_plots = False
 img_extension = 'png'
 
 
@@ -205,7 +206,7 @@ def msd_brownian():
 
     # Set up plot
     fig, ax = plt.subplots(1, figsize=(12, 10))
-    ax.set_title(f'MSD of Brownian Particle. D={D}, n_steps={n_steps}, total_time={total_time}s.')
+    ax.set_title(f'MSD of Brownian Particle. D={D}, n\_steps={n_steps}, total\_time={total_time}s.')
     ax.set_ylabel('$MSD=<(x(t+\Delta)-x(t))^2>_t$')
     ax.set_xlabel('$\Delta s$')
     ax.set_yscale('log')
@@ -252,7 +253,7 @@ def msd_brownian_projections():
 
     # Set up plot
     fig, ax = plt.subplots(1, figsize=(12, 10))
-    ax.set_title(f'MSD of Brownian Particle. D={D}, n_steps={n_steps}, total_time={total_time}s.')
+    ax.set_title(f'MSD of Brownian Particle. D={D}, n\_steps={n_steps}, total\_time={total_time}s.')
     ax.set_ylabel('$MSD=<(x(t+\Delta)-x(t))^2>_t$')
     ax.set_xlabel('$\Delta s$')
     ax.set_yscale('log')
@@ -301,7 +302,7 @@ def msd_brownian_varying_Ds():
 
     # Set up plot
     fig, ax = plt.subplots(1, figsize=(12, 10))
-    ax.set_title(f'MSD of Brownian Particle. n_steps={n_steps}, total_time={total_time}s.')
+    ax.set_title(f'MSD of Brownian Particle. n\_steps={n_steps}, total\_time={total_time}s.')
     ax.set_ylabel('$MSD=<(x(t+\Delta)-x(t))^2>_t$')
     ax.set_xlabel('$\Delta s$')
     ax.set_yscale('log')
@@ -332,6 +333,180 @@ def msd_brownian_varying_Ds():
         plt.show()
 
 
+def msd_active_particle():
+    args = get_args()
+    n_runs = 1
+
+    # Use same parameters for all simulations
+    fps = 25
+    total_time = 13 * 60
+    n_steps = total_time * fps
+    D = 1
+    momentum = 1
+
+    # Define deltas
+    deltas = np.arange(args.min_delta, args.max_delta, step=args.delta_step)
+    deltas_s = deltas / fps
+
+    # Set up plot
+    fig, ax = plt.subplots(1, figsize=(12, 10))
+    ax.set_title(f'MSD of Active Particle. D={D}, momentum={momentum}, n\_steps={n_steps}, total\_time={total_time}s.')
+    ax.set_ylabel('$MSD=<(x(t+\Delta)-x(t))^2>_t$')
+    ax.set_xlabel('$\Delta s$')
+    ax.set_yscale('log')
+    ax.set_xscale('log')
+    ax.grid()
+
+    for i in range(n_runs):
+        # Generate the brownian trajectory
+        p = ActiveParticle(D=D, momentum=momentum)
+        trajectory = p.generate_trajectory(n_steps=n_steps, total_time=total_time)
+        for j, projection in enumerate(['x', 'y', 'z']):
+            X = trajectory[:, j]
+            msds = calculate_msd(X, deltas)
+            msd_vals = np.array(list(msds.values()))
+            ax.plot(deltas_s, msd_vals, linestyle=[':', '-.', '--'][j])
+        msds = calculate_msd(trajectory, deltas)
+        msd_vals = np.array(list(msds.values()))
+        ax.plot(deltas_s, msd_vals)  # , linestyle=[':', '-.', '--'][j])
+
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            make_filename(
+                'active_particle',
+                args,
+                excludes=['trial', 'frames', 'src', 'u'],
+                append=f'_D={D}_n={n_steps}_T={total_time}'
+            )
+        )
+    if show_plots:
+        plt.show()
+
+
+def msd_active_particles():
+    args = get_args()
+    n_runs_per_momentum = 1
+
+    # Use same parameters for all simulations
+    fps = 25
+    total_time = 13 * 60
+    n_steps = total_time * fps
+    D = 1
+    momenta = [0, 0.25, 0.5, 0.75, 1]
+    cmaps = [plt.get_cmap(k) for k in ['Blues_r', 'Oranges_r', 'Greens_r', 'Reds_r', 'Purples_r']]
+
+    # Define deltas
+    deltas = np.arange(args.min_delta, args.max_delta, step=args.delta_step)
+    deltas_s = deltas / fps
+
+    # Set up plot
+    fig, ax = plt.subplots(1, figsize=(12, 10))
+    ax.set_title(f'MSD of Active Particles. D={D}, n\_steps={n_steps}, total\_time={total_time}s.')
+    ax.set_ylabel('$MSD=<(x(t+\Delta)-x(t))^2>_t$')
+    ax.set_xlabel('$\Delta s$')
+    ax.set_yscale('log')
+    ax.set_xscale('log')
+    ax.grid()
+
+    for i, momentum in enumerate(momenta):
+        for j in range(n_runs_per_momentum):
+            p = ActiveParticle(D=D, momentum=momentum)
+            trajectory = p.generate_trajectory(n_steps=n_steps, total_time=total_time)
+            msds = calculate_msd(trajectory, deltas)
+            msd_vals = np.array(list(msds.values()))
+            if j == 0:
+                label = f'momentum={momentum:.2f}'
+            else:
+                label = None
+            ax.plot(deltas_s, msd_vals, label=label, alpha=0.6,
+                    color=cmaps[i](j / n_runs_per_momentum))
+
+    ax.legend()
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            make_filename(
+                'active_particles',
+                args,
+                excludes=['trial', 'frames', 'src', 'u'],
+                append=f'_D={D}_ms={",".join([f"{m:.2f}" for m in momenta])}_n={n_steps}_T={total_time}'
+            )
+        )
+    if show_plots:
+        plt.show()
+
+
+def msd_confined_particle():
+    args = get_args()
+    n_runs = 1
+
+    # Use same parameters for all simulations
+    fps = 25
+    total_time = 13 * 60
+    n_steps = total_time * fps
+    D = 10
+    momentum = 0.8
+    unconfined_duration_mean = 30
+    unconfined_duration_variance = 1
+    confined_duration_mean = 10
+    confined_duration_variance = 0.5
+    D_confined = 0.05
+
+    # Define deltas
+    deltas = np.arange(args.min_delta, args.max_delta, step=args.delta_step)
+    deltas_s = deltas / fps
+
+    # Set up plot
+    fig, ax = plt.subplots(1, figsize=(12, 10))
+    ax.set_title(f'MSD of Confined Particle.\n'
+                 f'D\_unconfined={D}, D\_confined={D_confined}, momentum={momentum:.2f}, n\_steps={n_steps}, total\_time={total_time}s.\n'
+                 f'Unconfined duration $\sim \mathcal{{N}}({unconfined_duration_mean:.2f}, {unconfined_duration_variance:.2f})$. \n'
+                 f'Confined duration $\sim \mathcal{{N}}({confined_duration_mean:.2f}, {unconfined_duration_variance:.2f})$.', )
+    ax.set_ylabel('$MSD=<(x(t+\Delta)-x(t))^2>_t$')
+    ax.set_xlabel('$\Delta s$')
+    ax.set_yscale('log')
+    ax.set_xscale('log')
+    ax.grid()
+
+    for i in range(n_runs):
+        # Generate the brownian trajectory
+        p = ConfinedParticle(
+            D=D,
+            momentum=momentum,
+            unconfined_duration_mean=unconfined_duration_mean,
+            unconfined_duration_variance=unconfined_duration_variance,
+            confined_duration_mean=confined_duration_mean,
+            confined_duration_variance=confined_duration_variance,
+            D_confined=D_confined,
+        )
+        trajectory = p.generate_trajectory(n_steps=n_steps, total_time=total_time)
+
+        for j, projection in enumerate(['x', 'y', 'z']):
+            X = trajectory[:, j]
+            msds = calculate_msd(X, deltas)
+            msd_vals = np.array(list(msds.values()))
+            ax.plot(deltas_s, msd_vals, linestyle=[':', '-.', '--'][j])
+
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            make_filename(
+                'confined_particle',
+                args,
+                excludes=['trial', 'frames', 'src', 'u'],
+                append=f'_Du={D}_Dc={D_confined}_m={momentum:.2f}_n={n_steps}_T={total_time}'
+                       f'_u={unconfined_duration_mean:.2f},{unconfined_duration_variance:.2f}'
+                       f'_c={unconfined_duration_mean:.2f},{unconfined_duration_variance:.2f}'
+            )
+        )
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
@@ -339,5 +514,8 @@ if __name__ == '__main__':
     # msd_multiple()
     # msd_wt3d_vs_reconst()
     # msd_brownian()
-    msd_brownian_projections()
+    # msd_brownian_projections()
     # msd_brownian_varying_Ds()
+    msd_active_particle()
+    msd_active_particles()
+    msd_confined_particle()
