@@ -15,8 +15,9 @@ class BrownianParticle:
         # Starting position
         self.x0 = x0
 
-        # Current position (for momentum etc)
+        # Current and previous positions (for momentum etc)
         self.x = x0
+        self.x_prev = x0
 
         # Diffusion coefficient
         self.D = D
@@ -35,6 +36,7 @@ class BrownianParticle:
         for j in range(1, n_steps):
             step = self._step(dt)
             x[j] = x[j - 1] + step
+            self.x_prev = self.x
             self.x = x[j]
 
         return x
@@ -67,48 +69,47 @@ class ActiveParticle(BrownianParticle):
     ):
         super().__init__(x0, D)
         self.momentum = momentum
-
-        # Update direction angles
-        self.theta = 0
-        self.phi = 0
-
-        # Convert momentum into a variance value
-        if 0 < self.momentum < 1:
-            self.delta_angles_sigma = -np.log(self.momentum)
-        else:
-            self.delta_angles_sigma = 0
-
-    def generate_trajectory(self, n_steps: int, total_time: float) -> np.ndarray:
-        """
-        Sample initial theta and phi angles at random and then update using delta-angles drawn from normal distribution.
-        """
-        self.theta = np.random.rand() * 2 * np.pi
-        self.phi = np.random.rand() * np.pi
-
-        return super().generate_trajectory(n_steps, total_time)
+        self.cone_angle = (1 - self.momentum) * np.pi
 
     def _step(self, dt: float) -> np.ndarray:
         """
-        Generate a step in a random direction.
+        Sample a vector from a cone formed in the direction of travel.
+        Adapted from https://stackoverflow.com/questions/38997302/create-random-unit-vector-inside-a-defined-conical-region
         """
+        cone_dir = self.x - self.x_prev
+        cone_dir_default = np.array([0, 0, 1])
 
-        # Sample random step size
+        # If the cone direction is zeros then generate a random cone dir
+        if np.allclose(cone_dir, np.zeros_like(cone_dir)):
+            cone_dir = np.random.rand(3) * 2 - 1
+
+        # Normalise cone axis
+        cone_dir = cone_dir / np.linalg.norm(cone_dir)
+
+        # Sample a random unit-length vector centred around the north pole
+        theta = np.random.rand() * 2 * np.pi
+        z = np.random.rand() * (1 - np.cos(self.cone_angle)) + np.cos(self.cone_angle)
+        x = np.sqrt(1 - z**2) * np.cos(theta)
+        y = np.sqrt(1 - z**2) * np.sin(theta)
+        p = np.array([x, y, z])
+
+        # Find the rotation axis and rotation angle
+        u = np.cross(cone_dir_default, cone_dir)
+        u = u / np.linalg.norm(u)
+        rot = np.arccos(np.dot(cone_dir, cone_dir_default))
+
+        # Convert rotation axis and angle to 3x3 rotation matrix
+        # (See https://en.wikipedia.org/wiki/Rotation_matrix#Rotation_matrix_from_axis_and_angle)
+        R = np.cos(rot) * np.eye(3) \
+            + np.sin(rot) * np.cross(u, -np.eye(3)) \
+            + (1 - np.cos(rot)) * (np.outer(u, u))
+
+        # Rotate random vector
+        v = np.matmul(R, p)
+
+        # Scale by random step size
         r = np.sqrt(2.0 * self.m * self.D * dt) * np.abs(np.random.randn())
-
-        # Update angles
-        if self.momentum > 0:
-            self.theta += np.random.normal(scale=self.delta_angles_sigma)
-            self.phi += np.random.normal(scale=self.delta_angles_sigma)
-        else:
-            self.theta = np.random.rand() * 2 * np.pi
-            self.phi = np.random.rand() * np.pi
-
-        # Convert vector update to cartesian coordinates
-        dx = np.array([
-            r * np.cos(self.theta) * np.sin(self.phi),
-            r * np.sin(self.theta) * np.sin(self.phi),
-            r * np.cos(self.phi),
-        ])
+        dx = r * v
 
         return dx
 
@@ -157,7 +158,6 @@ class ConfinedParticle(BoundedParticle):
             D: float = 10.,
             momentum: float = 0,
             bounds: np.ndarray = None,
-
             unconfined_duration_mean: float = 10.,
             unconfined_duration_variance: float = 1.,
             confined_duration_mean: float = 10.,
