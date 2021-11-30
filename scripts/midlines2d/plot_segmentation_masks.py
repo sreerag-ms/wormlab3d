@@ -15,7 +15,7 @@ def plot_segmentation_masks(
     """
     Plot a triplet of generated segmentation masks.
     """
-    interactive_plots()
+    # interactive_plots()
     masks: SegmentationMasks
 
     # Fetch masks by id
@@ -48,6 +48,10 @@ def plot_segmentation_masks(
     images = masks.get_images()
     segs = masks.X
 
+    # segs = segs / segs.sum(axis=(1, 2))[:, None, None]
+    # segs = segs / segs.max()
+    segs[segs > 0.1] = 1
+
     fig, axes = plt.subplots(3, 3)
     fig.suptitle(
         f'{trial.date:%Y%m%d} #{trial.trial_num}. \n'
@@ -76,7 +80,9 @@ def plot_segmentation_masks(
 
 if __name__ == '__main__':
     plot_segmentation_masks(
+        masks_id='6179de54e15bc42adcaad7ef',
+
         # masks_id='607ff754f782c04c8abd026d',
-        trial_id=3,
+        # trial_id=3,
         # frame_num=3343,
     )

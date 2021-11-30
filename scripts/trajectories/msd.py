@@ -447,13 +447,13 @@ def msd_confined_particle():
     fps = 25
     total_time = 13 * 60
     n_steps = total_time * fps
-    D = 10
-    momentum = 0.8
+    D = 1
+    momentum = 0.95
     unconfined_duration_mean = 30
     unconfined_duration_variance = 1
-    confined_duration_mean = 10
-    confined_duration_variance = 0.5
-    D_confined = 0.05
+    confined_duration_mean = 30
+    confined_duration_variance = 1
+    D_confined = 0.01
 
     # Define deltas
     deltas = np.arange(args.min_delta, args.max_delta, step=args.delta_step)
@@ -517,5 +517,5 @@ if __name__ == '__main__':
     # msd_brownian_projections()
     # msd_brownian_varying_Ds()
     # msd_active_particle()
-    msd_active_particles()
+    # msd_active_particles()
     msd_confined_particle()
