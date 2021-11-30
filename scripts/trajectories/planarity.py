@@ -21,8 +21,7 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
         excludes = []
     fn = LOGS_PATH + '/' + START_TIMESTAMP + f'_{method}'
 
-    for k in ['trial', 'frames', 'src', 'aggregation', 'deltas', 'u', 'smoothing_window', 'directionality',
-              'projection']:
+    for k in ['trial', 'frames', 'src', 'deltas', 'delta_step', 'u', 'smoothing_window', 'directionality']:
         if k in excludes:
             continue
         if k == 'trial':
@@ -36,18 +35,16 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
             fn += frames_str_fn
         elif k == 'src':
             fn += f'_{args.midline3d_source}'
-        elif k == 'aggregation':
-            fn += f'_{args.aggregation}'
         elif k == 'deltas':
-            fn += f'_d={",".join([str(d) for d in args.deltas])}'
+            fn += f'_d={args.min_delta}-{args.max_delta}'
+        elif k == 'delta_step':
+            fn += f'_ds={args.delta_step}'
         elif k == 'u':
             fn += f'_u={args.trajectory_point}'
         elif k == 'smoothing_window' and args.smoothing_window is not None:
             fn += f'_sw={args.smoothing_window}'
         elif k == 'directionality' and args.directionality is not None:
             fn += f'_dir={args.directionality}'
-        elif k == 'projection':
-            fn += f'_p={args.projection}'
 
     return fn + '.' + img_extension
 
@@ -64,7 +61,7 @@ def planarity_vs_delta():
     # Calculate planarities across different time windows
     planarities = []
     for window_size in deltas:
-        args.window_size = int(window_size)
+        args.planarity_window = int(window_size)
         logger.info(f'Fetching PCA data for window size = {int(window_size)}.')
         pca_cache = get_pca_cache_from_args(args)
         planarities.append(1 - pca_cache.explained_variance_ratio[:, 2])

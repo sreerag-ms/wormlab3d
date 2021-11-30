@@ -6,6 +6,7 @@ from typing import Tuple, Dict, Any, List, Union
 
 import numpy as np
 from sklearn.decomposition import PCA
+
 from wormlab3d import logger, DATA_PATH, N_WORKERS
 from wormlab3d.toolkit.util import hash_data
 from wormlab3d.trajectories.cache import get_trajectory
@@ -52,7 +53,10 @@ def calculate_pca(X: np.ndarray, i: int, window_size: int) -> PCA:
         X = X.astype(np.float64)
 
     # logger.debug(f'Computing PCA in window [{start_idx}:{end_idx}]')
-    X_window = X[start_idx:end_idx].reshape((window_size_actual * X.shape[1], 3))
+    X_window = X[start_idx:end_idx]
+    if X.ndim == 3:
+        X_window = X_window.reshape((window_size_actual * X.shape[1], 3))
+    assert X.ndim == 2
     pca = PCA(svd_solver='full', copy=True, n_components=3)
     pca.fit(X_window)
 
@@ -99,6 +103,7 @@ def generate_pca_cache_data(
         smoothing_window: int = None,
         directionality: str = None,
         prune_slowest_ratio: float = None,
+        trajectory_point: str = None,
         window_size: int = 5,
         rebuild_cache: bool = False
 ) -> Tuple[PCACache, Dict[str, Any]]:
@@ -111,6 +116,7 @@ def generate_pca_cache_data(
         smoothing_window=smoothing_window,
         directionality=directionality,
         prune_slowest_ratio=prune_slowest_ratio,
+        trajectory_point=trajectory_point,
         rebuild_cache=rebuild_cache
     )
     pcas = calculate_pcas(X, window_size=window_size)
@@ -128,6 +134,7 @@ def generate_or_load_pca_cache(
         smoothing_window: int = None,
         directionality: str = None,
         window_size: int = 5,
+        trajectory_point: str = None,
         rebuild_cache: bool = False
 ) -> Tuple[PCACache, Dict[str, Any]]:
     """
@@ -145,6 +152,8 @@ def generate_or_load_pca_cache(
         'directionality': directionality,
         'window_size': window_size,
     }
+    if trajectory_point is not None:
+        args['trajectory_point'] = trajectory_point
     arg_hash = hash_data(args)
     filename_meta = f'{arg_hash}.meta'
     filename_pca = f'{arg_hash}.npz'
@@ -200,6 +209,7 @@ def get_pca_cache_from_args(args: Namespace) -> PCACache:
         smoothing_window=args.smoothing_window,
         directionality=args.directionality,
         window_size=ws,
+        trajectory_point=args.trajectory_point,
         rebuild_cache=args.rebuild_cache
     )
     return pcas
