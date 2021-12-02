@@ -11,6 +11,8 @@ setup(
     tests_require=['pytest'],
     install_requires=[
         'av >= 8.0, < 8.1',
+        'flask >= 2.0, < 2.1',
+        'gunicorn >= 20.1, < 21',
         'h5py >= 3.2, < 3.3',
         'matplotlib >= 3.4, < 3.5',
         'mongoengine >= 0.22, < 0.23',
@@ -23,7 +25,7 @@ setup(
         'torch >= 1.8, < 1.9',
         'scikit-image >= 0.18, < 0.19',
         'scikit-learn >= 0.24, < 0.25',
-        'simple-worm @ https://gitlab.com/tom-ranner/simple-worm.git@master',
+        'simple-worm[inv] @ git+https://gitlab.com/tom-ranner/simple-worm.git@master',
         'tensorboard >= 2.4, < 2.5',
         'torchvision >= 0.9, < 1.0'
     ],

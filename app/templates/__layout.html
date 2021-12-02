@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='bootstrap-5.1.0-dist/css/bootstrap.min.css') }}">
+  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='bootstrap-5.1.0-dist/css/bootstrap-grid.min.css') }}">
+  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='bootstrap-5.1.0-dist/css/bootstrap-reboot.min.css') }}">
+  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='bootstrap-5.1.0-dist/css/bootstrap-utilities.min.css') }}">
+  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='styles.css') }}?v=0">
+  <link rel="stylesheet" type="text/css"
+        href="{{ url_for('static', filename='open-iconic/font/css/open-iconic-bootstrap.css') }}">
+  <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.10.25/css/jquery.dataTables.min.css">
+  {% block css %}
+  {% endblock %}
+  <title>Wormlab3D - {{ title }}</title>
+</head>
+
+<body>
+
+{% block header %}
+{% include '_header.html' %}
+{% endblock %}
+
+<div class="container">
+  <main class="bd-content">
+    {% block container %}
+    {% block title %}<h1 class="bd-title mt-3">{{ title }}</h1>{% endblock %}
+    {% block messages %}{% include '_messages.html' %}{% endblock %}
+    {% block content %}{% endblock %}
+    {% endblock %}
+  </main>
+</div>
+
+<!-- Scripts -->
+<script src="{{ url_for('static', filename='bootstrap-5.1.0-dist/js/bootstrap.min.js') }}"></script>
+<script src="{{ url_for('static', filename='moment-with-locales.min.js') }}"></script>
+<script src="{{ url_for('static', filename='jquery-3.6.0.min.js') }}"></script>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

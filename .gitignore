@@ -20,3 +20,4 @@ __pycache__
 /data/pca_cache
 /data/trajectory_cache
 intermediate-data
+**/worm_data

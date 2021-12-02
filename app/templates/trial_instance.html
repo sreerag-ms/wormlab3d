@@ -1,0 +1,223 @@
+{% extends '__layout.html' %}
+
+
+{% block css %}
+  <link href="https://vjs.zencdn.net/7.11.4/video-js.css" rel="stylesheet" />
+{% endblock %}
+
+
+{% block title %}
+  <div class="p-5 mb-4 bg-light rounded-3">
+    <div class="container-fluid py-5">
+      <div class="d-flex bd-highlight mb-3">
+
+          <div class="me-auto p-2 bd-highlight">
+              <h1 class="display-5 fw-bold p-2 flex-grow-1">
+                {{ title }}
+                <a type="button" class="badge rounded-pill bg-primary fw-normal fs-4" href="{{ url_for('experiment_instance.experiment_instance', _id=trial.experiment.id) }}">
+                    Experiment #{{ trial.experiment.id }}
+                </a>
+                <div class="badge rounded-pill bg-secondary fw-normal fs-4" id="trial_date"></div>
+              </h1>
+          </div>
+
+          <a type="button" class="btn btn-secondary p-2 bd-highlight" href="{{ url_for('trial_instance.trial_instance', _id=(trial.id-1)) }}"><</a>
+          <a type="button" class="btn btn-secondary p-2 bd-highlight" href="{{ url_for('trial_instance.trial_instance', _id=(trial.id+1)) }}">></a>
+      </div>
+
+      <p class="col-md-8 fs-4 lead">{{ trial.comments.capitalize() if trial.comments else "No comment." }}</p>
+    </div>
+  </div>
+{% endblock %}
+
+
+{% block content %}
+  <table class="table table-striped table-hover">
+    <thead>
+      <tr>
+        <th scope="col">Attribute</th>
+        <th scope="col">Value</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for attr in attrs %}
+        <tr>
+          <th class="row-3">{{ attr.capitalize()|replace("_", " ") }}</th>
+          <td>{{ trial[attr] }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {# Video players #}
+  <nav class="d-flex justify-content-center">
+    <div class="nav nav-tabs" id="nav-tab" role="tablist">
+      <button class="nav-link active" id="nav-cam0-tab" data-bs-toggle="tab" data-bs-target="#nav-cam0" type="button" role="tab" aria-controls="nav-cam0" aria-selected="true">Cam 1</button>
+      <button class="nav-link" id="nav-cam1-tab" data-bs-toggle="tab" data-bs-target="#nav-cam1" type="button" role="tab" aria-controls="nav-cam1" aria-selected="false">Cam 2</button>
+      <button class="nav-link" id="nav-cam2-tab" data-bs-toggle="tab" data-bs-target="#nav-cam2" type="button" role="tab" aria-controls="nav-cam2" aria-selected="false">Cam 3</button>
+    </div>
+  </nav>
+  <div class="tab-content d-flex justify-content-center" id="nav-tabContent">
+    {% for i in range(3) %}
+      <div class="tab-pane fade {{ 'show active' if i == 0 }}" id="nav-cam{{ i }}" role="tabpanel" aria-labelledby="nav-cam{{ i }}-tab">
+          <video id="cam_video_{{ i }}" class="video-js vjs-default-skin" controls
+                 preload="auto" width="894" height="894"
+                 data-setup='{ "playbackRates": [0.25, 0.5, 1, 1.5, 2] }'></video>
+      </div>
+    {% endfor %}
+  </div>
+
+  {# Frame-based viewer #}
+  <div class="d-flex justify-content-center">
+    {% for i in range(3) %}
+      <img id="img-cam{{ i }}" class="img-fluid" src="{{ url_for('extract_img.screenshot', path= video_id|safe + '_' + i|safe + '.avi', trial_num=trial.id, frame_num=0, cam_num=0, fps=trial.fps) }}" alt="missing img">
+    {% endfor %}
+    <button id="btn-prev_frame" type="button" class="btn btn-secondary"><</button>
+    <button id="btn-next_frame" type="button" class="btn btn-secondary">></button>
+  </div>
+{% endblock %}
+
+
+{% block scripts %}
+  <script src="https://vjs.zencdn.net/7.11.4/video.min.js"></script>
+  <script>
+      // Format date
+      $("#trial_date").html("<i class=\"oi oi-clock\"></i>" + moment("{{ trial.date }}").format("DD-MMM-YYYY"));
+
+
+      // Explicitly tell video.js to not collect analytics, although v7 already does not send any data.
+      window.HELP_IMPROVE_VIDEOJS = false;
+
+
+      {#
+      Transcoding code
+      JS code from https://stackoverflow.com/questions/3639604/html5-audio-video-and-live-transcoding-with-ffmpeg
+      Originally by user3612643 (derolf), upgraded for video.js version 7.7.6 by Gustav P Svensson
+      #}
+      const videos = [];
+      for (let i = 0; i < 3; i++) {
+          (function(){
+              let video = videos[i];
+              let filename = "{{ video_id }}_" + i + ".avi";
+
+              video = videojs("cam_video_" + i);
+              video.src({
+                  src: '/media/' + filename,
+                  type: 'video/mp4'
+              });
+
+              // hack duration
+              video.duration = function () {
+                  return video.theDuration;
+              };
+              video.start = 0;
+
+              // The original code for "currentTime"
+              video.oldCurrentTime = function currentTime(seconds) {
+                  if (typeof seconds !== 'undefined') {
+                      if (seconds < 0) {
+                          seconds = 0;
+                      }
+
+                      this.techCall_('setCurrentTime', seconds);
+                      return;
+                  }
+                  this.cache_.currentTime = this.techGet_('currentTime') || 0;
+                  return this.cache_.currentTime;
+              };
+
+              // Our modified currentTime
+              video.currentTime = function (time) {
+                  if (time == undefined) {
+                      return video.oldCurrentTime() + video.start;
+                  }
+                  video.start = time;
+                  video.oldCurrentTime(0);
+                  video.src({
+                      src: "/media/" + filename + "?start=" + time,
+                      type: 'video/mp4'
+                  });
+                  video.play();
+                  return this;
+              };
+
+              // Get the duration of the movie
+              $.getJSON("/media/duration/" + filename, function (data) {
+                  video.theDuration = data.duration;
+              });
+          })();
+      }
+
+      {# TODO: Frame number based duration #}
+      {#function customTimeFormat(seconds, guide) {#}
+      {#    seconds = seconds < 0 ? 0 : seconds;#}
+      {#    let s = Math.floor(seconds % 60);#}
+      {#    let m = Math.floor(seconds / 60 % 60);#}
+      {#    let h = Math.floor(seconds / 3600);#}
+      {#    let gm = Math.floor(guide / 60 % 60);#}
+      {#    let gh = Math.floor(guide / 3600); // handle invalid times#}
+      {##}
+      {#    if (isNaN(seconds) || seconds === Infinity) {#}
+      {#        // '-' is false for all relational operators (e.g. <, >=) so this setting#}
+      {#        // will add the minimum number of fields specified by the guide#}
+      {#        h = m = s = '-';#}
+      {##}
+      {#        return h + ':' + s;#}
+      {#    } // Check if we need to show hours#}
+      {##}
+      {##}
+      {#    h = h > 0 || gh > 0 ? h + ':' : ''; // If hours are showing, we may need to add a leading zero.#}
+      {#    // Always show at least one digit of minutes.#}
+      {##}
+      {#    m = ((h || gm >= 10) && m < 10 ? '0' + m : m) + ':'; // Check if leading zero is need for seconds#}
+      {##}
+      {#    h = parseInt(h) < 10 ? '0' + h : h;#}
+      {#    s = parseInt(s) < 10 ? '0' + s : s;#}
+      {##}
+      {#    return h + m + s;#}
+      {# } #}
+      {##}
+      {#videojs.setFormatTime(customTimeFormat);#}
+
+
+      // Frame-based viewer buttons
+      let frame_num = 0;
+      $("#btn-prev_frame").on('click', () => {
+          frame_num = Math.max(0, frame_num - 1);
+
+          {% for i in range(3) %}
+              $("#img-cam" + {{ i }}).attr("src", "{{ url_for('extract_img.screenshot', path=filenames[i], trial_num=trial.id, cam_num=i, fps=trial.fps)|safe }}&frame_num=" + frame_num);
+          {% endfor %}
+      });
+      $("#btn-next_frame").on('click', () => {
+          // Disable next frame button until images are screenshotted
+          $("#btn-next_frame").attr("disabled", true);
+
+          frame_num = Math.min({{ trial.n_frames_min }}, frame_num + 1);
+
+          {% for i in range(3) %}
+              $("#img-cam" + {{ i }}).attr("src", "{{ url_for('extract_img.screenshot', path=filenames[i], trial_num=trial.id, cam_num=i, fps=trial.fps)|safe }}&frame_num=" + frame_num);
+          {% endfor %}
+
+          // Asynchronously re-enable the button when all the images have been screenshotted in the app's dir
+          $.ajax({
+              type: "GET",
+              data: {
+                  frame_num: frame_num
+              },
+              url: "{{ url_for("extract_img.completion", video_id=video_id) }}",
+              success: function(data) {
+                  console.log("success. data:");
+                  console.log(data);
+                  // Enable button
+                  $("#btn-next_frame").attr("disabled", false);
+              },
+              error: function(data) {
+                  console.log("failed. images not created after timeout (5s)");
+                  console.log(data);
+              }
+          });
+      });
+  </script>
+{% endblock %}
+
