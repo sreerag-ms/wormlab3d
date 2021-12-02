@@ -1,0 +1,30 @@
+{% extends '__layout.html' %}
+
+
+{% block content %}
+  <div class="row no-gutters">
+    <div class="col-sm-12" class="overflow-auto">
+      <table class="table table-striped table-sm display w-100" id="data-table">
+        <thead class="table-header">
+          <tr>
+            <th scope="col">ID</th>
+            <th scope="col">Name</th>
+            <th scope="col">Short Name</th>
+            <th scope="col">Symbol</th>
+            <th scope="col">Description</th>
+          </tr>
+        </thead>
+      </table>
+    </div>
+  </div>
+{% endblock %}
+
+
+{% block scripts %}
+  {% with %}
+    {% set table_name="data-table" %}
+    {% set table_order=[ 0, "asc" ] %}
+    {% include "table/table_js.html" %}
+  {% endwith %}
+{% endblock %}
+
