@@ -1,0 +1,470 @@
+import os
+from argparse import Namespace
+from typing import List
+
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib import animation
+from matplotlib.axes import Axes
+from mpl_toolkits.mplot3d.art3d import Line3DCollection, Poly3DCollection
+from scipy.signal import find_peaks
+from sklearn.decomposition import PCA
+
+from simple_worm.frame import FrameSequenceNumpy
+from simple_worm.plot3d import FrameArtist, Arrow3D
+from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
+from wormlab3d.toolkit.plot_utils import tex_mode, equal_aspect_ratio
+from wormlab3d.trajectories.args import get_args
+from wormlab3d.trajectories.cache import get_trajectory_from_args
+from wormlab3d.trajectories.util import calculate_speeds, calculate_angle
+
+animate = True
+show_plots = False
+save_plots = True
+img_extension = 'png'
+fps = 25
+playback_speed = 10
+n_revolutions = 0.5
+
+arrow_colours = {
+    'e0': 'red',
+    'e1': 'blue',
+    'e2': 'green',
+}
+
+tex_mode()
+
+
+def get_trajectory(args: Namespace):
+    X_slice = get_trajectory_from_args(args)
+    args.trajectory_point = None
+    X_full = get_trajectory_from_args(args)
+    return X_full, X_slice
+
+
+def add_pca_arrows(X, pca):
+    arrows = []
+    # Add PCA component vectors
+    centre = X.mean(axis=0)
+    for i in range(2, -1, -1):
+        vec = pca.components_[i] * pca.singular_values_[i] / 5
+        if vec.sum() == 0:
+            continue
+        origin = centre - vec / 2
+        arrow = Arrow3D(
+            origin=origin,
+            vec=vec,
+            color=arrow_colours[f'e{i}'],
+            mutation_scale=25,
+            arrowstyle='->',
+            linewidth=3,
+            alpha=0.9
+        )
+        arrows.append(arrow)
+    return arrows
+
+
+def get_plane(X, pca, colour):
+    # Add PCA plane
+    centre = X.mean(axis=0)
+    polygons = []
+
+    v0 = pca.components_[0] * pca.explained_variance_ratio_[0]
+    v1 = pca.components_[1] * pca.explained_variance_ratio_[1]
+    v2 = pca.components_[2] * pca.explained_variance_ratio_[2]
+
+    for i in range(3):
+        va = [v0, v1, v2][i]
+        vb = [v1, v2, v0][i]
+        vc = [v2, v0, v1][i]
+
+        for j in range(2):
+            if j == 1:
+                vc *= -1
+            verts = np.zeros((4, 3))
+            for k in range(3):
+                verts[:, k] = [
+                    centre[k] - va[k] - vb[k] - vc[k],
+                    centre[k] + va[k] - vb[k] - vc[k],
+                    centre[k] + va[k] + vb[k] - vc[k],
+                    centre[k] - va[k] + vb[k] - vc[k]
+                ]
+            polygons.append(verts)
+
+    plane = Poly3DCollection(polygons, alpha=0.2, facecolors=colour, edgecolors='dark' + colour)
+    return plane
+
+
+def plot_manoeuvre_3d(
+        title: str,
+        X_slice: np.ndarray,
+        X_full: np.ndarray = None,
+        folder: str = None,
+        filename: str = None,
+        colours: np.ndarray = None,
+        cmap: str = 'jet',
+        show_colourbar: bool = False,
+        ax: Axes = None,
+        worm_idx: int = 0,
+        arrows: List[Arrow3D] = None,
+        planes: List[Arrow3D] = None
+):
+    x, y, z = X_slice.T
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.add_subplot(projection='3d')
+
+    # Scatter the vertices
+    s = ax.scatter(x, y, z, c=colours, cmap=cmap, s=5, alpha=0.4, zorder=-1)
+    if show_colourbar:
+        fig.colorbar(s)
+
+    # Draw lines connecting points
+    points = X_slice[:, None, :]
+    segments = np.concatenate([points[:-1], points[1:]], axis=1)
+    lc = Line3DCollection(segments, array=colours, cmap=cmap, zorder=-2)
+    ax.add_collection(lc)
+
+    # Add worm
+    if worm_idx != -1:
+        if worm_idx >= len(X_full):
+            worm_idx = len(X_full) - 1
+        FS = FrameSequenceNumpy(x=X_full.transpose(0, 2, 1))
+        fa = FrameArtist(F=FS[worm_idx])
+        fa.add_midline(ax)
+
+    # Add arrows
+    if arrows is not None:
+        for arrow in arrows:
+            ax.add_artist(arrow)
+
+    # Add planes
+    if planes is not None:
+        for plane in planes:
+            ax.add_collection3d(plane)
+
+    equal_aspect_ratio(ax)
+
+    ax.set_title(title)
+    fig.tight_layout()
+
+    if animate:
+        # Aspects
+        azims = np.linspace(start=0, stop=360 * n_revolutions, num=len(X_slice))
+        ax.view_init(azim=azims[0])  # elev
+
+        def update(frame_num: int):
+            # Rotate the view.
+            ax.view_init(azim=azims[frame_num])
+
+            # Update the worm
+            if worm_idx != -1:
+                fa.update(FS[frame_num])
+            return ()
+
+        idxs_mask = np.array([i % playback_speed == 0 for i in np.arange(np.round(len(X_slice)))])
+        frame_nums = np.arange(len(X_slice))[idxs_mask].tolist()
+        ani = animation.FuncAnimation(
+            fig,
+            update,
+            frames=frame_nums,
+            blit=True,
+            interval=1 / fps
+        )
+
+    if save_plots:
+        assert filename is not None
+        path = LOGS_PATH + '/' + START_TIMESTAMP + '_'
+        if folder is not None:
+            path += folder
+            os.makedirs(path, exist_ok=True)
+            path += '/'
+        path += filename
+        if animate:
+            metadata = dict(
+                title=title,
+                artist='WormLab Leeds'
+            )
+            save_path = path + '.mp4'
+            logger.info(f'Saving animation to {save_path}.')
+            ani.save(save_path, writer='ffmpeg', fps=fps, metadata=metadata)
+        else:
+            save_path = path + f'.{img_extension}'
+            logger.info(f'Saving plot to {save_path}.')
+            plt.savefig(save_path)
+
+    if show_plots:
+        plt.show()
+
+    plt.close(fig)
+
+
+def get_manoeuvres(
+        X_full: np.ndarray,
+        X_slice: np.ndarray,
+        min_reversal_frames: int = 25,
+        window_size: int = 500
+) -> dict:
+    """
+    Get the manoeuvre sections, the parts prior and subsequent to a reversal.
+    """
+    signed_speeds = calculate_speeds(X_full, signed=True)
+    reversal_centre_idxs, reversal_props = find_peaks(signed_speeds < 0, width=min_reversal_frames)
+
+    manoeuvres = []
+
+    # Loop over reversal events
+    for i, reversal_centre_idx in enumerate(reversal_centre_idxs):
+        # Identify the plane of motion prior to the reversal
+        prev_end_idx = reversal_props['left_bases'][i]
+        prev_start_idx = max(0, prev_end_idx - window_size)
+        X_prev = X_slice[prev_start_idx:prev_end_idx]
+        pca_prev = PCA(svd_solver='full', copy=True, n_components=3)
+        pca_prev.fit(X_prev)
+
+        # Identify the plane of motion subsequent to the reversal
+        next_start_idx = reversal_props['right_bases'][i] - 1
+        next_end_idx = next_start_idx + window_size
+        X_next = X_slice[next_start_idx:next_end_idx]
+        pca_next = PCA(svd_solver='full', copy=True, n_components=3)
+        pca_next.fit(X_next)
+
+        manoeuvres.append({
+            'centre_idx': reversal_centre_idx,
+            'start_idx': prev_start_idx,
+            'end_idx': next_end_idx,
+            'X_prev': X_prev,
+            'X_next': X_next,
+            'pca_prev': pca_prev,
+            'pca_next': pca_next,
+            'reversal_duration': reversal_props['widths'][i]
+        })
+
+    return manoeuvres
+
+
+def plot_all_manoeuvres():
+    """
+    Plot all manoeuvres detected in the trajectory.
+    """
+    args = get_args()
+    X_full, X_slice = get_trajectory(args)
+    signed_speeds = calculate_speeds(X_full, signed=True)
+    # plt.plot(signed_speeds)
+    # plt.show()
+    # exit()
+
+    manoeuvres = get_manoeuvres(
+        X_full,
+        X_slice,
+        min_reversal_frames=args.min_reversal_frames,
+        window_size=args.manoeuvre_window
+    )
+
+    folder = f'manoeuvres_trial={args.trial}_{args.midline3d_source}' \
+             f'_rev={args.min_reversal_frames}' \
+             f'_ws={args.manoeuvre_window}' \
+             f'_sw={args.smoothing_window}'
+
+    # Loop over manoeuvres
+    for i, m in enumerate(manoeuvres):
+        plane_prev = get_plane(m['X_prev'], m['pca_prev'], 'orange')
+        plane_next = get_plane(m['X_next'], m['pca_next'], 'green')
+
+        # Xm = X_slice[m['start_idx']:m['end_idx']]
+        # pca_all = PCA(svd_solver='full', copy=True, n_components=3)
+        # pca_all.fit(Xm)
+        # plane_all = get_plane(Xm, pca_all, 'blue')
+
+        plot_manoeuvre_3d(
+            title=f'Trial {args.trial}. '
+                  f'Frames {m["start_idx"]}-{m["end_idx"]}. '
+                  f'Reversal duration={m["reversal_duration"] / 25:.1f}s. '
+                  f'Window size={args.manoeuvre_window} '
+                  f'Smoothing window={args.smoothing_window}',
+            X_slice=X_slice[m['start_idx']:m['end_idx']],
+            X_full=X_full[m['start_idx']:m['end_idx']],
+            folder=folder,
+            filename=f'frames={m["start_idx"]}-{m["end_idx"]}',
+            colours=signed_speeds[m['start_idx']:m['end_idx']],
+            cmap='PRGn',
+            show_colourbar=False,
+            worm_idx=int((m['end_idx'] - m['start_idx']) / 2) + 50,
+            # planes=[plane_prev, plane_next, plane_all],
+            planes=[plane_prev, plane_next],
+        )
+        # exit()
+
+
+def plot_angles_and_durations():
+    """
+    Plot the angles between the planes coming into and going out of a manoeuvre.
+    """
+    args = get_args()
+    X_full, X_slice = get_trajectory(args)
+    manoeuvres = get_manoeuvres(
+        X_full,
+        X_slice,
+        min_reversal_frames=args.min_reversal_frames,
+        window_size=args.manoeuvre_window
+    )
+
+    # Loop over manoeuvres
+    angles = []
+    durations = []
+    for i, m in enumerate(manoeuvres):
+        n1 = m['pca_prev'].components_[2]
+        n2 = m['pca_next'].components_[2]
+        angles.append(calculate_angle(n1, n2))
+        durations.append(m['reversal_duration'] / 25)
+
+    fig, axes = plt.subplots(3, figsize=(6, 6))
+    fig.suptitle(f'Trial {args.trial}. '
+                 f'Num reversal frames={args.min_reversal_frames}. '
+                 f'Window size={args.manoeuvre_window}')
+
+    # Plot histogram of angles
+    ax = axes[0]
+    ax.hist(angles, bins=50, density=True, facecolor='green', alpha=0.75)
+    ax.set_ylabel('P(angle)')
+    ax.set_xlabel('Angle')
+
+    # Plot histogram of the reversal durations
+    ax = axes[1]
+    ax.hist(durations, bins=50, density=True, facecolor='green', alpha=0.75)
+    ax.set_ylabel('P(duration)')
+    ax.set_xlabel('Duration (s)')
+
+    # Scatter
+    ax = axes[2]
+    ax.scatter(x=durations, y=angles)
+    ax.set_ylabel('Angles')
+    ax.set_xlabel('Durations (s)')
+
+    fig.tight_layout()
+
+    if save_plots:
+        path = LOGS_PATH + '/' + START_TIMESTAMP \
+               + f'_angles_v_durations' \
+                 f'_trial={args.trial}_{args.midline3d_source}' \
+                 f'_rev={args.min_reversal_frames}' \
+                 f'_ws={args.manoeuvre_window}'
+        save_path = path + f'.{img_extension}'
+        logger.info(f'Saving plot to {save_path}.')
+        plt.savefig(save_path)
+
+    if show_plots:
+        plt.show()
+
+
+def plot_angles_and_durations_varying_parameters():
+    """
+    Plot the angles between the planes coming into and going out of a manoeuvre.
+    """
+    args = get_args()
+    X_full, X_slice = get_trajectory(args)
+    reversal_frames = [25, 50, 100]
+    window_sizes = [10, 25, 50, 100, 200, 500, 1000, 2000]
+
+    fig, axes = plt.subplots(len(reversal_frames), len(window_sizes), figsize=(10, 10), sharex=True, sharey=True)
+    fig.suptitle(f'Trial {args.trial}.')
+
+    for row_idx, rf in enumerate(reversal_frames):
+        for col_idx, ws in enumerate(window_sizes):
+            manoeuvres = get_manoeuvres(
+                X_full,
+                X_slice,
+                min_reversal_frames=rf,
+                window_size=ws
+            )
+
+            # Loop over manoeuvres
+            angles = []
+            durations = []
+            for i, m in enumerate(manoeuvres):
+                n1 = m['pca_prev'].components_[0]
+                n2 = m['pca_next'].components_[0]
+                angles.append(calculate_angle(n1, n2))
+                durations.append(m['reversal_duration'] / 25)
+
+            ax = axes[row_idx, col_idx]
+            if row_idx == 0:
+                ax.set_title(f'Window size={ws}')
+            if col_idx == 0:
+                ax.set_ylabel(f'Reversal frames={rf}')
+
+            ax.scatter(x=durations, y=angles, s=15, alpha=0.7)
+
+    fig.tight_layout()
+
+    if save_plots:
+        path = LOGS_PATH + '/' + START_TIMESTAMP \
+               + f'_angles_v_durations' \
+                 f'_trial={args.trial}_{args.midline3d_source}' \
+                 f'_rev={",".join([str(rf) for rf in reversal_frames])}' \
+                 f'_ws={",".join([str(ws) for ws in window_sizes])}'
+        save_path = path + f'.{img_extension}'
+        logger.info(f'Saving plot to {save_path}.')
+        plt.savefig(save_path)
+
+    if show_plots:
+        plt.show()
+
+
+def plot_manoeuvre_rate():
+    """
+    Plot the rate of manoeuvres.
+    """
+    args = get_args()
+    X_full, X_slice = get_trajectory(args)
+    manoeuvres = get_manoeuvres(
+        X_full,
+        X_slice,
+        min_reversal_frames=args.min_reversal_frames,
+        window_size=args.manoeuvre_window
+    )
+
+    # Loop over manoeuvres, recording the idxs they occurred
+    idxs = [m['centre_idx'] for m in manoeuvres]
+    forward_durations = np.diff(idxs) / 25
+    reversal_durations = np.array([m['reversal_duration'] for m in manoeuvres]) / 25
+
+    fig, axes = plt.subplots(2, figsize=(6, 6), sharex=True, sharey=True)
+    fig.suptitle(f'Trial {args.trial}. '
+                 f'Min reversal frames={args.min_reversal_frames}. ')
+
+    # Plot histogram of the forward durations
+    ax = axes[0]
+    ax.hist(forward_durations, bins=50, density=False, facecolor='green', alpha=0.75)
+    ax.set_ylabel('Count')
+    ax.set_xlabel('Forward duration (s)')
+
+    # Plot histogram of the reversal durations
+    ax = axes[1]
+    ax.hist(reversal_durations, bins=50, density=False, facecolor='green', alpha=0.75)
+    ax.set_ylabel('Count')
+    ax.set_xlabel('Reversal duration (s)')
+
+    fig.tight_layout()
+
+    if save_plots:
+        path = LOGS_PATH + '/' + START_TIMESTAMP \
+               + f'_locomotive_durations' \
+                 f'_trial={args.trial}_{args.midline3d_source}' \
+                 f'_rev={args.min_reversal_frames}'
+        save_path = path + f'.{img_extension}'
+        logger.info(f'Saving plot to {save_path}.')
+        plt.savefig(save_path)
+
+    if show_plots:
+        plt.show()
+
+
+if __name__ == '__main__':
+    if save_plots:
+        os.makedirs(LOGS_PATH, exist_ok=True)
+    # from simple_worm.plot3d import interactive
+    # interactive()
+    # plot_all_manoeuvres()
+    # plot_angles_and_durations()
+    # plot_angles_and_durations_varying_parameters()
+    plot_manoeuvre_rate()

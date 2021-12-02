@@ -6,11 +6,12 @@ from typing import List, Dict, Union
 import matplotlib.animation as manimation
 import matplotlib.pyplot as plt
 import numpy as np
+from wormlab3d.trajectory.util import generate_or_load_trajectory_cache
 
 from simple_worm.plot3d import interactive
 from wormlab3d import logger, LOGS_PATH, START_TIMESTAMP
 from wormlab3d.toolkit.util import build_target_arguments_parser, str2bool
-from wormlab3d.trajectory.util import generate_or_load_trajectory_cache
+from wormlab3d.trajectories.util import calculate_angle
 
 plt.rcParams.update({
     'text.usetex': True,
@@ -51,30 +52,6 @@ def get_trajectory(args: Namespace) -> np.ndarray:
     return X
 
 
-def calculate_angle(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
-    """
-    Calculate the signed angle between vectors a->b and b->c.
-    """
-    v1 = b - a
-    v2 = c - b
-
-    if len(v1) == 2:
-        angle = np.arctan2(np.cross(v1, v2), np.dot(v1, v2))
-    elif len(v1) == 3:
-        abs = np.linalg.norm(v1) * np.linalg.norm(v2)
-        try:
-            cos = np.dot(v1, v2) / abs
-            angle = np.arccos(cos)
-            if np.isnan(angle):
-                angle = 0
-        except Exception:
-            angle = 0
-    else:
-        raise ValueError('Vectors of the wrong dimension!')
-
-    return angle
-
-
 def evaluate(trajectory: np.ndarray, deltas: Union[int, List[int]]) -> Union[np.ndarray, Dict[int, np.ndarray]]:
     """
     Evaluate the trajectory - calculate angles for all deltas.
@@ -90,11 +67,9 @@ def evaluate(trajectory: np.ndarray, deltas: Union[int, List[int]]) -> Union[np.
         logger.info(f'Calculating angles for delta = {delta}.')
         s = np.zeros(L - 2 * delta)
         for i in range(L - 2 * delta):
-            angle = calculate_angle(
-                trajectory[i],
-                trajectory[i + delta],
-                trajectory[i + 2 * delta]
-            )
+            v1 = trajectory[i + delta] - trajectory[i]
+            v2 = trajectory[i + 2 * delta] - trajectory[i + delta]
+            angle = calculate_angle(v1, v2)
             s[i] = angle
         res[delta] = s
 

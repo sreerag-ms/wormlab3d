@@ -1,6 +1,7 @@
 from typing import List, Tuple
 
 import numpy as np
+
 from wormlab3d import DATA_PATH
 from wormlab3d.data.model import Frame, Tag
 
@@ -175,3 +176,24 @@ def fetch_annotations(trial_id: str, frame_nums: List[int] = None) -> Tuple[List
         frame_idxs.append(tag_frame_idxs)
 
     return tags, frame_idxs
+
+
+def calculate_angle(v1: np.ndarray, v2: np.ndarray) -> float:
+    """
+    Calculate the signed angle between two vectors.
+    """
+    if len(v1) == 2:
+        angle = np.arctan2(np.cross(v1, v2), np.dot(v1, v2))
+    elif len(v1) == 3:
+        abs_val = np.linalg.norm(v1) * np.linalg.norm(v2)
+        try:
+            cos = np.dot(v1, v2) / abs_val
+            angle = np.arccos(cos)
+            if np.isnan(angle):
+                angle = 0
+        except Exception:
+            angle = 0
+    else:
+        raise ValueError('Vectors of the wrong dimension!')
+
+    return angle
