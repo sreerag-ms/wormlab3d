@@ -88,7 +88,7 @@ class Frame(Document):
         if filters is None:
             filters = {}
         filters = {'frame': self, **filters}
-        return Midline3D.objects(**filters)
+        return Midline3D.objects(**filters).order_by('+error')
 
     def centres_2d_available(self) -> bool:
         """

@@ -40,7 +40,7 @@ class MSRDN(RDN):
         # Shallow Feature Extraction
         self.SFE = _SFENet(
             C_in,
-            self.K*2,
+            self.K * 2,
             kernel_size=self.kernel_size,
             activation=self.activation,
             bn=self.batch_norm

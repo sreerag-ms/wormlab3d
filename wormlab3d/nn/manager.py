@@ -404,6 +404,8 @@ class Manager:
         return checkpoint
 
     def _fix_state(self, state):
+        if isinstance(self.net, WrappedDataParallel):
+            return state
         new_state = OrderedDict()
         for k, v in state.items():
             new_state[k.replace('module.', '')] = v

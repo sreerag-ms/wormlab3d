@@ -5,11 +5,13 @@ from wormlab3d.nn.args.base_args import BaseArgs
 LOSS_MSE = 'mse'
 LOSS_KL = 'kl'
 LOSS_BCE = 'bce'
+LOSS_LOGDIFF = 'logdiff'
 
 LOSSES = [
     LOSS_MSE,
     LOSS_KL,
-    LOSS_BCE
+    LOSS_BCE,
+    LOSS_LOGDIFF
 ]
 
 OPTIMISER_ADADELTA = 'Adadelta'

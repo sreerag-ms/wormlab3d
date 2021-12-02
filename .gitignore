@@ -12,8 +12,11 @@ __pycache__
 /logs
 
 # Data directories
-/data/db
 /data/backgrounds
+/data/db
 /data/ds_cache
+/data/K_estimates_cache
+/data/MF_outputs
+/data/trajectory_cache
 intermediate-data
 **/worm_data

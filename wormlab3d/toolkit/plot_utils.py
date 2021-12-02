@@ -31,6 +31,15 @@ def clear_axes(ax):
     ax.get_zaxis().set_ticks([])
 
 
+def tex_mode():
+    """Use latex font rendering."""
+    plt.rcParams.update({
+        'text.usetex': True,
+        'font.family': 'sans-serif',
+        'font.sans-serif': ['Helvetica']})
+    plt.rc('text.latex', preamble=r'\usepackage{amsmath}')
+
+
 class CameraImageArtist:
     """
     Draw camera images and midline coordinates.
@@ -149,7 +158,7 @@ def generate_interactive_3d_clip_with_projections(
     fps = trial.fps
 
     # Load the camera image sequences
-    IS = np.zeros((FS.n_timesteps, 3, *PREPARED_IMAGE_SIZE))
+    IS = np.zeros((FS.n_frames, 3, *PREPARED_IMAGE_SIZE))
     for i, frame in enumerate(FS_db.frames):
         if not frame.is_ready():
             logger.warning(f'Frame #{frame.frame_num} is not ready! Preparing now...')
@@ -223,7 +232,7 @@ def generate_interactive_3d_clip_with_projections(
     ca.add_midline_projections(axc1, axc2, axc3)
 
     # Animation controls
-    time_slider = Slider(ax_slider, 'Frame', 0, FS.n_timesteps - 1, valinit=0, valstep=1)
+    time_slider = Slider(ax_slider, 'Frame', 0, FS.n_frames - 1, valinit=0, valstep=1)
     is_manual = False  # True if user has taken control of the animation
 
     def update_frame(frame_num: int):
@@ -243,7 +252,7 @@ def generate_interactive_3d_clip_with_projections(
         nonlocal is_manual
         if is_manual:
             return ()
-        val = frame_num % FS.n_timesteps
+        val = frame_num % FS.n_frames
         time_slider.set_val(val)
         is_manual = False
         return ()
