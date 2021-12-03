@@ -8,25 +8,25 @@
     <div class="collapse navbar-collapse" id="navbarSupportedContent">
       <ul class="navbar-nav mr-auto">
         <li class="nav-item">
-          <a class="nav-link{{ ' active' if active=='tag' else '' }}" href="{{ url_for('tags.tags') }}">Tags</a>
+          <a class="nav-link{{ ' active' if active=='tags' else '' }}" href="{{ url_for('tags.tags') }}">Tags</a>
         </li>
         <li class="nav-item">
-          <a class="nav-link{{ ' active' if active=='experiment' else '' }}" href="{{ url_for('experiments.experiments') }}">Experiments</a>
+          <a class="nav-link{{ ' active' if active=='experiments' else '' }}" href="{{ url_for('experiments.experiments') }}">Experiments</a>
         </li>
         <li class="nav-item">
-          <a class="nav-link{{ ' active' if active=='trial' else '' }}" href="{{ url_for('trials.trials') }}">Trials</a>
+          <a class="nav-link{{ ' active' if active=='trials' else '' }}" href="{{ url_for('trials.trials') }}">Trials</a>
         </li>
         <li class="nav-item">
-          <a class="nav-link{{ ' active' if active=='midline2d' else '' }}" href="{{ url_for('midlines2d.midlines2d') }}">Midlines 2D</a>
+          <a class="nav-link{{ ' active' if active=='midlines2d' else '' }}" href="{{ url_for('midlines2d.midlines2d') }}">Midlines 2D</a>
         </li>
         <li class="nav-item">
-          <a class="nav-link{{ ' active' if active=='midline3d' else '' }}" href="{{ url_for('midlines3d.midlines3d') }}">Midlines 3D</a>
+          <a class="nav-link{{ ' active' if active=='midlines3d' else '' }}" href="{{ url_for('midlines3d.midlines3d') }}">Midlines 3D</a>
         </li>
         <li class="nav-item">
-          <a class="nav-link{{ ' active' if active=='dataset' else '' }}" href="{{ url_for('datasets.datasets') }}">Datasets</a>
+          <a class="nav-link{{ ' active' if active=='datasets' else '' }}" href="{{ url_for('datasets.datasets') }}">Datasets</a>
         </li>
         <li class="nav-item">
-          <a class="nav-link{{ ' active' if active=='reconstruction' else '' }}" href="{{ url_for('reconstructions.reconstructions') }}">Reconstructions</a>
+          <a class="nav-link{{ ' active' if active=='reconstructions' else '' }}" href="{{ url_for('reconstructions.reconstructions') }}">Reconstructions</a>
         </li>
       </ul>
     </div>

@@ -2,10 +2,9 @@ import os
 import subprocess
 import time
 
-from flask import Blueprint, Response, jsonify, request, abort, send_file
+from flask import Blueprint, Response, request, abort, send_file
 
 import app.util.config as config
-
 from wormlab3d.data.model import Frame
 
 # Form blueprint
@@ -31,14 +30,16 @@ class ScreenshotArgs:
 
         # Extra input params for checking whether the frame images exist
         self.timeout_sec = request.args.get("timeout_ms", default=5000, type=int) / 1000
-        self.refresh_sec = request.args.get("refresh_ms", default=50, type=int) / 1000   # Periodically refresh the check every [refresh_sec]
+        self.refresh_sec = request.args.get("refresh_ms", default=50,
+                                            type=int) / 1000  # Periodically refresh the check every [refresh_sec]
 
         # Convert frame number to seconds - this is dependent on the FPS of the trial video
-        self.start = self.frame_num * 1/self.fps
+        self.start = self.frame_num * 1 / self.fps
 
         # Output params
         self.filename = f"{path.split('.')[0]}-{self.frame_num}.jpg"
-        self.output = os.path.abspath(os.path.join(config.media_folder, self.filename))  # TODO: require a path to a local cache folder instead of media_folder (because videos are stored on git annex, probably can't write to that)
+        self.output = os.path.abspath(os.path.join(config.media_folder,
+                                                   self.filename))  # TODO: require a path to a local cache folder instead of media_folder (because videos are stored on git annex, probably can't write to that)
 
 
 @bp_extract_img.route('/media/extract_img/<path:path>')
@@ -71,8 +72,9 @@ def screenshot(path):
         raise Exception(f"Trial {args.trial_num} has no data for Frame {args.frame_num}")
 
     # Crop video at 2d coordinates (not reprojections). The output is a 200x200 square jpg image
-    coords = frame.centres_2d[args.cam_num][0]   # TODO: some data have more than one bubble. centre_3d.source_point_idxs?
-    crop_option = f"crop=200:200:{coords[0]-100}:{coords[1]-100}"
+    coords = frame.centres_2d[args.cam_num][
+        0]  # TODO: some data have more than one bubble. centre_3d.source_point_idxs?
+    crop_option = f"crop=200:200:{coords[0] - 100}:{coords[1] - 100}"
 
     # Command to extract the image w/ ffmpeg
     ffmpeg_args = config.ffmpeg_screenshot["*"]

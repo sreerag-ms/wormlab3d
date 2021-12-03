@@ -2,9 +2,11 @@
 <script src="https://cdn.datatables.net/1.10.25/js/dataTables.bootstrap4.min.js"></script>
 
 <script>
-    $(document).ready(function() {
-        $( "#{{ table_name }}" ).DataTable( {
-            order: [ {{ table_order|safe }} ],     {# table_order is not user supplied, so should be ok #}
+    $(document).ready(function () {
+        const DataTable = $().DataTable;
+
+        const table = $("#{{ table_name }}").DataTable({
+            order: [{{ table_order|safe }}], {# table_order is not user supplied, so should be ok #}
             pageLength: 25,
             // lengthMenu: [ 10, 25, 50, 100 ],
             // dom : '<"row no-gutters"<"col-12 col-md-6"l><"col-12 col-md-6"f>>t<"col-12"p>',
@@ -13,7 +15,7 @@
             serverSide: true,   // Enable server side processing to achieve low loading time pagination/queries
             ajax: {
                 url: "{{ ajax_url }}",
-                dataSrc: "data",   {# name of queried data in the ajax json response #}
+                dataSrc: "data", {# name of queried data in the ajax json response #}
                 {# mboo2005@v1.10.1116:50, Fri 26th Feb 2016
                 Sometimes we don't want to change server side code especially when using some API.
                 To alter the parameters send by DataTables use the ajax.data option.
@@ -30,38 +32,45 @@
                 }#}
             },
             columnDefs: [
-                { targets: "_all", defaultContent: "" }   {# Show nothing on cells that don't have a value #}
+                {targets: "_all", defaultContent: ""}   {# Show nothing on cells that don't have a value #}
             ],
             columns: [
-                {% for header in source_headers %}
+                {% for field in doc_view.fields %}
                     {
-                        data: "{{ header }}",
-                        render: function(data, type, row, meta) {
-                            {# If the column contains date values (specified in the route), format it. #}
-                            {% if header in date_headers %}
-                                // Obtain the timestamp from the object
+                        data: "{{ field.key }}",
+                        render: function (data, type, row, meta) {
+                            {% if field.type == 'id' %}
+                                return data ? data['$oid'] : '';
+                            {% elif field.type == 'string' %}
+                                return DataTable.render.text().filter(data);
+                            {% elif field.type == 'integer' %}
+                                renderer = DataTable.render.number(',','.', 0);
+                                return renderer.display(data);
+                            {% elif field.type == 'float' %}
+                                renderer = DataTable.render.number(',','.', {{field.precision}});
+                                return renderer.display(data);
+                            {% elif field.type == 'relation' %}
+                                return "<a href='{{ active }}/" + row._id + "'>" + data + "</a>";
+                            {% elif field.type == 'date' %}
                                 const timestamp = data["$date"];
-
                                 // If display or filter data is requested, format the date
-                                if ( type === 'display' || type === 'filter' ) {
+                                if (type === 'display' || type === 'filter') {
                                     return moment(timestamp).format("DD-MMM-YYYY");
                                 }
-
                                 // If sort/type data is requested, parse the date object into a timestamp
                                 return timestamp;
                             {% endif %}
-
-                            if (meta.col === 0) {
-                                {# Return non-date data values as a link to the row instance. #}
-                                return "<a href='{{ active }}/" + row._id + "'>" + data + "</a>";
-                            }
-
-                            {# Return data as is for all other columns #}
-                            return data;
                         }
                     },
                 {% endfor %}
             ],
         });
+
+        {% if doc_view.has_item_view %}
+        $("#{{ table_name }}").on('click', 'tr', function() {
+            const id = table.row(this).data()._id;
+            window.location.href = '/{{ active }}/' + id;
+        })
+        {% endif %}
     });
 </script>

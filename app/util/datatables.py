@@ -46,8 +46,8 @@ def dt_query(dt_params, document: Document):   # TODO: Inheritance type hinting?
     """
 
     # Id range of records to retrieve
-    start_id = int(dt_params.get("start"))
-    end_id = start_id + int(dt_params.get("length"))
+    start_idx = int(dt_params.get("start"))
+    end_idx = start_idx + int(dt_params.get("length"))
 
     # Compile regex for sorting
     order_column = re.compile("order(.+?)column")
@@ -80,7 +80,9 @@ def dt_query(dt_params, document: Document):   # TODO: Inheritance type hinting?
     ordered_queryset = document.objects.order_by(*sort_list)
     # filtered_queryset = ordered_queryset.filter()   # TODO: Implement
     num_matching_records = ordered_queryset.count()
-    queryset = ordered_queryset[start_id:end_id]
+    queryset = ordered_queryset[start_idx:end_idx]
+
+    d = queryset.to_json()
 
     # Set draw, recordsTotal, recordsFilered, data in the response json
     # Optionally set error as well if there is an error.

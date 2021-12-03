@@ -1,11 +1,43 @@
-from wormlab3d.data.model import Tag
+from flask import Blueprint, request
 
 from app.util.datatables import *
-
-from flask import Blueprint, request
+from app.views.document_view import DocumentView
+from wormlab3d.data.model import Tag
 
 # Form blueprint
 bp_api_tag = Blueprint('api_tag', __name__)
+
+
+class TagsView(DocumentView):
+    @property
+    def fields(self):
+        return [
+            {
+                'key': '_id',
+                'title': 'ID',
+                'type': 'integer',
+            },
+            {
+                'key': 'name',
+                'title': 'Name',
+                'type': 'string',
+            },
+            {
+                'key': 'short_name',
+                'title': 'Short name',
+                'type': 'string',
+            },
+            {
+                'key': 'symbol',
+                'title': 'Symbol',
+                'type': 'string',
+            },
+            {
+                'key': 'description',
+                'title': 'Description',
+                'type': 'string',
+            },
+        ]
 
 
 @bp_api_tag.route('/ajax/tags', methods=['GET'])

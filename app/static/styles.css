@@ -1,3 +1,7 @@
 #trial_date i {
     margin-right: 7px;
 }
+
+#data-table.dt-items-clickable tr:hover {
+    cursor: pointer;
+}

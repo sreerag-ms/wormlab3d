@@ -4,14 +4,12 @@
 {% block content %}
   <div class="row no-gutters">
     <div class="col-sm-12" class="overflow-auto">
-      <table class="table table-striped table-sm display w-100" id="data-table">
+      <table class="table table-striped table-sm display w-100{{ ' dt-items-clickable' if doc_view.has_item_view else '' }}" id="data-table">
         <thead class="table-header">
           <tr>
-            <th scope="col">ID</th>
-            <th scope="col">Name</th>
-            <th scope="col">Short Name</th>
-            <th scope="col">Symbol</th>
-            <th scope="col">Description</th>
+            {% for field in doc_view.fields %}
+              <th scope="col">{{ field.title }}</th>
+            {% endfor %}
           </tr>
         </thead>
       </table>
@@ -27,4 +25,3 @@
     {% include "table/table_js.html" %}
   {% endwith %}
 {% endblock %}
-
