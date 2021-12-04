@@ -54,9 +54,9 @@ def calculate_pca(X: np.ndarray, i: int, window_size: int) -> PCA:
 
     # logger.debug(f'Computing PCA in window [{start_idx}:{end_idx}]')
     X_window = X[start_idx:end_idx]
-    if X.ndim == 3:
+    if X_window.ndim == 3:
         X_window = X_window.reshape((window_size_actual * X.shape[1], 3))
-    assert X.ndim == 2
+    assert X_window.ndim == 2
     pca = PCA(svd_solver='full', copy=True, n_components=3)
     pca.fit(X_window)
 
@@ -87,7 +87,7 @@ def _calculate_pcas(X: np.ndarray, window_size: int) -> List[PCA]:
 
 
 def calculate_pcas(X: np.ndarray, window_size: int) -> List[PCA]:
-    if N_WORKERS > 1:
+    if 0 and N_WORKERS > 1:
         pcas = _calculate_pcas_parallel(X, window_size)
     else:
         pcas = _calculate_pcas(X, window_size)
