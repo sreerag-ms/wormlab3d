@@ -4,12 +4,7 @@ from flask import Flask
 
 # Import api (ajax) blueprints
 from .views.api import bp_api
-from .views.api.dataset import bp_api_dataset
-from .views.api.frame import bp_api_frame
-from .views.api.midline2d import bp_api_midline2d
-from .views.api.midline3d import bp_api_midline3d
-from .views.api.reconstruction import bp_api_reconstruction
-from .views.api.tag import bp_api_tag
+from app.model.reconstruction import bp_api_reconstruction
 
 # Import page blueprints
 from .views.page.datasets import bp_datasets
@@ -20,11 +15,9 @@ from .views.page.midlines3d import bp_midlines3d
 from .views.page.reconstructions import bp_reconstructions
 from .views.page.tags import bp_tags
 from .views.page.trials import bp_trials
-from .views.page.trial_instance import bp_trial_instance
 
 # Import media helper blueprints
 from .views.media import bp_media
-# from .views.media.transcode import bp_media
 from .views.media.extract_img import bp_extract_img
 
 from wormlab3d import APP_SECRET

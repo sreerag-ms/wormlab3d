@@ -8,7 +8,7 @@ import json
 import re
 
 from app.util.encoder import DateTimeEncoder
-from app.views.document_view import DocumentView
+from app.model import DocumentView
 from wormlab3d import logger
 
 

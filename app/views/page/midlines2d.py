@@ -2,7 +2,7 @@ import os
 
 from flask import Blueprint, render_template, flash
 
-from app.views.api.midline2d import Midlines2dView
+from app.model.midline2d import Midlines2dView
 
 # Form blueprint
 bp_midlines2d = Blueprint('midlines2d', __name__)

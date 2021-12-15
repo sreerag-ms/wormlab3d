@@ -23,7 +23,7 @@
         return moment(data).format("DD-MMM-YYYY");
       }
       // If sort/type data is requested, parse the date object into a timestamp
-      return timestamp;
+      return data;
     {% endif %}
     },
     {% if key in doc_view.hide_fields %}

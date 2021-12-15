@@ -2,7 +2,7 @@ import os
 
 from flask import Blueprint, render_template, flash
 
-from app.views.api.tag import TagsView
+from app.model.tag import TagsView
 
 # Form blueprint
 bp_tags = Blueprint('tags', __name__)

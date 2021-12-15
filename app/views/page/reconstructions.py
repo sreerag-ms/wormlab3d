@@ -2,7 +2,7 @@ import os
 
 from flask import Blueprint, render_template, flash
 
-from app.views.api.reconstruction import ReconstructionsView
+from app.model.reconstruction import ReconstructionsView
 
 # Form blueprint
 bp_reconstructions = Blueprint('reconstructions', __name__)

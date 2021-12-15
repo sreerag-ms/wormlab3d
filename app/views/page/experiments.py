@@ -2,8 +2,8 @@ import os
 
 from flask import Blueprint, render_template
 
-from app.views.api.experiment import ExperimentView
-from app.views.api.trial import TrialView
+from app.model.experiment import ExperimentView
+from app.model.trial import TrialView
 from wormlab3d.data.model import Experiment
 
 bp_experiments = Blueprint('experiments', __name__, url_prefix='/experiment')

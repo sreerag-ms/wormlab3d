@@ -2,7 +2,7 @@ import os
 
 from flask import Blueprint, render_template, flash
 
-from app.views.api.midline3d import Midlines3dView
+from app.model.midline3d import Midlines3dView
 
 # Form blueprint
 bp_midlines3d = Blueprint('midlines3d', __name__)

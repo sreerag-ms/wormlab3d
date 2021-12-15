@@ -2,7 +2,7 @@ import os
 
 from flask import Blueprint, render_template, flash
 
-from app.views.api.dataset import DatasetsView
+from app.model.dataset import DatasetsView
 
 # Form blueprint
 bp_datasets = Blueprint('datasets', __name__)

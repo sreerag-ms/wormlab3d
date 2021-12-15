@@ -1,7 +1,7 @@
 from flask import Blueprint, request
 
 from app.util.datatables import dt_query
-from app.views.document_view import DocumentView
+from app.model.document_view import DocumentView
 from wormlab3d.data.model import Reconstruction
 
 # Form blueprint

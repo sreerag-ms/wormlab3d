@@ -1,96 +1,41 @@
-from collections import OrderedDict
-from typing import Any, Dict
+import numpy as np
 
-from flask import Blueprint
-
-from app.views.api import ExperimentView
-from app.views.document_view import DocumentView, NESTED_DOCUMENT_SEPARATOR
-from wormlab3d.data.model import Trial
+from app.views.api import bp_api
+from wormlab3d.data.model import Trial, Frame
 
 
+@bp_api.route('/trial/<int:_id>/tracking', methods=['GET'])
+def get_tracking_data(_id):
+    trial = Trial.objects.get(id=_id)
 
-class TrialView(DocumentView):
-    has_item_view = True
+    centres_3d = []
+    timestamps = []
+    frame_time = 0.
 
-    @classmethod
-    @property
-    def document_class(cls):
-        return Trial
+    pipeline = [
+        {'$match': {'trial': trial.id}},
+        {'$project': {
+            '_id': 0,
+            'centre_3d': 1,
+            # 'centres_2d': 1,
+        }},
+        {'$sort': {'frame_num': 1}},
+    ]
+    cursor = Frame.objects().aggregate(pipeline)
 
-    # # @classmethod
-    # # @property
-    # def fields(self, prefix: str = '') -> OrderedDict[str, Any]:
-    #     if prefix != '':
-    #         prefix = prefix + NESTED_DOCUMENT_SEPARATOR
+    for res in cursor:
+        if 'centre_3d' in res and res['centre_3d'] is not None:
+            pt = res['centre_3d']['point_3d']
+        else:
+            pt = np.array([None, None, None])
+        centres_3d.append(pt)
+        timestamps.append(frame_time)
+        frame_time += 1 / trial.fps
+    centres_3d = np.stack(centres_3d).T
 
-    def _init_fields(self) -> OrderedDict[str, Dict[str, str]]:
-        experiment_view = ExperimentView(
-            hide_fields=['_id', 'legacy_id', 'num_trials', 'num_frames'],
-            prefix='experiment'
-        )
+    response = {
+        'timestamps': timestamps,
+        'centres_3d': centres_3d.tolist()
+    }
 
-        return OrderedDict([
-            (
-                self.prefix + '_id', {
-                    'title': 'ID',
-                    'type': 'integer',
-                },
-            ),
-            (
-                self.prefix + 'legacy_id', {
-                    'title': 'Legacy ID',
-                    'type': 'integer',
-                },
-            ),
-            (
-                self.prefix + 'experiment', {
-                    'title': 'Experiment',
-                    'type': 'relation',
-                    'filter_type': 'integer',
-                    'view_class': experiment_view,
-                },
-            ),
-            *experiment_view.fields.items(),
-            (
-                self.prefix + 'date', {
-                    'title': 'Date',
-                    'type': 'date',
-                },
-            ),
-            (
-                self.prefix + 'trial_num', {
-                    'title': 'Trial num.',
-                    'type': 'integer',
-                    'filter_type': 'choice_query',
-                },
-            ),
-            (
-                self.prefix + 'num_frames', {
-                    'title': 'Num. frames',
-                    'type': 'integer',
-                },
-            ),
-            (
-                self.prefix + 'fps', {
-                    'title': 'FPS',
-                    'type': 'float',
-                    'precision': 2,
-                    'filter_type': 'choice_query',
-                },
-            ),
-            (
-                self.prefix + 'temperature', {
-                    'title': 'Temperature',
-                    'type': 'float',
-                    'precision': 2,
-                    'filter_type': 'choice_query',
-                },
-            ),
-            (
-                self.prefix + 'comments', {
-                    'title': 'Comments',
-                    'type': 'string',
-                    'filter_type': 'none'
-                },
-            ),
-        ])
+    return response

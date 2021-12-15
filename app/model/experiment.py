@@ -1,7 +1,7 @@
 from collections import OrderedDict
-from typing import Dict, Any
+from typing import Dict
 
-from app.views.document_view import DocumentView, NESTED_DOCUMENT_SEPARATOR
+from app.model.document_view import DocumentView
 from wormlab3d.data.model import Experiment
 
 
@@ -14,11 +14,6 @@ class ExperimentView(DocumentView):
         return Experiment
 
     def _init_fields(self) -> OrderedDict[str, Dict[str, str]]:
-
-    # # @classmethod
-    # # @property
-    # def fields(self, prefix: str = '') -> OrderedDict[str, Any]:
-
         return OrderedDict([
             (
                 self.prefix + '_id', {

@@ -12,70 +12,66 @@
       <h3>Experiment</h3>
       {{ details.render(experiment_view, trial.experiment) }}
     </div>
-
-{#      <h3>Trials</h3>#}
-{#      {{ table.render(trials_view, table_name) }}#}
   </div>
-
 
   <div class="row">
 
     <ul class="nav nav-tabs" id="trial-tabs" role="tablist">
       <li class="nav-item" role="presentation">
-        <button class="nav-link active" id="videos-tab" data-bs-toggle="tab" data-bs-target="#videos-panel" type="button" role="tab" aria-controls="videos" aria-selected="true">Videos</button>
+        <button class="nav-link active" id="videos-tab" data-bs-toggle="tab" data-bs-target="#videos-panel"
+                type="button" role="tab" aria-controls="videos" aria-selected="true">Videos
+        </button>
       </li>
       <li class="nav-item" role="presentation">
-        <button class="nav-link" id="tracking-tab" data-bs-toggle="tab" data-bs-target="#tracking-panel" type="button" role="tab" aria-controls="profile" aria-selected="false">Tracking</button>
+        <button class="nav-link" id="tracking-tab" data-bs-toggle="tab" data-bs-target="#tracking-panel" type="button"
+                role="tab" aria-controls="profile" aria-selected="false">Tracking
+        </button>
       </li>
       <li class="nav-item" role="presentation">
-        <button class="nav-link" id="reconstructions-tab" data-bs-toggle="tab" data-bs-target="#reconstructions-panel" type="button" role="tab" aria-controls="reconstructions" aria-selected="false">Reconstructions</button>
+        <button class="nav-link" id="reconstructions-tab" data-bs-toggle="tab" data-bs-target="#reconstructions-panel"
+                type="button" role="tab" aria-controls="reconstructions" aria-selected="false">Reconstructions
+        </button>
       </li>
     </ul>
     <div class="tab-content" id="trial-panels">
 
       <div class="tab-pane fade show active" id="videos-panel" role="tabpanel" aria-labelledby="videos-tab">
-
         <div class="row g-0">
           {% for i in range(3) %}
             <div class="col col-md-4">
-{#              vjs-default-skin vjs-fluid#}
               <video id="cam_video_{{ i }}" class="video-js" preload="auto"></video>
             </div>
           {% endfor %}
         </div>
-{#        d-flex justify-content-center#}
         <div class="row g-0 mt-2 mb-5">
           <div class="video-controls d-flex justify-content-center align-items-center">
             <button type="button" class="vc-play btn btn-primary btn-large">
               <span class="oi oi-media-play"></span>
             </button>
-
             <div class="vc-progress progress mx-2">
-              <div class="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+              <div class="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0"
+                   aria-valuemax="100"></div>
             </div>
-
             <div class="vc-time">
               <span class="vc-current-time">00:00</span> / <span class="vc-duration">00:00</span>
             </div>
-
-
           </div>
-
-{#          <div id="video-controls" class="video-js"></div>#}
         </div>
-
-{#        Frame-based viewer#}
-{#        <div class="d-flex justify-content-center">#}
-{#          {% for i in range(3) %}#}
-{#            <img id="img-cam{{ i }}" class="img-fluid" src="{{ url_for('extract_img.screenshot', path= video_id|safe + '_' + i|safe + '.avi', trial_num=trial.id, frame_num=0, cam_num=0, fps=trial.fps) }}" alt="missing img">#}
-{#          {% endfor %}#}
-{#          <button id="btn-prev_frame" type="button" class="btn btn-secondary"><</button>#}
-{#          <button id="btn-next_frame" type="button" class="btn btn-secondary">></button>#}
-{#        </div>#}
       </div>
 
       <div class="tab-pane fade" id="tracking-panel" role="tabpanel" aria-labelledby="tracking-tab">
-        Tracking.
+        <div class="g-0 mt-5 mb-5">
+          <div class="d-flex justify-content-center align-items-center">
+            <div class="spinner-border mt-3" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+          </div>
+          <div id="tracking-plots" class="row g-1">
+            <div id="tracking-plot-x" class="col"></div>
+            <div id="tracking-plot-y" class="col"></div>
+            <div id="tracking-plot-z" class="col"></div>
+          </div>
+        </div>
       </div>
 
       <div class="tab-pane fade" id="reconstructions-panel" role="tabpanel" aria-labelledby="reconstructions-tab">
@@ -117,5 +113,64 @@
 
 {% block scripts %}
   {% include 'item/_video_js.html' %}
+
+  <script>
+      $(document).ready(function () {
+          let timestamps;
+          let centres_3d;
+
+          function plot_tracking(idx) {
+              let xyz = ['x', 'y', 'z'][idx];
+              let data = [{
+                  x: timestamps,
+                  y: centres_3d[idx],
+              }];
+              let layout = {
+                  title: xyz,
+                  margin: {t: 50},
+                  xaxis: {
+                      title: 'Time (s)',
+                      type: 'time'
+                  },
+                  yaxis: {
+                      title: 'Position (mm)',
+                  }
+              };
+              let config = {
+                  displaylogo: false,
+                  responsive: true,
+                  modeBarButtonsToRemove: ['toImage']
+              };
+
+              Plotly.newPlot('tracking-plot-' + xyz, data, layout, config);
+          }
+
+
+          $('#tracking-tab').one('show.bs.tab', function () {
+              console.log('loading tracking plot');
+              $.getJSON('{{ url_for('api.get_tracking_data', _id=trial.id) }}', function (data) {
+                  console.log('loaded!');
+                  console.log(data);
+                  timestamps = data['timestamps'];
+                  centres_3d = data['centres_3d'];
+                  $('#tracking-panel .spinner-border').hide();
+
+                  for (let i = 0; i < 3; i++) {
+                      plot_tracking(i);
+                  }
+              });
+          });
+
+          // Remember active tab
+          $('button[data-bs-toggle="tab"]').on('shown.bs.tab', function (e) {
+              localStorage.setItem('activeTab', $(e.target).data('bs-target'));
+          });
+          let activeTab = localStorage.getItem('activeTab');
+          if (activeTab) {
+              $('button[data-bs-target="'+activeTab+'"]').tab('show');
+          }
+      });
+  </script>
+
 {% endblock %}
 
