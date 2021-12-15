@@ -12,6 +12,7 @@ setup(
     install_requires=[
         'av >= 8.0, < 8.1',
         'flask >= 2.0, < 2.1',
+        'flask_wtf >= 1.0.0, < 1.1',
         'gunicorn >= 20.1, < 21',
         'h5py >= 3.2, < 3.3',
         'matplotlib >= 3.4, < 3.5',
