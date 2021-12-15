@@ -1,0 +1,19 @@
+{% macro render(doc_view, table_name) -%}
+  {% set table_name = table_name or 'data-table-' + doc_view.collection_name %}
+  <table
+    class="dataTable table table-striped table-bordered table-hover table-sm display w-100{{ ' dt-items-clickable' if doc_view.has_item_view else '' }}"
+    id="{{ table_name }}">
+    <thead class="table-header">
+    <tr>
+      {% for key, field in doc_view.fields.items() %}
+        <th scope="col">{{ field.title }}</th>
+{#        {% if field.type == 'relation' %}#}
+{#          {% for rel_field in field.view_class.fields() %}#}
+{#            <th scope="col">{{ rel_field.title }}</th>#}
+{#          {% endfor %}#}
+{#        {% endif %}#}
+      {% endfor %}
+    </tr>
+    </thead>
+  </table>
+{% endmacro %}

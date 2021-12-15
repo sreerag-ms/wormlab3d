@@ -30,3 +30,13 @@ class Experiment(Document):
         if best:
             return cameras.first()
         return cameras
+
+    @property
+    def num_trials(self):
+        from wormlab3d.data.model import Trial
+        return Trial.objects(experiment=self).count()
+
+    @property
+    def num_frames(self):
+        from wormlab3d.data.model import Trial
+        return sum([t.n_frames_min for t in Trial.objects(experiment=self).only('n_frames_min')])

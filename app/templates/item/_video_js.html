@@ -1,0 +1,269 @@
+<script>
+    $(document).ready(function () {
+        // Explicitly tell video.js to not collect analytics, although v7 already does not send any data.
+        window.HELP_IMPROVE_VIDEOJS = false;
+
+        const _ui_update_interval = 250;
+        let _interval_id;
+        let _current_time = 0;
+        let _duration = 0;
+        let _durations = [0, 0, 0];
+        let is_ready = [false, false, false];
+        let is_playing = [false, false, false];
+
+
+        function is_ready_all() {
+            return !is_ready.some(function (v) {
+                return v === false;
+            });
+        }
+
+        function is_playing_any() {
+            return is_playing.some(function (v) {
+                return v === true;
+            });
+        }
+
+        function set_master_duration() {
+            _duration = Math.max(..._durations);
+            $('.vc-duration').text(moment(_duration * 1000).format('mm:ss'));
+        }
+
+        {#
+        Transcoding code
+        JS code from https://stackoverflow.com/questions/3639604/html5-audio-video-and-live-transcoding-with-ffmpeg
+        Originally by user3612643 (derolf), upgraded for video.js version 7.7.6 by Gustav P Svensson
+        #}
+        let videos = [];
+        for (let i = 0; i < 3; i++) {
+            (function () {
+                let stream_endpoint = '/media/stream/{{ trial.id }}/' + i;
+                let duration_endpoint = '/media/duration/{{ trial.id }}/' + i;
+
+                let video = videojs('cam_video_' + i, {
+                    controls: false,
+                    fluid: true,
+                    responsive: true
+                });
+                video.src({
+                    src: stream_endpoint,
+                    type: 'video/mp4'
+                });
+                video.start = 0;
+
+                // The original code for "currentTime"
+                video.oldCurrentTime = function currentTime(seconds) {
+                    if (typeof seconds !== 'undefined') {
+                        if (seconds < 0) {
+                            seconds = 0;
+                        }
+
+                        this.techCall_('setCurrentTime', seconds);
+                        return;
+                    }
+                    this.cache_.currentTime = this.techGet_('currentTime') || 0;
+                    return this.cache_.currentTime;
+                };
+
+                // Our modified currentTime
+                video.currentTime = function (time) {
+                    if (time == undefined) {
+                        return video.oldCurrentTime() + video.start;
+                    }
+                    if (time == video.oldCurrentTime() + video.start) {
+                        return this;
+                    }
+                    video.start = time;
+                    video.oldCurrentTime(0);
+                    video.src({
+                        src: stream_endpoint + '?start=' + time,
+                        type: 'video/mp4'
+                    });
+                    return this;
+                };
+
+                // Get the duration of the movie
+                $.getJSON(duration_endpoint, function (data) {
+                    _durations[i] = data.duration;
+                    set_master_duration();
+                });
+
+                videos.push(video);
+            })();
+        }
+        ;
+
+        function sync_times() {
+            for (let i = 0; i < 3; i++) {
+                videos[i].currentTime(_current_time);
+            }
+        };
+
+        function pause_videos() {
+            for (let i = 0; i < 3; i++) {
+                videos[i].pause();
+            }
+            clearInterval(_interval_id);
+        };
+
+        function play_videos() {
+            if (!is_ready_all()) {
+                window.setTimeout(play_videos, 100);
+                return;
+            }
+            for (let i = 0; i < 3; i++) {
+                let video = videos[i];
+                if (video.paused()) {
+                    video.play();
+                }
+            }
+
+            // update UI every 250ms
+            _interval_id = setInterval(interval_step, _ui_update_interval);
+        };
+
+
+        $.each(videos, function (i) {
+            let video = videos[i];
+
+            video.on('canplay', function () {
+                console.log('canplay', i);
+                is_ready[i] = true;
+            });
+
+            video.on('playing', function () {
+                console.log('playing', i);
+                is_playing[i] = true;
+            });
+
+            video.on('pause', function () {
+                console.log('pausing', i);
+                is_playing[i] = false;
+            });
+
+            video.on('loadstart', function () {
+                console.log('not ready loadstart', i);
+                is_ready[i] = false;
+            });
+
+            video.on('ended', function () {
+                is_playing[i] = false;
+            });
+        });
+
+        $('.vc-play').on('click', function (e) {
+            e.preventDefault();
+            if (!is_ready_all()) {
+                return;
+            }
+            if (is_playing_any()) {
+                $('.oi-media-pause', this).removeClass('oi-media-pause').addClass('oi-media-play');
+                pause_videos();
+            } else {
+                $('.oi-media-play', this).removeClass('oi-media-play').addClass('oi-media-pause');
+                play_videos();
+            }
+        });
+
+        $('.vc-progress').on('mousedown', function (e) {
+            e.preventDefault();
+            let play_state = is_playing_any();
+            if (play_state) {
+                pause_videos();
+            }
+            let progress = (e.pageX - $(this).offset().left) / $(this).width();
+            _current_time = progress * _duration;
+            sync_times();
+            $('.vc-current-time').text(moment(_current_time * 1000).format('mm:ss'));
+            $('.vc-progress .progress-bar').width((progress * 100) + '%');
+            if (play_state) {
+                play_videos();
+            }
+        });
+
+        function interval_step() {
+            if (!is_ready_all()) {
+                return
+            } else if (!is_playing_any()) {
+                $('.vc-play .oi-media-pause').removeClass('oi-media-pause').addClass('oi-media-play');
+                clearInterval(_interval_id);
+                return;
+            }
+            _current_time += _ui_update_interval / 1000;
+            $('.vc-current-time').text(moment(_current_time * 1000).format('mm:ss'));
+            let progress = _current_time / _duration;
+            $('.vc-progress .progress-bar').width((progress * 100) + '%');
+        }
+
+        {# TODO: Frame number based duration #}
+        {#function customTimeFormat(seconds, guide) {#}
+        {#    seconds = seconds < 0 ? 0 : seconds;#}
+        {#    let s = Math.floor(seconds % 60);#}
+        {#    let m = Math.floor(seconds / 60 % 60);#}
+        {#    let h = Math.floor(seconds / 3600);#}
+        {#    let gm = Math.floor(guide / 60 % 60);#}
+        {#    let gh = Math.floor(guide / 3600); // handle invalid times#}
+        {##}
+        {#    if (isNaN(seconds) || seconds === Infinity) {#}
+        {#        // '-' is false for all relational operators (e.g. <, >=) so this setting#}
+        {#        // will add the minimum number of fields specified by the guide#}
+        {#        h = m = s = '-';#}
+        {##}
+        {#        return h + ':' + s;#}
+        {#    } // Check if we need to show hours#}
+        {##}
+        {##}
+        {#    h = h > 0 || gh > 0 ? h + ':' : ''; // If hours are showing, we may need to add a leading zero.#}
+        {#    // Always show at least one digit of minutes.#}
+        {##}
+        {#    m = ((h || gm >= 10) && m < 10 ? '0' + m : m) + ':'; // Check if leading zero is need for seconds#}
+        {##}
+        {#    h = parseInt(h) < 10 ? '0' + h : h;#}
+        {#    s = parseInt(s) < 10 ? '0' + s : s;#}
+        {##}
+        {#    return h + m + s;#}
+        {# } #}
+        {##}
+        {#videojs.setFormatTime(customTimeFormat);#}
+
+        {##}
+        {#        // Frame-based viewer buttons#}
+        {#        let frame_num = 0;#}
+        {#        $("#btn-prev_frame").on('click', () => {#}
+        {#            frame_num = Math.max(0, frame_num - 1);#}
+        {##}
+        {#            {% for i in range(3) %}#}
+        {#                $("#img-cam" + {{ i }}).attr("src", "{{ url_for('extract_img.screenshot', path=filenames[i], trial_num=trial.id, cam_num=i, fps=trial.fps)|safe }}&frame_num=" + frame_num);#}
+        {#            {% endfor %}#}
+        {#        });#}
+        {#        $("#btn-next_frame").on('click', () => {#}
+        {#            // Disable next frame button until images are screenshotted#}
+        {#            $("#btn-next_frame").attr("disabled", true);#}
+        {##}
+        {#            frame_num = Math.min({{ trial.n_frames_min }}, frame_num + 1);#}
+        {##}
+        {#            {% for i in range(3) %}#}
+        {#                $("#img-cam" + {{ i }}).attr("src", "{{ url_for('extract_img.screenshot', path=filenames[i], trial_num=trial.id, cam_num=i, fps=trial.fps)|safe }}&frame_num=" + frame_num);#}
+        {#            {% endfor %}#}
+        {##}
+        {#            // Asynchronously re-enable the button when all the images have been screenshotted in the app's dir#}
+        {#            $.ajax({#}
+        {#                type: "GET",#}
+        {#                data: {#}
+        {#                    frame_num: frame_num#}
+        {#                },#}
+        {#                url: "{{ url_for("extract_img.completion", video_id=video_id) }}",#}
+        {#                success: function (data) {#}
+        {#                    console.log("success. data:");#}
+        {#                    console.log(data);#}
+        {#                    // Enable button#}
+        {#                    $("#btn-next_frame").attr("disabled", false);#}
+        {#                },#}
+        {#                error: function (data) {#}
+        {#                    console.log("failed. images not created after timeout (5s)");#}
+        {#                    console.log(data);#}
+        {#                }#}
+        {#            });#}
+        {#        });#}
+    });
+</script>

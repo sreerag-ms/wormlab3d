@@ -1,0 +1,27 @@
+{% macro render(doc_view, doc) -%}
+  <table class="table w-30">
+    <tbody>
+    {% for key, field in doc_view.fields.items() if key not in doc_view.hide_fields %}
+      <tr>
+        <th width="40%">{{ field.title }}</th>
+        {% if key == '_id' %}
+          <td><a href="/{{ doc_view.collection_name }}/{{ doc.id }}">{{ doc.id }}</a></td>
+{#          <td>{{ doc[key] }}</td>#}
+        {% elif doc[key] is none %}
+          <td></td>
+        {% elif field.type == 'integer' %}
+          <td>{{ '{:,}'.format(doc[key]) }}</td>
+        {% elif field.type == 'float' %}
+          <td>{{ ('{:,.' + field.precision|string + 'f}').format(doc[key]) }}</td>
+        {% elif field.type == 'date' %}
+          <td>{{ doc[key].strftime('%Y-%m-%d') }}</td>
+        {% elif field.type == 'datetime' %}
+          <td>{{ doc[key].strftime('%Y-%m-%d %H:%M:%S') }}</td>
+        {% else %}
+          <td>{{ doc[key] }}</td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endmacro %}

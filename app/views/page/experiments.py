@@ -1,24 +1,46 @@
 import os
 
-from flask import Blueprint, render_template, flash
+from flask import Blueprint, render_template
 
-from app.views.api.experiment import ExperimentsView
+from app.views.api.experiment import ExperimentView
+from app.views.api.trial import TrialView
+from wormlab3d.data.model import Experiment
 
-# Form blueprint
-bp_experiments = Blueprint('experiments', __name__)
+bp_experiments = Blueprint('experiments', __name__, url_prefix='/experiment')
 
 
-@bp_experiments.route('/experiments', methods=['GET'])
+@bp_experiments.route('/', methods=['GET'])
 def experiments():
-    # Display a tip on how to do multi-column sorting
-    flash("To sort by multiple columns, hold SHIFT then left click.", category="info")
-
-    active = 'experiments'
+    active = 'experiment'
     os.environ['script_name'] = active
     return render_template(
         'list_view.html',
         title='Experiments',
         active=active,
-        doc_view=ExperimentsView(),
-        ajax_url="/ajax/experiments",
+        doc_view=ExperimentView()
+    )
+
+
+@bp_experiments.route('/<int:_id>', methods=['GET'])
+def experiment_instance(_id):
+    active = 'experiment'
+    os.environ['script_name'] = active
+    experiment = Experiment.objects.get(id=_id)
+
+    experiment_view = ExperimentView(
+        hide_fields=['_id']
+    )
+
+    trial_view = TrialView(
+        hide_fields=['experiment*'],
+        field_values={'experiment': _id}
+    )
+
+    return render_template(
+        'item/experiment.html',
+        title=f'Experiment #{_id}',
+        active=active,
+        experiment=experiment,
+        experiment_view=experiment_view,
+        trial_view=trial_view
     )

@@ -2,6 +2,28 @@
     margin-right: 7px;
 }
 
-#data-table.dt-items-clickable tr:hover {
+.dataTable.dt-items-clickable tr:hover {
     cursor: pointer;
+}
+
+#filters-accordion {
+    margin-bottom: 1rem;
+}
+
+.vc-progress {
+    width: 80%;
+    display: inline-block;
+}
+
+.vc-progress .progress-bar {
+    height: 100%;
+    width: 0;
+}
+
+.vc-play {
+    border-radius: 50%;
+}
+
+.vc-time {
+    display: inline-block;
 }

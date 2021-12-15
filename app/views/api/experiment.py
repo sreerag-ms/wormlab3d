@@ -1,71 +1,99 @@
-from flask import Blueprint, request
+from collections import OrderedDict
+from typing import Dict, Any
 
-from app.util.datatables import *
-from app.views.document_view import DocumentView
+from app.views.document_view import DocumentView, NESTED_DOCUMENT_SEPARATOR
 from wormlab3d.data.model import Experiment
 
-# Form blueprint
-bp_api_experiment = Blueprint('api_experiment', __name__)
 
-
-class ExperimentsView(DocumentView):
+class ExperimentView(DocumentView):
     has_item_view = True
 
+    @classmethod
     @property
-    def fields(self):
-        return [
-            {
-                'key': '_id',
-                'title': 'ID',
-                'type': 'integer',
-            },
-            {
-                'key': 'user',
-                'title': 'User',
-                'type': 'string',
-            },
-            {
-                'key': 'strain',
-                'title': 'Strain',
-                'type': 'string',
-            },
-            {
-                'key': 'sex',
-                'title': 'Sex',
-                'type': 'string',
-            },
-            {
-                'key': 'age',
-                'title': 'Age',
-                'type': 'string',
-            },
-            {
-                'key': 'concentration',
-                'title': 'Conc.',
-                'type': 'float',
-                'precision': 2
-            },
-            {
-                'key': 'worm_length',
-                'title': 'Worm length',
-                'type': 'float',
-                'precision': 2
-            },
-            {
-                'key': 'legacy_id',
-                'title': 'Legacy id',
-                'type': 'integer',
-            }
-        ]
+    def document_class(cls):
+        return Experiment
 
+    def _init_fields(self) -> OrderedDict[str, Dict[str, str]]:
 
-@bp_api_experiment.route('/ajax/experiments', methods=['GET'])
-def ajax_experiments():
-    """
-    :return: str
-        A json string containing the queried result and parameters required by DataTables.
-    """
+    # # @classmethod
+    # # @property
+    # def fields(self, prefix: str = '') -> OrderedDict[str, Any]:
 
-    # Parameters are sent via the URL from DataTables,
-    # which can be obtained with request.args.
-    return dt_query(request.args, Experiment)
+        return OrderedDict([
+            (
+                self.prefix + '_id', {
+                    'title': 'ID',
+                    'type': 'integer',
+                }
+            ),
+            (
+                self.prefix + 'user', {
+                    'title': 'User',
+                    'type': 'string',
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'strain', {
+                    'title': 'Strain',
+                    'type': 'string',
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'sex', {
+                    'title': 'Sex',
+                    'type': 'string',
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'age', {
+                    'title': 'Age',
+                    'type': 'string',
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'concentration', {
+                    'title': 'Conc.',
+                    'type': 'float',
+                    'precision': 2,
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'worm_length', {
+                    'title': 'Worm length',
+                    'type': 'float',
+                    'precision': 2
+                },
+            ),
+            (
+                self.prefix + 'legacy_id', {
+                    'title': 'Legacy id',
+                    'type': 'integer',
+                },
+            ),
+            (
+                self.prefix + 'num_trials', {
+                    'title': 'Num. Trials',
+                    'type': 'integer',
+                    'query': {
+                        'lookup': 'trial',
+                        'aggregation': 'count'
+                    }
+                },
+            ),
+            (
+                self.prefix + 'num_frames', {
+                    'title': 'Num. Frames',
+                    'type': 'integer',
+                    'query': {
+                        'lookup': 'trial',
+                        'aggregation': 'sum',
+                        'field': 'n_frames_min'
+                    }
+                }
+            )
+        ])

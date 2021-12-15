@@ -1,0 +1,121 @@
+{% extends '__layout.html' %}
+{% import 'table/_data_table.html' as table %}
+{% import 'table/_details_table.html' as details %}
+
+
+{% block content %}
+  <div class="row">
+    <div class="col-sm-12 col-md-6">
+      {{ details.render(trial_view, trial) }}
+    </div>
+    <div class="col-sm-12 col-md-6">
+      <h3>Experiment</h3>
+      {{ details.render(experiment_view, trial.experiment) }}
+    </div>
+
+{#      <h3>Trials</h3>#}
+{#      {{ table.render(trials_view, table_name) }}#}
+  </div>
+
+
+  <div class="row">
+
+    <ul class="nav nav-tabs" id="trial-tabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="videos-tab" data-bs-toggle="tab" data-bs-target="#videos-panel" type="button" role="tab" aria-controls="videos" aria-selected="true">Videos</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tracking-tab" data-bs-toggle="tab" data-bs-target="#tracking-panel" type="button" role="tab" aria-controls="profile" aria-selected="false">Tracking</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="reconstructions-tab" data-bs-toggle="tab" data-bs-target="#reconstructions-panel" type="button" role="tab" aria-controls="reconstructions" aria-selected="false">Reconstructions</button>
+      </li>
+    </ul>
+    <div class="tab-content" id="trial-panels">
+
+      <div class="tab-pane fade show active" id="videos-panel" role="tabpanel" aria-labelledby="videos-tab">
+
+        <div class="row g-0">
+          {% for i in range(3) %}
+            <div class="col col-md-4">
+{#              vjs-default-skin vjs-fluid#}
+              <video id="cam_video_{{ i }}" class="video-js" preload="auto"></video>
+            </div>
+          {% endfor %}
+        </div>
+{#        d-flex justify-content-center#}
+        <div class="row g-0 mt-2 mb-5">
+          <div class="video-controls d-flex justify-content-center align-items-center">
+            <button type="button" class="vc-play btn btn-primary btn-large">
+              <span class="oi oi-media-play"></span>
+            </button>
+
+            <div class="vc-progress progress mx-2">
+              <div class="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+            </div>
+
+            <div class="vc-time">
+              <span class="vc-current-time">00:00</span> / <span class="vc-duration">00:00</span>
+            </div>
+
+
+          </div>
+
+{#          <div id="video-controls" class="video-js"></div>#}
+        </div>
+
+{#        Frame-based viewer#}
+{#        <div class="d-flex justify-content-center">#}
+{#          {% for i in range(3) %}#}
+{#            <img id="img-cam{{ i }}" class="img-fluid" src="{{ url_for('extract_img.screenshot', path= video_id|safe + '_' + i|safe + '.avi', trial_num=trial.id, frame_num=0, cam_num=0, fps=trial.fps) }}" alt="missing img">#}
+{#          {% endfor %}#}
+{#          <button id="btn-prev_frame" type="button" class="btn btn-secondary"><</button>#}
+{#          <button id="btn-next_frame" type="button" class="btn btn-secondary">></button>#}
+{#        </div>#}
+      </div>
+
+      <div class="tab-pane fade" id="tracking-panel" role="tabpanel" aria-labelledby="tracking-tab">
+        Tracking.
+      </div>
+
+      <div class="tab-pane fade" id="reconstructions-panel" role="tabpanel" aria-labelledby="reconstructions-tab">
+        Reconstructions.
+      </div>
+
+    </div>
+
+  </div>
+
+{% endblock %}
+
+{##}
+{#<nav class="d-flex justify-content-center">#}
+{#  <div class="nav nav-tabs" id="nav-tab" role="tablist">#}
+{#    <button class="nav-link active" id="nav-cam0-tab" data-bs-toggle="tab" data-bs-target="#nav-cam0" type="button" role="tab" aria-controls="nav-cam0" aria-selected="true">Cam 1</button>#}
+{#    <button class="nav-link" id="nav-cam1-tab" data-bs-toggle="tab" data-bs-target="#nav-cam1" type="button" role="tab" aria-controls="nav-cam1" aria-selected="false">Cam 2</button>#}
+{#    <button class="nav-link" id="nav-cam2-tab" data-bs-toggle="tab" data-bs-target="#nav-cam2" type="button" role="tab" aria-controls="nav-cam2" aria-selected="false">Cam 3</button>#}
+{#  </div>#}
+{#</nav>#}
+{#<div class="tab-content d-flex justify-content-center" id="nav-tabContent">#}
+{#  {% for i in range(3) %}#}
+{#    <div class="tab-pane fade {{ 'show active' if i == 0 }}" id="nav-cam{{ i }}" role="tabpanel" aria-labelledby="nav-cam{{ i }}-tab">#}
+{#      <video id="cam_video_{{ i }}" class="video-js vjs-default-skin" controls#}
+{#             preload="auto" width="894" height="894"#}
+{#             data-setup='{ "playbackRates": [0.25, 0.5, 1, 1.5, 2] }'></video>#}
+{#    </div>#}
+{#  {% endfor %}#}
+{#</div>#}
+{##}
+{#Frame-based viewer#}
+{#<div class="d-flex justify-content-center">#}
+{#  {% for i in range(3) %}#}
+{#    <img id="img-cam{{ i }}" class="img-fluid" src="{{ url_for('extract_img.screenshot', path= video_id|safe + '_' + i|safe + '.avi', trial_num=trial.id, frame_num=0, cam_num=0, fps=trial.fps) }}" alt="missing img">#}
+{#  {% endfor %}#}
+{#  <button id="btn-prev_frame" type="button" class="btn btn-secondary"><</button>#}
+{#  <button id="btn-next_frame" type="button" class="btn btn-secondary">></button>#}
+{#</div>#}
+
+{% block scripts %}
+  {% include 'item/_video_js.html' %}
+{% endblock %}
+
