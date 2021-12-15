@@ -12,7 +12,8 @@
   <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='styles.css') }}?v=0">
   <link rel="stylesheet" type="text/css"
         href="{{ url_for('static', filename='open-iconic/font/css/open-iconic-bootstrap.css') }}">
-  <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.10.25/css/jquery.dataTables.min.css">
+  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='datatables.min.css') }}"/>
+  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='video-js-7.17.0.min.css') }}"/>
   {% block css %}
   {% endblock %}
   <title>Wormlab3D - {{ title }}</title>
@@ -38,6 +39,8 @@
 <script src="{{ url_for('static', filename='bootstrap-5.1.0-dist/js/bootstrap.min.js') }}"></script>
 <script src="{{ url_for('static', filename='moment-with-locales.min.js') }}"></script>
 <script src="{{ url_for('static', filename='jquery-3.6.0.min.js') }}"></script>
+<script src="{{ url_for('static', filename='datatables.min.js') }}"></script>
+<script src="{{ url_for('static', filename='video-js-7.17.0.min.js') }}"></script>
 
 {% block scripts %}{% endblock %}
 </body>
