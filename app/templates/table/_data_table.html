@@ -7,11 +7,6 @@
     <tr>
       {% for key, field in doc_view.fields.items() %}
         <th scope="col">{{ field.title }}</th>
-{#        {% if field.type == 'relation' %}#}
-{#          {% for rel_field in field.view_class.fields() %}#}
-{#            <th scope="col">{{ rel_field.title }}</th>#}
-{#          {% endfor %}#}
-{#        {% endif %}#}
       {% endfor %}
     </tr>
     </thead>

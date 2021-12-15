@@ -1,3 +1,6 @@
+{% set table_name=table_name or 'data-table-' + doc_view.collection_name %}
+{% set table_order=table_order or [0, 'asc'] %}
+
 {% macro render_fields(doc_view, prefix) -%}
   {% set prefix = prefix or '' %}
   {% set prefix = prefix + '.' if prefix != '' else '' %}
@@ -5,8 +8,11 @@
     {
     data: "{{ prefix + key }}",
     render: function (data, type, row, meta) {
-    {% if field.type == 'id' %}
-      return data ? data['$oid'] : '';
+      if (data === '' || data === null || data === undefined) {
+        return '';
+      }
+    {% if field.type == 'objectid' %}
+      return DataTable.render.text().filter(data);
     {% elif field.type == 'string' %}
       return DataTable.render.text().filter(data);
     {% elif field.type == 'integer' %}
@@ -36,8 +42,6 @@
   {% endfor %}
 {% endmacro %}
 
-
-
 <script>
     $(document).ready(function () {
         const DataTable = $().DataTable;
@@ -47,10 +51,9 @@
             pageLength: 25,
             // lengthMenu: [ 10, 25, 50, 100 ],
             // dom : '<"row no-gutters"<"col-12 col-md-6"l><"col-12 col-md-6"f>>t<"col-12"p>',
-            {#dom: 'rtilp',#}
             dom: "<'row'<'col-sm-12 col-md-5'i><'col-sm-12 col-md-7'p>>" +
                 "<'row'<'col-sm-12'tr>>" +
-                "<'row'<'col-sm-12 col-md-4 mt-2'l><'col-sm-12 col-md-4 mt-1'><'col-sm-12 col-md-4'p>>", {# B(uttons) #}
+                "<'row'<'col-sm-12 col-md-4 mt-2'l><'col-sm-12 col-md-4 mt-1'><'col-sm-12 col-md-4 mt-2'p>>", {# B(uttons) #}
             stateSave: true,
             stateLoaded: function (settings, data) {
                 $.each(data.columns, function (k, col) {

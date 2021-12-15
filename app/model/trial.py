@@ -15,16 +15,10 @@ class TrialView(DocumentView):
     def document_class(cls):
         return Trial
 
-    # # @classmethod
-    # # @property
-    # def fields(self, prefix: str = '') -> OrderedDict[str, Any]:
-    #     if prefix != '':
-    #         prefix = prefix + NESTED_DOCUMENT_SEPARATOR
-
     def _init_fields(self) -> OrderedDict[str, Dict[str, str]]:
         experiment_view = ExperimentView(
             hide_fields=['_id', 'legacy_id', 'num_trials', 'num_frames'],
-            prefix='experiment'
+            prefix=self.prefix + 'experiment'
         )
 
         return OrderedDict([

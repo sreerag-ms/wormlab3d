@@ -4,7 +4,6 @@ from flask import Flask
 
 # Import api (ajax) blueprints
 from .views.api import bp_api
-from app.model.reconstruction import bp_api_reconstruction
 
 # Import page blueprints
 from .views.page.datasets import bp_datasets

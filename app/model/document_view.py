@@ -57,8 +57,15 @@ class DocumentView(ABC):
 
     def get_choices(self, key: str) -> List[Any]:
         if NESTED_DOCUMENT_SEPARATOR in key:
-            rel_collection, rel_key = key.split('__')
-            return self.fields[rel_collection]['view_class'].get_choices(rel_key)
+            rel_keys = key.split(NESTED_DOCUMENT_SEPARATOR)
+            cols = [rel_keys[0]]
+            vc = self.fields[cols[0]]['view_class']
+            i = 1
+            while len(rel_keys) > 2:
+                vc = vc.fields[NESTED_DOCUMENT_SEPARATOR.join(cols + [rel_keys[i]])]['view_class']
+                rel_keys = rel_keys[1:]
+                i += 1
+            return vc.get_choices(rel_keys[-1])
         return self.document_class.objects.distinct(key)
 
     # @classmethod
@@ -75,8 +82,6 @@ class DocumentView(ABC):
             prefix_idx = prefix_idx + '.'
 
         for i, (key, field) in enumerate(self.fields.items()):
-
-
             label = field['title']
             filter_type = field['filter_type'] if 'filter_type' in field else field['type']
 

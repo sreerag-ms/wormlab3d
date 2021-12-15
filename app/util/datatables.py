@@ -7,7 +7,7 @@ Module to handle conversation between DataTables and MongoDB.
 import json
 import re
 
-from app.util.encoder import DateTimeEncoder
+from app.util.encoder import JSONEncoder
 from app.model import DocumentView
 from wormlab3d import logger
 
@@ -58,18 +58,24 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
         key_as = field_spec['as'] if 'as' in field_spec is not None else key
 
         if '__' in key:
-            rel_collection, rel_key = key.split('__')
-            if rel_collection not in lookups:
-                lookups[rel_collection] = [
-                    {'$lookup': {
-                        'from': rel_collection,
-                        'localField': rel_collection,
-                        'foreignField': '_id',
-                        'as': f'{rel_collection}_doc'
-                    }},
-                    {'$unwind': {'path': f'${rel_collection}_doc'}}
-                ]
-            projects[f'{rel_collection}__{rel_key}'] = f'${rel_collection}_doc.{rel_key}'
+            rel_keys = key.split('__')
+            doc_links = []
+            while len(rel_keys) > 1:
+                rel_collection = rel_keys[0]
+                if rel_collection not in lookups:
+                    lookup_key = '.'.join(doc_links + [rel_collection,])
+                    lookups[lookup_key] = [
+                        {'$lookup': {
+                            'from': rel_collection,
+                            'localField': '.'.join(doc_links + [rel_collection,]),
+                            'foreignField': '_id',
+                            'as': f'{lookup_key}_doc'
+                        }},
+                        {'$unwind': {'path': f'${lookup_key}_doc'}}
+                    ]
+                doc_links.append(f'{rel_collection}_doc')
+                rel_keys = rel_keys[1:]
+            projects[key] = f'${".".join(doc_links)}.{rel_keys[0]}'
 
         elif 'query' in field_spec:
             q = field_spec['query']
@@ -83,16 +89,7 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
                             'localField': '_id',
                             'foreignField': collection_name,
                             'as': lookup_key
-                        }},
-                        # {'$unwind': {'path': f'${q["lookup"]}'}},
-                        # {'$group': {
-                        #     '_id': {'_id': '$_id'},  #, f'_fkid': f'${q["lookup"]}.{collection_name}'},
-                        #     key: agg,
-                        #     'data': {'$first': '$$ROOT'}
-                        # }},
-                        # {'$replaceRoot': {
-                        #     'newRoot': {'$mergeObjects': ['$data', {key_as: f'${key}'}]}
-                        # }}
+                        }}
                     ]
 
                 if q['aggregation'] == 'count':
@@ -123,9 +120,11 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
             #     filter_value = float(filter_value)
             filters[key] = filter_value
         # todo: check more lookups
-    # print(filters)
+    # print('filters', filters)
 
     # Add lookups, project then filter
+    print('lookups', lookups)
+    print('projects', projects)
     for lookup_spec in lookups.values():
         pipeline.extend(lookup_spec)
     pipeline.append({'$project': projects})
@@ -175,6 +174,7 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
             'count': 0
         }
 
+
     # Set draw, recordsTotal, recordsFiltered, data in the response json
     # Optionally set error as well if there is an error.
     response = {
@@ -184,4 +184,4 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
         'recordsFiltered': results['count']
     }
 
-    return json.dumps(response, cls=DateTimeEncoder)
+    return json.dumps(response, cls=JSONEncoder)

@@ -1,6 +1,7 @@
 {% extends '__layout.html' %}
 {% import 'table/_data_table.html' as table %}
 {% import 'table/_details_table.html' as details %}
+{% set table_name="data-table-trial-" + trial.id|string + "-reconstructions" %}
 
 
 {% block content %}
@@ -74,8 +75,8 @@
         </div>
       </div>
 
-      <div class="tab-pane fade" id="reconstructions-panel" role="tabpanel" aria-labelledby="reconstructions-tab">
-        Reconstructions.
+      <div class="tab-pane fade py-2" id="reconstructions-panel" role="tabpanel" aria-labelledby="reconstructions-tab">
+        {{ table.render(reconstruction_view, table_name) }}
       </div>
 
     </div>
@@ -113,6 +114,12 @@
 
 {% block scripts %}
   {% include 'item/_video_js.html' %}
+
+
+  {% with %}
+    {% set doc_view=reconstruction_view %}
+    {% include 'table/_table_js.html' %}
+  {% endwith %}
 
   <script>
       $(document).ready(function () {

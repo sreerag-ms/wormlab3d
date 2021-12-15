@@ -1,67 +1,86 @@
-from flask import Blueprint, request
+from collections import OrderedDict
+from typing import Dict
 
-from app.util.datatables import dt_query
 from app.model.document_view import DocumentView
+from app.model.experiment import ExperimentView
+from app.model.trial import TrialView
 from wormlab3d.data.model import Reconstruction
 
-# Form blueprint
-bp_api_reconstruction = Blueprint('api_reconstruction', __name__)
 
+class ReconstructionView(DocumentView):
+    has_item_view = True
 
-class ReconstructionsView(DocumentView):
+    @classmethod
     @property
-    def fields(self):
-        return [
-            {
-                'key': '_id',
-                'title': 'ID',
-                'type': 'id',
-            },
-            {
-                'key': 'experiment',
-                'title': 'Experiment',
-                'type': 'integer',
-            },
-            {
-                'key': 'trial',
-                'title': 'Trial',
-                'type': 'integer',
-            },
-            {
-                'key': 'start_frame',
-                'title': 'Start frame',
-                'type': 'integer',
-            },
-            {
-                'key': 'end_frame',
-                'title': 'End frame',
-                'type': 'integer',
-            },
-            {
-                'key': 'source',
-                'title': 'Source',
-                'type': 'string',
-            },
-            {
-                'key': 'source_file',
-                'title': 'Source file',
-                'type': 'string',
-            },
-            {
-                'key': 'model',
-                'title': 'Model',
-                'type': 'id',
-            }
-        ]
+    def document_class(cls):
+        return Reconstruction
 
+    def _init_fields(self) -> OrderedDict[str, Dict[str, str]]:
+        # experiment_view = ExperimentView(
+        #     hide_fields=['_id', 'legacy_id', 'num_trials', 'num_frames'],
+        #     prefix='experiment'
+        # )
+        trial_view = TrialView(
+            # hide_fields=['_id', 'legacy_id', 'comments', 'experiment2'],
+            prefix=self.prefix + 'trial'
+        )
 
-@bp_api_reconstruction.route('/ajax/reconstructions', methods=['GET'])
-def ajax_reconstructions():
-    """
-    :return: str
-        A json string containing the queried result and parameters required by DataTables.
-    """
-
-    # Parameters are sent via the URL from DataTables,
-    # which can be obtained with request.args.
-    return dt_query(request.args, Reconstruction)
+        return OrderedDict([
+            (
+                self.prefix + '_id', {
+                    'title': 'ID',
+                    'type': 'objectid',
+                },
+            ),
+            # (
+            #     self.prefix + 'experiment', {
+            #         'title': 'Experiment',
+            #         'type': 'relation',
+            #         'filter_type': 'integer',
+            #         'view_class': experiment_view,
+            #     },
+            # ),
+            # *experiment_view.fields.items(),
+            (
+                self.prefix + 'trial', {
+                    'title': 'Trial',
+                    'type': 'relation',
+                    'filter_type': 'integer',
+                    'view_class': trial_view,
+                },
+            ),
+            *trial_view.fields.items(),
+            (
+                self.prefix + 'start_frame', {
+                    'title': 'Start frame',
+                    'type': 'integer',
+                },
+            ),
+            (
+                self.prefix + 'end_frame', {
+                    'title': 'End frame',
+                    'type': 'integer',
+                },
+            ),
+            (
+                self.prefix + 'source', {
+                    'title': 'Source',
+                    'type': 'string',
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'source_file', {
+                    'title': 'Source file',
+                    'type': 'string',
+                },
+            ),
+            (
+                self.prefix + 'model', {
+                    'title': 'Model',
+                    'type': 'relation',
+                    'filter_type': 'integer',
+                    # 'view_class': trial_view,
+                },
+            ),
+        ])
