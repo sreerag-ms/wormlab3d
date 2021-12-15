@@ -6,11 +6,10 @@
         <th width="40%">{{ field.title }}</th>
         {% if key == '_id' %}
           <td><a href="/{{ doc_view.collection_name }}/{{ doc.id }}">{{ doc.id }}</a></td>
-{#          <td>{{ doc[key] }}</td>#}
         {% elif doc[key] is none %}
           <td></td>
         {% elif field.type == 'integer' %}
-          <td>{{ '{:,}'.format(doc[key]) }}</td>
+            <td>{{ '{:,}'.format(doc[key]) }}</td>
         {% elif field.type == 'float' %}
           <td>{{ ('{:,.' + field.precision|string + 'f}').format(doc[key]) }}</td>
         {% elif field.type == 'date' %}

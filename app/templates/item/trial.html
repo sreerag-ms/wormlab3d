@@ -171,6 +171,9 @@
           // Remember active tab
           $('button[data-bs-toggle="tab"]').on('shown.bs.tab', function (e) {
               localStorage.setItem('activeTab', $(e.target).data('bs-target'));
+
+              // Resize data tables
+              $($.fn.dataTable.tables(true)).DataTable().columns.adjust();
           });
           let activeTab = localStorage.getItem('activeTab');
           if (activeTab) {

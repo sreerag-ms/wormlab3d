@@ -85,4 +85,14 @@ class TrialView(DocumentView):
                     'filter_type': 'none'
                 },
             ),
+            (
+                self.prefix + 'num_reconstructions', {
+                    'title': 'Num. Reconstructions',
+                    'type': 'integer',
+                    'query': {
+                        'lookup': 'reconstruction',
+                        'aggregation': 'count'
+                    }
+                },
+            ),
         ])

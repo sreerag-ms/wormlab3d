@@ -130,3 +130,8 @@ class Trial(Document):
             )
 
         return self.triplet_reader
+
+    @property
+    def num_reconstructions(self):
+        from wormlab3d.data.model import Reconstruction
+        return Reconstruction.objects(trial=self).count()
