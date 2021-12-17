@@ -1,0 +1,67 @@
+{% extends '__layout.html' %}
+{% import 'table/_data_table.html' as table %}
+{% import 'table/_details_table.html' as details %}
+
+
+{% block content %}
+  <div class="row">
+    <div class="col-sm-12 col-md-4">
+      {{ details.render(reconstruction_view, reconstruction) }}
+    </div>
+    <div class="col-sm-12 col-md-4">
+      <h3>Trial</h3>
+      {{ details.render(trial_view, reconstruction.trial) }}
+    </div>
+    <div class="col-sm-12 col-md-4">
+      <h3>Experiment</h3>
+      {{ details.render(experiment_view, reconstruction.trial.experiment) }}
+    </div>
+  </div>
+
+  <div class="row">
+
+    <ul class="nav nav-tabs" id="trial-tabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="videos-tab" data-bs-toggle="tab" data-bs-target="#videos-panel"
+                type="button" role="tab" aria-controls="videos" aria-selected="true">Videos
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tracking-tab" data-bs-toggle="tab" data-bs-target="#tracking-panel" type="button"
+                role="tab" aria-controls="profile" aria-selected="false">Tracking
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="reconstructions-tab" data-bs-toggle="tab" data-bs-target="#reconstructions-panel"
+                type="button" role="tab" aria-controls="reconstructions" aria-selected="false">Reconstructions
+        </button>
+      </li>
+    </ul>
+    <div class="tab-content" id="trial-panels">
+
+      <div class="tab-pane fade show active" id="videos-panel" role="tabpanel" aria-labelledby="videos-tab">
+
+      </div>
+
+      <div class="tab-pane fade" id="tracking-panel" role="tabpanel" aria-labelledby="tracking-tab">
+
+      </div>
+
+      <div class="tab-pane fade py-2" id="reconstructions-panel" role="tabpanel" aria-labelledby="reconstructions-tab">
+      </div>
+
+    </div>
+
+  </div>
+
+{% endblock %}
+
+
+{% block scripts %}
+{#  {% with %}#}
+{#    {% set doc_view=reconstruction_view %}#}
+{#    {% include 'table/_table_js.html' %}#}
+{#  {% endwith %}#}
+
+{% endblock %}
+

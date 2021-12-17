@@ -2,7 +2,9 @@ import os
 
 from flask import Blueprint, render_template
 
+from app.model import ExperimentView, TrialView
 from app.model.reconstruction import ReconstructionView
+from wormlab3d.data.model import Reconstruction
 
 bp_reconstructions = Blueprint('reconstructions', __name__, url_prefix='/reconstruction')
 
@@ -17,12 +19,6 @@ def reconstructions():
         active=active,
         doc_view=ReconstructionView(
             hide_fields=[
-                # 'experiment*',
-                # 'experiment___id',
-                # 'experiment__legacy_id',
-                # 'experiment__worm_length',
-                # 'experiment__num_trials',
-                # 'experiment__num_frames',
                 'trial___id',
                 'trial__legacy_id',
                 'trial__trial_num',
@@ -36,4 +32,31 @@ def reconstructions():
                 'trial__experiment__num_frames',
             ]
         ),
+    )
+
+
+@bp_reconstructions.route('/<string:_id>', methods=['GET'])
+def reconstruction_instance(_id):
+    active = 'reconstruction'
+    os.environ['script_name'] = active
+    reconstruction = Reconstruction.objects.get(id=_id)
+    reconstruction_view = ReconstructionView(
+        hide_fields=['_id', 'trial*'],
+        field_values={'experiment': _id}
+    )
+    experiment_view = ExperimentView(
+        hide_fields=['num_frames', 'legacy_id']
+    )
+    trial_view = TrialView(
+        hide_fields=['num_frames', 'legacy_id', 'experiment*']
+    )
+
+    return render_template(
+        'item/reconstruction.html',
+        title=f'Reconstruction #{_id}',
+        active=active,
+        reconstruction=reconstruction,
+        reconstruction_view=reconstruction_view,
+        trial_view=trial_view,
+        experiment_view=experiment_view,
     )
