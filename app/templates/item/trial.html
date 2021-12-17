@@ -67,7 +67,15 @@
               <span class="visually-hidden">Loading...</span>
             </div>
           </div>
-          <div id="tracking-plots" class="row g-1">
+          <div class="row g-1">
+            <div id="tracking-plot-3d" class="col"></div>
+          </div>
+          <div class="row g-1">
+            <div id="tracking-plot-xy" class="col"></div>
+            <div id="tracking-plot-xz" class="col"></div>
+            <div id="tracking-plot-yz" class="col"></div>
+          </div>
+          <div class="row g-1">
             <div id="tracking-plot-x" class="col"></div>
             <div id="tracking-plot-y" class="col"></div>
             <div id="tracking-plot-z" class="col"></div>
@@ -124,47 +132,114 @@
   <script>
       $(document).ready(function () {
           let timestamps;
+          let timestamps_ms;
           let centres_3d;
+          let plot_config = {
+              displaylogo: false,
+              responsive: true,
+              modeBarButtonsToRemove: ['toImage']
+          };
 
-          function plot_tracking(idx) {
+          function plot_tracking_single(idx) {
               let xyz = ['x', 'y', 'z'][idx];
               let data = [{
-                  x: timestamps,
+                  x: timestamps_ms,
                   y: centres_3d[idx],
+                  type: 'scattergl',
+                  mode: 'markers',
+                  marker: {
+                      size: 2,
+                      color: timestamps,
+                      colorscale: 'Jet'
+                  },
               }];
               let layout = {
                   title: xyz,
                   margin: {t: 50},
                   xaxis: {
                       title: 'Time (s)',
-                      type: 'time'
+                      type: 'date',
+                      tickformat: '%M:%S'
                   },
                   yaxis: {
                       title: 'Position (mm)',
                   }
               };
-              let config = {
-                  displaylogo: false,
-                  responsive: true,
-                  modeBarButtonsToRemove: ['toImage']
-              };
 
-              Plotly.newPlot('tracking-plot-' + xyz, data, layout, config);
+              Plotly.newPlot('tracking-plot-' + xyz, data, layout, plot_config);
+          }
+
+          function plot_tracking_pairs(idx0, idx1) {
+              let xyz0 = ['x', 'y', 'z'][idx0];
+              let xyz1 = ['x', 'y', 'z'][idx1];
+              let pair = xyz0 + xyz1;
+              let data = [{
+                  x: centres_3d[idx0],
+                  y: centres_3d[idx1],
+                  type: 'scattergl',
+                  mode: 'markers',
+                  marker: {
+                      size: 2,
+                      color: timestamps,
+                      colorscale: 'Jet'
+                  },
+              }];
+              let layout = {
+                  title: pair,
+                  margin: {t: 50},
+                  xaxis: {
+                      title: xyz0,
+                  },
+                  yaxis: {
+                      title: xyz1
+                  }
+              };
+              Plotly.newPlot('tracking-plot-' + pair, data, layout, plot_config);
+          }
+
+          function plot_tracking_3d() {
+              let data = [{
+                  x: centres_3d[0],
+                  y: centres_3d[1],
+                  z: centres_3d[2],
+                  type: 'scatter3d',
+                  mode: 'markers',
+                  marker: {
+                      size: 2,
+                      color: timestamps,
+                      colorscale: 'Jet'
+                  },
+              }];
+              let layout = {
+                  margin: {t: 50},
+                  xaxis: {
+                      title: 'x',
+                  },
+                  yaxis: {
+                      title: 'y'
+                  },
+                  zaxis: {
+                      title: 'z'
+                  }
+              };
+              Plotly.newPlot('tracking-plot-3d', data, layout, plot_config);
           }
 
 
           $('#tracking-tab').one('show.bs.tab', function () {
               console.log('loading tracking plot');
               $.getJSON('{{ url_for('api.get_tracking_data', _id=trial.id) }}', function (data) {
-                  console.log('loaded!');
-                  console.log(data);
                   timestamps = data['timestamps'];
+                  timestamps_ms = timestamps.map(function(t) { return t * 1000 });
                   centres_3d = data['centres_3d'];
                   $('#tracking-panel .spinner-border').hide();
-
+                  plot_tracking_3d();
+                  plot_tracking_pairs(0,1);
+                  plot_tracking_pairs(0,2);
+                  plot_tracking_pairs(1,2);
                   for (let i = 0; i < 3; i++) {
-                      plot_tracking(i);
-                  }
+                      plot_tracking_single(i);
+                   }
               });
           });
 
