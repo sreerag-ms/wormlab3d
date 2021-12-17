@@ -99,6 +99,9 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
                 else:
                     raise ValueError(f'Unrecognised aggregation value: {q["aggregation"]}.')
 
+            elif 'operation' in q:
+                projects[key_as] = {f'${q["operation"]}': [f'${f}' for f in q['fields']]}
+
             else:
                 raise ValueError(f'Unrecognised query: {q}.')
 

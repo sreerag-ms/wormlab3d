@@ -63,6 +63,16 @@ class TrialView(DocumentView):
                 },
             ),
             (
+                self.prefix + 'duration', {
+                    'title': 'Duration',
+                    'type': 'time',
+                    'query': {
+                        'operation': 'multiply',
+                        'fields': ['num_frames', 'fps']
+                    },
+                },
+            ),
+            (
                 self.prefix + 'fps', {
                     'title': 'FPS',
                     'type': 'float',

@@ -24,11 +24,14 @@
     {% elif field.type == 'relation' %}
       return '<a href="/{{ key }}/' + data + '">' + data + '</a>';
     {% elif field.type == 'date' %}
-      // If display or filter data is requested, format the date
       if (type === 'display' || type === 'filter') {
         return moment(data).format("DD-MMM-YYYY");
       }
-      // If sort/type data is requested, parse the date object into a timestamp
+      return data;
+    {% elif field.type == 'time' %}
+      if (type === 'display' || type === 'filter') {
+        return moment(data).format("mm:ss");
+      }
       return data;
     {% endif %}
     },
@@ -36,9 +39,6 @@
       visible: false,
     {% endif %}
     },
-{#    {% if field.type == 'relation' %}#}
-{#      {{ render_fields(field.view_class, field.key) }}#}
-{#    {% endif %}#}
   {% endfor %}
 {% endmacro %}
 
