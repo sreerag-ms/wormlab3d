@@ -109,10 +109,12 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
             projects[key_as] = f'${key}'
 
     # Filters
+    matches = {}
     filters = {}
     for i, (key, field_spec) in enumerate(doc_view.fields.items()):
         filter_value = request.get(f'columns[{i}][search][value]')
         if filter_value != '':
+            # print(key, filter_value, field_spec)
             if field_spec['type'] == 'integer':
                 filter_value = int(filter_value)
             elif field_spec['type'] == 'float':
@@ -121,13 +123,20 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
                 filter_value = int(filter_value)
             # elif field_spec['type'] == 'float':
             #     filter_value = float(filter_value)
-            filters[key] = filter_value
+
+            if 'early_match' in field_spec and field_spec['early_match'] == True:
+                matches[key] = filter_value
+            else:
+                filters[key] = filter_value
         # todo: check more lookups
     # print('filters', filters)
 
-    # Add lookups, project then filter
+    # Add matches, lookups, project then filter
+    print('matches', matches)
     print('lookups', lookups)
     print('projects', projects)
+    if len(matches):
+        pipeline.append({'$match': matches})
     for lookup_spec in lookups.values():
         pipeline.extend(lookup_spec)
     pipeline.append({'$project': projects})
@@ -153,7 +162,7 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
 
     # Range of records to retrieve
     start_idx = int(request.get('start'))
-    end_idx = start_idx + int(request.get('length'))
+    length = int(request.get('length'))
 
     # Return a count of all filtered results plus a slice of full results
     pipeline += [
@@ -164,7 +173,7 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
         }},
         {'$project': {
             'count': 1,
-            'rows': {'$slice': ['$results', start_idx, end_idx]}
+            'rows': {'$slice': ['$results', start_idx, length]}
         }}
     ]
     logger.debug(pipeline)
@@ -177,13 +186,20 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
             'count': 0
         }
 
+    # Fetch total count from collection metadata
+    cursor = doc_view.document_class.objects.aggregate([
+        {'$collStats': { 'count': {} }}
+    ])
+    try:
+        total_records = list(cursor)[0]['count']
+    except IndexError:
+        total_records = 0
 
     # Set draw, recordsTotal, recordsFiltered, data in the response json
-    # Optionally set error as well if there is an error.
     response = {
         'data': results['rows'],
         'draw': int(request.get('draw')),  # Cast to int to avoid XSS
-        'recordsTotal': doc_view.document_class.objects.count(),
+        'recordsTotal': total_records,
         'recordsFiltered': results['count']
     }
 
