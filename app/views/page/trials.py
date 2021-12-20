@@ -1,10 +1,8 @@
 import os
 
-from flask import Blueprint, render_template
-
-from app.model import ReconstructionView
+from app.model import ReconstructionView, TrialView, FrameView
 from app.views.api import ExperimentView
-from app.model.trial import TrialView
+from flask import Blueprint, render_template
 from wormlab3d.data.model import Trial
 
 bp_trials = Blueprint('trials', __name__, url_prefix='/trial')
@@ -36,6 +34,10 @@ def trial_instance(_id):
     experiment_view = ExperimentView(
         hide_fields=['num_frames', 'legacy_id']
     )
+    frame_view = FrameView(
+        hide_fields=['trial*'],
+        field_values={'trial': _id}
+    )
     reconstruction_view = ReconstructionView(
         hide_fields=['trial*'],
         field_values={'trial': _id}
@@ -48,5 +50,6 @@ def trial_instance(_id):
         trial=trial,
         trial_view=trial_view,
         experiment_view=experiment_view,
+        frame_view=frame_view,
         reconstruction_view=reconstruction_view,
     )
