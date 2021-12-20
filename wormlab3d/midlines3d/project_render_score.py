@@ -14,7 +14,7 @@ def avg_pool_2d(grad, oob_grad_val=0., mode='constant'):
     return ag
 
 
-def render_points(points, blur_sigmas):
+def render_points(points, blur_sigmas, blur_intensities, blur_sigmas_cameras_sfs: torch.Tensor, blur_intensities_cameras_sfs: torch.Tensor):
     n_worm_points = points.shape[2]
     bs = points.shape[0]
     device = points.device
@@ -28,6 +28,8 @@ def render_points(points, blur_sigmas):
 
     # Reshape blur sigmas
     blur_sigmas = blur_sigmas.repeat_interleave(3, 0)[:, :, None, None]
+    sfs = blur_sigmas_cameras_sfs.reshape(bs*3)[:, None, None, None]
+    blur_sigmas = blur_sigmas * sfs
 
     # Build x and y grids
     grid = torch.linspace(-1.0, 1.0, PREPARED_IMAGE_SIZE[0], dtype=torch.float32, device=device)
@@ -43,13 +45,23 @@ def render_points(points, blur_sigmas):
     blobs = torch.exp(-(dst / (2 * blur_sigmas**2)))
 
     # Mask is the sum of the blobs
-    masks = blobs.sum(dim=1)
+    # masks = blobs.sum(dim=1)
+
+    # Mask is sum of blobs where each blob is scaled by its blur_intensity
+    # print('blur_intensities.shape', blur_intensities.shape)
+    blur_intensities = blur_intensities.repeat_interleave(3, 0)[:, :, None, None]
+    sfs = blur_intensities_cameras_sfs.reshape(bs*3)[:, None, None, None]
+    blur_intensities = blur_intensities * sfs
+
+    masks = (blobs * blur_intensities).sum(dim=1)
 
     # Normalise
     masks = masks.clamp(max=1.)
-    sum_ = masks.sum(dim=(1, 2), keepdim=True)
-    sum_ = sum_.clamp(min=1e-8)
-    masks_normed = masks / sum_
+    # print(masks.shape)
+    # exit()
+    # sum_ = masks.sum(dim=(1, 2), keepdim=True)
+    # sum_ = sum_.clamp(min=1e-8)
+    masks_normed = masks   #/ sum_
 
     # Reshape
     masks_normed = masks_normed.reshape(bs, 3, *PREPARED_IMAGE_SIZE)
@@ -94,7 +106,9 @@ def render_curve(points, blur_sigmas):
     # Blur line
     d = torch.sqrt(d + 1e-6)
     sig = (blur_sigmas[:, 1:] + blur_sigmas[:, :-1]) / 2
-    lines = torch.exp(-d / (sig**2)[:, :, None, None])
+    sig = sig.repeat_interleave(3, 0)[:, :, None, None]
+    lines = torch.exp(-d / (sig**2))
+    # lines = torch.exp(-d / (sig**2)[:, :, None, None])
     # lines = torch.exp(-(dst / (2 * blur_sigmas**2)[:, :, None, None]))
 
     # Sum the lines together to make the render
@@ -123,22 +137,45 @@ class ProjectRenderScoreModel(nn.Module):
             cloud_points: torch.Tensor,
             masks_target: torch.Tensor,
             blur_sigmas_cloud: torch.Tensor,
+            blur_intensities_cloud: torch.Tensor,
+            blur_sigmas_cameras_sfs: torch.Tensor,
+            blur_intensities_cameras_sfs: torch.Tensor,
             points_3d_base: torch.Tensor,
             points_2d_base: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # Render the point cloud
         cloud_points_2d = self._project_to_2d(cam_coeffs, cloud_points, points_3d_base, points_2d_base)
-        masks_cloud, blobs = render_points(cloud_points_2d, blur_sigmas_cloud)
+        masks_cloud, blobs = render_points(cloud_points_2d, blur_sigmas_cloud, blur_intensities_cloud, blur_sigmas_cameras_sfs, blur_intensities_cameras_sfs)
+        # print('\n\n')
+        # print('cloud_points_2d.shape', cloud_points_2d.shape)
+        # print('masks_cloud.shape', masks_cloud.shape)
+        # print('masks_cloud.sum(dim=(2,3)).shape', masks_cloud.sum(dim=(2,3)).shape)
+        # print('masks_cloud.sum(dim=(2,3))', masks_cloud.sum(dim=(2,3)))
+        # print('blobs.shape', blobs.shape)
 
         # Normalise blobs
-        sum_ = blobs.sum(dim=(2, 3), keepdim=True)
+        # sum_ = blobs.sum(dim=(2, 3), keepdim=True)
+        sum_ = blobs.amax(dim=(2, 3), keepdim=True)
         sum_ = sum_.clamp(min=1e-8)
         blobs_normed = blobs / sum_
+        # print('blobs_normed.shape', blobs_normed.shape)
+        # print('masks_target.shape', masks_target.shape)
+        # print('(blobs_normed * masks_target.unsqueeze(2)).sum(dim=(3, 4)).shape', (blobs_normed * masks_target.unsqueeze(2)).sum(dim=(3, 4)).shape)
+        # exit()
 
         # Calculate points scores
         cloud_points_scores = (blobs_normed * masks_target.unsqueeze(2)).sum(dim=(3, 4)).mean(dim=1)
+        # print('cloud_points_scores', cloud_points_scores.shape, cloud_points_scores.sum())
+        # blobs_target_overlaps = (blobs_normed * masks_target.unsqueeze(2)).sum(dim=(3, 4))
+        # overlap_means = blobs_target_overlaps.mean(dim=1)
+        # overlap_vars = blobs_target_overlaps.var(dim=1)
+        # cloud_points_scores = torch.log(1+overlap_means) - torch.log(1+overlap_vars)
+        # cloud_points_scores = (blobs_normed * masks_target.unsqueeze(2)).sum(dim=(3, 4)).mean(dim=1)
+        # cloud_points_scores = (blobs_normed * masks_target.unsqueeze(2)).sum(dim=(3, 4)).prod(dim=1)
+        # cloud_points_scores = (blobs_normed * masks_target.unsqueeze(2)).amax(dim=(3, 4)).prod(dim=1)
+        # cloud_points_scores = (blobs_normed * masks_target).sum(dim=(3, 4)).mean(dim=1)
 
-        return masks_cloud, cloud_points_scores
+        return masks_cloud, cloud_points_2d, cloud_points_scores
 
     def forward_curve(
             self,

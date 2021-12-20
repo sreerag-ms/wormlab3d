@@ -12,7 +12,9 @@ class RuntimeArgs(BaseArgs):
             gpu_only: bool = False,
             cpu_only: bool = False,
             checkpoint_every_n_steps: int = -1,
+            checkpoint_every_n_frames: int = 1,
             plot_every_n_steps: int = -1,
+            plot_every_n_frames: int = -1,
             plot_n_examples: int = 1,
             save_plots: bool = False,
             **kwargs
@@ -22,7 +24,9 @@ class RuntimeArgs(BaseArgs):
         self.gpu_only = gpu_only
         self.cpu_only = cpu_only
         self.checkpoint_every_n_steps = checkpoint_every_n_steps
+        self.checkpoint_every_n_frames = checkpoint_every_n_frames
         self.plot_every_n_steps = plot_every_n_steps
+        self.plot_every_n_frames = plot_every_n_frames
         self.plot_n_examples = plot_n_examples
         self.save_plots = save_plots
 
@@ -46,8 +50,12 @@ class RuntimeArgs(BaseArgs):
                            help='Only run on CPU. Otherwise will use GPU if available.')
         group.add_argument('--checkpoint-every-n-steps', type=int, default=-1,
                            help='Save a checkpoint every n steps, -1 turns this off. Default=-1.')
+        group.add_argument('--checkpoint-every-n-frames', type=int, default=1,
+                           help='Save a checkpoint every n frames, -1 turns this off. Default=1.')
         group.add_argument('--plot-every-n-steps', type=int, default=-1,
                            help='Plot example inputs and outputs every n steps, -1 turns this off.')
+        group.add_argument('--plot-every-n-frames', type=int, default=-1,
+                           help='Plot example inputs and outputs every n frames, -1 turns this off.')
         group.add_argument('--plot-n-examples', type=int, default=1,
                            help='Plot this number of examples from the batch at each iteration.')
         group.add_argument('--save-plots', type=str2bool, default=False,

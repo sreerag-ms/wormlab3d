@@ -1,6 +1,6 @@
 from argparse import ArgumentParser
 
-from wormlab3d.midlines3d.args.network_args import ENCODING_MODE_POINTS, ENCODING_MODES
+from wormlab3d.midlines3d.args.network_args import ENCODING_MODE_POINTS, ENCODING_MODES, ENCODING_MODE_MSC
 from wormlab3d.nn.args.base_args import BaseArgs
 from wormlab3d.toolkit.util import str2bool
 
@@ -14,6 +14,7 @@ class ModelArgs(BaseArgs):
             n_cloud_points: int = 1000,
             n_curve_points: int = 50,
             curve_mode: str = ENCODING_MODE_POINTS,
+            ms_curve_depth: int = 5,
             n_curve_basis_fns: int = 4,
             blur_sigmas_cloud_init: float = 0.01,
             blur_sigmas_curve_init: float = 0.1,
@@ -27,7 +28,16 @@ class ModelArgs(BaseArgs):
         self.n_cloud_points = n_cloud_points
         self.n_curve_points = n_curve_points
         self.curve_mode = curve_mode
+        self.ms_curve_depth= ms_curve_depth
         self.n_curve_basis_fns = n_curve_basis_fns
+
+        if curve_mode == ENCODING_MODE_MSC:
+            N = 0
+            for mi in range(ms_curve_depth):
+                N += 2**mi
+            self.n_curve_points = N
+            self.n_cloud_points = 0
+            self.n_curve_basis_fns = 0
 
         # Blur sigmas (controls the size of rendered points)
         self.blur_sigma_masks_cloud_init = blur_sigmas_cloud_init
@@ -54,6 +64,8 @@ class ModelArgs(BaseArgs):
                            help='Number of curve points. Default=50.')
         group.add_argument('--curve-mode', type=str, default=ENCODING_MODE_POINTS, choices=ENCODING_MODES,
                            help='Curve parametrisation mode.')
+        group.add_argument('--ms-curve-depth', type=int, default=5,
+                           help='Depth of multi-scale curves to use. Default=5 (=1,2,4,8,16).')
         group.add_argument('--n-curve-basis-fns', type=int, default=4,
                            help='Number of basis functions to use for basis curve encoding. Default=4.')
         group.add_argument('--blur-sigmas-cloud-init', type=float, default=0.01,
@@ -70,6 +82,7 @@ class ModelArgs(BaseArgs):
             'n_cloud_points': self.n_cloud_points,
             'n_curve_points': self.n_curve_points,
             'curve_mode': self.curve_mode,
+            'ms_curve_depth': self.ms_curve_depth,
             'n_curve_basis_fns': self.n_curve_basis_fns,
             'blur_sigmas_cloud_init': self.blur_sigma_masks_cloud_init,
             'blur_sigmas_curve_init': self.blur_sigma_masks_curve_init,

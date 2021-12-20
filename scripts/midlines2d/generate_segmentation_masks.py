@@ -128,6 +128,7 @@ def generate_2d_segmentation_masks(
             batch.append(masks)
             if len(batch) == frame_batch_size:
                 process_batch()
+                # exit()
 
     # Process any leftovers
     if len(batch) > 0:
@@ -136,6 +137,7 @@ def generate_2d_segmentation_masks(
 
 if __name__ == '__main__':
     generate_2d_segmentation_masks(
-        checkpoint_id='607edc8cd549270c25c73346',
-        frame_batch_size=3  # this is multiplied by 3 for the neural-network batch size
+        trial_id=37,
+        checkpoint_id='6179bc531b40d362d22918a7',
+        frame_batch_size=8  # this is multiplied by 3 for the neural-network batch size
     )

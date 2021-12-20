@@ -11,6 +11,7 @@ class MFModelParameters(Document):
     n_cloud_points = IntField(required=True)
     n_curve_points = IntField(required=True)
     curve_mode = StringField(required=True, choices=ENCODING_MODES)
+    ms_curve_depth = IntField()
     n_curve_basis_fns = IntField()
     blur_sigmas_cloud_init = FloatField()
     blur_sigmas_curve_init = FloatField()

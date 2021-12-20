@@ -34,8 +34,10 @@ class MFCheckpoint(Document):
         """
         return MFCheckpoint(
             cloned_from=self,
+            trial=self.trial,
             masks=self.masks,
             model_params=self.model_params,
+            frame_num=self.frame_num,
             step_cc=self.step_cc,
             step_curve=self.step_curve,
             loss_cc=self.loss_cc,

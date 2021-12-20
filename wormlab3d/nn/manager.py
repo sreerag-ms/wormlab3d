@@ -18,7 +18,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from wormlab3d import logger, LOGS_PATH
+from wormlab3d import logger, LOGS_PATH, ROOT_PATH
 from wormlab3d.data.model.checkpoint import Checkpoint
 from wormlab3d.data.model.network_parameters import *
 from wormlab3d.nn.args import DatasetArgs, NetworkArgs, OptimiserArgs, RuntimeArgs
@@ -80,6 +80,11 @@ class Manager:
 
     @staticmethod
     def get_logs_path(checkpoint: Checkpoint) -> str:
+        if checkpoint.parameters_file is not None:
+            pos = checkpoint.parameters_file.find('checkpoints')
+            pth = ROOT_PATH + '/' + checkpoint.parameters_file[:pos-1]
+            return pth
+
         return LOGS_PATH \
                + f'/{checkpoint.dataset.created:%Y%m%d_%H:%M}_{checkpoint.dataset.id}' \
                + f'/{checkpoint.network_params.created:%Y%m%d_%H:%M}_{checkpoint.network_params.id}'
@@ -234,12 +239,13 @@ class Manager:
 
             # Mean squared error / L2 loss
             if loss_type == LOSS_MSE:
-                def mse(pred, target):
-                    loss = F.mse_loss(pred, target, reduction='sum')
-                    loss = loss / len(pred)  # return loss per-datum so different batch sizes can be compared
-                    return loss
-
-                metrics[loss_type] = mse
+                metrics[loss_type] = nn.MSELoss()
+                # def mse(pred, target):
+                #     loss = F.mse_loss(pred, target, reduction='sum')
+                #     loss = loss / len(pred)  # return loss per-datum so different batch sizes can be compared
+                #     return loss
+                #
+                # metrics[loss_type] = mse
 
             # KL divergence
             elif loss_type == LOSS_KL:
@@ -381,7 +387,9 @@ class Manager:
             checkpoint.runtime_args = to_dict(self.runtime_args)
 
             # Load the network and optimiser parameter states
-            path = f'{self.get_logs_path(prev_checkpoint)}/checkpoints/{prev_checkpoint.id}.chkpt'
+            # path = f'{self.get_logs_path(prev_checkpoint)}/checkpoints/{prev_checkpoint.id}.chkpt'
+            # prev_checkpoint.parameters_file
+            path = ROOT_PATH + '/' + prev_checkpoint.parameters_file
             state = torch.load(path, map_location=self.device)
             self.net.load_state_dict(self._fix_state(state['model_state_dict']), strict=False)
             if self.optimiser_args.algorithm != prev_checkpoint.optimiser_args['algorithm']:
@@ -436,6 +444,8 @@ class Manager:
             'model_state_dict': self.net.state_dict(),
             'optimiser_state_dict': self.optimiser.state_dict(),
         }, path)
+        self.checkpoint.parameters_file = path[len(ROOT_PATH) + 1:]
+        logger.info(f'Saved parameters to "{self.checkpoint.parameters_file}".')
 
         # Replace the current checkpoint-buffer with a clone of the just-saved checkpoint
         self.checkpoint = self.checkpoint.clone()

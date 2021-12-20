@@ -23,6 +23,8 @@ class Checkpoint(Document):
     optimiser_args = DictField()
     runtime_args = DictField()
 
+    parameters_file = StringField()
+
     meta = {
         'ordering': ['-created'],
         'indexes': ['dataset', 'network_params']
