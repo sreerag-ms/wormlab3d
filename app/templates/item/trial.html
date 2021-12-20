@@ -1,7 +1,8 @@
 {% extends '__layout.html' %}
 {% import 'table/_data_table.html' as table %}
 {% import 'table/_details_table.html' as details %}
-{% set table_name="data-table-trial-" + trial.id|string + "-reconstructions" %}
+{% set table_name_frames="data-table-trial-" + trial.id|string + "-frames" %}
+{% set table_name_reconstructions="data-table-trial-" + trial.id|string + "-reconstructions" %}
 
 
 {% block content %}
@@ -26,6 +27,11 @@
       <li class="nav-item" role="presentation">
         <button class="nav-link" id="tracking-tab" data-bs-toggle="tab" data-bs-target="#tracking-panel" type="button"
                 role="tab" aria-controls="profile" aria-selected="false">Tracking
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="frames-tab" data-bs-toggle="tab" data-bs-target="#frames-panel"
+                type="button" role="tab" aria-controls="frames" aria-selected="false">Frames
         </button>
       </li>
       <li class="nav-item" role="presentation">
@@ -83,8 +89,20 @@
         </div>
       </div>
 
+      <div class="tab-pane fade py-2" id="frames-panel" role="tabpanel" aria-labelledby="frames-tab">
+        <div class="row">
+          <div id="frames-table" class="col-md-8">
+            {{ table.render(frame_view, table_name_frames) }}
+          </div>
+          <div id="frame-details" class="col-md-4">
+            <h4>Prepared images</h4>
+            <div class="d-flex flex-column align-items-center"></div>
+          </div>
+        </div>
+      </div>
+
       <div class="tab-pane fade py-2" id="reconstructions-panel" role="tabpanel" aria-labelledby="reconstructions-tab">
-        {{ table.render(reconstruction_view, table_name) }}
+        {{ table.render(reconstruction_view, table_name_reconstruction) }}
       </div>
 
     </div>
@@ -93,39 +111,19 @@
 
 {% endblock %}
 
-{##}
-{#<nav class="d-flex justify-content-center">#}
-{#  <div class="nav nav-tabs" id="nav-tab" role="tablist">#}
-{#    <button class="nav-link active" id="nav-cam0-tab" data-bs-toggle="tab" data-bs-target="#nav-cam0" type="button" role="tab" aria-controls="nav-cam0" aria-selected="true">Cam 1</button>#}
-{#    <button class="nav-link" id="nav-cam1-tab" data-bs-toggle="tab" data-bs-target="#nav-cam1" type="button" role="tab" aria-controls="nav-cam1" aria-selected="false">Cam 2</button>#}
-{#    <button class="nav-link" id="nav-cam2-tab" data-bs-toggle="tab" data-bs-target="#nav-cam2" type="button" role="tab" aria-controls="nav-cam2" aria-selected="false">Cam 3</button>#}
-{#  </div>#}
-{#</nav>#}
-{#<div class="tab-content d-flex justify-content-center" id="nav-tabContent">#}
-{#  {% for i in range(3) %}#}
-{#    <div class="tab-pane fade {{ 'show active' if i == 0 }}" id="nav-cam{{ i }}" role="tabpanel" aria-labelledby="nav-cam{{ i }}-tab">#}
-{#      <video id="cam_video_{{ i }}" class="video-js vjs-default-skin" controls#}
-{#             preload="auto" width="894" height="894"#}
-{#             data-setup='{ "playbackRates": [0.25, 0.5, 1, 1.5, 2] }'></video>#}
-{#    </div>#}
-{#  {% endfor %}#}
-{#</div>#}
-{##}
-{#Frame-based viewer#}
-{#<div class="d-flex justify-content-center">#}
-{#  {% for i in range(3) %}#}
-{#    <img id="img-cam{{ i }}" class="img-fluid" src="{{ url_for('extract_img.screenshot', path= video_id|safe + '_' + i|safe + '.avi', trial_num=trial.id, frame_num=0, cam_num=0, fps=trial.fps) }}" alt="missing img">#}
-{#  {% endfor %}#}
-{#  <button id="btn-prev_frame" type="button" class="btn btn-secondary"><</button>#}
-{#  <button id="btn-next_frame" type="button" class="btn btn-secondary">></button>#}
-{#</div>#}
 
 {% block scripts %}
   {% include 'item/_video_js.html' %}
-
-
+  
+  {% with %}
+    {% set doc_view=frame_view %}
+    {% set table_name=table_name_frames %}
+    {% set table_order=[1, 'asc'] %}
+    {% include 'table/_table_js.html' %}
+  {% endwith %}
   {% with %}
     {% set doc_view=reconstruction_view %}
+    {% set table_name=table_name_reconstruction %}
     {% include 'table/_table_js.html' %}
   {% endwith %}
 
@@ -225,21 +223,22 @@
               Plotly.newPlot('tracking-plot-3d', data, layout, plot_config);
           }
 
-
+          // Load tracking data and draw plots when the tab is activated
           $('#tracking-tab').one('show.bs.tab', function () {
-              console.log('loading tracking plot');
               $.getJSON('{{ url_for('api.get_tracking_data', _id=trial.id) }}', function (data) {
                   timestamps = data['timestamps'];
-                  timestamps_ms = timestamps.map(function(t) { return t * 1000 });
+                  timestamps_ms = timestamps.map(function (t) {
+                      return t * 1000
+                  });
                   centres_3d = data['centres_3d'];
                   $('#tracking-panel .spinner-border').hide();
                   plot_tracking_3d();
-                  plot_tracking_pairs(0,1);
-                  plot_tracking_pairs(0,2);
-                  plot_tracking_pairs(1,2);
+                  plot_tracking_pairs(0, 1);
+                  plot_tracking_pairs(0, 2);
+                  plot_tracking_pairs(1, 2);
                   for (let i = 0; i < 3; i++) {
                       plot_tracking_single(i);
-                   }
+                  }
               });
           });
 
@@ -250,10 +249,35 @@
               // Resize data tables
               $($.fn.dataTable.tables(true)).DataTable().columns.adjust();
           });
+
+          // Restore active tab
           let activeTab = localStorage.getItem('activeTab');
           if (activeTab) {
-              $('button[data-bs-target="'+activeTab+'"]').tab('show');
+              $('button[data-bs-target="' + activeTab + '"]').tab('show');
           }
+
+          // Load frame images on selecting it in the table
+          function load_frame_details(frame_id) {
+              $.getJSON('/api/frame/' + frame_id, function (data) {
+                  let imgs = '';
+                  for (let i = 0; i < data.images.length; i++) {
+                      imgs += '<img src="' + data.images[i] + '" class="mt-2 wm-50"/><br>'
+                  }
+                  $('#frame-details div').html(imgs).show();
+              });
+          }
+
+          $('#{{table_name_frames}} tbody').on('click', 'tr', function () {
+              if ($(this).hasClass('table-primary')) {
+                  $(this).removeClass('table-primary');
+                  $('#frame-details img').remove();
+              } else {
+                  $('#{{table_name_frames}} tr').removeClass('table-primary');
+                  $(this).addClass('table-primary');
+                  const frame_id = $('#{{table_name_frames}}').DataTable({retrieve: true}).row(this).data()._id;
+                  load_frame_details(frame_id)
+              }
+          });
       });
   </script>
 

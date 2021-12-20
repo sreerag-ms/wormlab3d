@@ -33,6 +33,22 @@
         return moment(data).format("mm:ss");
       }
       return data;
+    {% elif field.type == 'array' %}
+      {% if field.type_array == 'string' %}
+        let renderer = DataTable.render.text();
+      {% elif field.type_array == 'integer' %}
+        let renderer = DataTable.render.number(',', '.', 0);
+      {% elif field.type_array == 'float' %}
+        let renderer = DataTable.render.number(',', '.', {{ field.precision }});
+      {% endif %}
+      data = data.map(function(d) {
+      {% if field.type_array == 'string' %}
+        return renderer.filter(d);
+      {% elif field.type_array == 'integer' or field.type_array == 'float' %}
+        return renderer.display(d);
+      {% endif %}
+      });
+      return '[' + data.join(', ') + ']';
     {% endif %}
     },
     {% if key in doc_view.hide_fields %}
@@ -44,8 +60,6 @@
 
 <script>
     $(document).ready(function () {
-        const DataTable = $().DataTable;
-
         let table = $("#{{ table_name }}").DataTable({
             order: [{{ table_order|safe }}],
             pageLength: 25,
@@ -134,7 +148,7 @@
             $("#{{ table_name }}").on('click', 'tr', function () {
                 const id = table.row(this).data()._id;
                 window.location.href = '/{{ doc_view.collection_name }}/' + id;
-            })
+            });
         {% endif %}
     });
 </script>
