@@ -1,0 +1,23 @@
+{% extends '__layout.html' %}
+{% import 'table/_data_table.html' as table %}
+{% import 'table/_details_table.html' as details %}
+{% set table_name="data-table-experiment-" + experiment.id|string + "-trials" %}
+
+{% block content %}
+  <div class="row no-gutters">
+    <div class="col-sm-12 bd-content" class="overflow-auto">
+      {{ details.render(experiment_view, experiment) }}
+
+      <h3>Trials</h3>
+      {{ table.render(trial_view, table_name) }}
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {% with %}
+    {% set doc_view=trial_view %}
+    {% set table_order=[3, 'asc'] %}
+    {% include 'table/_table_js.html' %}
+  {% endwith %}
+{% endblock %}

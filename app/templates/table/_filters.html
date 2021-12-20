@@ -1,0 +1,38 @@
+{% macro render_fields(form) -%}
+  {% for field in form %}
+    {% if field.type in ['CSRFTokenField', 'HiddenField'] %}
+      {{ field() }}
+    {% elif field.type == 'FormField' %}
+      {{ render_fields(field) }}
+    {% else %}
+      <div class="col-md-2 form-floating form-group {% if field.errors %}error{% endif %}">
+        {{ field(placeholder=field.title) }}
+        {{ field.label }}
+      </div>
+    {% endif %}
+  {% endfor %}
+{% endmacro %}
+
+{% macro render(form) -%}
+  <div class="accordion" id="filters-accordion">
+    <div class="accordion-item">
+      <h2 class="accordion-header" id="filters-heading">
+        <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapseOne"
+                aria-expanded="true" aria-controls="collapseOne">
+          Filters
+        </button>
+      </h2>
+      <div id="collapseOne" class="accordion-collapse collapse show" aria-labelledby="filters-heading"
+           data-bs-parent="#filters-accordion">
+        <div class="accordion-body">
+          <form method="POST" action="/" class="filters-form row g-3" novalidate>
+            {{ render_fields(form) }}
+            <div class="col d-flex align-items-end justify-content-end">
+              <button class="btn btn-outline-danger btn-sm reset-filters-btn">Reset</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endmacro %}

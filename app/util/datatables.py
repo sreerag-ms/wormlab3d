@@ -4,16 +4,18 @@ datatables.py
 Module to handle conversation between DataTables and MongoDB.
 """
 
-import re
 import json
+import re
 
-from mongoengine import Document
+from app.util.encoder import JSONEncoder
+from app.model import DocumentView
+from wormlab3d import logger
 
 
-def dt_query(dt_params, document: Document):   # TODO: Inheritance type hinting?
+def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting?
     """
 
-    :param dt_params: ImmutableMultiDict
+    :param request: ImmutableMultiDict
         Direct DataTables to a flask route, then pass in request.args from flask.
 
         Sample parameters dict (not actual data)
@@ -38,56 +40,167 @@ def dt_query(dt_params, document: Document):   # TODO: Inheritance type hinting?
          'search[regex]': 'false',
          'search[value]': '',
          'start': '0'}
-    :param document: Document
-        A MongoEngine Document. For example, the Trial table.
+    :param doc_view: DocumentView
+        A DocumentView. For example, TrialView.
 
     :return output: str
         A json string containing the queried result and parameters required by DataTables.
     """
+    collection_name = doc_view.collection_name
 
-    # Id range of records to retrieve
-    start_id = int(dt_params.get("start"))
-    end_id = start_id + int(dt_params.get("length"))
+    # Build aggregation pipeline
+    pipeline = []
+    lookups = {}
 
-    # Compile regex for sorting
-    order_column = re.compile("order(.+?)column")
-    order_dir = re.compile("order(.+?)dir")
+    # Projects
+    projects = {}
+    for key, field_spec in doc_view.fields.items():
+        key_as = field_spec['as'] if 'as' in field_spec is not None else key
 
-    # Find the value parameter keys that match strings like "order[0][column]" and "order[0][dir]"
-    sort_cols = filter(lambda s: order_column.match(s), dt_params)
-    sort_dirs = filter(lambda s: order_dir.match(s), dt_params)
+        if '__' in key:
+            rel_keys = key.split('__')
+            doc_links = []
+            while len(rel_keys) > 1:
+                rel_collection = rel_keys[0]
+                if rel_collection not in lookups:
+                    lookup_key = '.'.join(doc_links + [rel_collection,])
+                    lookups[lookup_key] = [
+                        {'$lookup': {
+                            'from': rel_collection,
+                            'localField': '.'.join(doc_links + [rel_collection,]),
+                            'foreignField': '_id',
+                            'as': f'{lookup_key}_doc'
+                        }},
+                        {'$unwind': {'path': f'${lookup_key}_doc'}}
+                    ]
+                doc_links.append(f'{rel_collection}_doc')
+                rel_keys = rel_keys[1:]
+            projects[key] = f'${".".join(doc_links)}.{rel_keys[0]}'
 
-    sort_list = []
-    sort_col = next(sort_cols, None)
-    sort_dir = next(sort_dirs, None)
-    while sort_col is not None:
-        sort_val = dt_params.get(sort_col)
-        sort_dir = dt_params.get(sort_dir)  # asc, desc, None
+        elif 'query' in field_spec:
+            q = field_spec['query']
+            if 'lookup' in q:
+                lookup_key = q['lookup']
 
-        # Find the name of the column to be requested from the parameters (the key looks like "columns[0][data]")
-        sort_col_name = dt_params.get(f"columns[{sort_val}][data]")
+                if lookup_key not in lookups:
+                    lookups[lookup_key] = [
+                        {'$lookup': {
+                            'from': lookup_key,
+                            'localField': '_id',
+                            'foreignField': collection_name,
+                            'as': lookup_key
+                        }}
+                    ]
 
-        sort_symbol = "-" if sort_dir == "desc" else "+"
+                if q['aggregation'] == 'count':
+                    projects[key_as] = {'$size': f'${lookup_key}'}
+                elif q['aggregation'] == 'sum':
+                    projects[key_as] = {'$sum': f'${lookup_key}.{q["field"]}'}
+                else:
+                    raise ValueError(f'Unrecognised aggregation value: {q["aggregation"]}.')
 
-        # Form the column sorting string and append it to the list
-        sort_list.append(f"{sort_symbol}{sort_col_name}")
+            elif 'operation' in q:
+                projects[key_as] = {f'${q["operation"]}': [f'${f}' for f in q['fields']]}
 
-        # Go to next sort column
-        sort_col = next(sort_cols, None)
-        sort_dir = next(sort_dirs, None)
+            else:
+                raise ValueError(f'Unrecognised query: {q}.')
 
-    # Form the query set
-    ordered_queryset = document.objects.order_by(*sort_list)
-    # filtered_queryset = ordered_queryset.filter()   # TODO: Implement
-    num_matching_records = ordered_queryset.count()
-    queryset = ordered_queryset[start_id:end_id]
+        else:
+            projects[key_as] = f'${key}'
 
-    # Set draw, recordsTotal, recordsFilered, data in the response json
-    # Optionally set error as well if there is an error.
-    response = {"data": json.loads(queryset.to_json()),
-                "draw": int(dt_params.get("draw")),  # Cast to int to avoid XSS
-                "recordsTotal": document.objects.count(),
-                "recordsFiltered": num_matching_records
-                }
+    # Filters
+    matches = {}
+    filters = {}
+    for i, (key, field_spec) in enumerate(doc_view.fields.items()):
+        filter_value = request.get(f'columns[{i}][search][value]')
+        if filter_value != '':
+            # print(key, filter_value, field_spec)
+            if field_spec['type'] == 'integer':
+                filter_value = int(filter_value)
+            elif field_spec['type'] == 'float':
+                filter_value = float(filter_value)
+            elif field_spec['type'] == 'relation':
+                filter_value = int(filter_value)
+            # elif field_spec['type'] == 'float':
+            #     filter_value = float(filter_value)
 
-    return json.dumps(response)
+            if 'early_match' in field_spec and field_spec['early_match'] == True:
+                matches[key] = filter_value
+            else:
+                filters[key] = filter_value
+        # todo: check more lookups
+    # print('filters', filters)
+
+    # Add matches, lookups, project then filter
+    print('matches', matches)
+    print('lookups', lookups)
+    print('projects', projects)
+    if len(matches):
+        pipeline.append({'$match': matches})
+    for lookup_spec in lookups.values():
+        pipeline.extend(lookup_spec)
+    pipeline.append({'$project': projects})
+    if len(filters):
+        pipeline.append({'$match': filters})
+
+    # Sorts
+    order_column = re.compile('order(.+?)column')
+    order_dir = re.compile('order(.+?)dir')
+
+    # Find the value parameter keys that match strings like 'order[0][column]' and 'order[0][dir]'
+    sort_req_idxs = filter(lambda s: order_column.match(s), request)
+    sort_req_dirs = filter(lambda s: order_dir.match(s), request)
+    sort_keys = [request.get(f'columns[{request.get(k)}][data]') for k in sort_req_idxs]
+    sort_dirs = [-1 if request.get(d) == 'desc' else 1 for d in sort_req_dirs]
+    assert len(sort_keys) == len(sort_dirs), 'Different numbers of sort keys to sort directions received!'
+
+    sorts = {}
+    for k, d in zip(sort_keys, sort_dirs):
+        sorts[k] = d
+    if len(sorts) > 0:
+        pipeline.append({'$sort': sorts})
+
+    # Range of records to retrieve
+    start_idx = int(request.get('start'))
+    length = int(request.get('length'))
+
+    # Return a count of all filtered results plus a slice of full results
+    pipeline += [
+        {'$group': {
+            '_id': None,
+            'count': {'$sum': 1},
+            'results': {'$push': '$$ROOT'}
+        }},
+        {'$project': {
+            'count': 1,
+            'rows': {'$slice': ['$results', start_idx, length]}
+        }}
+    ]
+    logger.debug(pipeline)
+    cursor = doc_view.document_class.objects.aggregate(pipeline)
+    try:
+        results = list(cursor)[0]
+    except IndexError:
+        results = {
+            'rows': [],
+            'count': 0
+        }
+
+    # Fetch total count from collection metadata
+    cursor = doc_view.document_class.objects.aggregate([
+        {'$collStats': { 'count': {} }}
+    ])
+    try:
+        total_records = list(cursor)[0]['count']
+    except IndexError:
+        total_records = 0
+
+    # Set draw, recordsTotal, recordsFiltered, data in the response json
+    response = {
+        'data': results['rows'],
+        'draw': int(request.get('draw')),  # Cast to int to avoid XSS
+        'recordsTotal': total_records,
+        'recordsFiltered': results['count']
+    }
+
+    return json.dumps(response, cls=JSONEncoder)

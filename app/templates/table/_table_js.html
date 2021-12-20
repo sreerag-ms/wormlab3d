@@ -1,0 +1,154 @@
+{% set table_name=table_name or 'data-table-' + doc_view.collection_name %}
+{% set table_order=table_order or [0, 'asc'] %}
+
+{% macro render_fields(doc_view, prefix) -%}
+  {% set prefix = prefix or '' %}
+  {% set prefix = prefix + '.' if prefix != '' else '' %}
+  {% for key, field in doc_view.fields.items() %}
+    {
+    data: "{{ prefix + key }}",
+    render: function (data, type, row, meta) {
+      if (data === '' || data === null || data === undefined) {
+        return '';
+      }
+    {% if field.type == 'objectid' %}
+      return DataTable.render.text().filter(data);
+    {% elif field.type == 'string' %}
+      return DataTable.render.text().filter(data);
+    {% elif field.type == 'integer' %}
+      renderer = DataTable.render.number(',', '.', 0);
+      return renderer.display(data);
+    {% elif field.type == 'float' %}
+      renderer = DataTable.render.number(',', '.', {{ field.precision }});
+      return renderer.display(data);
+    {% elif field.type == 'relation' %}
+      return '<a href="/{{ key }}/' + data + '">' + data + '</a>';
+    {% elif field.type == 'date' %}
+      if (type === 'display' || type === 'filter') {
+        return moment(data).format("DD-MMM-YYYY");
+      }
+      return data;
+    {% elif field.type == 'time' %}
+      if (type === 'display' || type === 'filter') {
+        return moment(data).format("mm:ss");
+      }
+      return data;
+    {% elif field.type == 'array' %}
+      {% if field.type_array == 'string' %}
+        let renderer = DataTable.render.text();
+      {% elif field.type_array == 'integer' %}
+        let renderer = DataTable.render.number(',', '.', 0);
+      {% elif field.type_array == 'float' %}
+        let renderer = DataTable.render.number(',', '.', {{ field.precision }});
+      {% endif %}
+      data = data.map(function(d) {
+      {% if field.type_array == 'string' %}
+        return renderer.filter(d);
+      {% elif field.type_array == 'integer' or field.type_array == 'float' %}
+        return renderer.display(d);
+      {% endif %}
+      });
+      return '[' + data.join(', ') + ']';
+    {% endif %}
+    },
+    {% if key in doc_view.hide_fields %}
+      visible: false,
+    {% endif %}
+    },
+  {% endfor %}
+{% endmacro %}
+
+<script>
+    $(document).ready(function () {
+        let table = $("#{{ table_name }}").DataTable({
+            order: [{{ table_order|safe }}],
+            pageLength: 25,
+            // lengthMenu: [ 10, 25, 50, 100 ],
+            // dom : '<"row no-gutters"<"col-12 col-md-6"l><"col-12 col-md-6"f>>t<"col-12"p>',
+            dom: "<'row'<'col-sm-12 col-md-5'i><'col-sm-12 col-md-7'p>>" +
+                "<'row'<'col-sm-12'tr>>" +
+                "<'row'<'col-sm-12 col-md-4 mt-2'l><'col-sm-12 col-md-4 mt-1'><'col-sm-12 col-md-4 mt-2'p>>", {# B(uttons) #}
+            stateSave: true,
+            stateLoaded: function (settings, data) {
+                $.each(data.columns, function (k, col) {
+                    let dest = $('.filters-form .form-control[data-idx="' + k + '"]');
+                    dest.val(col.search.search);
+                });
+            },
+            stateDuration: 1,
+            scrollX: true,
+            processing: true,
+            serverSide: true,   // Enable server side processing to achieve low loading time pagination/queries
+            ajax: {
+                url: '/api/{{ doc_view.collection_name }}',
+                dataSrc: 'data',
+            },
+            columnDefs: [
+                {targets: '_all', defaultContent: ''},
+            ],
+            columns: [
+                {{ render_fields(doc_view) }}
+{#                {% for field in doc_view.fields %}#}
+{#                    {#}
+{#                        data: "{{ field.key }}",#}
+{#                        render: function (data, type, row, meta) {#}
+{#                            {% if field.type == 'id' %}#}
+{#                                return data ? data['$oid'] : '';#}
+{#                            {% elif field.type == 'string' %}#}
+{#                                return DataTable.render.text().filter(data);#}
+{#                            {% elif field.type == 'integer' %}#}
+{#                                renderer = DataTable.render.number(',', '.', 0);#}
+{#                                return renderer.display(data);#}
+{#                            {% elif field.type == 'float' %}#}
+{#                                renderer = DataTable.render.number(',', '.', {{field.precision}});#}
+{#                                return renderer.display(data);#}
+{#                            {% elif field.type == 'relation' %}#}
+{#                                return "<a href='/{{ field.key }}/" + data + "'>" + data + "</a>";#}
+{#                            {% elif field.type == 'date' %}#}
+{#                                const timestamp = data['$date'];#}
+{#                                // If display or filter data is requested, format the date#}
+{#                                if (type === 'display' || type === 'filter') {#}
+{#                                    return moment(timestamp).format("DD-MMM-YYYY");#}
+{#                                }#}
+{#                                // If sort/type data is requested, parse the date object into a timestamp#}
+{#                                return timestamp;#}
+{#                            {% endif %}#}
+{#                        },#}
+{#                        {% if field.key in doc_view.hide_fields %}#}
+{#                            visible: false,#}
+{#                        {% endif %}#}
+{#                    },#}
+{#                {% endfor %}#}
+            ],
+            searchCols: [
+                {% for key, field in doc_view.fields.items() %}
+                    {% if key in doc_view.field_values %}
+                        {search: '{{ doc_view.field_values[key] }}'},
+                    {% else %}
+                        null,
+                    {% endif %}
+                {% endfor %}
+            ],
+        });
+
+        $('.filters-form .form-control').on('change keyup', function () {
+            table.column($(this).data('idx'))
+                .search($(this).val())
+                .draw();
+        });
+
+        $('.reset-filters-btn').on('click', function (e) {
+            e.preventDefault();
+            let ff = $(this).closest('.filters-form')[0];
+            ff.reset();
+            table.search('').columns().search('').draw();
+        });
+
+        {% if doc_view.has_item_view %}
+            $("#{{ table_name }}").on('click', 'tr', function () {
+                const id = table.row(this).data()._id;
+                window.location.href = '/{{ doc_view.collection_name }}/' + id;
+            });
+        {% endif %}
+    });
+</script>

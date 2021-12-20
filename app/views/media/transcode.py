@@ -2,32 +2,44 @@ import os
 import re
 import subprocess
 
-from flask import Blueprint, Response, jsonify, request, abort
+from flask import Response, jsonify, request, abort
+from mongoengine import DoesNotExist
 
 import app.util.config as config
+from app.views.media import bp_media
+from wormlab3d import CAMERA_IDXS
+from wormlab3d.data.model import Trial
+from wormlab3d.data.util import fix_path
 
-# Form blueprint
-bp_transcode = Blueprint('transcode', __name__)
+
+def _get_video_path(_id: int, cam_idx: int) -> str:
+    try:
+        trial = Trial.objects.get(id=_id)
+    except DoesNotExist:
+        abort(404)
+    if cam_idx not in CAMERA_IDXS:
+        abort(404)
+    path = fix_path(trial.videos[cam_idx])
+    if not os.path.isfile(path):
+        abort(404)
+    return path
 
 
-@bp_transcode.route('/media/<path:path>')
-def media_content(path):
+@bp_media.route('/stream/<int:_id>/<int:cam_idx>')
+def media_content(_id: int, cam_idx: int):
     """
     Retrieve a media file at <path> and transcode it to mp4.
 
     Code taken from https://github.com/derolf/transcoder
     """
-
-    d = os.path.abspath(os.path.join(config.media_folder, path))
-    if not os.path.isfile(d):
-        abort(404)
-    start = request.args.get("start") or 0
+    path = _get_video_path(_id, cam_idx)
+    start = request.args.get('start') or 0
 
     def generate():
-        args = config.ffmpeg_transcode_args["*"]
-        common_options = config.ffmpeg_common_options["*"]
+        args = config.ffmpeg_transcode_args['*']
+        common_options = config.ffmpeg_common_options['*']
 
-        cmdline = config.ffmpeg + args.format(str(start), d, "mp4", "copy") + common_options
+        cmdline = config.ffmpeg + args.format(str(start), path, 'mp4', 'copy') + common_options
         FNULL = open(os.devnull, 'w')
         proc = subprocess.Popen(cmdline.split(), stdout=subprocess.PIPE, stderr=FNULL)
         try:
@@ -41,23 +53,19 @@ def media_content(path):
 
     return Response(response=generate(), status=200, mimetype='video/mp4',
                     headers={'Access-Control-Allow-Origin': '*',
-                             "Content-Type": "video/mp4", "Content-Disposition": "inline",
-                             "Content-Transfer-Enconding": "binary"})
+                             'Content-Type': 'video/mp4', 'Content-Disposition': 'inline',
+                             'Content-Transfer-Enconding': 'binary'})
 
 
-@bp_transcode.route('/media/duration/<path:path>')
-def get_duration(path):
+@bp_media.route('/duration/<int:_id>/<int:cam_idx>')
+def get_duration(_id: int, cam_idx: int):
     """
     Figure out duration of a media file using FFmpeg.
 
     Code taken from https://github.com/derolf/transcoder
     """
-    d = os.path.abspath(os.path.join(config.media_folder, path))
-    if not os.path.isfile(d):
-        abort(404)
-
-    cmdline = f"{config.ffmpeg} -i {d}"
-
+    path = _get_video_path(_id, cam_idx)
+    cmdline = f'{config.ffmpeg} -i {path}'
     duration = -1
     FNULL = open(os.devnull, 'w')
     proc = subprocess.Popen(cmdline.split(), stderr=subprocess.PIPE, stdout=FNULL)

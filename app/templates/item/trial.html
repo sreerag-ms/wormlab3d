@@ -1,0 +1,285 @@
+{% extends '__layout.html' %}
+{% import 'table/_data_table.html' as table %}
+{% import 'table/_details_table.html' as details %}
+{% set table_name_frames="data-table-trial-" + trial.id|string + "-frames" %}
+{% set table_name_reconstructions="data-table-trial-" + trial.id|string + "-reconstructions" %}
+
+
+{% block content %}
+  <div class="row">
+    <div class="col-sm-12 col-md-6">
+      {{ details.render(trial_view, trial) }}
+    </div>
+    <div class="col-sm-12 col-md-6">
+      <h3>Experiment</h3>
+      {{ details.render(experiment_view, trial.experiment) }}
+    </div>
+  </div>
+
+  <div class="row">
+
+    <ul class="nav nav-tabs" id="trial-tabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="videos-tab" data-bs-toggle="tab" data-bs-target="#videos-panel"
+                type="button" role="tab" aria-controls="videos" aria-selected="true">Videos
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tracking-tab" data-bs-toggle="tab" data-bs-target="#tracking-panel" type="button"
+                role="tab" aria-controls="profile" aria-selected="false">Tracking
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="frames-tab" data-bs-toggle="tab" data-bs-target="#frames-panel"
+                type="button" role="tab" aria-controls="frames" aria-selected="false">Frames
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="reconstructions-tab" data-bs-toggle="tab" data-bs-target="#reconstructions-panel"
+                type="button" role="tab" aria-controls="reconstructions" aria-selected="false">Reconstructions
+        </button>
+      </li>
+    </ul>
+    <div class="tab-content" id="trial-panels">
+
+      <div class="tab-pane fade show active" id="videos-panel" role="tabpanel" aria-labelledby="videos-tab">
+        <div class="row g-0">
+          {% for i in range(3) %}
+            <div class="col col-md-4">
+              <video id="cam_video_{{ i }}" class="video-js" preload="auto"></video>
+            </div>
+          {% endfor %}
+        </div>
+        <div class="row g-0 mt-2 mb-5">
+          <div class="video-controls d-flex justify-content-center align-items-center">
+            <button type="button" class="vc-play btn btn-primary btn-large">
+              <span class="oi oi-media-play"></span>
+            </button>
+            <div class="vc-progress progress mx-2">
+              <div class="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0"
+                   aria-valuemax="100"></div>
+            </div>
+            <div class="vc-time">
+              <span class="vc-current-time">00:00</span> / <span class="vc-duration">00:00</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-pane fade" id="tracking-panel" role="tabpanel" aria-labelledby="tracking-tab">
+        <div class="g-0 mt-5 mb-5">
+          <div class="d-flex justify-content-center align-items-center">
+            <div class="spinner-border mt-3" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+          </div>
+          <div class="row g-1">
+            <div id="tracking-plot-3d" class="col"></div>
+          </div>
+          <div class="row g-1">
+            <div id="tracking-plot-xy" class="col"></div>
+            <div id="tracking-plot-xz" class="col"></div>
+            <div id="tracking-plot-yz" class="col"></div>
+          </div>
+          <div class="row g-1">
+            <div id="tracking-plot-x" class="col"></div>
+            <div id="tracking-plot-y" class="col"></div>
+            <div id="tracking-plot-z" class="col"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-pane fade py-2" id="frames-panel" role="tabpanel" aria-labelledby="frames-tab">
+        <div class="row">
+          <div id="frames-table" class="col-md-8">
+            {{ table.render(frame_view, table_name_frames) }}
+          </div>
+          <div id="frame-details" class="col-md-4">
+            <h4>Prepared images</h4>
+            <div class="d-flex flex-column align-items-center"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-pane fade py-2" id="reconstructions-panel" role="tabpanel" aria-labelledby="reconstructions-tab">
+        {{ table.render(reconstruction_view, table_name_reconstruction) }}
+      </div>
+
+    </div>
+
+  </div>
+
+{% endblock %}
+
+
+{% block scripts %}
+  {% include 'item/_video_js.html' %}
+
+  {% with %}
+    {% set doc_view=frame_view %}
+    {% set table_name=table_name_frames %}
+    {% set table_order=[1, 'asc'] %}
+    {% include 'table/_table_js.html' %}
+  {% endwith %}
+  {% with %}
+    {% set doc_view=reconstruction_view %}
+    {% set table_name=table_name_reconstruction %}
+    {% include 'table/_table_js.html' %}
+  {% endwith %}
+
+  <script>
+      $(document).ready(function () {
+          let timestamps;
+          let timestamps_ms;
+          let centres_3d;
+          let plot_config = {
+              displaylogo: false,
+              responsive: true,
+              modeBarButtonsToRemove: ['toImage']
+          };
+
+          function plot_tracking_single(idx) {
+              let xyz = ['x', 'y', 'z'][idx];
+              let data = [{
+                  x: timestamps_ms,
+                  y: centres_3d[idx],
+                  type: 'scattergl',
+                  mode: 'markers',
+                  marker: {
+                      size: 2,
+                      color: timestamps,
+                      colorscale: 'Jet'
+                  },
+              }];
+              let layout = {
+                  title: xyz,
+                  margin: {t: 50},
+                  xaxis: {
+                      title: 'Time (s)',
+                      type: 'date',
+                      tickformat: '%M:%S'
+                  },
+                  yaxis: {
+                      title: 'Position (mm)',
+                  }
+              };
+
+              Plotly.newPlot('tracking-plot-' + xyz, data, layout, plot_config);
+          }
+
+          function plot_tracking_pairs(idx0, idx1) {
+              let xyz0 = ['x', 'y', 'z'][idx0];
+              let xyz1 = ['x', 'y', 'z'][idx1];
+              let pair = xyz0 + xyz1;
+              let data = [{
+                  x: centres_3d[idx0],
+                  y: centres_3d[idx1],
+                  type: 'scattergl',
+                  mode: 'markers',
+                  marker: {
+                      size: 2,
+                      color: timestamps,
+                      colorscale: 'Jet'
+                  },
+              }];
+              let layout = {
+                  title: pair,
+                  margin: {t: 50},
+                  xaxis: {
+                      title: xyz0,
+                  },
+                  yaxis: {
+                      title: xyz1
+                  }
+              };
+              Plotly.newPlot('tracking-plot-' + pair, data, layout, plot_config);
+          }
+
+          function plot_tracking_3d() {
+              let data = [{
+                  x: centres_3d[0],
+                  y: centres_3d[1],
+                  z: centres_3d[2],
+                  type: 'scatter3d',
+                  mode: 'markers',
+                  marker: {
+                      size: 2,
+                      color: timestamps,
+                      colorscale: 'Jet'
+                  },
+              }];
+              let layout = {
+                  margin: {t: 50},
+                  xaxis: {
+                      title: 'x',
+                  },
+                  yaxis: {
+                      title: 'y'
+                  },
+                  zaxis: {
+                      title: 'z'
+                  }
+              };
+              Plotly.newPlot('tracking-plot-3d', data, layout, plot_config);
+          }
+
+          // Load tracking data and draw plots when the tab is activated
+          $('#tracking-tab').one('show.bs.tab', function () {
+              $.getJSON('{{ url_for('api.get_tracking_data', _id=trial.id) }}', function (data) {
+                  timestamps = data['timestamps'];
+                  timestamps_ms = timestamps.map(function (t) {
+                      return t * 1000
+                  });
+                  centres_3d = data['centres_3d'];
+                  $('#tracking-panel .spinner-border').hide();
+                  plot_tracking_3d();
+                  plot_tracking_pairs(0, 1);
+                  plot_tracking_pairs(0, 2);
+                  plot_tracking_pairs(1, 2);
+                  for (let i = 0; i < 3; i++) {
+                      plot_tracking_single(i);
+                  }
+              });
+          });
+
+          // Remember active tab
+          $('button[data-bs-toggle="tab"]').on('shown.bs.tab', function (e) {
+              localStorage.setItem('activeTab', $(e.target).data('bs-target'));
+
+              // Resize data tables
+              $($.fn.dataTable.tables(true)).DataTable().columns.adjust();
+          });
+
+          // Restore active tab
+          let activeTab = localStorage.getItem('activeTab');
+          if (activeTab) {
+              $('button[data-bs-target="' + activeTab + '"]').tab('show');
+          }
+
+          // Load frame images on selecting it in the table
+          function load_frame_details(frame_id) {
+              $.getJSON('/api/frame/' + frame_id, function (data) {
+                  let imgs = '';
+                  for (let i = 0; i < data.images.length; i++) {
+                      imgs += '<img src="' + data.images[i] + '" class="mt-2 wm-50"/><br>'
+                  }
+                  $('#frame-details div').html(imgs).show();
+              });
+          }
+
+          $('#{{table_name_frames}} tbody').on('click', 'tr', function () {
+              if ($(this).hasClass('table-primary')) {
+                  $(this).removeClass('table-primary');
+                  $('#frame-details img').remove();
+              } else {
+                  $('#{{table_name_frames}} tr').removeClass('table-primary');
+                  $(this).addClass('table-primary');
+                  const frame_id = $('#{{table_name_frames}}').DataTable({retrieve: true}).row(this).data()._id;
+                  load_frame_details(frame_id)
+              }
+          });
+      });
+  </script>
+
+{% endblock %}
+

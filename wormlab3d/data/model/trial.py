@@ -130,3 +130,14 @@ class Trial(Document):
             )
 
         return self.triplet_reader
+
+    @property
+    def num_reconstructions(self):
+        from wormlab3d.data.model import Reconstruction
+        return Reconstruction.objects(trial=self).count()
+
+    @property
+    def duration(self):
+        from datetime import datetime
+        dt = datetime.fromtimestamp(round(self.n_frames_min / self.fps))
+        return dt
