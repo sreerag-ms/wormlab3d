@@ -6,10 +6,10 @@ from typing import Dict, Any
 import numpy as np
 from wormlab3d import PREPARED_IMAGE_SIZE, DATA_PATH
 from wormlab3d import logger
-from wormlab3d.data.model import Trial, MFParameters, MFCheckpoint
+from wormlab3d.data.model import MFParameters, MFCheckpoint, Reconstruction
 from wormlab3d.midlines3d.dynamic_cameras import N_CAM_COEFFICIENTS
 from wormlab3d.midlines3d.frame_state import FrameState, BUFFER_NAMES, PARAMETER_NAMES, BINARY_DATA_KEYS
-from wormlab3d.toolkit.util import hash_data, to_numpy
+from wormlab3d.toolkit.util import to_numpy
 
 TRIAL_STATES_PATH = DATA_PATH / 'MF_outputs'
 
@@ -17,14 +17,15 @@ TRIAL_STATES_PATH = DATA_PATH / 'MF_outputs'
 class TrialState:
     def __init__(
             self,
-            trial: Trial,
+            reconstruction: Reconstruction,
             start_frame: int,
             end_frame: int,
             parameters: MFParameters,
     ):
-        self.trial = trial
+        self.reconstruction = reconstruction
+        self.trial = reconstruction.trial
         self.start_frame = start_frame
-        self.end_frame = trial.n_frames_min if end_frame == -1 else end_frame
+        self.end_frame = self.trial.n_frames_min if end_frame == -1 else end_frame
         self.parameters: MFParameters = parameters
         self.states = {}
         self.stats = {}
@@ -45,14 +46,14 @@ class TrialState:
     @property
     def meta(self) -> Dict[str, Any]:
         return {
-            'trial': self.trial.id,
+            'reconstruction': str(self.reconstruction.id),
+            'trial': int(self.trial.id),
             'parameters': str(self.parameters.id),
         }
 
     @property
     def path(self) -> Path:
-        meta_hash = hash_data(self.meta)
-        return TRIAL_STATES_PATH / f'trial_{self.trial.id}' / meta_hash
+        return TRIAL_STATES_PATH / f'trial_{self.trial.id}' / str(self.reconstruction.id)
 
     def _load_state(self) -> bool:
         """

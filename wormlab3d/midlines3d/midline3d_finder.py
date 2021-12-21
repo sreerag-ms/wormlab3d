@@ -66,6 +66,9 @@ class Midline3DFinder:
         # Check the devices
         self.device = self._init_devices()
 
+        # Reconstruction
+        self.reconstruction = self._init_reconstruction()
+
         # Load the trial and initialise trainable parameters
         self._init_trial()
 
@@ -74,9 +77,6 @@ class Midline3DFinder:
 
         # Checkpoint
         self.checkpoint = self._init_checkpoint()
-
-        # Reconstruction
-        self.reconstruction = self._init_reconstruction()
 
         # Plotting
         self.plot_3d_azim = -60
@@ -92,7 +92,7 @@ class Midline3DFinder:
     @staticmethod
     def get_logs_path(checkpoint: MFCheckpoint) -> Path:
         identifiers = {
-            'model_params': str(checkpoint.parameters.id),
+            'parameters': str(checkpoint.parameters.id),
             **to_dict(checkpoint.source_args),
         }
         arg_hash = hash_data(identifiers)
@@ -168,6 +168,41 @@ class Midline3DFinder:
         cd = torch.jit.script(cd)
         return cd
 
+    def _init_reconstruction(self) -> Reconstruction:
+        """
+        Load or create the reconstruction record.
+        """
+        logger.info('Initialising reconstruction.')
+        params = {
+            'trial': int(self.source_args.trial_id),
+            'source': M3D_SOURCE_MF,
+            'mf_parameters': self.parameters
+        }
+        start_frame = self.source_args.start_frame
+
+        # Look for existing reconstruction
+        reconstruction = None
+        try:
+            reconstruction = Reconstruction.objects.get(
+                **params,
+                start_frame__lte=start_frame,
+                end_frame__gte=start_frame
+            )
+            logger.info(f'Loaded reconstruction (id={reconstruction.id}, created={reconstruction.created}).')
+        except DoesNotExist:
+            logger.info(f'No reconstruction record found in database.')
+
+        if reconstruction is None:
+            reconstruction = Reconstruction(
+                **params,
+                start_frame=start_frame,
+                end_frame=start_frame
+            )
+            reconstruction.save()
+            logger.info(f'Saved reconstruction record to database (id={reconstruction.id})')
+
+        return reconstruction
+
     def _init_trial(self):
         """
         Load the trial.
@@ -199,7 +234,7 @@ class Midline3DFinder:
 
         # Prepare trial state
         self.trial_state = TrialState(
-            trial=self.trial,
+            reconstruction=self.reconstruction,
             start_frame=self.source_args.start_frame,
             end_frame=self.source_args.end_frame,
             parameters=self.parameters
@@ -422,41 +457,6 @@ class Midline3DFinder:
             )
 
         return checkpoint
-
-    def _init_reconstruction(self) -> Reconstruction:
-        """
-        Load or create the reconstruction record.
-        """
-        logger.info('Initialising reconstruction.')
-        params = {
-            'trial': self.trial,
-            'source': M3D_SOURCE_MF,
-            'mf_parameters': self.parameters
-        }
-        start_frame = self.source_args.start_frame
-
-        # Look for existing reconstruction
-        reconstruction = None
-        try:
-            reconstruction = Reconstruction.objects.get(
-                **params,
-                start_frame__lte=start_frame,
-                end_frame__gte=start_frame
-            )
-            logger.info(f'Loaded reconstruction (id={reconstruction.id}, created={reconstruction.created}).')
-        except DoesNotExist:
-            logger.info(f'No reconstruction record found in database.')
-
-        if reconstruction is None:
-            reconstruction = Reconstruction(
-                **params,
-                start_frame=start_frame,
-                end_frame=start_frame
-            )
-            reconstruction.save()
-            logger.info(f'Saved reconstruction record to database (id={reconstruction.id})')
-
-        return reconstruction
 
     def _init_tb_logger(self):
         """Initialise the tensorboard writer."""
