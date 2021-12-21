@@ -6,14 +6,13 @@ def train():
     """
     Reconstruct 3D midlines for a trial.
     """
-    runtime_args, source_args, model_args, optimiser_args = parse_arguments()
+    runtime_args, source_args, parameter_args = parse_arguments()
 
     # Construct finder
     manager = Midline3DFinder(
         runtime_args=runtime_args,
         source_args=source_args,
-        model_args=model_args,
-        optimiser_args=optimiser_args
+        parameter_args=parameter_args
     )
 
     # Process the trial

@@ -10,16 +10,26 @@ import dotenv
 ENV = os.getenv('ENV', 'local')
 
 # Set base path to point to the repository root
-ROOT_PATH = str(Path(__file__).parent.parent)
+ROOT_PATH = Path(__file__).parent.parent
 
 # Load environment variables from .env file
-dotenv.load_dotenv(ROOT_PATH + '/.env')
+dotenv.load_dotenv(ROOT_PATH / '.env')
+
+
+def _load_env_path(k: str, default: Path):
+    ep = os.getenv(k)
+    if ep is None:
+        ep = default
+    if ep is not None:
+        ep = Path(ep)
+    return ep
+
 
 # Data paths
-DATA_PATH = ROOT_PATH + '/data'
-ANNEX_PATH = os.getenv('ANNEX_PATH', str(Path(__file__).parent.parent.parent) + '/worm_data')
-WT3D_PATH = os.getenv('WT3D_PATH', str(Path(__file__).parent.parent.parent) + '/3DWT_Data')
-DATASET_CACHE_PATH = DATA_PATH + '/ds_cache'
+DATA_PATH = ROOT_PATH / 'data'
+ANNEX_PATH = _load_env_path('ANNEX_PATH', ROOT_PATH.parent / 'worm_data')
+WT3D_PATH = _load_env_path('WT3D_PATH', ROOT_PATH.parent / '3DWT_Data')
+DATASET_CACHE_PATH = DATA_PATH / 'ds_cache'
 
 # When fetching annexed files on demand, ensure that this much space is always kept free
 MIN_FREE_DISK_SPACE = os.getenv('MIN_FREE_DISK_SPACE', '100G')
@@ -30,7 +40,7 @@ PREPARED_IMAGE_SIZE = (200, 200)
 # Camera indices, for the avoidance of doubt
 CAMERA_IDXS = [0, 1, 2]
 
-# Worm length in terms of number of coordinates/sections
+# Worm length in terms of number of coordinates/sections. todo: remove
 # N_WORM_POINTS = 128
 N_WORM_POINTS = 50
 # N_WORM_POINTS = 3
@@ -41,6 +51,8 @@ START_TIMESTAMP = time.strftime('%Y%m%d_%H%M')
 # Number of parallel workers to use for tasks
 N_WORKERS = os.getenv('N_WORKERS', 8)
 
+# PyTorch to use JIT where possible
+PYTORCH_JIT = os.getenv('PYTORCH_JIT', 1)
 
 # || ------------------------------ DATABASE ------------------------------- ||
 
@@ -57,10 +69,10 @@ APP_PORT = os.getenv('APP_PORT')
 
 # || -------------------------------- LOGS --------------------------------- ||
 
-cwd = os.getcwd()
-dir_name = os.path.dirname(sys.argv[0]).replace(cwd, '').lstrip('/')
-SCRIPT_PATH = (cwd + '/' + dir_name).rstrip('/')
-LOGS_PATH = ROOT_PATH + '/logs' + SCRIPT_PATH[len(ROOT_PATH):] + '/' + os.path.basename(sys.argv[0])[:-3]
+cwd = Path.cwd()
+dir_name = os.path.dirname(sys.argv[0]).replace(str(cwd), '').lstrip('/')
+SCRIPT_PATH = cwd / dir_name
+LOGS_PATH = ROOT_PATH / 'logs' / SCRIPT_PATH.relative_to(ROOT_PATH) / Path(sys.argv[0]).stem
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 WRITE_LOG_FILES = os.getenv('WRITE_LOG_FILES', False)
 

@@ -6,7 +6,7 @@ from wormlab3d.data.model.experiment import Experiment
 from wormlab3d.data.model.frame import Frame
 from wormlab3d.data.model.frame_sequence import FrameSequence
 from wormlab3d.data.model.mf_checkpoint import MFCheckpoint
-from wormlab3d.data.model.mf_model_parameters import MFModelParameters
+from wormlab3d.data.model.mf_parameters import MFParameters
 from wormlab3d.data.model.midline2d import Midline2D
 from wormlab3d.data.model.midline3d import Midline3D
 from wormlab3d.data.model.model import Model

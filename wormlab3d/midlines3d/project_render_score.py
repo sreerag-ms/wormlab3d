@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, List, Final
 
 import torch
 import torch.nn.functional as F
@@ -7,192 +7,163 @@ from wormlab3d import PREPARED_IMAGE_SIZE
 from wormlab3d.midlines3d.dynamic_cameras import DynamicCameras
 
 
-def avg_pool_2d(grad, oob_grad_val=0., mode='constant'):
-    # Average pooling with overlap and boundary values
-    padded_grad = F.pad(grad, (1, 1, 1, 1), mode=mode, value=oob_grad_val)
-    ag = F.avg_pool2d(input=padded_grad, kernel_size=3, stride=2, padding=0)
-    return ag
-
-
-def render_points(points, blur_sigmas, blur_intensities, blur_sigmas_cameras_sfs: torch.Tensor, blur_intensities_cameras_sfs: torch.Tensor):
-    n_worm_points = points.shape[2]
+@torch.jit.script
+def render_points(
+        points: torch.Tensor,
+        sigmas: torch.Tensor,
+        intensities: torch.Tensor,
+        camera_sigmas: torch.Tensor,
+        cameras_intensities: torch.Tensor,
+        image_size: int = PREPARED_IMAGE_SIZE[0]
+):
+    """
+    Render points as Gaussian blobs onto a 2D image.
+    """
     bs = points.shape[0]
+    N = points.shape[2]
     device = points.device
 
     # Shift to [-1,+1]
-    points = (points - 100) / 100
+    s2 = int(image_size / 2)
+    points = (points - s2) / s2
 
     # Reshape points
-    points = points.reshape(bs * 3, n_worm_points, 2)
+    points = points.reshape(bs * 3, N, 2)
     points = points.clamp(min=-1, max=1)
 
-    # Reshape blur sigmas
-    blur_sigmas = blur_sigmas.repeat_interleave(3, 0)[:, :, None, None]
-    sfs = blur_sigmas_cameras_sfs.reshape(bs*3)[:, None, None, None]
-    blur_sigmas = blur_sigmas * sfs
+    # Reshape and scale sigmas
+    sigmas = sigmas.repeat_interleave(3, 0)[:, :, None, None]
+    sfs = camera_sigmas.reshape(bs * 3)[:, None, None, None]
+    sigmas = sigmas * sfs
+
+    # Reshape and scale intensities
+    intensities = intensities.repeat_interleave(3, 0)[:, :, None, None]
+    sfs = cameras_intensities.reshape(bs * 3)[:, None, None, None]
+    intensities = intensities * sfs
 
     # Build x and y grids
-    grid = torch.linspace(-1.0, 1.0, PREPARED_IMAGE_SIZE[0], dtype=torch.float32, device=device)
+    grid = torch.linspace(-1.0, 1.0, image_size, dtype=torch.float32, device=device)
     yv, xv = torch.meshgrid([grid, grid])
-
-    # 1 x 1 x H x W x 2
     m = torch.cat([xv[..., None], yv[..., None]], dim=-1)[None, None]
     p2 = points[:, :, None, None, :]
 
     # Make (un-normalised) gaussian blobs centred at the coordinates
     mmp2 = m - p2
     dst = mmp2[..., 0]**2 + mmp2[..., 1]**2
-    blobs = torch.exp(-(dst / (2 * blur_sigmas**2)))
+    blobs = torch.exp(-(dst / (2 * sigmas**2)))
 
-    # Mask is the sum of the blobs
-    # masks = blobs.sum(dim=1)
-
-    # Mask is sum of blobs where each blob is scaled by its blur_intensity
-    # print('blur_intensities.shape', blur_intensities.shape)
-    blur_intensities = blur_intensities.repeat_interleave(3, 0)[:, :, None, None]
-    sfs = blur_intensities_cameras_sfs.reshape(bs*3)[:, None, None, None]
-    blur_intensities = blur_intensities * sfs
-
-    masks = (blobs * blur_intensities).sum(dim=1)
-
-    # Normalise
+    # The rendering is the sum of blobs where each blob is scaled by its intensity
+    masks = (blobs * intensities).sum(dim=1)
     masks = masks.clamp(max=1.)
-    # print(masks.shape)
-    # exit()
-    # sum_ = masks.sum(dim=(1, 2), keepdim=True)
-    # sum_ = sum_.clamp(min=1e-8)
-    masks_normed = masks   #/ sum_
+    masks = masks.reshape(bs, 3, image_size, image_size)
 
-    # Reshape
-    masks_normed = masks_normed.reshape(bs, 3, *PREPARED_IMAGE_SIZE)
-    blobs = blobs.reshape(bs, 3, n_worm_points, *PREPARED_IMAGE_SIZE)
+    # Also return the blobs for scoring points individually
+    blobs = blobs.reshape(bs, 3, N, image_size, image_size)
 
-    return masks_normed, blobs
-
-
-def render_curve(points, blur_sigmas):
-    n_worm_points = points.shape[2]
-    bs = points.shape[0]
-
-    # Shift to [-1,+1]
-    points = (points - 100) / 100
-
-    # Reshape
-    points = points.reshape(bs * 3, n_worm_points, 2)
-    points = points.clamp(min=-1, max=1)
-    a = points[:, :-1]
-    b = points[:, 1:]
-
-    def sumprod(x, y, keepdim=True):
-        return torch.sum(x * y, dim=-1, keepdim=keepdim)
-
-    grid = torch.linspace(-1.0, 1.0, PREPARED_IMAGE_SIZE[0], dtype=torch.float32, device=a.device)
-
-    yv, xv = torch.meshgrid([grid, grid])
-    # 1 x H x W x 2
-    m = torch.cat([xv[..., None], yv[..., None]], dim=-1)[None, None]
-
-    # B x N x 1 x 1 x 2
-    a, b = a[:, :, None, None, :], b[:, :, None, None, :]
-    t_min = sumprod(m - a, b - a) / \
-            torch.max(sumprod(b - a, b - a), torch.tensor(1e-6, device=a.device))
-    t_line = torch.clamp(t_min, 0.0, 1.0)
-
-    # closest points on the line to every image pixel
-    s = a + t_line * (b - a)
-
-    d = sumprod(s - m, s - m, keepdim=False)
-
-    # Blur line
-    d = torch.sqrt(d + 1e-6)
-    sig = (blur_sigmas[:, 1:] + blur_sigmas[:, :-1]) / 2
-    sig = sig.repeat_interleave(3, 0)[:, :, None, None]
-    lines = torch.exp(-d / (sig**2))
-    # lines = torch.exp(-d / (sig**2)[:, :, None, None])
-    # lines = torch.exp(-(dst / (2 * blur_sigmas**2)[:, :, None, None]))
-
-    # Sum the lines together to make the render
-    masks = lines.sum(dim=1)
-    masks = masks.clamp(max=1)
-
-    # Normalise and reshape
-    sum_ = masks.sum(dim=(1, 2), keepdim=True)
-    sum_ = sum_.clamp(min=1e-8)
-    masks = (masks / sum_).reshape(bs, 3, *PREPARED_IMAGE_SIZE)
-
-    return masks
+    return masks, blobs
 
 
 class ProjectRenderScoreModel(nn.Module):
-    def __init__(self):
+    image_size: Final[int]
+
+    def __init__(self, image_size: int = PREPARED_IMAGE_SIZE[0]):
         super().__init__()
-        self.cams = DynamicCameras()
+        self.image_size = image_size
+        self.cams = torch.jit.script(DynamicCameras())
 
-    def forward(self):
-        raise RuntimeError('The forward method of this model is not enabled!')
-
-    def forward_cloud(
+    def forward(
             self,
             cam_coeffs: torch.Tensor,
-            cloud_points: torch.Tensor,
-            masks_target: torch.Tensor,
-            blur_sigmas_cloud: torch.Tensor,
-            blur_intensities_cloud: torch.Tensor,
-            blur_sigmas_cameras_sfs: torch.Tensor,
-            blur_intensities_cameras_sfs: torch.Tensor,
+            points: List[torch.Tensor],
+            masks_target: List[torch.Tensor],
+            sigmas: List[torch.Tensor],
+            intensities: List[torch.Tensor],
+            camera_sigmas: torch.Tensor,
+            camera_intensities: torch.Tensor,
             points_3d_base: torch.Tensor,
             points_2d_base: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # Render the point cloud
-        cloud_points_2d = self._project_to_2d(cam_coeffs, cloud_points, points_3d_base, points_2d_base)
-        masks_cloud, blobs = render_points(cloud_points_2d, blur_sigmas_cloud, blur_intensities_cloud, blur_sigmas_cameras_sfs, blur_intensities_cameras_sfs)
-        # print('\n\n')
-        # print('cloud_points_2d.shape', cloud_points_2d.shape)
-        # print('masks_cloud.shape', masks_cloud.shape)
-        # print('masks_cloud.sum(dim=(2,3)).shape', masks_cloud.sum(dim=(2,3)).shape)
-        # print('masks_cloud.sum(dim=(2,3))', masks_cloud.sum(dim=(2,3)))
-        # print('blobs.shape', blobs.shape)
+    ) -> Tuple[
+        List[torch.Tensor],
+        List[torch.Tensor],
+        List[torch.Tensor],
+        List[torch.Tensor],
+        List[torch.Tensor],
+        List[torch.Tensor]
+    ]:
+        """
+        Project the 3D points to 2D, render the projected points as blobs on an image and score each point for overlap.
+        """
+        D = len(points)
+        masks = []
+        points_2d = []
+        scores = []
+        points_smoothed = []
+        sigmas_smoothed = []
+        intensities_smoothed = []
 
-        # Normalise blobs
-        # sum_ = blobs.sum(dim=(2, 3), keepdim=True)
-        sum_ = blobs.amax(dim=(2, 3), keepdim=True)
-        sum_ = sum_.clamp(min=1e-8)
-        blobs_normed = blobs / sum_
-        # print('blobs_normed.shape', blobs_normed.shape)
-        # print('masks_target.shape', masks_target.shape)
-        # print('(blobs_normed * masks_target.unsqueeze(2)).sum(dim=(3, 4)).shape', (blobs_normed * masks_target.unsqueeze(2)).sum(dim=(3, 4)).shape)
-        # exit()
+        # Run the parameters through the model at each scale to get the outputs
+        for d in range(D):
+            points_d = points[d]
+            masks_target_d = masks_target[d]
+            sigmas_d = sigmas[d]
+            intensities_d = intensities[d]
 
-        # Calculate points scores
-        cloud_points_scores = (blobs_normed * masks_target.unsqueeze(2)).sum(dim=(3, 4)).mean(dim=1)
-        # print('cloud_points_scores', cloud_points_scores.shape, cloud_points_scores.sum())
-        # blobs_target_overlaps = (blobs_normed * masks_target.unsqueeze(2)).sum(dim=(3, 4))
-        # overlap_means = blobs_target_overlaps.mean(dim=1)
-        # overlap_vars = blobs_target_overlaps.var(dim=1)
-        # cloud_points_scores = torch.log(1+overlap_means) - torch.log(1+overlap_vars)
-        # cloud_points_scores = (blobs_normed * masks_target.unsqueeze(2)).sum(dim=(3, 4)).mean(dim=1)
-        # cloud_points_scores = (blobs_normed * masks_target.unsqueeze(2)).sum(dim=(3, 4)).prod(dim=1)
-        # cloud_points_scores = (blobs_normed * masks_target.unsqueeze(2)).amax(dim=(3, 4)).prod(dim=1)
-        # cloud_points_scores = (blobs_normed * masks_target).sum(dim=(3, 4)).mean(dim=1)
+            # Smooth the points, sigmas and intensities using average pooling convolutions.
+            if d > 1:
+                ks = int(d / 2) * 2 + 1
+                pad_size = int(ks / 2)
 
-        return masks_cloud, cloud_points_2d, cloud_points_scores
+                # Smooth the curve points
+                cp = torch.cat([
+                    torch.repeat_interleave(points_d[:, 0].unsqueeze(1), pad_size, dim=1),
+                    points_d,
+                    torch.repeat_interleave(points_d[:, -1].unsqueeze(1), pad_size, dim=1)
+                ], dim=1)
+                cp = cp.permute(0, 2, 1)
+                cps = F.avg_pool1d(cp, kernel_size=ks, stride=1, padding=0)
+                points_d = cps.permute(0, 2, 1)
 
-    def forward_curve(
-            self,
-            cam_coeffs: torch.Tensor,
-            curve_points: torch.Tensor,
-            blur_sigmas_curve: torch.Tensor,
-            points_3d_base: torch.Tensor,
-            points_2d_base: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        # Render the curve
-        curve_points_2d = self._project_to_2d(cam_coeffs, curve_points, points_3d_base, points_2d_base)
-        masks_curves = render_curve(curve_points_2d, blur_sigmas_curve)
+                # Smooth the sigmas
+                sigs = torch.cat([
+                    sigmas_d[:, 1:pad_size + 1].flip(dims=(1,)),
+                    sigmas_d,
+                    sigmas_d[:, -pad_size - 1:-1].flip(dims=(1,)),
+                ], dim=1)
+                sigs = sigs[:, None, :]
+                sigs = F.avg_pool1d(sigs, kernel_size=ks, stride=1, padding=0)
+                sigmas_d = sigs.squeeze(1)
 
-        # todo: Get the point scores for the curve points
-        curve_points_scores = torch.zeros_like(blur_sigmas_curve)
+                # Smooth the intensities
+                ints = torch.cat([
+                    intensities_d[:, 1:pad_size + 1].flip(dims=(1,)),
+                    intensities_d,
+                    intensities_d[:, -pad_size - 1:-1].flip(dims=(1,)),
+                ], dim=1)
+                ints = ints[:, None, :]
+                ints = F.avg_pool1d(ints, kernel_size=ks, stride=1, padding=0)
+                intensities_d = ints.squeeze(1)
 
-        return masks_curves, curve_points_scores
+            # Project and render
+            points_2d_d = self._project_to_2d(cam_coeffs, points_d, points_3d_base, points_2d_base)
+            masks_d, blobs = render_points(points_2d_d, sigmas_d, intensities_d, camera_sigmas, camera_intensities,
+                                           self.image_size)
+
+            # Normalise blobs
+            sum_ = blobs.amax(dim=(2, 3), keepdim=True)
+            sum_ = sum_.clamp(min=1e-8)
+            blobs_normed = blobs / sum_
+
+            # Score the points
+            scores_d = (blobs_normed * masks_target_d.unsqueeze(2)).sum(dim=(3, 4)).mean(dim=1)
+
+            masks.append(masks_d)
+            points_2d.append(points_2d_d.transpose(1, 2))
+            scores.append(scores_d)
+            points_smoothed.append(points_d)
+            sigmas_smoothed.append(sigmas_d)
+            intensities_smoothed.append(intensities_d)
+
+        return masks, points_2d, scores, points_smoothed, sigmas_smoothed, intensities_smoothed
 
     def _project_to_2d(
             self,
@@ -211,7 +182,7 @@ class ProjectRenderScoreModel(nn.Module):
         points_2d = self.cams.forward(cam_coeffs, points_3d)
 
         # Re-centre according to 2D base points plus a (100,100) to put it in the centre of the cropped image
-        image_centre_pt = torch.ones((bs, 1, 1, 2), dtype=torch.float32, device=device) * PREPARED_IMAGE_SIZE[0] / 2
+        image_centre_pt = torch.ones((bs, 1, 1, 2), dtype=torch.float32, device=device) * self.image_size / 2
         points_2d = points_2d - points_2d_base[:, :, None] + image_centre_pt
 
         return points_2d

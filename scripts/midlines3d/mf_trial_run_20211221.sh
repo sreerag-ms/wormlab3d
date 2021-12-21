@@ -1,0 +1,44 @@
+#!/bin/bash
+
+python mf_trial.py \
+        --no-resume 
+        --cpu-only 
+        --checkpoint-every-n-steps=-1 
+        --checkpoint-every-n-frames=100 
+        --log-level=2 
+        --plot-every-n-steps=-1 
+        --plot-every-n-frames=1 
+        --plot-sigmas=True 
+        --plot-intensities=True 
+        --plot-scores=True 
+        --save-plots=True 
+        --trial-id=17 
+        --start-frame=100 
+        --depth=5 
+        --window-size=1 
+        --use-master=True 
+        --masks-threshold=0.2 
+        --optimise-cam-coeffs=True 
+        --optimise-cam-intrinsics=True
+        --optimise-cam-rotations=True 
+        --optimise-cam-translations=True 
+        --optimise-cam-distortions=True 
+        --optimise-cam-shifts=False 
+        --optimise-sigmas=True 
+        --optimise-intensities=True 
+        --loss-masks-metric=mse 
+        --loss-masks-multiscale=True 
+        --loss-masks=1. 
+        --loss-neighbours=1. 
+        --loss-parents=0. 
+        --loss-aunts=1. 
+        --loss-scores=0. 
+        --loss-sigmas=1. 
+        --loss-intensities=1. 
+        --loss-smoothness=10. 
+        --loss-temporal=0. 
+        --algorithm=AdamW 
+        --lr-cam-coeffs=1e-5 
+        --lr-points=1e-3 
+        --lr-sigmas=1e-3 
+        --lr-intensities=1e-3

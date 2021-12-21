@@ -15,12 +15,12 @@ from wormlab3d.toolkit.camera_model_triplet import CameraModelTriplet
 
 M3D_SOURCE_WT3D = 'WT3D'
 M3D_SOURCE_RECONST = 'reconst'
-M3D_SOURCE_MODEL = 'model'
+M3D_SOURCE_MF = 'MF'
 
 M3D_SOURCES = [
     M3D_SOURCE_WT3D,
     M3D_SOURCE_RECONST,
-    M3D_SOURCE_MODEL
+    M3D_SOURCE_MF
 ]
 
 

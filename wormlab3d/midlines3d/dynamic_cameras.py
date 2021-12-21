@@ -1,3 +1,5 @@
+from typing import Final
+
 import torch
 from torch import nn
 
@@ -9,14 +11,27 @@ class DynamicCameras(nn.Module):
     A dynamic camera model modelled on the pinhole camera model with distortion from here:
     https://opencv-python-tutroals.readthedocs.io/en/latest/py_tutorials/py_calib3d/py_calibration/py_calibration.html
     """
+    n_coeffs: Final[int] = N_CAM_COEFFICIENTS
+    fx: torch.Tensor
+    fy: torch.Tensor
+    cx: torch.Tensor
+    cy: torch.Tensor
+    rotation: torch.Tensor
+    translation: torch.Tensor
+    distortion: torch.Tensor
+    shifts: torch.Tensor
 
     def __init__(self, distort: bool = True):
         super().__init__()
         self.distort = distort
-        self.register_buffer('fx', None, persistent=False)
-        self.register_buffer('fy', None, persistent=False)
-        self.register_buffer('translation', None, persistent=False)
-        self.register_buffer('distortion', None, persistent=False)
+        self.register_buffer('fx', torch.zeros(0, 3, 1), persistent=False)
+        self.register_buffer('fy', torch.zeros(0, 3, 1), persistent=False)
+        self.register_buffer('cx', torch.zeros(0, 3, 1), persistent=False)
+        self.register_buffer('cy', torch.zeros(0, 3, 1), persistent=False)
+        self.register_buffer('rotation', torch.zeros(0, 3, 3, 3), persistent=False)
+        self.register_buffer('translation', torch.zeros(0, 3, 3), persistent=False)
+        self.register_buffer('distortion', torch.zeros(0, 3, 5), persistent=False)
+        self.register_buffer('shifts', torch.zeros(0, 3), persistent=False)
 
     def extract_coefficients(self, coefficients: torch.Tensor):
         """
@@ -24,7 +39,7 @@ class DynamicCameras(nn.Module):
         """
         assert coefficients.dim() == 3  # batch size
         assert coefficients.shape[1] == 3  # cameras come in triplets
-        assert coefficients.shape[2] == N_CAM_COEFFICIENTS  # camera parameters
+        assert coefficients.shape[2] == self.n_coeffs  # camera parameters
         bs = coefficients.shape[0]
 
         # Extract parameters
@@ -65,7 +80,7 @@ class DynamicCameras(nn.Module):
 
         # Distort
         if self.distort:
-            k1, k2, p1, p2, k3 = (self.distortion[:, :, i].unsqueeze(-1) for i in range(5))
+            k1, k2, p1, p2, k3 = [self.distortion[:, :, i].unsqueeze(-1) for i in range(5)]
             xy = x * y
             r2 = x**2 + y**2
             r4 = r2 * r2

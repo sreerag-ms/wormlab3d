@@ -13,10 +13,14 @@ class RuntimeArgs(BaseArgs):
             cpu_only: bool = False,
             checkpoint_every_n_steps: int = -1,
             checkpoint_every_n_frames: int = 1,
+            log_level: int = 0,
             plot_every_n_steps: int = -1,
             plot_every_n_frames: int = -1,
             plot_n_examples: int = 1,
-            save_plots: bool = False,
+            plot_sigmas: bool = True,
+            plot_intensities: bool = True,
+            plot_scores: bool = True,
+            save_plots: bool = True,
             **kwargs
     ):
         self.resume = resume
@@ -25,9 +29,13 @@ class RuntimeArgs(BaseArgs):
         self.cpu_only = cpu_only
         self.checkpoint_every_n_steps = checkpoint_every_n_steps
         self.checkpoint_every_n_frames = checkpoint_every_n_frames
+        self.log_level = log_level
         self.plot_every_n_steps = plot_every_n_steps
         self.plot_every_n_frames = plot_every_n_frames
         self.plot_n_examples = plot_n_examples
+        self.plot_sigmas = plot_sigmas
+        self.plot_intensities = plot_intensities
+        self.plot_scores = plot_scores
         self.save_plots = save_plots
 
     @classmethod
@@ -43,7 +51,7 @@ class RuntimeArgs(BaseArgs):
                                    help='Do not resume from a previous checkpoint.')
         resume_parser.set_defaults(resume=False)
         group.add_argument('--resume-from', type=str, default='latest',
-                           help='Resume from a specific checkpoint id, step, "latest" or "best". Default="latest".')
+                           help='Resume from a specific checkpoint id, "latest" or "best". Default="latest".')
         group.add_argument('--gpu-only', action='store_true',
                            help='Abort if no gpus are detected.')
         group.add_argument('--cpu-only', action='store_true',
@@ -54,9 +62,17 @@ class RuntimeArgs(BaseArgs):
                            help='Save a checkpoint every n frames, -1 turns this off. Default=1.')
         group.add_argument('--plot-every-n-steps', type=int, default=-1,
                            help='Plot example inputs and outputs every n steps, -1 turns this off.')
+        group.add_argument('--log-level', type=int, default=2, choices=[0, 1, 2],
+                           help='Tensorboard logging level. 0=Totals only. 1=Depth losses. 2=All losses and parameter stats.')
         group.add_argument('--plot-every-n-frames', type=int, default=-1,
                            help='Plot example inputs and outputs every n frames, -1 turns this off.')
         group.add_argument('--plot-n-examples', type=int, default=1,
                            help='Plot this number of examples from the batch at each iteration.')
-        group.add_argument('--save-plots', type=str2bool, default=False,
-                           help='Save plot images to disk. Default = False.')
+        group.add_argument('--plot-sigmas', type=str2bool, default=True,
+                           help='Plot sigmas.')
+        group.add_argument('--plot-intensities', type=str2bool, default=True,
+                           help='Plot intensities.')
+        group.add_argument('--plot-scores', type=str2bool, default=True,
+                           help='Plot scores.')
+        group.add_argument('--save-plots', type=str2bool, default=True,
+                           help='Save plot images to disk. Default = True.')
