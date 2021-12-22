@@ -19,8 +19,9 @@ def get_args(
     """
     parser = ArgumentParser(description='Wormlab3D trajectory script.')
 
-    # Source arguments, trial id is always required
-    parser.add_argument('--trial', type=int, help='Trial id.', required=True)
+    # Source arguments
+    parser.add_argument('--reconstruction', type=int, help='Reconstruction id.', required=False)
+    parser.add_argument('--trial', type=int, help='Trial id.', required=False)
     parser.add_argument('--midline3d-source', type=str, default=M3D_SOURCE_RECONST, choices=M3D_SOURCES,
                         help='Midline3D source.')
     parser.add_argument('--midline3d-source-file', type=str, help='Midline3D source file.')
@@ -76,5 +77,9 @@ def get_args(
     # Check trajectory point
     if include_trajectory_options and args.trajectory_point is not None:
         assert args.trajectory_point == -1 or 0 <= args.trajectory_point <= 1, 'trajectory-point must be -1 for centre of mass or between 0 and 1.'
+
+    # Reconstruction id or trial id is always required
+    assert (args.reconstruction is not None or args.trial is not None) \
+           and not (args.reconstruction is not None and args.trial is not None), 'Specify just one of reconstruction OR trial.'
 
     return args

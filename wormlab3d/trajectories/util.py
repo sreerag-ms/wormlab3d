@@ -5,7 +5,7 @@ import numpy as np
 from wormlab3d import DATA_PATH
 from wormlab3d.data.model import Frame, Tag
 
-TRAJECTORY_CACHE_PATH = DATA_PATH + '/trajectory_cache'
+TRAJECTORY_CACHE_PATH = DATA_PATH / 'trajectory_cache'
 SMOOTHING_WINDOW_TYPES = ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']
 
 
