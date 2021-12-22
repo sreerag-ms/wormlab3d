@@ -1,6 +1,7 @@
 {% extends '__layout.html' %}
 {% import 'table/_data_table.html' as table %}
 {% import 'table/_details_table.html' as details %}
+{% import '_tabs.html' as tabs %}
 
 
 {% block content %}
@@ -20,36 +21,14 @@
 
   <div class="row">
 
-    <ul class="nav nav-tabs" id="trial-tabs" role="tablist">
-      <li class="nav-item" role="presentation">
-        <button class="nav-link active" id="videos-tab" data-bs-toggle="tab" data-bs-target="#videos-panel"
-                type="button" role="tab" aria-controls="videos" aria-selected="true">Videos
-        </button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button class="nav-link" id="tracking-tab" data-bs-toggle="tab" data-bs-target="#tracking-panel" type="button"
-                role="tab" aria-controls="profile" aria-selected="false">Tracking
-        </button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button class="nav-link" id="reconstructions-tab" data-bs-toggle="tab" data-bs-target="#reconstructions-panel"
-                type="button" role="tab" aria-controls="reconstructions" aria-selected="false">Reconstructions
-        </button>
-      </li>
+    <ul class="nav nav-tabs" id="reconstruction-{{ reconstruction.id }}-tabs" role="tablist">
+      {{ tabs.tab_item('Parameters', true) }}
     </ul>
-    <div class="tab-content" id="trial-panels">
 
-      <div class="tab-pane fade show active" id="videos-panel" role="tabpanel" aria-labelledby="videos-tab">
-
-      </div>
-
-      <div class="tab-pane fade" id="tracking-panel" role="tabpanel" aria-labelledby="tracking-tab">
-
-      </div>
-
-      <div class="tab-pane fade py-2" id="reconstructions-panel" role="tabpanel" aria-labelledby="reconstructions-tab">
-      </div>
-
+    <div class="tab-content" id="reconstruction-{{ reconstruction.id }}-panels">
+      {% call tabs.tab_panel('Parameters', true) %}
+        {{ details.render(parameters_view, reconstruction.mf_parameters) }}
+      {% endcall %}
     </div>
 
   </div>

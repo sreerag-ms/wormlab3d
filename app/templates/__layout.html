@@ -5,12 +5,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
 
-  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='bootstrap-5.1.0-dist/css/bootstrap.min.css') }}">
-  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='bootstrap-5.1.0-dist/css/bootstrap-grid.min.css') }}">
-  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='bootstrap-5.1.0-dist/css/bootstrap-reboot.min.css') }}">
-  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='bootstrap-5.1.0-dist/css/bootstrap-utilities.min.css') }}">
+  <link rel="stylesheet" type="text/css"
+        href="{{ url_for('static', filename='bootstrap-5.1.0-dist/css/bootstrap.min.css') }}">
+  <link rel="stylesheet" type="text/css"
+        href="{{ url_for('static', filename='bootstrap-5.1.0-dist/css/bootstrap-grid.min.css') }}">
+  <link rel="stylesheet" type="text/css"
+        href="{{ url_for('static', filename='bootstrap-5.1.0-dist/css/bootstrap-reboot.min.css') }}">
+  <link rel="stylesheet" type="text/css"
+        href="{{ url_for('static', filename='bootstrap-5.1.0-dist/css/bootstrap-utilities.min.css') }}">
   <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='styles.css') }}?v=0">
-  <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='open-iconic/font/css/open-iconic-bootstrap.css') }}">
+  <link rel="stylesheet" type="text/css"
+        href="{{ url_for('static', filename='open-iconic/font/css/open-iconic-bootstrap.css') }}">
   <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='datatables.min.css') }}"/>
   <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='video-js-7.17.0.min.css') }}"/>
   {% block css %}
@@ -21,15 +26,15 @@
 <body>
 
 {% block header %}
-{% include '_header.html' %}
+  {% include '_header.html' %}
 {% endblock %}
 
 <div class="container-fluid">
   <main class="bd-content">
     {% block container %}
-    {% block title %}<h1 class="bd-title mt-3">{{ title }}</h1>{% endblock %}
-    {% block messages %}{% include '_messages.html' %}{% endblock %}
-    {% block content %}{% endblock %}
+      {% block title %}<h1 class="bd-title mt-3">{{ title }}</h1>{% endblock %}
+      {% block messages %}{% include '_messages.html' %}{% endblock %}
+      {% block content %}{% endblock %}
     {% endblock %}
   </main>
 </div>
@@ -49,7 +54,7 @@
 <script src="{{ url_for('static', filename='datatables.min.js') }}"></script>
 <script src="{{ url_for('static', filename='video-js-7.17.0.min.js') }}"></script>
 <script src="{{ url_for('static', filename='plotly-2.6.3.min.js') }}"></script>
-
 {% block scripts %}{% endblock %}
+<script src="{{ url_for('static', filename='util.js') }}"></script>
 </body>
 </html>

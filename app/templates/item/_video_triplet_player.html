@@ -1,0 +1,22 @@
+<div class="row g-0">
+  {% for i in range(3) %}
+    <div class="col col-md-4">
+      <video id="cam_video_{{ i }}" class="video-js" preload="auto"></video>
+    </div>
+  {% endfor %}
+</div>
+<div class="row g-0 mt-2 mb-5">
+  <div class="video-controls d-flex justify-content-center align-items-center">
+    <button type="button" class="vc-play btn btn-primary btn-large">
+      <span class="oi oi-media-play"></span>
+    </button>
+    <div class="vc-progress progress mx-2">
+      <div class="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0"
+           aria-valuemax="100"></div>
+    </div>
+    <div class="vc-time">
+      <span class="vc-current-time">00:00</span> / <span class="vc-duration">00:00</span>
+    </div>
+  </div>
+</div>
+

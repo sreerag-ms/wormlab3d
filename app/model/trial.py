@@ -68,7 +68,7 @@ class TrialView(DocumentView):
                     'type': 'time',
                     'query': {
                         'operation': 'multiply',
-                        'fields': ['num_frames', 'fps']
+                        'fields': [self.prefix + 'num_frames', self.prefix + 'fps']
                     },
                 },
             ),

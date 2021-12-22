@@ -29,7 +29,6 @@ def trial_instance(_id):
     trial = Trial.objects.get(id=_id)
     trial_view = TrialView(
         hide_fields=['_id', 'experiment*'],
-        field_values={'experiment': _id}
     )
     experiment_view = ExperimentView(
         hide_fields=['num_frames', 'legacy_id']

@@ -1,6 +1,7 @@
 from collections import OrderedDict
 from typing import Dict
 
+from app.model import MFParametersView
 from app.model.document_view import DocumentView
 from app.model.experiment import ExperimentView
 from app.model.trial import TrialView
@@ -16,13 +17,13 @@ class ReconstructionView(DocumentView):
         return Reconstruction
 
     def _init_fields(self) -> OrderedDict[str, Dict[str, str]]:
-        # experiment_view = ExperimentView(
-        #     hide_fields=['_id', 'legacy_id', 'num_trials', 'num_frames'],
-        #     prefix='experiment'
-        # )
         trial_view = TrialView(
             # hide_fields=['_id', 'legacy_id', 'comments', 'experiment2'],
             prefix=self.prefix + 'trial'
+        )
+
+        parameters_view = MFParametersView(
+            prefix=self.prefix + 'mf_parameters'
         )
 
         return OrderedDict([
@@ -32,15 +33,18 @@ class ReconstructionView(DocumentView):
                     'type': 'objectid',
                 },
             ),
-            # (
-            #     self.prefix + 'experiment', {
-            #         'title': 'Experiment',
-            #         'type': 'relation',
-            #         'filter_type': 'integer',
-            #         'view_class': experiment_view,
-            #     },
-            # ),
-            # *experiment_view.fields.items(),
+            (
+                self.prefix + 'created', {
+                    'title': 'Created',
+                    'type': 'datetime',
+                },
+            ),
+            (
+                self.prefix + 'updated', {
+                    'title': 'Updated',
+                    'type': 'datetime',
+                },
+            ),
             (
                 self.prefix + 'trial', {
                     'title': 'Trial',
@@ -76,11 +80,12 @@ class ReconstructionView(DocumentView):
                 },
             ),
             (
-                self.prefix + 'model', {
-                    'title': 'Model',
+                self.prefix + 'mf_parameters', {
+                    'title': 'Parameters',
                     'type': 'relation',
-                    'filter_type': 'integer',
-                    # 'view_class': trial_view,
+                    'filter_type': 'string',
+                    'view_class': parameters_view,
                 },
             ),
+            *parameters_view.fields.items(),
         ])

@@ -1,0 +1,20 @@
+{% macro tab_item(name, active) -%}
+  {% set varname = name | lower | replace(' ', '-') %}
+  {% set active = active or false %}
+  {% set active_cls = ' active' if active else '' %}
+  {% set active_bool = 'true' if active else 'false' %}
+  <li class="nav-item" role="presentation">
+    <button class="nav-link{{ active_cls }}" id="{{ varname }}-tab" data-bs-toggle="tab" data-bs-target="#{{ varname }}-panel"
+            type="button" role="tab" aria-controls="{{ varname }}" aria-selected="{{ active_bool }}">{{ name }}
+    </button>
+  </li>
+{% endmacro %}
+
+{% macro tab_panel(name, active) -%}
+  {% set varname = name | lower | replace(' ', '-') %}
+  {% set active = active or false %}
+  {% set active_cls = ' active' if active else '' %}
+  <div class="tab-pane fade show py-2{{ active_cls }}" id="{{ varname }}-panel" role="tabpanel" aria-labelledby="{{ varname }}-tab">
+    {{ caller() }}
+  </div>
+{% endmacro %}

@@ -27,3 +27,7 @@
 .vc-time {
     display: inline-block;
 }
+
+#tracking-plot-3d {
+    height: 50rem;
+}
