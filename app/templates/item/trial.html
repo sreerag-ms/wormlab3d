@@ -2,18 +2,22 @@
 {% import 'table/_data_table.html' as table %}
 {% import 'table/_details_table.html' as details %}
 {% import '_tabs.html' as tabs %}
+{% import 'item/_cards.html' as cards %}
 {% set table_name_frames="data-table-trial-" + trial.id|string + "-frames" %}
 {% set table_name_reconstructions="data-table-trial-" + trial.id|string + "-reconstructions" %}
 
 
 {% block content %}
-  <div class="row">
+  <div class="row mb-4">
     <div class="col-sm-12 col-md-6">
-      {{ details.render(trial_view, trial) }}
+      {% call cards.card() %}
+        {{ details.render(trial_view, trial) }}
+      {% endcall %}
     </div>
     <div class="col-sm-12 col-md-6">
-      <h3>Experiment</h3>
-      {{ details.render(experiment_view, trial.experiment) }}
+      {% call cards.card('Experiment') %}
+        {{ details.render(experiment_view, trial.experiment) }}
+      {% endcall %}
     </div>
   </div>
 

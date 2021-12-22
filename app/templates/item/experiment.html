@@ -1,17 +1,33 @@
 {% extends '__layout.html' %}
 {% import 'table/_data_table.html' as table %}
 {% import 'table/_details_table.html' as details %}
+{% import 'item/_cards.html' as cards %}
+{% import '_tabs.html' as tabs %}
 {% set table_name="data-table-experiment-" + experiment.id|string + "-trials" %}
 
 {% block content %}
-  <div class="row no-gutters">
-    <div class="col-sm-12 bd-content" class="overflow-auto">
-      {{ details.render(experiment_view, experiment) }}
 
-      <h3>Trials</h3>
-      {{ table.render(trial_view, table_name) }}
+  <div class="row mb-4">
+    <div class="col-sm-12 col-md-12">
+      {% call cards.card() %}
+        {{ details.render(experiment_view, experiment) }}
+      {% endcall %}
     </div>
   </div>
+
+  <div class="row">
+  
+    <ul class="nav nav-tabs" id="experiment-{{ experiment.id }}-tabs" role="tablist">
+      {{ tabs.tab_item('Trials', true) }}
+    </ul>
+    <div class="tab-content" id="experiment-{{ experiment.id }}-panels">
+      {% call tabs.tab_panel('Trials', true) %}
+        {{ table.render(trial_view, table_name) }}
+      {% endcall %}
+    </div>
+
+  </div>
+
 {% endblock %}
 
 {% block scripts %}
