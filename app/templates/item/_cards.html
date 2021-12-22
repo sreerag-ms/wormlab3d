@@ -1,0 +1,10 @@
+{% macro card(title) -%}
+  <div class="card text-dark bg-light">
+    {% if title %}
+      <div class="card-header">{{ title }}</div>
+    {% endif %}
+    <div class="card-body">
+      {{ caller() }}
+    </div>
+  </div>
+{% endmacro %}

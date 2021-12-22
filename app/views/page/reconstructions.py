@@ -6,8 +6,17 @@ from app.model import ExperimentView, TrialView, MFParametersView
 from app.model.reconstruction import ReconstructionView
 from wormlab3d.data.model import Reconstruction
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
+from wormlab3d.midlines3d.trial_state import TrialState
 
 bp_reconstructions = Blueprint('reconstructions', __name__, url_prefix='/reconstruction')
+
+CAM_PARAMETER_KEYS = [
+    'Intrinsics',
+    'Rotations',
+    'Translations',
+    'Distortions',
+    'Shifts',
+]
 
 
 @bp_reconstructions.route('/', methods=['GET'])
@@ -34,6 +43,8 @@ def reconstructions():
                 'trial__experiment__worm_length',
                 'trial__experiment__num_trials',
                 'trial__experiment__num_frames',
+                'mf_parameters___id',
+                'mf_parameters__created',
             ]
         ),
     )
@@ -45,7 +56,7 @@ def reconstruction_instance(_id):
     os.environ['script_name'] = active
     reconstruction = Reconstruction.objects.get(id=_id)
 
-    hide_reconstruction_fields =['_id', 'trial*', 'mf_parameters*']
+    hide_reconstruction_fields = ['_id', 'trial*', 'mf_parameters*']
     if reconstruction.source == M3D_SOURCE_MF:
         hide_reconstruction_fields.append('source_file')
 
@@ -60,6 +71,9 @@ def reconstruction_instance(_id):
     )
     parameters_view = MFParametersView()
 
+    ts = TrialState(reconstruction=reconstruction)
+    stat_keys = list(ts.stats.keys())
+
     return render_template(
         'item/reconstruction.html',
         title=f'Reconstruction #{_id}',
@@ -68,5 +82,7 @@ def reconstruction_instance(_id):
         reconstruction_view=reconstruction_view,
         trial_view=trial_view,
         experiment_view=experiment_view,
-        parameters_view=parameters_view
+        parameters_view=parameters_view,
+        stat_keys=stat_keys,
+        cam_keys=CAM_PARAMETER_KEYS,
     )

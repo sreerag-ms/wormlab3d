@@ -18,15 +18,18 @@ class TrialState:
     def __init__(
             self,
             reconstruction: Reconstruction,
-            start_frame: int,
-            end_frame: int,
-            parameters: MFParameters,
+            start_frame: int = None,
+            end_frame: int = None
     ):
         self.reconstruction = reconstruction
         self.trial = reconstruction.trial
+        if start_frame is None:
+            start_frame = reconstruction.start_frame
+        if end_frame is None:
+            end_frame = reconstruction.end_frame
         self.start_frame = start_frame
         self.end_frame = self.trial.n_frames_min if end_frame == -1 else end_frame
-        self.parameters: MFParameters = parameters
+        self.parameters: MFParameters = reconstruction.mf_parameters
         self.states = {}
         self.stats = {}
         self.checkpoint: MFCheckpoint = None
@@ -208,6 +211,23 @@ class TrialState:
             if k not in self.stats:
                 self.stats[k] = [0. for _ in range(self.n_frames)]
             self.stats[k][i] = float(v)
+
+    def get(self, k: str, start_frame: int = None, end_frame: int = None) -> np.ndarray:
+        """
+        Return a slice of data for a given buffer/parameter key.
+        """
+        assert k in BUFFER_NAMES + PARAMETER_NAMES
+        state = self.states[k]
+        if start_frame is not None:
+            assert start_frame >= self.frame_nums[0]
+        else:
+            start_frame = self.start_frame
+        if end_frame is not None:
+            assert end_frame >= self.frame_nums[-1]
+        else:
+            end_frame = self.end_frame + 1
+        return state[start_frame:end_frame]
+
 
     def __len__(self):
         return self.n_frames

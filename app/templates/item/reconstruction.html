@@ -2,20 +2,25 @@
 {% import 'table/_data_table.html' as table %}
 {% import 'table/_details_table.html' as details %}
 {% import '_tabs.html' as tabs %}
+{% import 'item/_cards.html' as cards %}
 
 
 {% block content %}
   <div class="row">
     <div class="col-sm-12 col-md-4">
-      {{ details.render(reconstruction_view, reconstruction) }}
+      {% call cards.card() %}
+        {{ details.render(reconstruction_view, reconstruction) }}
+      {% endcall %}
     </div>
     <div class="col-sm-12 col-md-4">
-      <h3>Trial</h3>
-      {{ details.render(trial_view, reconstruction.trial) }}
+      {% call cards.card('Trial') %}
+        {{ details.render(trial_view, reconstruction.trial) }}
+      {% endcall %}
     </div>
     <div class="col-sm-12 col-md-4">
-      <h3>Experiment</h3>
-      {{ details.render(experiment_view, reconstruction.trial.experiment) }}
+      {% call cards.card('Experiment') %}
+        {{ details.render(experiment_view, reconstruction.trial.experiment) }}
+      {% endcall %}
     </div>
   </div>
 
@@ -23,11 +28,66 @@
 
     <ul class="nav nav-tabs" id="reconstruction-{{ reconstruction.id }}-tabs" role="tablist">
       {{ tabs.tab_item('Parameters', true) }}
+      {{ tabs.tab_item('Stats') }}
+      {{ tabs.tab_item('Tracking 2D') }}
+      {{ tabs.tab_item('Tracking 3D') }}
+      {{ tabs.tab_item('Cameras') }}
     </ul>
 
     <div class="tab-content" id="reconstruction-{{ reconstruction.id }}-panels">
       {% call tabs.tab_panel('Parameters', true) %}
         {{ details.render(parameters_view, reconstruction.mf_parameters) }}
+      {% endcall %}
+
+      {% call tabs.tab_panel('Stats') %}
+        <div class="g-0 mt-5 mb-5 stats-plots">
+          <div class="d-flex justify-content-center align-items-center">
+            <div class="spinner-border mt-3" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+          </div>
+
+          <div class="form-floating form-group">
+            <select name="stat-key" id="stat-key-select" class="form-control form-select" placeholder="Statistic">
+              {% for stat_key in stat_keys %}
+                <option value="{{ stat_key }}">{{ stat_key }}</option>
+              {% endfor %}
+            </select>
+            <label for="stat-key-select">Statistic</label>
+          </div>
+
+          <div id="stats-plot"></div>
+        </div>
+      {% endcall %}
+
+      {% call tabs.tab_panel('Tracking 2D') %}
+        {% include 'item/_tracking_plots_2d.html' %}
+      {% endcall %}
+      {% call tabs.tab_panel('Tracking 3D') %}
+        {% include 'item/_tracking_plots_3d.html' %}
+      {% endcall %}
+
+
+      {% call tabs.tab_panel('Cameras') %}
+        <div class="g-0 mt-5 mb-5 cameras-plots">
+          <div class="d-flex justify-content-center align-items-center">
+            <div class="spinner-border mt-3" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+          </div>
+
+          <div class="form-floating form-group">
+            <select name="cameras-key" id="cameras-key-select" class="form-control form-select"
+                    placeholder="Camera parameters">
+              {% for cam_key in cam_keys %}
+                <option value="{{ cam_key }}">{{ cam_key }}</option>
+              {% endfor %}
+            </select>
+            <label for="cameras-key-select">Camera parameters</label>
+          </div>
+
+          <div id="cameras-plots"></div>
+        </div>
       {% endcall %}
     </div>
 
@@ -37,10 +97,169 @@
 
 
 {% block scripts %}
-{#  {% with %}#}
-{#    {% set doc_view=reconstruction_view %}#}
-{#    {% include 'table/_table_js.html' %}#}
-{#  {% endwith %}#}
+  <script>
+      $(document).ready(function () {
+          // ========================== Stats ==========================
+          let stats = {};
+          let stats_plot_data = [{
+              x: [],
+              y: [],
+              type: 'line',
+          }];
+          let stats_plot_layout = {
+              xaxis: {
+                  title: 'Time (s)',
+                  type: 'date',
+                  tickformat: '%M:%S'
+              }
+          };
+          Plotly.newPlot('stats-plot', stats_plot_data, stats_plot_layout, plot_config);
+
+          function get_stats(key) {
+              $('#stats-panel .spinner-border').show();
+              $.getJSON('{{ url_for('api.get_stats', _id=reconstruction.id) }}', {key: key}, function (data) {
+                  stats[key] = {
+                      x: timestamps_in_ms(data['timestamps']),
+                      y: data['values']
+                  }
+                  $('#stats-panel .spinner-border').hide();
+                  plot_stats(key);
+              });
+          }
+
+          function plot_stats(k) {
+              stats_plot_data[0]['x'] = stats[k]['x']
+              stats_plot_data[0]['y'] = stats[k]['y']
+              Plotly.redraw('stats-plot');
+          }
+
+          $('#stat-key-select').change(function () {
+              let k = $(this).val();
+              if (k in stats) {
+                  plot_stats(k);
+              } else {
+                  get_stats(k);
+              }
+          });
+
+          // Load stats data and draw plot when the tab is activated
+          $('#stats-tab').one('shown.bs.tab', function () {
+              $('#stat-key-select').change();
+          });
+
+
+          // ========================== Tracking trajectories ==========================
+          let X, ts;
+
+          function get_trajectory(cb) {
+              $.getJSON('{{ url_for('api.get_trajectory_data', _id=reconstruction.id) }}', function (data) {
+                  ts = data['timestamps'];
+                  X = data['X'];
+                  cb();
+              });
+          }
+
+          // Load tracking data and draw 2d plots when the tab is activated
+          $('#tracking-2d-tab').one('shown.bs.tab', function () {
+              function make_plots() {
+                  $('#tracking-2d-panel .spinner-border').hide();
+                  plot_tracking_pairs(X, 0, 1, ts);
+                  plot_tracking_pairs(X, 0, 2, ts);
+                  plot_tracking_pairs(X, 1, 2, ts);
+                  for (let i = 0; i < 3; i++) {
+                      plot_tracking_single(X, i, ts);
+                  }
+              }
+
+              if (X) {
+                  make_plots()
+              } else {
+                  get_trajectory(make_plots)
+              }
+          });
+
+          // Load tracking data and draw 3d plot when the tab is activated
+          $('#tracking-3d-tab').one('shown.bs.tab', function () {
+              function make_plots() {
+                  $('#tracking-3d-panel .spinner-border').hide();
+                  plot_tracking_3d(X, ts);
+              }
+
+              if (X) {
+                  make_plots()
+              } else {
+                  get_trajectory(make_plots)
+              }
+          });
+
+
+          // ========================== Cameras ==========================
+          let cameras_params = {};
+
+          function make_cameras_plot(timestamps, data, title) {
+              let plot_data = [{
+                  x: timestamps,
+                  y: data[0],
+                  type: 'line',
+                  name: 'Camera 0'
+              }, {
+                  x: timestamps,
+                  y: data[1],
+                  type: 'line',
+                  name: 'Camera 1'
+              }, {
+                  x: timestamps,
+                  y: data[2],
+                  type: 'line',
+                  name: 'Camera 2'
+              }];
+              let layout = {
+                  title: title,
+                  xaxis: {
+                      title: 'Time (s)',
+                      type: 'date',
+                      tickformat: '%M:%S'
+                  }
+              };
+              $('#cameras-plots').append('<div class="row"></div>')
+              Plotly.newPlot($('#cameras-plots div:last')[0], plot_data, layout, plot_config);
+          }
+
+          function get_cameras_params(key) {
+              $('#cameras-panel .spinner-border').show();
+              $.getJSON('{{ url_for('api.get_cameras_parameters', _id=reconstruction.id) }}', {key: key}, function (data) {
+                  cameras_params[key] = data;
+                  $('#cameras-panel .spinner-border').hide();
+                  plot_cameras_params(key);
+              });
+          }
+
+          function plot_cameras_params(k) {
+              let p = cameras_params[k];
+              let tms = timestamps_in_ms(p['timestamps']);
+              $('#cameras-plots div').each(function () {
+                  Plotly.purge(this);
+              });
+              for (let i = 0; i < p['shape'][0]; i++) {
+                  make_cameras_plot(tms, p['data'][i], p['titles'][i])
+              }
+          }
+
+          $('#cameras-key-select').change(function () {
+              let k = $(this).val();
+              if (k in cameras_params) {
+                  plot_cameras_params(k);
+              } else {
+                  get_cameras_params(k);
+              }
+          });
+
+          // Load camera params and draw plot when the tab is activated
+          $('#cameras-tab').one('shown.bs.tab', function () {
+              $('#cameras-key-select').change();
+          });
+      });
+  </script>
 
 {% endblock %}
 
