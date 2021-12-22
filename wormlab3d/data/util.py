@@ -13,9 +13,9 @@ def fix_path(path: str) -> str:
     if path is None or path == '':
         return
     if DATA_PATH_PLACEHOLDER in path:
-        path = path.replace(DATA_PATH_PLACEHOLDER, DATA_PATH)
+        path = path.replace(DATA_PATH_PLACEHOLDER, str(DATA_PATH))
     if ANNEX_PATH_PLACEHOLDER in path:
-        path = path.replace(ANNEX_PATH_PLACEHOLDER, ANNEX_PATH)
+        path = path.replace(ANNEX_PATH_PLACEHOLDER, str(ANNEX_PATH))
 
     return path
 
