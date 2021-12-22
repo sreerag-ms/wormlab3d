@@ -71,7 +71,7 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
                             'foreignField': '_id',
                             'as': f'{lookup_key}_doc'
                         }},
-                        {'$unwind': {'path': f'${lookup_key}_doc'}}
+                        {'$unwind': {'path': f'${lookup_key}_doc', 'preserveNullAndEmptyArrays': True}}
                     ]
                 doc_links.append(f'{rel_collection}_doc')
                 rel_keys = rel_keys[1:]
