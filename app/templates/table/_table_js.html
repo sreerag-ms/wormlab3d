@@ -15,17 +15,33 @@
       return DataTable.render.text().filter(data);
     {% elif field.type == 'string' %}
       return DataTable.render.text().filter(data);
+    {% elif field.type == 'boolean' %}
+      if (type === 'display' || type === 'filter') {
+        if (data) {
+          return '<span class="oi oi-check text-success"></span>';
+        } else {
+          return '<span class="oi oi-x text-danger"></span>';
+        }
+      }
+      return data;
     {% elif field.type == 'integer' %}
       renderer = DataTable.render.number(',', '.', 0);
       return renderer.display(data);
     {% elif field.type == 'float' %}
       renderer = DataTable.render.number(',', '.', {{ field.precision }});
       return renderer.display(data);
+    {% elif field.type == 'scientific' %}
+      return Number(data).toExponential({{ field.precision }});
     {% elif field.type == 'relation' %}
       return '<a href="/{{ key }}/' + data + '">' + data + '</a>';
     {% elif field.type == 'date' %}
       if (type === 'display' || type === 'filter') {
         return moment(data).format("DD-MMM-YYYY");
+      }
+      return data;
+    {% elif field.type == 'datetime' %}
+      if (type === 'display' || type === 'filter') {
+        return moment(data).format("DD-MMM-YYYY HH:mm:ss");
       }
       return data;
     {% elif field.type == 'time' %}

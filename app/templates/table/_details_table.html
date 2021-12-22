@@ -4,23 +4,33 @@
     {% for key, field in doc_view.fields.items() if key not in doc_view.hide_fields %}
       <tr>
         <th width="40%">{{ field.title }}</th>
+        <td>
         {% if key == '_id' %}
-          <td><a href="/{{ doc_view.collection_name }}/{{ doc.id }}">{{ doc.id }}</a></td>
+          <a href="/{{ doc_view.collection_name }}/{{ doc.id }}">{{ doc.id }}</a>
         {% elif doc[key] is none %}
-          <td></td>
+          {# empty cell #}
+        {% elif field.type == 'boolean' %}
+          {% if doc[key] %}
+            <span class="oi oi-check text-success"></span>
+          {% else %}
+            <span class="oi oi-x text-danger"></span>
+          {% endif %}
         {% elif field.type == 'integer' %}
-            <td>{{ '{:,}'.format(doc[key]) }}</td>
+          {{ '{:,}'.format(doc[key]) }}
         {% elif field.type == 'float' %}
-          <td>{{ ('{:,.' + field.precision|string + 'f}').format(doc[key]) }}</td>
+          {{ ('{:,.' + field.precision|string + 'f}').format(doc[key]) }}
+        {% elif field.type == 'scientific' %}
+          {{ ('{:,.' + field.precision|string + 'e}').format(doc[key]) }}
         {% elif field.type == 'date' %}
-          <td>{{ doc[key].strftime('%Y-%m-%d') }}</td>
+          {{ doc[key].strftime('%Y-%m-%d') }}
         {% elif field.type == 'datetime' %}
-          <td>{{ doc[key].strftime('%Y-%m-%d %H:%M:%S') }}</td>
+          {{ doc[key].strftime('%Y-%m-%d %H:%M:%S') }}
         {% elif field.type == 'time' %}
-          <td>{{ doc[key].strftime('%M:%S') }}</td>
+          {{ doc[key].strftime('%M:%S') }}
         {% else %}
-          <td>{{ doc[key] }}</td>
+          {{ doc[key] }}
         {% endif %}
+        </td>
       </tr>
     {% endfor %}
     </tbody>
