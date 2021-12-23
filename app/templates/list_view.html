@@ -1,6 +1,6 @@
 {% extends '__layout.html' %}
-{% import 'table/_data_table.html' as table %}
-{% import 'table/_filters.html' as filters %}
+{% import 'includes/_data_table.html' as table %}
+{% import 'includes/_filters.html' as filters %}
 
 
 {% block content %}
@@ -14,9 +14,5 @@
 
 
 {% block scripts %}
-  {% with %}
-    {% set table_name='data-table-' + doc_view.collection_name %}
-    {% set table_order=table_order or [0, 'asc'] %}
-    {% include 'table/_table_js.html' %}
-  {% endwith %}
+  {% include 'includes/_table_js.html' %}
 {% endblock %}

@@ -1,8 +1,8 @@
 {% extends '__layout.html' %}
-{% import 'table/_data_table.html' as table %}
-{% import 'table/_details_table.html' as details %}
-{% import '_tabs.html' as tabs %}
-{% import 'item/_cards.html' as cards %}
+{% import 'includes/_data_table.html' as table %}
+{% import 'includes/_details_table.html' as details %}
+{% import 'includes/_tabs.html' as tabs %}
+{% import 'includes/_cards.html' as cards %}
 
 
 {% block content %}
@@ -40,12 +40,8 @@
       {% endcall %}
 
       {% call tabs.tab_panel('Stats') %}
-        <div class="g-0 mt-5 mb-5 stats-plots">
-          <div class="d-flex justify-content-center align-items-center">
-            <div class="spinner-border mt-3" role="status">
-              <span class="visually-hidden">Loading...</span>
-            </div>
-          </div>
+        <div class="g-0 mt-1 mb-5 stats-plots">
+          {% include 'includes/_loader.html' %}
 
           <div class="form-floating form-group">
             <select name="stat-key" id="stat-key-select" class="form-control form-select" placeholder="Statistic">
@@ -61,20 +57,16 @@
       {% endcall %}
 
       {% call tabs.tab_panel('Tracking 2D') %}
-        {% include 'item/_tracking_plots_2d.html' %}
-      {% endcall %}
-      {% call tabs.tab_panel('Tracking 3D') %}
-        {% include 'item/_tracking_plots_3d.html' %}
+        {% include 'includes/_tracking_plots_2d.html' %}
       {% endcall %}
 
+      {% call tabs.tab_panel('Tracking 3D') %}
+        {% include 'includes/_tracking_plots_3d.html' %}
+      {% endcall %}
 
       {% call tabs.tab_panel('Cameras') %}
-        <div class="g-0 mt-5 mb-5 cameras-plots">
-          <div class="d-flex justify-content-center align-items-center">
-            <div class="spinner-border mt-3" role="status">
-              <span class="visually-hidden">Loading...</span>
-            </div>
-          </div>
+        <div class="g-0 mt-1 mb-5 cameras-plots">
+          {% include 'includes/_loader.html' %}
 
           <div class="form-floating form-group">
             <select name="cameras-key" id="cameras-key-select" class="form-control form-select"
@@ -89,6 +81,7 @@
           <div id="cameras-plots"></div>
         </div>
       {% endcall %}
+
     </div>
 
   </div>

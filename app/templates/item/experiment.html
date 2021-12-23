@@ -1,8 +1,8 @@
 {% extends '__layout.html' %}
-{% import 'table/_data_table.html' as table %}
-{% import 'table/_details_table.html' as details %}
-{% import 'item/_cards.html' as cards %}
-{% import '_tabs.html' as tabs %}
+{% import 'includes/_data_table.html' as table %}
+{% import 'includes/_details_table.html' as details %}
+{% import 'includes/_cards.html' as cards %}
+{% import 'includes/_tabs.html' as tabs %}
 {% set table_name="data-table-experiment-" + experiment.id|string + "-trials" %}
 
 {% block content %}
@@ -16,7 +16,7 @@
   </div>
 
   <div class="row">
-  
+
     <ul class="nav nav-tabs" id="experiment-{{ experiment.id }}-tabs" role="tablist">
       {{ tabs.tab_item('Trials', true) }}
     </ul>
@@ -34,6 +34,6 @@
   {% with %}
     {% set doc_view=trial_view %}
     {% set table_order=[3, 'asc'] %}
-    {% include 'table/_table_js.html' %}
+    {% include 'includes/_table_js.html' %}
   {% endwith %}
 {% endblock %}
