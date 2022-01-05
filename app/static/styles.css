@@ -10,21 +10,34 @@
     margin-bottom: 1rem;
 }
 
-.vc-progress {
+.tab-content {
+    position: relative;
+}
+
+.loader {
+    z-index: 2000;
+    opacity: 0.7;
+}
+
+.vc-progress, .fc-progress {
     width: 80%;
     display: inline-block;
 }
 
-.vc-progress .progress-bar {
+.vc-progress, .fc-progress {
+    cursor: pointer;
+}
+
+.vc-progress .progress-bar, .fc-progress .progress-bar {
     height: 100%;
     width: 0;
 }
 
-.vc-play {
+.vc-play, .fc-prev, .fc-next {
     border-radius: 50%;
 }
 
-.vc-time {
+.vc-time, .fc-time {
     display: inline-block;
 }
 

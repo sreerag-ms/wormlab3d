@@ -31,7 +31,7 @@
       {{ tabs.tab_item('Reconstructions') }}
     </ul>
     <div class="tab-content" id="trial-{{ trial.id }}-panels">
-      {% call tabs.tab_panel('Videos') %}
+      {% call tabs.tab_panel('Videos', true) %}
         {% include 'includes/_video_triplet_player.html' %}
       {% endcall %}
       {% call tabs.tab_panel('Tracking 2D') %}
@@ -92,7 +92,7 @@
           // Load tracking data and draw 2d plots when the tab is activated
           $('#tracking-2d-tab').one('shown.bs.tab', function () {
               function make_plots() {
-                  $('#tracking-2d-panel .spinner-border').hide();
+                  $('#tracking-2d-panel .loader').hide();
                   plot_tracking_pairs(X, 0, 1, ts);
                   plot_tracking_pairs(X, 0, 2, ts);
                   plot_tracking_pairs(X, 1, 2, ts);
@@ -110,7 +110,7 @@
           // Load tracking data and draw 3d plot when the tab is activated
           $('#tracking-3d-tab').one('shown.bs.tab', function () {
               function make_plots() {
-                  $('#tracking-3d-panel .spinner-border').hide();
+                  $('#tracking-3d-panel .loader').hide();
                   plot_tracking_3d(X, ts);
               }
               if (X) {

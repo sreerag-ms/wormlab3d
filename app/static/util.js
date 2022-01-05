@@ -18,6 +18,13 @@ $(document).ready(function() {
         }
         console.log('restoring ', 'activeTab_' + tabs_id, activeTab);
     });
+
+    // Re-layout plots when tab is first shown
+    $('button[data-bs-toggle="tab"]').one('shown.bs.tab', function () {
+        $('.js-plotly-plot', $(this).data('bs-target')).one('plotly_afterplot', function() {
+            Plotly.relayout(this, {autosize: true});
+        });
+    });
 });
 
 
