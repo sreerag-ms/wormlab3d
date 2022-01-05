@@ -76,6 +76,35 @@ def get_cameras_parameters(_id: str):
     }
 
 
+@bp_api.route('/reconstruction/<string:_id>/point-stats', methods=['GET'])
+def get_point_stats(_id: str):
+    reconstruction = Reconstruction.objects.get(id=_id)
+    D = reconstruction.mf_parameters.depth
+    frame_num = request.args.get('frame_num', type=int)
+    ts = TrialState(reconstruction=reconstruction)
+
+    vals_flat = {
+        k: ts.get(k)[frame_num]
+        for k in ['sigmas', 'intensities', 'scores']
+    }
+    vals = {
+        k: {}
+        for k in ['xs', 'sigmas', 'intensities', 'scores']
+    }
+
+    for d in range(D):
+        from_idx = sum([2**d2 for d2 in range(d)])
+        to_idx = from_idx + 2**d
+        vals['xs'][d] = np.linspace(0, 1, 2**d + 2)[1:-1].tolist()
+        for k in ['sigmas', 'intensities', 'scores']:
+            vals[k][d] = vals_flat[k][from_idx:to_idx].tolist()
+
+    return {
+        'timestamps': _get_timestamps(reconstruction),
+        **vals
+    }
+
+
 def _get_timestamps(reconstruction: Reconstruction, frame_nums: List[int] = None):
     if frame_nums is None:
         frame_nums = np.arange(reconstruction.start_frame, reconstruction.end_frame)

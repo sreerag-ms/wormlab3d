@@ -32,3 +32,7 @@ class Reconstruction(Document):
     def save(self, *args, **kwargs):
         self.updated = datetime.datetime.now()
         return super().save(*args, **kwargs)
+
+    @property
+    def n_frames(self) -> int:
+        return self.end_frame - self.start_frame

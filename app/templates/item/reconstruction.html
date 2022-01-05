@@ -32,6 +32,7 @@
       {{ tabs.tab_item('Tracking 2D') }}
       {{ tabs.tab_item('Tracking 3D') }}
       {{ tabs.tab_item('Cameras') }}
+      {{ tabs.tab_item('Point stats') }}
     </ul>
 
     <div class="tab-content" id="reconstruction-{{ reconstruction.id }}-panels">
@@ -82,6 +83,33 @@
         </div>
       {% endcall %}
 
+      {% call tabs.tab_panel('Point stats') %}
+        <div class="g-0 mt-1 mb-5 point-stats-plots">
+          {% include 'includes/_loader.html' %}
+          <div class="frame-controls d-flex justify-content-center align-items-center">
+            <button type="button" class="fc-prev btn btn-primary btn-large">
+              <span class="oi oi-arrow-thick-left"></span>
+            </button>
+            <div class="fc-progress progress mx-2">
+              <div class="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0"
+                   aria-valuemax="100"></div>
+            </div>
+            <button type="button" class="fc-next btn btn-primary btn-large">
+              <span class="oi oi-arrow-thick-right"></span>
+            </button>
+            <div class="fc-time ms-3">
+              <span class="fc-current-frame">{{ '{:,}'.format(reconstruction.start_frame) }}</span>
+              / <span class="fc-num-frames">{{ '{:,}'.format(reconstruction.end_frame) }}</span>
+            </div>
+          </div>
+          <div class="row g-1">
+            <div id="sigmas-plots" class="col"></div>
+            <div id="intensities-plots" class="col"></div>
+            <div id="scores-plots" class="col"></div>
+          </div>
+        </div>
+      {% endcall %}
+
     </div>
 
   </div>
@@ -109,20 +137,20 @@
           Plotly.newPlot('stats-plot', stats_plot_data, stats_plot_layout, plot_config);
 
           function get_stats(key) {
-              $('#stats-panel .spinner-border').show();
+              $('#stats-panel .loader').show();
               $.getJSON('{{ url_for('api.get_stats', _id=reconstruction.id) }}', {key: key}, function (data) {
                   stats[key] = {
                       x: timestamps_in_ms(data['timestamps']),
                       y: data['values']
                   }
-                  $('#stats-panel .spinner-border').hide();
+                  $('#stats-panel .loader').hide();
                   plot_stats(key);
               });
           }
 
           function plot_stats(k) {
-              stats_plot_data[0]['x'] = stats[k]['x']
-              stats_plot_data[0]['y'] = stats[k]['y']
+              stats_plot_data[0]['x'] = stats[k]['x'];
+              stats_plot_data[0]['y'] = stats[k]['y'];
               Plotly.redraw('stats-plot');
           }
 
@@ -155,7 +183,7 @@
           // Load tracking data and draw 2d plots when the tab is activated
           $('#tracking-2d-tab').one('shown.bs.tab', function () {
               function make_plots() {
-                  $('#tracking-2d-panel .spinner-border').hide();
+                  $('#tracking-2d-panel .loader').hide();
                   plot_tracking_pairs(X, 0, 1, ts);
                   plot_tracking_pairs(X, 0, 2, ts);
                   plot_tracking_pairs(X, 1, 2, ts);
@@ -174,7 +202,7 @@
           // Load tracking data and draw 3d plot when the tab is activated
           $('#tracking-3d-tab').one('shown.bs.tab', function () {
               function make_plots() {
-                  $('#tracking-3d-panel .spinner-border').hide();
+                  $('#tracking-3d-panel .loader').hide();
                   plot_tracking_3d(X, ts);
               }
 
@@ -219,10 +247,10 @@
           }
 
           function get_cameras_params(key) {
-              $('#cameras-panel .spinner-border').show();
+              $('#cameras-panel .loader').show();
               $.getJSON('{{ url_for('api.get_cameras_parameters', _id=reconstruction.id) }}', {key: key}, function (data) {
                   cameras_params[key] = data;
-                  $('#cameras-panel .spinner-border').hide();
+                  $('#cameras-panel .loader').hide();
                   plot_cameras_params(key);
               });
           }
@@ -251,6 +279,98 @@
           $('#cameras-tab').one('shown.bs.tab', function () {
               $('#cameras-key-select').change();
           });
+
+
+          // ========================== Points stats (sigmas, intensities, scores) ==========================
+
+          let frame_num = {{ reconstruction.start_frame }};
+          let ps_keys = ['sigmas', 'intensities', 'scores'];
+          let ps_data = {};
+          let ps_plot_data = {'sigmas': [], 'intensities': [], 'scores': []};
+          let ps_layouts = {};
+          for (let i = 0; i < 3; i++) {
+              let k = ps_keys[i];
+              for (let d = 0; d < {{ reconstruction.mf_parameters.depth }}; d++) {
+                  ps_plot_data[k].push({
+                      x: [],
+                      y: [],
+                      type: 'line',
+                      name: 'Depth ' + String(d)
+                  });
+              }
+
+              ps_layouts[k] = {
+                  title: k.charAt(0).toUpperCase() + k.slice(1),
+                  xaxis: {title: 'Body coordinate',},
+                  margin: {t: 50},
+              };
+
+              Plotly.newPlot(k + '-plots', ps_plot_data[k], ps_layouts[k], plot_config);
+          }
+
+          function plot_point_stats() {
+              let xs = ps_data[frame_num]['xs'];
+              for (let i = 0; i < 3; i++) {
+                  let k = ps_keys[i];
+                  let p = ps_data[frame_num][k];
+                  for (let d = 0; d < {{ reconstruction.mf_parameters.depth }}; d++) {
+                      ps_plot_data[k][d]['x'] = xs[d];
+                      ps_plot_data[k][d]['y'] = p[d];
+                  }
+                  Plotly.react(k + '-plots', ps_plot_data[k], ps_layouts[k], plot_config);
+              }
+          }
+
+          function get_point_stats() {
+              $('#point-stats-panel .loader').show();
+              $.getJSON('{{ url_for('api.get_point_stats', _id=reconstruction.id) }}', {frame_num: frame_num}, function (data) {
+                  ps_data[frame_num] = data;
+                  $('#point-stats-panel .loader').hide();
+                  plot_point_stats();
+              });
+          }
+
+          function update_point_stats_plots() {
+              if (frame_num in ps_data) {
+                  plot_point_stats();
+              } else {
+                  get_point_stats();
+              }
+          }
+
+          function set_frame_num(new_frame_num) {
+              frame_num = new_frame_num;
+              let progress = (frame_num -{{ reconstruction.start_frame }}) / {{ reconstruction.n_frames }};
+              $('.fc-current-frame').text(Number(frame_num).toLocaleString());
+              $('.fc-progress .progress-bar').width((progress * 100) + '%');
+              update_point_stats_plots();
+          }
+
+          $('.fc-prev').click(function () {
+              if (frame_num > 0) {
+                  set_frame_num(frame_num - 1);
+              }
+          });
+
+          $('.fc-next').click(function () {
+              if (frame_num < {{ reconstruction.end_frame }}) {
+                  set_frame_num(frame_num + 1);
+              }
+          });
+
+          $('.fc-progress').on('mousedown', function (e) {
+              e.preventDefault();
+              let progress = (e.pageX - $(this).offset().left) / $(this).width();
+              let new_frame_num = Math.round({{ reconstruction.start_frame }} +progress * {{ reconstruction.n_frames }});
+              set_frame_num(new_frame_num);
+          });
+
+          // Load sigmas and draw plot when the tab is activated
+          $('#point-stats-tab').one('shown.bs.tab', function () {
+              update_point_stats_plots();
+          });
+
+
       });
   </script>
 
