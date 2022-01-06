@@ -1,4 +1,4 @@
-$(document).ready(function() {
+$(document).ready(function () {
     // Remember active tab
     $('button[data-bs-toggle="tab"]').on('shown.bs.tab', function (e) {
         let tabs_id = $(this).closest('ul.nav-tabs').attr('id');
@@ -10,7 +10,7 @@ $(document).ready(function() {
     });
 
     // Restore active tab
-    $('ul.nav-tabs').each(function(el) {
+    $('ul.nav-tabs').each(function (el) {
         let tabs_id = $(this).attr('id');
         let activeTab = localStorage.getItem('activeTab_' + tabs_id);
         if (activeTab) {
@@ -21,7 +21,7 @@ $(document).ready(function() {
 
     // Re-layout plots when tab is first shown
     $('button[data-bs-toggle="tab"]').one('shown.bs.tab', function () {
-        $('.js-plotly-plot', $(this).data('bs-target')).one('plotly_afterplot', function() {
+        $('.js-plotly-plot', $(this).data('bs-target')).one('plotly_afterplot', function () {
             Plotly.relayout(this, {autosize: true});
         });
     });
@@ -113,7 +113,12 @@ function plot_tracking_3d(X, timestamps) {
         },
     }];
     let layout = {
-        margin: {t: 50},
+        scene: {
+            aspectmode: 'data',
+        },
+        margin: {
+            t: 50
+        },
         xaxis: {
             title: 'x',
         },
@@ -124,6 +129,7 @@ function plot_tracking_3d(X, timestamps) {
             title: 'z'
         }
     };
+    console.log(layout);
     Plotly.newPlot('tracking-plot-3d', data, layout, plot_config);
 }
 
