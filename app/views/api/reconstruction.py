@@ -1,6 +1,11 @@
+import base64
+from io import BytesIO
 from typing import List
 
+import cv2
+import matplotlib.pyplot as plt
 import numpy as np
+from PIL import Image
 from flask import request
 
 from app.views.api import bp_api
@@ -103,6 +108,68 @@ def get_point_stats(_id: str):
         'timestamps': _get_timestamps(reconstruction),
         **vals
     }
+
+
+@bp_api.route('/reconstruction/<string:_id>/posture', methods=['GET'])
+def get_posture(_id):
+    reconstruction = Reconstruction.objects.get(id=_id)
+    D = request.args.get('depth', type=int)
+    frame_num = request.args.get('frame_num', type=int)
+    ts = TrialState(reconstruction=reconstruction)
+    from_idx = sum([2**d2 for d2 in range(D)])
+    to_idx = from_idx + 2**D
+
+    # Get 3D posture
+    all_points = ts.get('points')[frame_num]
+    points = all_points[from_idx:to_idx].T
+
+    # Get 2D projections
+    all_projections = ts.get('points_2d')[frame_num]  # (N, 3, 2)
+    points_2d = np.round(all_projections[from_idx:to_idx]).astype(np.int32)
+
+    # Get sigmas
+    all_sigmas = ts.get('sigmas')[frame_num]
+    sigmas = all_sigmas[from_idx:to_idx]
+
+    # Get intensities
+    all_intensities = ts.get('intensities')[frame_num]
+    intensities = all_intensities[from_idx:to_idx]
+
+    # Colour map
+    cmap = plt.get_cmap('jet')
+    colours = np.array([cmap(d) for d in np.linspace(0, 1, 2**D)])
+
+    # Add transparency based on intensity
+    colours[:, 3] *= intensities / 2
+
+    # Convert to integers
+    colours = np.round(colours * 255).astype(np.uint8)
+
+    # Read each numpy array into a PIL Image, write the png image to a buffer and encode as a base64-encoded string
+    images = []
+    frame = reconstruction.get_frame(frame_num)
+    for i, img_array in enumerate(frame.images):
+        z = (img_array * 255).astype(np.uint8)
+        z = cv2.cvtColor(z, cv2.COLOR_GRAY2RGBA)
+
+        # Overlay 2d projection
+        p2d = points_2d[:, i]
+        for j, p in enumerate(p2d):
+            z = cv2.circle(z, p, int(sigmas[j] * 100), color=colours[j].tolist(), thickness=-1, lineType=cv2.LINE_AA)
+
+        img = Image.fromarray(z, 'RGBA')
+        buffer = BytesIO()
+        img.save(buffer, format='PNG')
+        buffer.seek(0)
+        data_uri = base64.b64encode(buffer.read()).decode('utf-8')
+        images.append(f'data:image/png;charset=utf-8;base64,{data_uri}')
+
+    response = {
+        'images': images,
+        'posture': points.tolist()
+    }
+
+    return response
 
 
 def _get_timestamps(reconstruction: Reconstruction, frame_nums: List[int] = None):

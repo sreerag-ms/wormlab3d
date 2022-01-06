@@ -35,7 +35,7 @@ class Trial(Document):
         self.readers = [None] * 3
         self.triplet_reader = None
 
-    def get_frame(self, frame_num) -> Frame:
+    def get_frame(self, frame_num: int) -> Frame:
         return Frame.objects.get(
             trial=self,
             frame_num=frame_num

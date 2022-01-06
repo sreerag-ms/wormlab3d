@@ -17,7 +17,6 @@ def get_tracking_data(_id):
         {'$project': {
             '_id': 0,
             'centre_3d': 1,
-            # 'centres_2d': 1,
         }},
         {'$sort': {'frame_num': 1}},
     ]

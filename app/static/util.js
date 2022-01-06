@@ -129,9 +129,16 @@ function plot_tracking_3d(X, timestamps) {
             title: 'z'
         }
     };
-    console.log(layout);
     Plotly.newPlot('tracking-plot-3d', data, layout, plot_config);
 }
 
-// ==================================================================
 
+// ================================= General util =================================
+
+function linspace(start, stop, num, endpoint = true) {
+    const div = endpoint ? (num - 1) : num;
+    const step = (stop - start) / div;
+    return Array.from({length: num}, (_, i) => start + step * i);
+}
+
+// ==================================================================

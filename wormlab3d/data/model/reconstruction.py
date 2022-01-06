@@ -3,6 +3,7 @@ import datetime
 from mongoengine import *
 from wormlab3d.data.model.mf_parameters import MFParameters
 from wormlab3d.data.model.midline3d import M3D_SOURCES
+from wormlab3d.data.model.frame import Frame
 
 
 class Reconstruction(Document):
@@ -32,6 +33,9 @@ class Reconstruction(Document):
     def save(self, *args, **kwargs):
         self.updated = datetime.datetime.now()
         return super().save(*args, **kwargs)
+
+    def get_frame(self, frame_num: int) -> Frame:
+        return self.trial.get_frame(frame_num)
 
     @property
     def n_frames(self) -> int:
