@@ -172,6 +172,28 @@ def get_posture(_id):
     return response
 
 
+@bp_api.route('/reconstruction/<string:_id>/worm-lengths', methods=['GET'])
+def get_worm_lengths(_id: str):
+    reconstruction = Reconstruction.objects.get(id=_id)
+    D = reconstruction.mf_parameters.depth
+    ts = TrialState(reconstruction=reconstruction)
+    points = ts.get('points')  # (T, N, 3)
+    lengths = {}
+
+    for d in range(1, D):
+        from_idx = sum([2**d2 for d2 in range(d)])
+        to_idx = from_idx + 2**d
+        points_d = points[:, from_idx:to_idx]
+        segments = points_d[:, 1:] - points_d[:, :-1]
+        segment_lengths = np.linalg.norm(segments, axis=-1)
+        lengths[d] = np.sum(segment_lengths, axis=-1).tolist()
+
+    return {
+        'timestamps': _get_timestamps(reconstruction),
+        'lengths': lengths
+    }
+
+
 def _get_timestamps(reconstruction: Reconstruction, frame_nums: List[int] = None):
     if frame_nums is None:
         frame_nums = np.arange(reconstruction.start_frame, reconstruction.end_frame)

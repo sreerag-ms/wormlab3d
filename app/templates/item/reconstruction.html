@@ -34,6 +34,7 @@
       {{ tabs.tab_item('Cameras') }}
       {{ tabs.tab_item('Point stats') }}
       {{ tabs.tab_item('Postures') }}
+      {{ tabs.tab_item('Lengths') }}
     </ul>
 
     <div class="frame-controls my-2" style="display: none;">
@@ -135,6 +136,13 @@
               <div class="d-flex flex-column align-items-center"></div>
             </div>
           </div>
+        </div>
+      {% endcall %}
+
+      {% call tabs.tab_panel('Lengths') %}
+        <div class="g-0 mt-1 mb-5 length-plots">
+          {% include 'includes/_loader.html' %}
+          <div id="length-plots"></div>
         </div>
       {% endcall %}
 
@@ -498,6 +506,43 @@
           // Hide frame controls when not needed
           $('#point-stats-tab, #postures-tab').on('hidden.bs.tab', function () {
               $('.frame-controls').hide();
+          });
+
+          // ========================== Lengths ==========================
+          let lengths_plot_data = [];
+          for (let d = 1; d < {{ reconstruction.mf_parameters.depth }}; d++) {
+              lengths_plot_data.push({
+                  x: [],
+                  y: [],
+                  type: 'line',
+                  name: 'Depth ' + String(d)
+              });
+          }
+
+          let lengths_layout = {
+              title: 'Worm length',
+              xaxis: {title: 'Time (s)', type: 'date', tickformat: '%M:%S'},
+              yaxis: {title: 'Length (mm)',},
+              margin: {t: 50},
+          };
+
+          Plotly.newPlot('length-plots', lengths_plot_data, lengths_layout, plot_config);
+
+          function get_lengths() {
+              $('#lengths-panel .loader').show();
+              $.getJSON('{{ url_for('api.get_worm_lengths', _id=reconstruction.id) }}', {frame_num: frame_num}, function (data) {
+                  for (let d = 0; d < {{ reconstruction.mf_parameters.depth }} -1; d++) {
+                      lengths_plot_data[d]['x'] = timestamps_in_ms(data['timestamps']);
+                      lengths_plot_data[d]['y'] = data['lengths'][d + 1];
+                  }
+                  Plotly.react('length-plots', lengths_plot_data, lengths_layout, plot_config);
+                  $('#lengths-panel .loader').hide();
+              });
+          }
+
+          // Load lengths and draw plot when the tab is activated
+          $('#lengths-tab').one('shown.bs.tab', function () {
+              get_lengths();
           });
 
       });
