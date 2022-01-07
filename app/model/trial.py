@@ -57,7 +57,7 @@ class TrialView(DocumentView):
                 },
             ),
             (
-                self.prefix + 'num_frames', {
+                self.prefix + 'n_frames_min', {
                     'title': 'Num. frames',
                     'type': 'integer',
                 },
@@ -67,8 +67,8 @@ class TrialView(DocumentView):
                     'title': 'Duration',
                     'type': 'time',
                     'query': {
-                        'operation': 'multiply',
-                        'fields': [self.prefix + 'num_frames', self.prefix + 'fps']
+                        'operation': 'divide',
+                        'fields': [self.prefix + 'n_frames_min', self.prefix + 'fps']
                     },
                 },
             ),

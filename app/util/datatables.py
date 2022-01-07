@@ -7,8 +7,8 @@ Module to handle conversation between DataTables and MongoDB.
 import json
 import re
 
-from app.util.encoder import JSONEncoder
 from app.model import DocumentView
+from app.util.encoder import JSONEncoder
 from wormlab3d import logger
 
 
@@ -63,11 +63,11 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
             while len(rel_keys) > 1:
                 rel_collection = rel_keys[0]
                 if rel_collection not in lookups:
-                    lookup_key = '.'.join(doc_links + [rel_collection,])
+                    lookup_key = '.'.join(doc_links + [rel_collection, ])
                     lookups[lookup_key] = [
                         {'$lookup': {
                             'from': rel_collection,
-                            'localField': '.'.join(doc_links + [rel_collection,]),
+                            'localField': '.'.join(doc_links + [rel_collection, ]),
                             'foreignField': '_id',
                             'as': f'{lookup_key}_doc'
                         }},
@@ -100,7 +100,18 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
                     raise ValueError(f'Unrecognised aggregation value: {q["aggregation"]}.')
 
             elif 'operation' in q:
-                projects[key_as] = {f'${q["operation"]}': [f'${f}' for f in q['fields']]}
+                if q['operation'] == 'divide':
+                    assert len(q['fields']) == 2
+                    numerator = f'${q["fields"][0]}'
+                    divisor = f'${q["fields"][1]}'
+                    cond = {'$cond': [
+                        {'$eq': [divisor, 0]},
+                        0,
+                        {'$divide': [numerator, divisor]}
+                    ]}
+                    projects[key_as] = cond
+                else:
+                    projects[key_as] = {f'${q["operation"]}': [f'${f}' for f in q['fields']]}
 
             else:
                 raise ValueError(f'Unrecognised query: {q}.')
@@ -124,7 +135,7 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
             # elif field_spec['type'] == 'float':
             #     filter_value = float(filter_value)
 
-            if 'early_match' in field_spec and field_spec['early_match'] == True:
+            if 'early_match' in field_spec and field_spec['early_match'] is True:
                 matches[key] = filter_value
             else:
                 filters[key] = filter_value
@@ -188,7 +199,7 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
 
     # Fetch total count from collection metadata
     cursor = doc_view.document_class.objects.aggregate([
-        {'$collStats': { 'count': {} }}
+        {'$collStats': {'count': {}}}
     ])
     try:
         total_records = list(cursor)[0]['count']

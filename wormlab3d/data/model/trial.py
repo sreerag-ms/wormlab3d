@@ -139,5 +139,8 @@ class Trial(Document):
     @property
     def duration(self):
         from datetime import datetime
-        dt = datetime.fromtimestamp(round(self.n_frames_min / self.fps))
+        if self.fps > 0:
+            dt = datetime.fromtimestamp(round(self.n_frames_min / self.fps))
+        else:
+            dt = datetime.fromtimestamp(0)
         return dt
