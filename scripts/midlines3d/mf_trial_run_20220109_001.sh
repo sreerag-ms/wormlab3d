@@ -1,18 +1,18 @@
 #!/bin/bash
 
 python mf_trial.py \
-        --resume \
+        --no-resume \
         --gpu-only \
         --checkpoint-every-n-steps=-1 \
         --checkpoint-every-n-frames=100 \
         --log-level=0 \
         --plot-every-n-steps=-1 \
-        --plot-every-n-frames=1 \
+        --plot-every-n-frames=-1 \
         --plot-sigmas=True \
         --plot-intensities=True \
         --plot-scores=True \
         --save-plots=True \
-        --trial-id=76 \
+        --trial-id=1 \
         --start-frame=0 \
         --depth=9 \
         --window-size=1 \
