@@ -46,7 +46,7 @@
             {{ table.render(frame_view, table_name_frames) }}
           </div>
           <div id="frame-details" class="col-md-4">
-            {% call cards.card('Cropped images') %}
+            {% call cards.card('Cropped images', sticky=True) %}
               <div class="d-flex flex-column align-items-center"></div>
             {% endcall %}
           </div>

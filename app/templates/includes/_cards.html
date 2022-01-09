@@ -1,5 +1,6 @@
-{% macro card(title) -%}
-  <div class="card text-dark bg-light">
+{% macro card(title, sticky=False) -%}
+  {% set sticky = ' sticky-top' if sticky else '' %}
+  <div class="card text-dark bg-light{{ sticky }}">
     {% if title %}
       <div class="card-header">{{ title }}</div>
     {% endif %}
