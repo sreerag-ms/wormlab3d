@@ -12,7 +12,7 @@ python mf_trial.py \
         --plot-intensities=True \
         --plot-scores=True \
         --save-plots=True \
-        --trial-id=37 \
+        --trial-id=67 \
         --start-frame=0 \
         --depth=9 \
         --window-size=1 \

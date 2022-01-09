@@ -14,6 +14,7 @@ from torch.backends import cudnn
 from torch.optim import Optimizer
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms.functional import gaussian_blur
+
 from wormlab3d import logger, LOGS_PATH, PREPARED_IMAGE_SIZE, START_TIMESTAMP
 from wormlab3d.data.model import Trial, Cameras, MFCheckpoint, MFParameters, Reconstruction
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
@@ -41,7 +42,7 @@ PRINT_KEYS = [
 
 # torch.autograd.set_detect_anomaly(True)
 
-GPU_ID = 1  # todo: detect automatically?
+GPU_ID = 0  # todo: detect automatically?
 
 
 class Midline3DFinder:
@@ -183,11 +184,10 @@ class Midline3DFinder:
         # Look for existing reconstruction
         reconstruction = None
         try:
-            reconstruction = Reconstruction.objects.get(
-                **params,
-                start_frame__lte=start_frame,
-                end_frame__gte=start_frame
-            )
+            reconstruction = Reconstruction.objects.get(**params)
+            if reconstruction.start_frame < start_frame:
+                reconstruction.start_frame = start_frame
+                reconstruction.save()
             logger.info(f'Loaded reconstruction (id={reconstruction.id}, created={reconstruction.created}).')
         except DoesNotExist:
             logger.info(f'No reconstruction record found in database.')
@@ -459,7 +459,7 @@ class Midline3DFinder:
 
     def _init_tb_logger(self):
         """Initialise the tensorboard writer."""
-        self.tb_logger = SummaryWriter(self.logs_path / 'events' / START_TIMESTAMP, flush_secs=5)
+        self.tb_logger = SummaryWriter(self.logs_path / 'events' / START_TIMESTAMP, max_queue=100, flush_secs=30)
 
     def _configure_paths(self):
         """
