@@ -29,6 +29,7 @@ class Frame(Document):
     centres_2d = TripletField(ListField(ListField()))
     centres_2d_thresholds = TripletField(IntField())
     centre_3d = EmbeddedDocumentField(ObjectPoint)
+    centre_3d_fixed = EmbeddedDocumentField(ObjectPoint)
 
     # Prepared images (we don't store high-resolution images)
     images = TripletField(
@@ -363,12 +364,18 @@ class Frame(Document):
         """
 
         # Check the centre point exists and if not, create it
-        if self.centre_3d is None:
+        if self.centre_3d is None and self.centre_3d_fixed is None:
             logger.warning('Frame does not have a 3d centre point available, generating now.')
             res = self.generate_centre_3d()
             if not res:
                 return False
             assert self.centre_3d is not None
+
+        # Use the fixed (interpolated and smoothed) centre point if available
+        if self.centre_3d_fixed is not None:
+            p3d = self.centre_3d_fixed
+        else:
+            p3d = self.centre_3d
 
         # Set the frame number, fetch the images from each video and generate the crops
         reader = self.trial.get_video_triplet_reader()
@@ -378,7 +385,7 @@ class Frame(Document):
         for c, image in images.items():
             crop = crop_image(
                 image=image,
-                centre_2d=self.centre_3d.reprojected_points_2d[c],
+                centre_2d=p3d.reprojected_points_2d[c],
                 size=PREPARED_IMAGE_SIZE,
                 fix_overlaps=True
             )

@@ -12,6 +12,7 @@ def generate_prepared_images(
         trial_id: int = None,
         frame_num: int = None,
         missing_only: bool = True,
+        fixed_centres_only: bool = True,
         fix_missing_centres: bool = False,
         max_3d_error: float = 0,
 ):
@@ -28,6 +29,8 @@ def generate_prepared_images(
         logger.info(f'Generating any missing prepared images for {len(trial_ids)} trials.')
     else:
         logger.info(f'(Re)generating ALL prepared images for {len(trial_ids)} trials.')
+    if fixed_centres_only:
+        logger.info('Using fixed centres only.')
 
     # Iterate over matching trials
     for trial_id in trial_ids:
@@ -48,8 +51,10 @@ def generate_prepared_images(
                 }
             if max_3d_error > 0:
                 filters['centre_3d__error__lte'] = max_3d_error
-            elif not fix_missing_centres:
+            elif not fix_missing_centres and not fixed_centres_only:
                 filters['centre_3d__error__exists'] = True
+            if fixed_centres_only:
+                filters['centre_3d_fixed__exists'] = True
             frames = trial.get_frames(filters).only('id').no_dereference()
         frame_ids = [f.id for f in frames]
 
@@ -74,7 +79,7 @@ def generate_prepared_images(
             frame.trial = trial
 
             # Check the centre point exists and if not, create it
-            if frame.centre_3d is None:
+            if frame.centre_3d is None and frame.centre_3d_fixed is None:
                 if fix_missing_centres:
                     logger.warning(log_prefix + '3D centre point unavailable, generating now.')
                     res = frame.generate_centre_3d(
@@ -93,12 +98,16 @@ def generate_prepared_images(
                 else:
                     logger.warning(log_prefix + '3D centre point unavailable, skipping.')
                     continue
-            assert frame.centre_3d is not None
 
-            if 0 < max_3d_error < frame.centre_3d.error:
-                logger.warning(log_prefix + f'3D centre point error ({frame.centre_3d.error:.2f}) '
-                                            f'> max_3d_error ({max_3d_error:.2f}), skipping.')
-                continue
+            if frame.centre_3d_fixed is not None:
+                p3d = frame.centre_3d_fixed
+            else:
+                assert frame.centre_3d is not None
+                p3d = frame.centre_3d
+                if 0 < max_3d_error < p3d.error:
+                    logger.warning(log_prefix + f'3D centre point error ({p3d.error:.2f}) '
+                                                f'> max_3d_error ({max_3d_error:.2f}), skipping.')
+                    continue
 
             # Set the frame number, fetch the images from each video and generate the crops
             logger.info(log_prefix + 'Generating crops.')
@@ -108,7 +117,7 @@ def generate_prepared_images(
             for c, image in images.items():
                 crop = crop_image(
                     image=image,
-                    centre_2d=frame.centre_3d.reprojected_points_2d[c],
+                    centre_2d=p3d.reprojected_points_2d[c],
                     size=PREPARED_IMAGE_SIZE,
                     fix_overlaps=True
                 )
@@ -125,7 +134,9 @@ def generate_prepared_images(
 
 if __name__ == '__main__':
     generate_prepared_images(
-        missing_only=True,
+        trial_id=15,
+        missing_only=False,
+        fixed_centres_only=True,
         fix_missing_centres=False,
-        max_3d_error=100,
+        max_3d_error=0,
     )

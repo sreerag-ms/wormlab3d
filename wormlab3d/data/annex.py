@@ -10,7 +10,7 @@ def is_annexed_file(path: str) -> bool:
     """
     Checks if the path points at a git-annexed file.
     """
-    return (ANNEX_PATH_PLACEHOLDER in path or ANNEX_PATH in path) and os.path.islink(path)
+    return (ANNEX_PATH_PLACEHOLDER in path or str(ANNEX_PATH) in path) and os.path.islink(path)
 
 
 def _execute_annex_cmd(cmd: str, path: str, check: bool = True) -> subprocess.CompletedProcess:
