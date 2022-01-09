@@ -17,13 +17,16 @@ def get_tracking_data(_id):
         {'$project': {
             '_id': 0,
             'centre_3d': 1,
+            'centre_3d_fixed': 1,
         }},
         {'$sort': {'frame_num': 1}},
     ]
     cursor = Frame.objects().aggregate(pipeline)
 
     for res in cursor:
-        if 'centre_3d' in res and res['centre_3d'] is not None:
+        if 'centre_3d_fixed' in res and res['centre_3d_fixed'] is not None:
+            pt = res['centre_3d_fixed']['point_3d']
+        elif 'centre_3d' in res and res['centre_3d'] is not None:
             pt = res['centre_3d']['point_3d']
         else:
             pt = np.array([None, None, None])
