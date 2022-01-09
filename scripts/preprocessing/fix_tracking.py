@@ -98,7 +98,7 @@ def fix_tracking_trial(trial_id: int, missing_only: bool = True):
         cameras_ids.append(cams_id)
 
         # Check the displacement isn't too large -- set max displacement of 0.8mm/second
-        if i > 0:
+        if len(centres_3d) > 1:
             displacement = np.linalg.norm(pt - centres_3d[-1])
             if displacement > (0.8 / trial.fps) * (n - frame_nums_with_data[-1]):
                 frame_nums_missing_data.append(n)
