@@ -194,9 +194,10 @@ def fix_tracking_trial(trial_id: int, missing_only: bool = True):
             ax.set_title(['x', 'y', 'z'][i])
             ax.plot(smoothed_vals, color='green', alpha=0.5, label='Fixed')
             ax.scatter(frame_nums_with_data, f(frame_nums_with_data), s=1, color='blue', alpha=0.7, label='Included')
-            ax.scatter(frame_nums_missing_data, bad_pts[:, i], s=1, color='red', alpha=0.7, label='Excluded')
-            ax.scatter(frame_nums_missing_data, f(frame_nums_missing_data), s=1, color='orange', alpha=0.7,
-                       label='Interpolated')
+            if len(frame_nums_missing_data) > 0:
+                ax.scatter(frame_nums_missing_data, bad_pts[:, i], s=1, color='red', alpha=0.7, label='Excluded')
+                ax.scatter(frame_nums_missing_data, f(frame_nums_missing_data), s=1, color='orange', alpha=0.7,
+                           label='Interpolated')
             if i == 0:
                 ax.legend()
 
