@@ -42,7 +42,7 @@ PRINT_KEYS = [
 
 # torch.autograd.set_detect_anomaly(True)
 
-GPU_ID = 0  # todo: detect automatically?
+GPU_ID = 1  # todo: detect automatically?
 
 
 class Midline3DFinder:
@@ -262,6 +262,8 @@ class Midline3DFinder:
         logger.info(f'Initialising frame state for frame #{frame_num} (id={frame.id}).')
 
         # Load images
+        if frame.images is None or len(frame.images) != 3:
+            raise RuntimeError('Frame does not have a triplet of prepared images. Aborting!')
         images = torch.from_numpy(np.stack(frame.images))
 
         # Threshold images to make the target masks
@@ -300,14 +302,20 @@ class Midline3DFinder:
         # Load cameras
         cameras: Cameras = frame.get_cameras()
 
+        # Use the fixed (interpolated and smoothed) centre point if available
+        if frame.centre_3d_fixed is not None:
+            p3d = frame.centre_3d_fixed
+        else:
+            p3d = frame.centre_3d
+
         # Initialise frame state
         frame_state = FrameState(
             frame_num=frame_num,
             images=images,
             masks_target=masks,
             cameras=cameras,
-            points_3d_base=torch.tensor(frame.centre_3d.point_3d),
-            points_2d_base=torch.tensor(frame.centre_3d.reprojected_points_2d),
+            points_3d_base=torch.tensor(p3d.point_3d),
+            points_2d_base=torch.tensor(p3d.reprojected_points_2d),
             parameters=self.parameters,
             prev_frame_state=prev_frame_state,
             master_frame_state=master_frame_state

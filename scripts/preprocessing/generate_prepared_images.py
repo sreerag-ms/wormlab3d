@@ -134,7 +134,7 @@ def generate_prepared_images(
 
 if __name__ == '__main__':
     generate_prepared_images(
-        trial_id=15,
+#        trial_id=15,
         missing_only=False,
         fixed_centres_only=True,
         fix_missing_centres=False,

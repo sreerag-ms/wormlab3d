@@ -34,6 +34,15 @@ def crop_image(
     crop = image[row_from:row_to, col_from:col_to].copy()
 
     if fix_overlaps and crop.shape != size:
+        print('centre_2d', centre_2d)
+        print('crop.shape', crop.shape)
+        print('size', size)
+        print('row_from', row_from)
+        print('row_to', row_to)
+        print('col_from', col_from)
+        print('col_to', col_to)
+        print('top_overlap', top_overlap)
+        print('left_overlap', left_overlap)
         crop_fixed = np.zeros(size, dtype=image.dtype)
         crop_fixed[top_overlap:top_overlap + crop.shape[0], left_overlap:left_overlap + crop.shape[1]] = crop
         crop = crop_fixed
