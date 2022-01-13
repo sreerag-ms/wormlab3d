@@ -2,7 +2,6 @@ $(document).ready(function () {
     // Remember active tab
     $('button[data-bs-toggle="tab"]').on('shown.bs.tab', function (e) {
         let tabs_id = $(this).closest('ul.nav-tabs').attr('id');
-        console.log('setting ', 'activeTab_' + tabs_id, $(e.target).data('bs-target'));
         localStorage.setItem('activeTab_' + tabs_id, $(e.target).data('bs-target'));
 
         // Resize data tables
@@ -16,7 +15,6 @@ $(document).ready(function () {
         if (activeTab) {
             $('button[data-bs-target="' + activeTab + '"]').tab('show');
         }
-        console.log('restoring ', 'activeTab_' + tabs_id, activeTab);
     });
 
     // Re-layout plots when tab is first shown
@@ -28,7 +26,13 @@ $(document).ready(function () {
 });
 
 
-// ================================= Tracking plots =================================
+// ================================= General util =================================
+
+function linspace(start, stop, num, endpoint = true) {
+    const div = endpoint ? (num - 1) : num;
+    const step = (stop - start) / div;
+    return Array.from({length: num}, (_, i) => start + step * i);
+}
 
 let plot_config = {
     displaylogo: false,
@@ -36,9 +40,12 @@ let plot_config = {
     modeBarButtonsToRemove: ['toImage']
 };
 
+
+// ================================= Tracking plots =================================
+
 function timestamps_in_ms(timestamps) {
     return timestamps.map(function (t) {
-        return t * 1000
+        return t * 1000;
     });
 }
 
@@ -67,8 +74,7 @@ function plot_tracking_single(X, idx, timestamps) {
             title: 'Position (mm)',
         }
     };
-
-    Plotly.newPlot('tracking-plot-' + xyz, data, layout, plot_config);
+    Plotly.react('tracking-plot-' + xyz, data, layout, plot_config);
 }
 
 function plot_tracking_pairs(X, idx0, idx1, timestamps) {
@@ -96,7 +102,7 @@ function plot_tracking_pairs(X, idx0, idx1, timestamps) {
             title: xyz1
         }
     };
-    Plotly.newPlot('tracking-plot-' + pair, data, layout, plot_config);
+    Plotly.react('tracking-plot-' + pair, data, layout, plot_config);
 }
 
 function plot_tracking_3d(X, timestamps) {
@@ -130,15 +136,6 @@ function plot_tracking_3d(X, timestamps) {
         }
     };
     Plotly.newPlot('tracking-plot-3d', data, layout, plot_config);
-}
-
-
-// ================================= General util =================================
-
-function linspace(start, stop, num, endpoint = true) {
-    const div = endpoint ? (num - 1) : num;
-    const step = (stop - start) / div;
-    return Array.from({length: num}, (_, i) => start + step * i);
 }
 
 // ==================================================================

@@ -35,9 +35,19 @@
         {% include 'includes/_video_triplet_player.html' %}
       {% endcall %}
       {% call tabs.tab_panel('Tracking 2D') %}
+        <select name="tracking-fixed-2d-select" id="tracking-fixed-2d-select" class="form-control form-select"
+                placeholder="Fixed centres">
+          <option value="1">Fixed</option>
+          <option value="0">Raw triangulations</option>
+        </select>
         {% include 'includes/_tracking_plots_2d.html' %}
       {% endcall %}
       {% call tabs.tab_panel('Tracking 3D') %}
+        <select name="tracking-fixed-3d-select" id="tracking-fixed-3d-select" class="form-control form-select"
+                placeholder="Fixed centres">
+          <option value="1">Fixed</option>
+          <option value="0">Raw triangulations</option>
+        </select>
         {% include 'includes/_tracking_plots_3d.html' %}
       {% endcall %}
       {% call tabs.tab_panel('Frames') %}
@@ -69,57 +79,85 @@
     {% set doc_view=frame_view %}
     {% set table_name=table_name_frames %}
     {% set table_order=[1, 'asc'] %}
+    {% set initialise=False %}
     {% include 'includes/_table_js.html' %}
   {% endwith %}
   {% with %}
     {% set doc_view=reconstruction_view %}
     {% set table_name=table_name_reconstruction %}
+    {% set initialise=False %}
     {% include 'includes/_table_js.html' %}
   {% endwith %}
 
   <script>
       $(document).ready(function () {
-          let X, ts;
+          // ========================== Tracking trajectories ==========================
+          let X = {}, ts;
+          let fixed_2d = $('#tracking-fixed-2d-select').val();
+          let fixed_3d = $('#tracking-fixed-3d-select').val();
 
-          function get_tracking_data(cb) {
-              $.getJSON('{{ url_for('api.get_tracking_data', _id=trial.id) }}', function (data) {
+          function get_tracking_data(fixed, cb) {
+              $.getJSON('{{ url_for('api.get_tracking_data', _id=trial.id) }}', {fixed: fixed}, function (data) {
                   ts = data['timestamps'];
-                  X = data['centres_3d'];
+                  X[fixed] = data['centres_3d'];
                   cb();
               });
           }
 
-          // Load tracking data and draw 2d plots when the tab is activated
-          $('#tracking-2d-tab').one('shown.bs.tab', function () {
-              function make_plots() {
-                  $('#tracking-2d-panel .loader').hide();
-                  plot_tracking_pairs(X, 0, 1, ts);
-                  plot_tracking_pairs(X, 0, 2, ts);
-                  plot_tracking_pairs(X, 1, 2, ts);
-                  for (let i = 0; i < 3; i++) {
-                      plot_tracking_single(X, i, ts);
-                  }
+          function make_tracking_2d_plots() {
+              let Xf = X[fixed_2d];
+              plot_tracking_pairs(Xf, 0, 1, ts);
+              plot_tracking_pairs(Xf, 0, 2, ts);
+              plot_tracking_pairs(Xf, 1, 2, ts);
+              for (let i = 0; i < 3; i++) {
+                  plot_tracking_single(Xf, i, ts);
               }
+              $('#tracking-2d-panel .loader').hide();
+          }
 
-              if (X) {
-                  make_plots()
+          function make_tracking_3d_plots() {
+              let Xf = X[fixed_3d];
+              plot_tracking_3d(Xf, ts);
+              $('#tracking-3d-panel .loader').hide();
+          }
+
+          // Update the 2D tracking plots when changing between fixed and raw views
+          $('#tracking-fixed-2d-select').change(function () {
+              $('#tracking-2d-panel .loader').show();
+              fixed_2d = $(this).val();
+              if (fixed_2d in X) {
+                  make_tracking_2d_plots();
               } else {
-                  get_tracking_data(make_plots)
+                  get_tracking_data(fixed_2d, make_tracking_2d_plots);
               }
           });
 
-          // Load tracking data and draw 3d plot when the tab is activated
-          $('#tracking-3d-tab').one('shown.bs.tab', function () {
-              function make_plots() {
-                  $('#tracking-3d-panel .loader').hide();
-                  plot_tracking_3d(X, ts);
-              }
-
-              if (X) {
-                  make_plots()
+          // Update the 3D tracking plots when changing between fixed and raw views
+          $('#tracking-fixed-3d-select').change(function () {
+              $('#tracking-3d-panel .loader').show();
+              fixed_3d = $(this).val();
+              if (fixed_3d in X) {
+                  make_tracking_3d_plots();
               } else {
-                  get_tracking_data(make_plots)
+                  get_tracking_data(fixed_3d, make_tracking_3d_plots);
               }
+          });
+
+          // Load tracking data and draw 2D plots when the tab is activated
+          $('#tracking-2d-tab').one('shown.bs.tab', function () {
+              $('#tracking-fixed-2d-select').change();
+          });
+
+          // Load tracking data and draw 3D plots when the tab is activated
+          $('#tracking-3d-tab').one('shown.bs.tab', function () {
+              $('#tracking-fixed-3d-select').change();
+          });
+
+
+          // ========================== Frames ==========================
+          $('#frames-tab').one('shown.bs.tab', function () {
+              initialise_{{ frame_view.collection_name }}_table();
+              $('#{{table_name_frames}} tbody').on('click', 'tr', handle_frame_row_select);
           });
 
           // Load frame images on selecting it in the table
@@ -133,7 +171,7 @@
               });
           }
 
-          $('#{{table_name_frames}} tbody').on('click', 'tr', function () {
+          function handle_frame_row_select() {
               if ($(this).hasClass('table-primary')) {
                   $(this).removeClass('table-primary');
                   $('#frame-details img').remove();
@@ -141,8 +179,13 @@
                   $('#{{table_name_frames}} tr').removeClass('table-primary');
                   $(this).addClass('table-primary');
                   const frame_id = $('#{{table_name_frames}}').DataTable({retrieve: true}).row(this).data()._id;
-                  load_frame_details(frame_id)
+                  load_frame_details(frame_id);
               }
+          };
+
+          // ========================== Reconstructions ==========================
+          $('#reconstructions-tab').one('shown.bs.tab', function () {
+              initialise_{{ reconstruction_view.collection_name }}_table()
           });
       });
   </script>
