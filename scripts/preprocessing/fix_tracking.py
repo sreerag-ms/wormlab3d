@@ -52,6 +52,7 @@ def fix_tracking_trial(trial_id: int, missing_only: bool = True):
     bad_pts = []
     cameras_ids = []
     cams_models = {}
+    last_good_cams_id = None
 
     # Fetch the 3d centres
     logger.info('Fetching the 3d centres.')
@@ -87,15 +88,12 @@ def fix_tracking_trial(trial_id: int, missing_only: bool = True):
         if 'centre_3d' not in res or res['centre_3d'] is None:
             frame_nums_missing_data.append(n)
             bad_pts.append(np.array([np.nan, np.nan, np.nan]))
-            cameras_ids.append(cameras_ids[-1])
+            if last_good_cams_id is not None:
+                cameras_ids.append(last_good_cams_id)
+            else:
+                cameras_ids.append(None)
             continue
         pt = np.array(res['centre_3d']['point_3d'])
-
-        # Get the cameras model
-        cams_id = res['centre_3d']['cameras']
-        if cams_id not in cams_models:
-            cams_models[cams_id] = Cameras.objects.get(id=cams_id).get_camera_model_triplet()
-        cameras_ids.append(cams_id)
 
         # Check the displacement isn't too large -- set max displacement of 0.8mm/second
         if len(centres_3d) > 1:
@@ -103,14 +101,29 @@ def fix_tracking_trial(trial_id: int, missing_only: bool = True):
             if displacement > (0.8 / trial.fps) * (n - frame_nums_with_data[-1]):
                 frame_nums_missing_data.append(n)
                 bad_pts.append(pt)
+                if last_good_cams_id is not None:
+                    cameras_ids.append(last_good_cams_id)
+                else:
+                    cameras_ids.append(None)
                 continue
 
         # Check the reprojection error isn't too large -- set max of 50
         if res['centre_3d']['error'] > 50:
             frame_nums_missing_data.append(n)
             bad_pts.append(pt)
+            if last_good_cams_id is not None:
+                cameras_ids.append(last_good_cams_id)
+            else:
+                cameras_ids.append(None)
             continue
 
+        # Get the cameras model
+        cams_id = res['centre_3d']['cameras']
+        if cams_id not in cams_models:
+            cams_models[cams_id] = Cameras.objects.get(id=cams_id).get_camera_model_triplet()
+
+        last_good_cams_id = cams_id
+        cameras_ids.append(cams_id)
         centres_3d.append(pt)
         frame_nums_with_data.append(n)
 
@@ -164,6 +177,14 @@ def fix_tracking_trial(trial_id: int, missing_only: bool = True):
             window_len += 1
         new_centres[i] = smooth(new_vals, window_len=window_len)
 
+    # Fix any missing cameras at the start due to rejected points at the start of the video
+    i = 0
+    while cameras_ids[i] is None:
+        i += 1
+    if i > 0:
+        for j in range(i):
+            cameras_ids[j] = cameras_ids[i]
+
     # Update database
     if not dry_run:
         logger.info('Updating database.')
@@ -207,6 +228,7 @@ def fix_tracking_trial(trial_id: int, missing_only: bool = True):
             plt.savefig(LOGS_PATH / f'{START_TIMESTAMP}_trial={trial_id}.{img_extension}')
         if show_plots:
             plt.show()
+        plt.close(fig)
 
 
 def fix_tracking(missing_only: bool = True):
@@ -219,4 +241,4 @@ def fix_tracking(missing_only: bool = True):
 if __name__ == '__main__':
     # from simple_worm.plot3d import interactive
     # interactive()
-    fix_tracking(missing_only=True)
+    fix_tracking(missing_only=False)
