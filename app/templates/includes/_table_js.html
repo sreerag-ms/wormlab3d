@@ -1,5 +1,6 @@
 {% set table_name=table_name or 'data-table-' + doc_view.collection_name %}
 {% set table_order=table_order or [0, 'asc'] %}
+{% set initialise=initialise if initialise is defined else True %}
 
 {% macro render_fields(doc_view, prefix) -%}
   {% set prefix = prefix or '' %}
@@ -75,7 +76,7 @@
 {% endmacro %}
 
 <script>
-    $(document).ready(function () {
+    function initialise_{{ doc_view.collection_name }}_table() {
         let table = $("#{{ table_name }}").DataTable({
             order: [{{ table_order|safe }}],
             pageLength: 25,
@@ -166,5 +167,10 @@
                 window.location.href = '/{{ doc_view.collection_name }}/' + id;
             });
         {% endif %}
+    }
+    {% if initialise %}
+    $(document).ready(function () {
+        initialise_{{ doc_view.collection_name }}_table();
     });
+    {% endif %}
 </script>
