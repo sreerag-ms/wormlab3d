@@ -57,5 +57,13 @@ class FrameView(DocumentView):
                     'type': 'float',
                     'precision': 3,
                 },
-            )
+            ),
+            (
+                self.prefix + 'centre_3d_fixed.point_3d', {
+                    'title': 'Centre 3D Fixed',
+                    'type': 'array',
+                    'type_array': 'float',
+                    'precision': 2,
+                },
+            ),
         ])
