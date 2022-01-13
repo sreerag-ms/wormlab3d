@@ -8,13 +8,13 @@ channels:
 dependencies:
   - python = 3.9
   - av = 8.0
+  - ffmpeg-python = 0.2
   - flask = 2.0
   - flask_wtf = 1.0
   - gunicorn = 20.1
   - h5py = 3.2
   - matplotlib = 3.4
   - mongoengine = 0.22
-  - mpi4py = 3.0.3  # pin to earlier version to avoid warnings...
   - numpy = 1.20
   - opencv = 4.5
   - pims = 0.5

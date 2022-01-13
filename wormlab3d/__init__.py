@@ -30,6 +30,7 @@ DATA_PATH = ROOT_PATH / 'data'
 ANNEX_PATH = _load_env_path('ANNEX_PATH', ROOT_PATH.parent / 'worm_data')
 WT3D_PATH = _load_env_path('WT3D_PATH', ROOT_PATH.parent / '3DWT_Data')
 DATASET_CACHE_PATH = DATA_PATH / 'ds_cache'
+TRACKING_VIDEOS_PATH = DATA_PATH / 'tracking_videos'
 
 # When fetching annexed files on demand, ensure that this much space is always kept free
 MIN_FREE_DISK_SPACE = os.getenv('MIN_FREE_DISK_SPACE', '100G')
