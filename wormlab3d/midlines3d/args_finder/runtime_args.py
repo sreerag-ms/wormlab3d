@@ -11,6 +11,7 @@ class RuntimeArgs(BaseArgs):
             resume_from: str = 'latest',
             gpu_only: bool = False,
             cpu_only: bool = False,
+            gpu_id: int = 0,
             checkpoint_every_n_steps: int = -1,
             checkpoint_every_n_frames: int = 1,
             log_level: int = 0,
@@ -27,6 +28,7 @@ class RuntimeArgs(BaseArgs):
         self.resume_from = resume_from
         self.gpu_only = gpu_only
         self.cpu_only = cpu_only
+        self.gpu_id = gpu_id
         self.checkpoint_every_n_steps = checkpoint_every_n_steps
         self.checkpoint_every_n_frames = checkpoint_every_n_frames
         self.log_level = log_level
@@ -56,6 +58,8 @@ class RuntimeArgs(BaseArgs):
                            help='Abort if no gpus are detected.')
         group.add_argument('--cpu-only', action='store_true',
                            help='Only run on CPU. Otherwise will use GPU if available.')
+        group.add_argument('--gpu-id', type=int, default=0,
+                           help='GPU id to use if using GPUs.')
         group.add_argument('--checkpoint-every-n-steps', type=int, default=-1,
                            help='Save a checkpoint every n steps, -1 turns this off. Default=-1.')
         group.add_argument('--checkpoint-every-n-frames', type=int, default=1,

@@ -42,8 +42,6 @@ PRINT_KEYS = [
 
 # torch.autograd.set_detect_anomaly(True)
 
-GPU_ID = 1  # todo: detect automatically?
-
 
 class Midline3DFinder:
     def __init__(
@@ -97,7 +95,7 @@ class Midline3DFinder:
             **to_dict(checkpoint.source_args),
         }
         arg_hash = hash_data(identifiers)
-        return LOGS_PATH / f'trial_{checkpoint.trial.id}' / arg_hash
+        return LOGS_PATH / f'trial_{checkpoint.trial.id:03d}' / arg_hash
 
     @property
     def step(self):
@@ -375,7 +373,7 @@ class Midline3DFinder:
         if cpu_or_gpu == 'cpu':
             device = torch.device('cpu')
         else:
-            device = torch.device(f'cuda:{GPU_ID}' if torch.cuda.is_available() else 'cpu')
+            device = torch.device(f'cuda:{self.runtime_args.gpu_id}' if torch.cuda.is_available() else 'cpu')
         if device.type == 'cuda':
             logger.info('Using GPU.')
             cudnn.benchmark = True  # optimises code for constant input sizes
