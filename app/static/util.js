@@ -40,6 +40,9 @@ let plot_config = {
     modeBarButtonsToRemove: ['toImage']
 };
 
+// Explicitly tell video.js to not collect analytics, although v7 already does not send any data.
+window.HELP_IMPROVE_VIDEOJS = false;
+
 
 // ================================= Tracking plots =================================
 
