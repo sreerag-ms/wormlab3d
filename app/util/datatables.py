@@ -8,7 +8,7 @@ import json
 import re
 
 from app.model import DocumentView
-from app.util.encoder import JSONEncoder
+from app.util.encoders import JSONEncoder
 from wormlab3d import logger
 
 

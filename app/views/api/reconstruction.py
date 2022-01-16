@@ -1,15 +1,12 @@
-import base64
-from io import BytesIO
 from typing import List
 
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
-from PIL import Image
-from flask import request
-
+from app.util.encoders import base64img
 from app.views.api import bp_api
 from app.views.page.reconstructions import CAM_PARAMETER_KEYS
+from flask import request
 from wormlab3d.data.model import Reconstruction
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.trajectories.cache import get_trajectory
@@ -131,41 +128,49 @@ def get_posture(_id):
     all_sigmas = ts.get('sigmas')[frame_num]
     sigmas = all_sigmas[from_idx:to_idx]
 
-    # Get intensities
-    all_intensities = ts.get('intensities')[frame_num]
-    intensities = all_intensities[from_idx:to_idx]
+    # Get masks
+    masks_target = ts.get('masks_target')[frame_num]
 
     # Colour map
     cmap = plt.get_cmap('jet')
     colours = np.array([cmap(d) for d in np.linspace(0, 1, 2**D)])
-
-    # Add transparency based on intensity
-    colours[:, 3] *= intensities / 2
-
-    # Convert to integers
     colours = np.round(colours * 255).astype(np.uint8)
 
-    # Read each numpy array into a PIL Image, write the png image to a buffer and encode as a base64-encoded string
+    # Prepare images with overlaid midlines as connecting lines between vertices.
     images = []
     frame = reconstruction.get_frame(frame_num)
     for i, img_array in enumerate(frame.images):
         z = (img_array * 255).astype(np.uint8)
-        z = cv2.cvtColor(z, cv2.COLOR_GRAY2RGBA)
+        z = cv2.cvtColor(z, cv2.COLOR_GRAY2RGB)
+
+        # Overlay 2d projection
+        p2d = points_2d[:, i]
+        for j, p in enumerate(p2d):
+            z = cv2.drawMarker(z, p, color=colours[j].tolist(), markerType=cv2.MARKER_CROSS, markerSize=3, thickness=1,
+                               line_type=cv2.LINE_AA)
+            if j > 0:
+                cv2.line(z, p2d[j - 1], p2d[j], color=colours[j].tolist(), thickness=2, lineType=cv2.LINE_AA)
+
+        img_str = base64img(z, image_mode='RGB')
+        images.append(img_str)
+
+    # Prepare masks with overlaid vertices scaled by sigmas.
+    masks = []
+    for i, mask_array in enumerate(masks_target):
+        z = (mask_array * 255).astype(np.uint8)
+        z = cv2.cvtColor(z, cv2.COLOR_GRAY2RGB)
 
         # Overlay 2d projection
         p2d = points_2d[:, i]
         for j, p in enumerate(p2d):
             z = cv2.circle(z, p, int(sigmas[j] * 100), color=colours[j].tolist(), thickness=-1, lineType=cv2.LINE_AA)
 
-        img = Image.fromarray(z, 'RGBA')
-        buffer = BytesIO()
-        img.save(buffer, format='PNG')
-        buffer.seek(0)
-        data_uri = base64.b64encode(buffer.read()).decode('utf-8')
-        images.append(f'data:image/png;charset=utf-8;base64,{data_uri}')
+        img_str = base64img(z, image_mode='RGB')
+        masks.append(img_str)
 
     response = {
         'images': images,
+        'masks': masks,
         'posture': points.tolist()
     }
 

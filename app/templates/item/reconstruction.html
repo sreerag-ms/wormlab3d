@@ -118,7 +118,7 @@
           {% include 'includes/_loader.html' %}
 
           <div class="row g-1">
-            <div class="col col-md-10">
+            <div class="col col-md-8 flex">
               <div class="form-floating form-group">
                 <select name="depth" id="depth-select" class="form-control form-select"
                         placeholder="Depth">
@@ -129,10 +129,13 @@
                 </select>
                 <label for="depth-select">Depth</label>
               </div>
-              <div id="posture-3d-plot"></div>
+              <div id="posture-3d-plot" class="h-100"></div>
             </div>
 
             <div id="posture-2d-images" class="col col-md-2">
+              <div class="d-flex flex-column align-items-center"></div>
+            </div>
+            <div id="posture-2d-masks" class="col col-md-2">
               <div class="d-flex flex-column align-items-center"></div>
             </div>
           </div>
@@ -426,13 +429,22 @@
               Plotly.react('posture-3d-plot', postures_3d_plot_data, postures_3d_plot_layout, plot_config);
           }
 
-          function plot_posture_2d() {
+          function draw_posture_2d_images() {
               let images = postures_data[depth][frame_num].images;
               let imgs = '';
               for (let i = 0; i < images.length; i++) {
-                  imgs += '<img src="' + images[i] + '" class="mt-2 w-75"/><br>'
+                  imgs += '<img src="' + images[i] + '" class="mt-1 w-100"/>'
               }
               $('#posture-2d-images .flex-column').html(imgs);
+          }
+
+          function draw_posture_2d_masks() {
+              let masks = postures_data[depth][frame_num].masks;
+              let imgs = '';
+              for (let i = 0; i < masks.length; i++) {
+                  imgs += '<img src="' + masks[i] + '" class="mt-1 w-100"/>'
+              }
+              $('#posture-2d-masks .flex-column').html(imgs);
           }
 
           function get_posture() {
@@ -443,7 +455,8 @@
               }, function (data) {
                   postures_data[depth][frame_num] = data;
                   $('#postures-panel .loader').hide();
-                  plot_posture_2d();
+                  draw_posture_2d_images();
+                  draw_posture_2d_masks();
                   plot_posture_3d();
               });
           }
@@ -451,7 +464,8 @@
           function update_postures() {
               if (frame_num in postures_data[depth]) {
                   plot_posture_3d();
-                  plot_posture_2d();
+                  draw_posture_2d_images();
+                  draw_posture_2d_masks();
               } else {
                   get_posture();
               }
