@@ -1,7 +1,7 @@
-from typing import List, Dict, Union
+from typing import List, Dict, Union, Tuple
 
+import numpy as np
 from mongoengine import *
-
 from wormlab3d import CAMERA_IDXS
 from wormlab3d.data.model import Cameras
 from wormlab3d.data.model.experiment import Experiment
@@ -130,6 +130,38 @@ class Trial(Document):
             )
 
         return self.triplet_reader
+
+    def get_tracking_data(self, fixed: bool) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Fetch the 3D tracking data.
+        """
+        centres_3d = []
+        timestamps = []
+        frame_time = 0.
+
+        pipeline = [
+            {'$match': {'trial': self.id}},
+            {'$project': {
+                '_id': 0,
+                'p3d': '$centre_3d' + ('_fixed' if fixed else ''),
+            }},
+            {'$sort': {'frame_num': 1}},
+        ]
+        cursor = Frame.objects().aggregate(pipeline)
+
+        for res in cursor:
+            if 'p3d' in res and res['p3d'] is not None:
+                pt = res['p3d']['point_3d']
+            else:
+                pt = np.array([None, None, None])
+            centres_3d.append(pt)
+            timestamps.append(frame_time)
+            frame_time += 1 / self.fps
+
+        centres_3d = np.array(centres_3d)
+        timestamps = np.array(timestamps)
+
+        return centres_3d, timestamps
 
     @property
     def num_reconstructions(self):

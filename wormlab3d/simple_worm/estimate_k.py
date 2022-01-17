@@ -12,7 +12,7 @@ from wormlab3d import logger, DATA_PATH, N_WORKERS
 from wormlab3d.toolkit.util import hash_data
 from wormlab3d.trajectories.cache import get_trajectory
 
-K_ESTIMATES_CACHE_PATH = DATA_PATH + '/K_estimates_cache'
+K_ESTIMATES_CACHE_PATH = DATA_PATH / 'K_estimates_cache'
 
 
 def est_K(X: np.ndarray, i: int, n_sample_frames: int, K0: float) -> float:

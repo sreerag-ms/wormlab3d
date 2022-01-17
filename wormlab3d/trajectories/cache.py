@@ -1,12 +1,10 @@
 import json
-import os
 from argparse import Namespace
-from typing import Tuple, List, Any, Dict, Union
+from typing import Tuple, Any, Dict, Union
 
 import numpy as np
-
 from wormlab3d import logger, DATA_PATH
-from wormlab3d.data.model import Midline3D, Frame, Reconstruction
+from wormlab3d.data.model import Midline3D, Frame, Reconstruction, Trial
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.trajectories.util import smooth_trajectory, prune_slowest_frames, prune_directionality
@@ -117,9 +115,9 @@ def get_trajectory_from_args(args: Namespace, return_meta: bool = False) -> Unio
         return X
 
 
-def generate_trajectory_cache_data(
+def _generate_trajectory_cache_data(
         reconstruction: Reconstruction,
-) -> Tuple[np.ndarray, List[int]]:
+) -> np.ndarray:
     """
     Load trial midlines from the database and combine across a full trial array container.
     """
@@ -194,6 +192,72 @@ def generate_trajectory_cache_data(
     return Xs
 
 
+def _fetch_reconstruction(
+        reconstruction_id: str = None,
+        trial_id: str = None,
+        midline_source: str = None,
+        midline_source_file: str = None,
+) -> Union[Reconstruction, None]:
+    """
+    Try to find a reconstruction satisfying arguments.
+    """
+    reconstruction = None
+    if reconstruction_id is not None:
+        reconstruction = Reconstruction.objects.get(id=reconstruction_id)
+    else:
+        # Try to find a suitable reconstruction
+        filters = {'trial': trial_id}
+        if midline_source is not None:
+            filters['source'] = midline_source
+        if midline_source_file is not None:
+            filters['source_file'] = midline_source_file
+
+        reconstructions = Reconstruction.objects(**filters).order_by('-updated')
+        if reconstructions.count() == 0:
+            logger.warning(f'Found no reconstructions for parameters {filters}.')
+        else:
+            logger.info(
+                f'Found {reconstructions.count()} matching reconstructions. '
+                f'Using most recent.'
+            )
+            reconstruction = reconstructions[0]
+
+    return reconstruction
+
+
+def _fetch_mf_trajectory(
+        reconstruction: Reconstruction,
+        start_frame: int,
+        end_frame: int,
+        depth: int = None
+) -> Tuple[np.ndarray, dict]:
+    """
+    Fetch a MF trajectory from the corresponding TrialState.
+    """
+    ts = TrialState(
+        reconstruction=reconstruction,
+        start_frame=start_frame,
+        end_frame=end_frame
+    )
+    XD = ts.get('points')
+    if depth is None:
+        X_full = XD
+    else:
+        D = reconstruction.mf_parameters.depth
+        if depth == -1:
+            depth = D
+        assert depth <= D
+        from_idx = sum([2**d for d in range(depth - 1)])
+        to_idx = from_idx + 2**(depth - 1)
+        X_full = XD[:, from_idx:to_idx]
+
+    X_base = ts.get('points_3d_base')
+    X_full = X_full + X_base[:, None, :]
+    meta = {'shape': X_full.shape, }
+
+    return X_full, meta
+
+
 def generate_or_load_trajectory_cache(
         reconstruction_id: str = None,
         trial_id: str = None,
@@ -207,65 +271,44 @@ def generate_or_load_trajectory_cache(
     """
     Try to load an existing trajectory cache or generate it otherwise.
     """
-    if reconstruction_id is not None:
-        reconstruction = Reconstruction.objects.get(id=reconstruction_id)
+    reconstruction = _fetch_reconstruction(reconstruction_id, trial_id, midline_source, midline_source_file)
+
+    # Get trial
+    trial: Trial
+    if reconstruction is None:
+        logger.warning('No matching reconstruction found, using tracking data.')
+        assert trial_id is not None
+        trial = Trial.objects.get(id=trial_id)
     else:
-        # Try to find a suitable reconstruction
-        filters = {'trial': trial_id}
-        if midline_source is not None:
-            filters['source'] = midline_source
-        if midline_source_file is not None:
-            filters['source_file'] = midline_source_file
-
-        reconstructions = Reconstruction.objects(**filters).order_by('-updated')
-        if reconstructions.count() > 0:
-            raise RuntimeError(f'Found no reconstructions for parameters {filters}.')
-
-        logger.info(
-            f'Found {reconstructions.count()} matching reconstructions. '
-            f'Using most recent.'
-        )
-        reconstruction = reconstructions[0]
+        trial = reconstruction.trial
 
     # Set defaults for frame range
     if start_frame is None:
         start_frame = 0
-    start_frame = max(start_frame, reconstruction.start_frame)
     if end_frame is None:
-        end_frame = reconstruction.trial.n_frames_min
-    end_frame = min(end_frame, reconstruction.end_frame)
+        end_frame = trial.n_frames_min
 
-    # MF trajectories are already stored on disk
-    if reconstruction.source == M3D_SOURCE_MF:
-        ts = TrialState(
-            reconstruction=reconstruction,
-            start_frame=start_frame,
-            end_frame=end_frame
-        )
-        XD = ts.get('points')
-        if depth is None:
-            X_full = XD
-        else:
-            D = reconstruction.mf_parameters.depth
-            if depth == -1:
-                depth = D
-            assert depth <= D
-            from_idx = sum([2**d for d in range(depth - 1)])
-            to_idx = from_idx + 2**(depth - 1)
-            X_full = XD[:, from_idx:to_idx]
+    if reconstruction is not None:
+        start_frame = max(start_frame, reconstruction.start_frame)
+        end_frame = min(end_frame, reconstruction.end_frame)
 
-        X_base = ts.get('points_3d_base')
-        X_full = X_full + X_base[:, None, :]
+    if reconstruction is None:
+        # If no reconstruction construct a trajectory from the tracking data
+        centres_3d, timestamps = trial.get_tracking_data(fixed=True)
+        X_full = centres_3d[:, None, :]
+        meta = {'shape': X_full.shape, 'type': 'tracking-only'}
 
-        meta = {'shape': X_full.shape, }
+    elif reconstruction.source == M3D_SOURCE_MF:
+        X_full, meta = _fetch_mf_trajectory(reconstruction, start_frame, end_frame, depth)
 
     else:
-        filename_meta = f'{reconstruction_id}x.meta'
-        filename_X = f'{reconstruction_id}x.npz'
+        # Generate or load a reconstruction trajectory for the reconst or WT3D sources.
+        filename_meta = f'{reconstruction.id}.meta'
+        filename_X = f'{reconstruction.id}.npz'
         path_meta = TRAJECTORY_CACHE_PATH / filename_meta
         path_X = TRAJECTORY_CACHE_PATH / filename_X
         X_full = None
-        if not rebuild_cache and os.path.exists(path_meta) and os.path.exists(path_X):
+        if not rebuild_cache and path_meta.exists() and path_X.exists():
             try:
                 with open(path_meta, 'r') as f:
                     meta = json.load(f)
@@ -280,12 +323,12 @@ def generate_or_load_trajectory_cache(
 
         if X_full is None:
             # Generate the trajectory data cache
-            X_data = generate_trajectory_cache_data(reconstruction)
+            X_data = _generate_trajectory_cache_data(reconstruction)
             X_full = np.memmap(path_X, dtype=np.float32, mode='w+', shape=X_data.shape)
             X_full[:] = X_data
 
             # Save the cache onto the hard drive
-            path_Xs = TRAJECTORY_CACHE_PATH + '/' + filename_X
+            path_Xs = TRAJECTORY_CACHE_PATH / filename_X
             logger.debug(f'Saving trajectory file cache to {path_Xs}.')
             X_full.flush()
 

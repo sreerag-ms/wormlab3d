@@ -11,7 +11,7 @@ from wormlab3d import logger, DATA_PATH, N_WORKERS
 from wormlab3d.toolkit.util import hash_data
 from wormlab3d.trajectories.cache import get_trajectory
 
-PCA_CACHE_PATH = DATA_PATH + '/pca_cache'
+PCA_CACHE_PATH = DATA_PATH / 'pca_cache'
 
 
 class PCACache:
