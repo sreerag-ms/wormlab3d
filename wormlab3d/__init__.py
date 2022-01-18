@@ -29,6 +29,7 @@ def _load_env_path(k: str, default: Path):
 DATA_PATH = ROOT_PATH / 'data'
 ANNEX_PATH = _load_env_path('ANNEX_PATH', ROOT_PATH.parent / 'worm_data')
 WT3D_PATH = _load_env_path('WT3D_PATH', ROOT_PATH.parent / '3DWT_Data')
+PREPARED_IMAGES_PATH = DATA_PATH / 'prepared_images'
 DATASET_CACHE_PATH = DATA_PATH / 'ds_cache'
 TRACKING_VIDEOS_PATH = DATA_PATH / 'tracking_videos'
 

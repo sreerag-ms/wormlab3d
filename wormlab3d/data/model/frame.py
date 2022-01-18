@@ -3,7 +3,7 @@ from typing import List, Union
 import numpy as np
 from mongoengine import *
 
-from wormlab3d import logger, PREPARED_IMAGE_SIZE, CAMERA_IDXS
+from wormlab3d import logger, PREPARED_IMAGE_SIZE, CAMERA_IDXS, PREPARED_IMAGES_PATH
 from wormlab3d.data.model import Cameras, CameraShifts
 from wormlab3d.data.model.cameras import CAM_SOURCE_ANNEX
 from wormlab3d.data.model.experiment import Experiment
@@ -56,6 +56,21 @@ class Frame(Document):
         ],
         'ordering': ['+trial', '+frame_num']
     }
+
+    def __getattribute__(self, k):
+        # If the database field does not exist or is not a triplet then check file system
+        if k != 'images':
+            return super().__getattribute__(k)
+        images_db = super().__getattribute__(k)
+        if images_db is None or len(images_db) != 3:
+            path = PREPARED_IMAGES_PATH / f'{self.trial.id:03d}' / f'{self.frame_num:06d}.npz'
+            try:
+                return np.load(path)['images']
+            except Exception:
+                return None
+        else:
+            return images_db
+
 
     def get_midlines2d(
             self,

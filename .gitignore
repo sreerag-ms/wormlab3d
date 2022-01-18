@@ -18,6 +18,7 @@ __pycache__
 /data/K_estimates_cache
 /data/MF_outputs
 /data/pca_cache
+/data/prepared_images
 /data/tracking_videos
 /data/trajectory_cache
 intermediate-data
