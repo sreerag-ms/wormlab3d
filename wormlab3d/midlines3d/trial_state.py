@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Dict, Any
 
 import numpy as np
+
 from wormlab3d import PREPARED_IMAGE_SIZE, DATA_PATH
 from wormlab3d import logger
 from wormlab3d.data.model import MFParameters, MFCheckpoint, Reconstruction
@@ -19,7 +20,8 @@ class TrialState:
             self,
             reconstruction: Reconstruction,
             start_frame: int = None,
-            end_frame: int = None
+            end_frame: int = None,
+            read_only: bool = True
     ):
         self.reconstruction = reconstruction
         self.trial = reconstruction.trial
@@ -41,8 +43,8 @@ class TrialState:
             self.frame_nums.append(i)
         assert len(self.frame_nums) == self.n_frames
 
-        loaded = self._load_state()
-        if not loaded:
+        loaded = self._load_state(read_only)
+        if not loaded and not read_only:
             self._init_state()
             self.save()
 
@@ -58,7 +60,7 @@ class TrialState:
     def path(self) -> Path:
         return TRIAL_STATES_PATH / f'trial_{self.trial.id}' / str(self.reconstruction.id)
 
-    def _load_state(self) -> bool:
+    def _load_state(self, read_only: bool = True) -> bool:
         """
         Try to load the state.
         """
@@ -76,10 +78,11 @@ class TrialState:
 
         # If metadata exists, use the shapes to load the other state files.
         states = {}
+        mode = 'r' if read_only else 'r+'
         for k in BUFFER_NAMES + PARAMETER_NAMES:
             path_state = self.path / f'{k}.npz'
             try:
-                state = np.memmap(path_state, dtype=np.float32, mode='r+', shape=tuple(meta['shapes'][k]))
+                state = np.memmap(path_state, dtype=np.float32, mode=mode, shape=tuple(meta['shapes'][k]))
                 states[k] = state
                 logger.info(f'Loaded data from {path_state}.')
             except Exception as e:
@@ -227,7 +230,6 @@ class TrialState:
         else:
             end_frame = self.end_frame + 1
         return state[start_frame:end_frame]
-
 
     def __len__(self):
         return self.n_frames

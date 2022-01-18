@@ -234,7 +234,8 @@ class Midline3DFinder:
         self.trial_state = TrialState(
             reconstruction=self.reconstruction,
             start_frame=self.source_args.start_frame,
-            end_frame=self.source_args.end_frame
+            end_frame=self.source_args.end_frame,
+            read_only=False
         )
 
         # Master state
