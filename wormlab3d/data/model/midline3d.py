@@ -68,7 +68,7 @@ class Midline3D(Document):
             masks.append(mask)
         return masks
 
-    def get_prepared_2d_coordinates(self, regenerate: bool = False, cameras: CameraModelTriplet = None) -> np.ndarray:
+    def get_prepared_2d_coordinates(self, regenerate: bool = False, cameras: CameraModelTriplet = None) -> List[np.ndarray]:
         """
         Project the 3D midline coordinates down and return relative to the prepared 2D images.
         Caches results into the database on request.
@@ -86,7 +86,7 @@ class Midline3D(Document):
 
         return self.X_projections
 
-    def prepare_2d_coordinates(self, X: np.ndarray = None, cameras: CameraModelTriplet = None) -> np.ndarray:
+    def prepare_2d_coordinates(self, X: np.ndarray = None, cameras: CameraModelTriplet = None) -> List[np.ndarray]:
         """
         Project the 3D midline coordinates down and return relative to the prepared 2D images.
         Allow different 3D coordinates to be passed in, otherwise use the object's property.
