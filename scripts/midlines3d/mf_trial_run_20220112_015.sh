@@ -3,6 +3,7 @@
 python mf_trial.py \
         --no-resume \
         --gpu-only \
+	--gpu-id=1 \
         --checkpoint-every-n-steps=-1 \
         --checkpoint-every-n-frames=100 \
         --log-level=0 \

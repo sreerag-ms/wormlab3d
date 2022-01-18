@@ -32,7 +32,7 @@ python mf_trial.py \
         --loss-masks-multiscale=True \
         --loss-masks=1. \
         --loss-neighbours=1. \
-        --loss-parents=0. \
+        --loss-parents=1. \
         --loss-aunts=1. \
         --loss-scores=0. \
         --loss-sigmas=1. \

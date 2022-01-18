@@ -1,7 +1,7 @@
 #!/bin/bash
 
 python mf_trial.py \
-        --no-resume \
+        --resume \
         --gpu-only \
 	--gpu-id=0 \
         --checkpoint-every-n-steps=-1 \
