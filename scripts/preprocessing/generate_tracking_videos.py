@@ -11,7 +11,9 @@ height = PREPARED_IMAGE_SIZE[1]
 
 def generate_tracking_video_trial(trial_id: int):
     trial = Trial.objects.get(id=trial_id)
-    frame_nums = []
+    if trial.fps == 0:
+        logger.warning('Trial FPS=0. Cannot create video.')
+        return
 
     # Fetch the images
     logger.info('Querying database.')
@@ -36,6 +38,7 @@ def generate_tracking_video_trial(trial_id: int):
             .run_async(pipe_stdin=True)
     )
 
+    frame_nums = []
     logger.info('Fetching images.')
     for i, res in enumerate(cursor):
         n = res['frame_num']
@@ -68,7 +71,7 @@ def generate_tracking_video_trial(trial_id: int):
         logger.warning('Fewer than 25 contiguous frames found with images.')
         return
 
-    logger.info(f'Generating video for frames {frame_nums[0]}-{frame_nums[-1]}. '
+    logger.info(f'Generated video for frames {frame_nums[0]}-{frame_nums[-1]}. '
                 f'(Total frames in database = {trial.n_frames_min}).')
 
 
@@ -84,8 +87,12 @@ def generate_tracking_videos(missing_only: bool = True):
             if video_filename.exists():
                 logger.info(f'Video already exists at: {video_filename}. Skipping.')
                 continue
-        generate_tracking_video_trial(trial_id)
-        break
+
+        # Soft fail on errors
+        try:
+            generate_tracking_video_trial(trial_id)
+        except Exception as e:
+            logger.error(str(e))
 
 
 if __name__ == '__main__':
