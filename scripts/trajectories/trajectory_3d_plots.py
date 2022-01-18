@@ -19,8 +19,8 @@ from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.pca import get_planarity_from_args
 from wormlab3d.trajectories.util import calculate_speeds, calculate_htd
 
-animate = True
-show_plots = False
+animate = False
+show_plots = True
 save_plots = True
 img_extension = 'png'
 fps = 25
@@ -64,7 +64,7 @@ def make_plot(
         return_ax = True
 
     # Scatter the vertices
-    s = ax.scatter(x, y, z, c=colours, cmap=cmap, s=5, alpha=0.4, zorder=-1)
+    s = ax.scatter(x, y, z, c=colours, cmap=cmap, s=20, alpha=0.4, zorder=-1)
     if show_colourbar:
         fig.colorbar(s)
 
@@ -82,7 +82,9 @@ def make_plot(
 
     equal_aspect_ratio(ax)
 
-    ax.set_title(title)
+    # ax.set_title(title)
+    ax.axis('off')
+    ax.view_init(azim=170, elev=20)
 
     if return_ax:
         return ax
@@ -115,19 +117,19 @@ def make_plot(
 
     if save_plots:
         assert filename is not None
-        path = LOGS_PATH + '/' + START_TIMESTAMP + f'_{filename}'
+        path = LOGS_PATH / f'{START_TIMESTAMP}_{filename}'
         if animate:
             metadata = dict(
                 title=title,
                 artist='WormLab Leeds'
             )
-            save_path = path + '.mp4'
+            save_path = path.with_suffix('.mp4')
             logger.info(f'Saving animation to {save_path}.')
             ani.save(save_path, writer='ffmpeg', fps=fps, metadata=metadata)
         else:
-            save_path = path + f'.{img_extension}'
+            save_path = path.with_suffix(f'.{img_extension}')
             logger.info(f'Saving plot to {save_path}.')
-            plt.savefig(save_path)
+            plt.savefig(save_path, transparent=True)
 
     if show_plots:
         plt.show()
@@ -139,12 +141,14 @@ def plot_trajectory():
     """
     args = get_args()
     X_full, X_slice = get_trajectory(args)
+    # np.savez(LOGS_PATH / f'{START_TIMESTAMP}_trajectory_trial={args.trial}', X_full)
 
     make_plot(
         title=f'Trial {args.trial}.',
         filename=f'trajectory_trial={args.trial}_{args.midline3d_source}',
         X_full=X_full,
         X_slice=X_slice,
+        draw_worm=False,
     )
 
 
@@ -362,7 +366,7 @@ if __name__ == '__main__':
     # interactive()
     plot_trajectory()
     # plot_trajectory_head_tail_distance()
-    plot_trajectory_signed_speed()
+    # plot_trajectory_signed_speed()
     # plot_trajectory_K()
     # plot_trajectory_planarity()
     # plot_brownian_trajectory()
