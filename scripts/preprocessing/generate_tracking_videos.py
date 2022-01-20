@@ -1,7 +1,9 @@
+import os
+
 import ffmpeg
 import numpy as np
 
-from wormlab3d import logger, PREPARED_IMAGE_SIZE, TRACKING_VIDEOS_PATH
+from wormlab3d import logger, PREPARED_IMAGE_SIZE, TRACKING_VIDEOS_PATH, PREPARED_IMAGES_PATH
 from wormlab3d.data.model import Trial, Frame
 from wormlab3d.toolkit.util import resolve_targets
 
@@ -22,18 +24,22 @@ def generate_tracking_video_trial(trial_id: int):
         {'$project': {
             '_id': 1,
             'frame_num': 1,
-            'images': 1
         }},
         # {'$sort': {'frame_num': 1}},
     ]
     cursor = Frame.objects().aggregate(pipeline, allowDiskUse=True)
 
+    # Delete existing video
+    video_filename = TRACKING_VIDEOS_PATH / f'{trial.id:03d}.mp4'
+    if video_filename.exists():
+        logger.info(f'Video already exists at: {video_filename}. Deleting.')
+        os.remove(video_filename)
+
     # Initialise ffmpeg process
-    video_filename = str(TRACKING_VIDEOS_PATH / f'{trial.id:03d}.mp4')
     process = (
         ffmpeg
             .input('pipe:', format='rawvideo', pix_fmt='gray', s='{}x{}'.format(width, height))
-            .output(video_filename, pix_fmt='gray', vcodec='libx264', r=trial.fps)
+            .output(str(video_filename), pix_fmt='gray', vcodec='libx264', r=trial.fps)
             .overwrite_output()
             .run_async(pipe_stdin=True)
     )
@@ -51,13 +57,15 @@ def generate_tracking_video_trial(trial_id: int):
         assert n == n0 + i
 
         # Check images are present
-        if 'images' not in res or len(res['images']) != 3:
+        img_path = PREPARED_IMAGES_PATH / f'{trial.id:03d}' / f'{n:06d}.npz'
+        try:
+            image_triplet = np.load(img_path)['images']
+        except Exception:
             logger.warning('Prepared images not available, stopping here.')
             break
         frame_nums.append(n)
 
         # Stack image triplet and convert
-        image_triplet = Frame.images.to_python(res['images'])
         image_triplet = np.floor(np.concatenate(image_triplet) * 255)
         image_triplet = image_triplet.astype(np.uint8).T
         process.stdin.write(image_triplet.tobytes())
@@ -96,4 +104,4 @@ def generate_tracking_videos(missing_only: bool = True):
 
 
 if __name__ == '__main__':
-    generate_tracking_videos(missing_only=True)
+    generate_tracking_videos(missing_only=False)

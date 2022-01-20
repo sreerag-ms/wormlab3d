@@ -33,7 +33,7 @@ def move_images_to_disk_trial(trial_id: int):
     # Loop over frames
     missing = []
     for i, frame_id in enumerate(frame_ids):
-        if (i + 1) % 10 == 0:
+        if (i + 1) % 100 == 0:
             logger.info(f'Processing frame {i + 1}/{len(frame_ids)}')
         frame = Frame.objects.get(id=frame_id)
         n = frame.frame_num
