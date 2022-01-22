@@ -8,10 +8,31 @@ from wormlab3d import logger, LOGS_PATH, START_TIMESTAMP, CAMERA_IDXS
 from wormlab3d.data.model import Trial, Frame, ObjectPoint, Cameras
 from wormlab3d.toolkit.util import resolve_targets
 
-dry_run = False
+dry_run = True
 show_plots = False
 save_plots = True
 img_extension = 'svg'
+
+# Manual hacks to exclude bubbles and bad points
+# trial_id: [[ 3d_point, radius ],...]
+exclude_points = {
+    106: [
+        ([0.14, -1.53, 438.24], 0.1),
+    ],
+    114: [
+        ([-1.02, -0.77, 455.99], 0.1)
+    ],
+    251: [
+        ([-1.25, -1.93, 552.52], 0.1)
+    ],
+    79: [
+        ([-0.06, 0.96, 491.53], 0.1)
+    ],
+    121: [
+        ([-0.17, -1.44, 348.38], 0.1)
+    ]
+}
+
 
 
 def smooth(X: np.ndarray, window_len=5):
@@ -53,6 +74,10 @@ def fix_tracking_trial(trial_id: int, missing_only: bool = True):
     cameras_ids = []
     cams_models = {}
     last_good_cams_id = None
+    if trial.id in exclude_points:
+        excludes = exclude_points[trial.id]
+    else:
+        excludes = []
 
     # Fetch the 3d centres
     logger.info('Fetching the 3d centres.')
@@ -67,6 +92,14 @@ def fix_tracking_trial(trial_id: int, missing_only: bool = True):
         {'$sort': {'frame_num': 1}},
     ]
     cursor = Frame.objects().aggregate(pipeline)
+
+    def bad_pt_abort(n_, bad_pt):
+        frame_nums_missing_data.append(n_)
+        bad_pts.append(bad_pt)
+        if last_good_cams_id is not None:
+            cameras_ids.append(last_good_cams_id)
+        else:
+            cameras_ids.append(None)
 
     logger.info('Collating triangulated points.')
     for i, res in enumerate(cursor):
@@ -86,35 +119,30 @@ def fix_tracking_trial(trial_id: int, missing_only: bool = True):
 
         # Check that the centre is present
         if 'centre_3d' not in res or res['centre_3d'] is None:
-            frame_nums_missing_data.append(n)
-            bad_pts.append(np.array([np.nan, np.nan, np.nan]))
-            if last_good_cams_id is not None:
-                cameras_ids.append(last_good_cams_id)
-            else:
-                cameras_ids.append(None)
+            bad_pt_abort(n, np.array([np.nan, np.nan, np.nan]))
             continue
         pt = np.array(res['centre_3d']['point_3d'])
 
         # Check the displacement isn't too large -- set max displacement of 0.8mm/second
         if len(centres_3d) > 1:
             displacement = np.linalg.norm(pt - centres_3d[-1])
-            if displacement > (0.8 / trial.fps) * (n - frame_nums_with_data[-1]):
-                frame_nums_missing_data.append(n)
-                bad_pts.append(pt)
-                if last_good_cams_id is not None:
-                    cameras_ids.append(last_good_cams_id)
-                else:
-                    cameras_ids.append(None)
+            if displacement > (0.5 / trial.fps) * (n - frame_nums_with_data[-1]):
+                bad_pt_abort(n, pt)
                 continue
 
         # Check the reprojection error isn't too large -- set max of 50
         if res['centre_3d']['error'] > 50:
-            frame_nums_missing_data.append(n)
-            bad_pts.append(pt)
-            if last_good_cams_id is not None:
-                cameras_ids.append(last_good_cams_id)
-            else:
-                cameras_ids.append(None)
+            bad_pt_abort(n, pt)
+            continue
+
+        # Check that this isn't too close to an excluded point
+        found_excluded_pt = False
+        for exclude_pt, r in excludes:
+            if np.linalg.norm(pt - exclude_pt) < r:
+                bad_pt_abort(n, pt)
+                found_excluded_pt = True
+                continue
+        if found_excluded_pt:
             continue
 
         # Get the cameras model
