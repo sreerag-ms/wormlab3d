@@ -10,6 +10,8 @@ from wormlab3d.data.model import Frame
 @bp_api.route('/frame/<string:_id>', methods=['GET'])
 def get_frame_data(_id):
     frame = Frame.objects.get(id=_id)
+    if frame.images is None or len(frame.images) != 3:
+        return {'images': 0}
 
     # Read each numpy array into a PIL Image, write the png image to a buffer and encode as a base64-encoded string
     images = []

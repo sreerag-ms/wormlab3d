@@ -17,7 +17,6 @@ from .views.page.trials import bp_trials
 
 # Import media helper blueprints
 from .views.media import bp_media
-from .views.media.extract_img import bp_extract_img
 
 from wormlab3d import APP_SECRET
 
@@ -49,4 +48,3 @@ app.register_blueprint(bp_trials)
 
 # Media routes
 app.register_blueprint(bp_media)
-app.register_blueprint(bp_extract_img)

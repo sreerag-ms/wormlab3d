@@ -1,6 +1,7 @@
 {% set table_name=table_name or 'data-table-' + doc_view.collection_name %}
 {% set table_order=table_order or [0, 'asc'] %}
 {% set initialise=initialise if initialise is defined else True %}
+{% set created_row_cb=created_row_cb if created_row_cb is defined else False %}
 
 {% macro render_fields(doc_view, prefix) -%}
   {% set prefix = prefix or '' %}
@@ -66,6 +67,11 @@
       {% endif %}
       });
       return '[' + data.join(', ') + ']';
+    {% elif field.type == 'enum' %}
+      if (type === 'display' || type === 'filter') {
+      return {{ field.choices | tojson}}[data];
+      }
+      return data;
     {% endif %}
     },
     {% if key in doc_view.hide_fields %}
@@ -92,10 +98,10 @@
                     dest.val(col.search.search);
                 });
             },
-            stateDuration: 0,
+            stateDuration: 5,
             scrollX: true,
             processing: true,
-            serverSide: true,   // Enable server side processing to achieve low loading time pagination/queries
+            serverSide: true,
             ajax: {
                 url: '/api/{{ doc_view.collection_name }}',
                 dataSrc: 'data',
@@ -115,6 +121,9 @@
                     {% endif %}
                 {% endfor %}
             ],
+        {% if created_row_cb %}
+            createdRow: {{ created_row_cb |safe}}
+        {% endif %}
         });
 
         $('.filters-form .form-control').on('change keyup', function () {

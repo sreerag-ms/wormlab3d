@@ -45,6 +45,14 @@ def reconstructions():
                 'trial__experiment__num_frames',
                 'mf_parameters___id',
                 'mf_parameters__created',
+                'mf_parameters__use_master',
+                'mf_parameters__sigmas_init',
+                'mf_parameters__n_steps*',
+                'mf_parameters__conv*',
+                'mf_parameters__opt*',
+                # 'mf_parameters__loss*',
+                'mf_parameters__algorithm',
+                'mf_parameters__lr*'
             ]
         ),
     )

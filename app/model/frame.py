@@ -14,13 +14,6 @@ class FrameView(DocumentView):
         return Frame
 
     def _init_fields(self) -> OrderedDict[str, Dict[str, str]]:
-        # frame_num = IntField(required=True)
-        # max_brightnesses = TripletField(IntField())
-        # centres_2d = TripletField(ListField(ListField()))
-        # centres_2d_thresholds = TripletField(IntField())
-        # centre_3d = EmbeddedDocumentField(ObjectPoint)
-        # tags = ListField(ReferenceField(Tag))
-
         return OrderedDict([
             (
                 self.prefix + 'trial', {

@@ -44,3 +44,27 @@
 #tracking-plot-3d {
     height: 50rem;
 }
+
+.quality-10 {
+    background: #79dfc1;  /* teal-300 */
+}
+
+.quality-9 {
+    background: #a6e9d5;  /* teal-200 */
+}
+
+.quality-7 {
+    background: #cff4fc;  /* cyan-100 */
+}
+
+.quality-5 {
+    background: #ffe69c;  /* yellow-200 */
+}
+
+.quality-3 {
+    background: #feb272;  /* orange-300 */
+}
+
+.quality-1 {
+    background: #f1aeb5;  /* red-200 */
+}

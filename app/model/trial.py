@@ -4,7 +4,7 @@ from typing import Dict
 from app.model.document_view import DocumentView
 from app.model.experiment import ExperimentView
 from wormlab3d.data.model import Trial
-
+from wormlab3d.data.model.trial import TRIAL_QUALITY_CHOICES
 
 
 class TrialView(DocumentView):
@@ -25,12 +25,6 @@ class TrialView(DocumentView):
             (
                 self.prefix + '_id', {
                     'title': 'ID',
-                    'type': 'integer',
-                },
-            ),
-            (
-                self.prefix + 'legacy_id', {
-                    'title': 'Legacy ID',
                     'type': 'integer',
                 },
             ),
@@ -89,6 +83,12 @@ class TrialView(DocumentView):
                 },
             ),
             (
+                self.prefix + 'legacy_id', {
+                    'title': 'Legacy ID',
+                    'type': 'integer',
+                },
+            ),
+            (
                 self.prefix + 'comments', {
                     'title': 'Comments',
                     'type': 'string',
@@ -103,6 +103,13 @@ class TrialView(DocumentView):
                         'lookup': 'reconstruction',
                         'aggregation': 'count'
                     }
+                },
+            ),
+            (
+                self.prefix + 'quality', {
+                    'title': 'Quality',
+                    'type': 'enum',
+                    'choices': TRIAL_QUALITY_CHOICES
                 },
             ),
         ])

@@ -9,12 +9,42 @@
 
 {% block content %}
   <div class="row mb-4">
-    <div class="col-sm-12 col-md-6">
+    <div class="col-sm-12 col-md-4">
       {% call cards.card() %}
         {{ details.render(trial_view, trial) }}
       {% endcall %}
     </div>
-    <div class="col-sm-12 col-md-6">
+    <div class="col-sm-12 col-md-4">
+      {% call cards.card('Quality checks') %}
+        <table class="table w-30">
+          <tbody>
+          <tr>
+            <th width="40%">Overall quality</th>
+            <td>
+              {% if trial.quality %}
+                {{ trial_view.fields.quality.choices[trial.quality] }}
+              {% else %}
+                Unchecked
+              {% endif %}
+            </td>
+          </tr>
+          {% for key, title in quality_check_fields.items() %}
+            <tr>
+              <th width="40%">{{ title }}</th>
+              <td>
+                  {% if trial.quality_checks[key] %}
+                    <span class="oi oi-check text-success"></span>
+                  {% else %}
+                    <span class="oi oi-x text-danger"></span>
+                  {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      {% endcall %}
+    </div>
+    <div class="col-sm-12 col-md-4">
       {% call cards.card('Experiment') %}
         {{ details.render(experiment_view, trial.experiment) }}
       {% endcall %}
@@ -223,11 +253,15 @@
           // Load frame images on selecting it in the table
           function load_frame_details(frame_id) {
               $.getJSON('/api/frame/' + frame_id, function (data) {
-                  let imgs = '';
-                  for (let i = 0; i < data.images.length; i++) {
-                      imgs += '<img src="' + data.images[i] + '" class="mt-2 w-75"/><br>'
+                  let html = '';
+                  if (data.images == 0) {
+                      html = '<span class="fst-italic">No images available</span>';
+                  } else {
+                      for (let i = 0; i < data.images.length; i++) {
+                          html += '<img src="' + data.images[i] + '" class="mt-2 w-75"/><br>'
+                      }
                   }
-                  $('#frame-details .flex-column').html(imgs).show();
+                  $('#frame-details .flex-column').html(html).show();
               });
           }
 

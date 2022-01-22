@@ -4,8 +4,7 @@ from typing import List, Dict, Any
 
 from flask_wtf import FlaskForm
 from mongoengine import Document
-from wtforms import IntegerField, FloatField, StringField, SelectField, FormField
-
+from wtforms import IntegerField, FloatField, StringField, SelectField
 
 NESTED_DOCUMENT_SEPARATOR = '__'
 
@@ -13,7 +12,13 @@ NESTED_DOCUMENT_SEPARATOR = '__'
 class DocumentView(ABC):
     has_item_view = False
 
-    def __init__(self, document: Document = None, hide_fields: list = None, field_values: list = None, prefix: str=''):
+    def __init__(
+            self,
+            document: Document = None,
+            hide_fields: list = None,
+            field_values: list = None,
+            prefix: str = ''
+    ):
         self.document = document
 
         # Add prefix
@@ -31,7 +36,7 @@ class DocumentView(ABC):
             if hk[-1] != '*':
                 continue
             for key in self.fields.keys():
-                if key[:len(hk)-1] == hk[:-1]:
+                if key[:len(hk) - 1] == hk[:-1]:
                     hide_fields.append(key)
         self.hide_fields = hide_fields
 
@@ -68,13 +73,14 @@ class DocumentView(ABC):
             return vc.get_choices(rel_keys[-1])
         return self.document_class.objects.distinct(key)
 
-    # @classmethod
-    def filters_form(self, prefix=None, prefix_idx=None, instantiate=True) -> FlaskForm:
+    def filters_form(
+            self,
+            prefix: str = None,
+            prefix_idx: str = None,
+            instantiate: bool = True
+    ) -> FlaskForm:
         class FilterForm(FlaskForm):
             pass
-        # print('\n')
-        # print('FilterForm', prefix)
-        # print(self.fields)
 
         if prefix_idx is None:
             prefix_idx = ''
@@ -104,6 +110,11 @@ class DocumentView(ABC):
                 choices = [''] + values
                 render_kw['class'] += ' form-select'
                 form_field = SelectField(label, choices=choices, render_kw=render_kw)
+            elif filter_type == 'enum':
+                choices = {'': '', **field['choices']}
+                choices = zip(choices.keys(), choices.values())
+                render_kw['class'] += ' form-select'
+                form_field = SelectField(label, choices=choices, render_kw=render_kw)
 
             if form_field is not None:
                 setattr(FilterForm, key, form_field)
@@ -117,11 +128,6 @@ class DocumentView(ABC):
 
         if prefix is None:
             prefix = 'filters_'
-        # print(prefix, FilterForm)
         form = FilterForm(prefix=prefix)
-        # for field in form:
-        #     print(field)
-        # print('\n')
 
         return form
-        # return FilterForm(prefix=prefix)

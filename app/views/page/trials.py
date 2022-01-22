@@ -12,6 +12,8 @@ bp_trials = Blueprint('trials', __name__, url_prefix='/trial')
 def trials():
     active = 'trial'
     os.environ['script_name'] = active
+    created_row_cb = 'function(row, data, dataIndex) {$(row).addClass(\'quality-\' + String(data[\'quality\']));}'
+
     return render_template(
         'list_view.html',
         title='Trials',
@@ -19,6 +21,7 @@ def trials():
         doc_view=TrialView(
             hide_fields=['experiment___id', 'experiment__legacy_id', 'experiment__num_trials', 'experiment__num_frames']
         ),
+        created_row_cb=created_row_cb
     )
 
 
@@ -28,7 +31,7 @@ def trial_instance(_id):
     os.environ['script_name'] = active
     trial = Trial.objects.get(id=_id)
     trial_view = TrialView(
-        hide_fields=['_id', 'experiment*'],
+        hide_fields=['_id', 'experiment*', 'quality'],
     )
     experiment_view = ExperimentView(
         hide_fields=['num_frames', 'legacy_id']
@@ -38,9 +41,29 @@ def trial_instance(_id):
         field_values={'trial': _id}
     )
     reconstruction_view = ReconstructionView(
-        hide_fields=['trial*'],
+        hide_fields=[
+            'trial*',
+            'mf_parameters___id',
+            'mf_parameters__created',
+            'mf_parameters__use_master',
+            'mf_parameters__sigmas_init',
+            'mf_parameters__n_steps*',
+            'mf_parameters__conv*',
+            'mf_parameters__algorithm',
+            'mf_parameters__lr*'
+        ],
         field_values={'trial': _id}
     )
+    quality_check_fields = {
+        'fps': 'FPS',
+        'durations': 'Durations',
+        'brightnesses': 'Brightnesses',
+        'triangulations': 'Triangulations',
+        'triangulations_fixed': 'Triangulations fixed',
+        'tracking_video': 'Tracking video exists',
+        # 'syncing': 'Syncing',
+        'verified': 'Manually verified',
+    }
 
     return render_template(
         'item/trial.html',
@@ -51,4 +74,5 @@ def trial_instance(_id):
         experiment_view=experiment_view,
         frame_view=frame_view,
         reconstruction_view=reconstruction_view,
+        quality_check_fields=quality_check_fields
     )

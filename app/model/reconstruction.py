@@ -3,7 +3,6 @@ from typing import Dict
 
 from app.model import MFParametersView
 from app.model.document_view import DocumentView
-from app.model.experiment import ExperimentView
 from app.model.trial import TrialView
 from wormlab3d.data.model import Reconstruction
 
@@ -18,7 +17,6 @@ class ReconstructionView(DocumentView):
 
     def _init_fields(self) -> OrderedDict[str, Dict[str, str]]:
         trial_view = TrialView(
-            # hide_fields=['_id', 'legacy_id', 'comments', 'experiment2'],
             prefix=self.prefix + 'trial'
         )
 

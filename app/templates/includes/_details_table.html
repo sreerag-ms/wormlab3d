@@ -27,6 +27,8 @@
           {{ doc[key].strftime('%Y-%m-%d %H:%M:%S') }}
         {% elif field.type == 'time' %}
           {{ doc[key].strftime('%M:%S') }}
+        {% elif field.type == 'enum' %}
+          {{ field.choices[doc[key]] }}
         {% else %}
           {{ doc[key] }}
         {% endif %}

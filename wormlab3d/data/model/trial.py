@@ -2,7 +2,7 @@ from typing import List, Dict, Union, Tuple
 
 import numpy as np
 from mongoengine import *
-from wormlab3d import CAMERA_IDXS
+from wormlab3d import CAMERA_IDXS, TRACKING_VIDEOS_PATH
 from wormlab3d.data.model import Cameras
 from wormlab3d.data.model.experiment import Experiment
 from wormlab3d.data.model.frame import Frame
@@ -10,6 +10,33 @@ from wormlab3d.data.triplet_field import TripletField
 from wormlab3d.data.util import fix_path
 from wormlab3d.preprocessing.video_reader import VideoReader
 from wormlab3d.preprocessing.video_triplet_reader import VideoTripletReader
+
+TRIAL_QUALITY_VERIFIED = 10
+TRIAL_QUALITY_GOOD = 9
+TRIAL_QUALITY_MINOR_ISSUES = 7
+TRIAL_QUALITY_TRACKING_ISSUES = 5
+TRIAL_QUALITY_VIDEO_ISSUES = 3
+TRIAL_QUALITY_BROKEN = 1
+
+TRIAL_QUALITY_CHOICES = {
+    TRIAL_QUALITY_VERIFIED: 'Verified',
+    TRIAL_QUALITY_GOOD: 'Good',
+    TRIAL_QUALITY_MINOR_ISSUES: 'Minor issues',
+    TRIAL_QUALITY_TRACKING_ISSUES: 'Tracking issues',
+    TRIAL_QUALITY_VIDEO_ISSUES: 'Video issues',
+    TRIAL_QUALITY_BROKEN: 'Broken',
+}
+
+
+class TrialQualityChecks(EmbeddedDocument):
+    fps = BooleanField(default=False)
+    durations = BooleanField(default=False)
+    brightnesses = BooleanField(default=False)
+    triangulations = BooleanField(default=False)
+    triangulations_fixed = BooleanField(default=False)
+    tracking_video = BooleanField(default=False)
+    syncing = BooleanField(default=False)
+    verified = BooleanField(default=False)
 
 
 class Trial(Document):
@@ -22,13 +49,14 @@ class Trial(Document):
     n_frames_max = IntField(required=True, default=0)
     n_frames_min = IntField(required=True, default=0)
     fps = FloatField()
-    quality = FloatField()
     temperature = FloatField(min_value=0)
     comments = StringField()
     videos = TripletField(StringField(), required=True)
     backgrounds = TripletField(StringField())
     legacy_id = IntField(unique=True)
     legacy_data = DictField()
+    quality = IntField()
+    quality_checks = EmbeddedDocumentField(TrialQualityChecks)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -164,7 +192,7 @@ class Trial(Document):
         return centres_3d, timestamps
 
     @property
-    def num_reconstructions(self):
+    def num_reconstructions(self) -> int:
         from wormlab3d.data.model import Reconstruction
         return Reconstruction.objects(trial=self).count()
 
@@ -176,3 +204,8 @@ class Trial(Document):
         else:
             dt = datetime.fromtimestamp(0)
         return dt
+
+    @property
+    def has_tracking_video(self) -> bool:
+        video_filename = TRACKING_VIDEOS_PATH / f'{self.id:03d}.mp4'
+        return video_filename.exists()
