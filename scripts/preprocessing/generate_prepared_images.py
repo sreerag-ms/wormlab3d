@@ -1,6 +1,6 @@
 import numpy as np
 
-from wormlab3d import logger
+from wormlab3d import logger, PREPARED_IMAGES_PATH
 from wormlab3d.data.model import Trial
 from wormlab3d.data.model.frame import PREPARED_IMAGE_SIZE, Frame
 from wormlab3d.preprocessing.cropper import crop_image
@@ -36,6 +36,7 @@ def generate_prepared_images(
     for trial_id in trial_ids:
         logger.info(f'Processing trial id={trial_id}')
         trial = Trial.objects.get(id=trial_id)
+        dest = PREPARED_IMAGES_PATH / f'{trial.id:03d}'
 
         # Filter frames
         if frame_num is not None:
@@ -126,7 +127,10 @@ def generate_prepared_images(
                 crop = crop.astype(np.float32) / 255.
                 crop = (crop - crop.min()) / (crop.max() - crop.min())
                 crops.append(crop)
-            frame.images = crops
+
+            # Save cropped images to disk
+            np.savez_compressed(dest / f'{frame.frame_num:06d}.npz', images=np.array(crops))
+            # frame.images = crops  # todo - use Frame to save images
 
             # Unlock the frame when finished
             frame.release_lock_and_save()
@@ -134,7 +138,6 @@ def generate_prepared_images(
 
 if __name__ == '__main__':
     generate_prepared_images(
-#        trial_id=15,
         missing_only=False,
         fixed_centres_only=True,
         fix_missing_centres=False,
