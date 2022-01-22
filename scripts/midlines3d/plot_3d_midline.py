@@ -8,6 +8,7 @@ from simple_worm.frame import FrameNumpy
 from simple_worm.plot3d import cla, FrameArtist
 from wormlab3d import logger, CAMERA_IDXS, LOGS_PATH, START_TIMESTAMP
 from wormlab3d.data.model import Trial, Midline3D
+from wormlab3d.toolkit.plot_utils import equal_aspect_ratio
 from wormlab3d.toolkit.util import parse_target_arguments
 
 MAX_ATTEMPTS = 10
@@ -73,6 +74,7 @@ def plot_3d(midline: Midline3D):
     F = FrameNumpy(x=midline.X.T)
     fa = FrameArtist(F=F)
     fa.add_midline(ax)
+    equal_aspect_ratio(ax)
     cla(ax)
     fig.tight_layout()
 
@@ -179,6 +181,6 @@ if __name__ == '__main__':
     # from wormlab3d.toolkit.plot_utils import interactive_plots
     # interactive_plots()
     mid = get_midline()
-    # plot_3d(mid)
+    plot_3d(mid)
     # plot_reprojections(mid)
-    plot_reprojection_singles(mid)
+    # plot_reprojection_singles(mid)
