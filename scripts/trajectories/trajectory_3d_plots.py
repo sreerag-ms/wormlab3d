@@ -7,10 +7,10 @@ from matplotlib import animation
 from matplotlib.axes import Axes
 from matplotlib.gridspec import GridSpec
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
-
 from simple_worm.frame import FrameSequenceNumpy
 from simple_worm.plot3d import FrameArtist
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
+from wormlab3d.data.model import Trial
 from wormlab3d.simple_worm.estimate_k import get_K_estimates_from_args
 from wormlab3d.toolkit.plot_utils import tex_mode, equal_aspect_ratio
 from wormlab3d.trajectories.args import get_args
@@ -21,7 +21,7 @@ from wormlab3d.trajectories.util import calculate_speeds, calculate_htd
 
 animate = False
 show_plots = True
-save_plots = True
+save_plots = False
 img_extension = 'png'
 fps = 25
 playback_speed = 10
@@ -38,23 +38,30 @@ def get_trajectory(args: Namespace):
 
 
 def make_plot(
-        title: str,
         X_slice: np.ndarray,
         X_full: np.ndarray = None,
+        title: str = None,
         filename: str = None,
         colours: np.ndarray = None,
-        cmap: str = 'jet',
+        cmap: str = 'viridis_r',
         show_colourbar: bool = False,
         ax: Axes = None,
-        draw_worm: bool = True
+        draw_edges: bool = True,
+        draw_worm: bool = True,
+        show_axis: bool = True,
+        show_ticks: bool = True,
 ):
+    x, y, z = X_slice.T
     if X_full is None:
         draw_worm = False
 
-    x, y, z = X_slice.T
+    # Construct colours
     if colours is None:
         colours = np.linspace(0, 1, len(X_slice))
+    cmap = plt.get_cmap(cmap)
+    c = [cmap(c_) for c_ in colours]
 
+    # Create figure if required
     return_ax = False
     if ax is None:
         fig = plt.figure(figsize=(10, 10))
@@ -64,15 +71,16 @@ def make_plot(
         return_ax = True
 
     # Scatter the vertices
-    s = ax.scatter(x, y, z, c=colours, cmap=cmap, s=20, alpha=0.4, zorder=-1)
+    s = ax.scatter(x, y, z, c=c, s=100, alpha=0.4, zorder=-1)
     if show_colourbar:
         fig.colorbar(s)
 
     # Draw lines connecting points
-    points = X_slice[:, None, :]
-    segments = np.concatenate([points[:-1], points[1:]], axis=1)
-    lc = Line3DCollection(segments, array=colours, cmap=cmap, zorder=-2)
-    ax.add_collection(lc)
+    if draw_edges:
+        points = X_slice[:, None, :]
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
+        lc = Line3DCollection(segments, array=colours, cmap=cmap, zorder=-2)
+        ax.add_collection(lc)
 
     # Add worm
     if draw_worm:
@@ -80,11 +88,20 @@ def make_plot(
         fa = FrameArtist(F=FS[0])
         fa.add_midline(ax)
 
-    equal_aspect_ratio(ax)
+    # Set title
+    if title is not None:
+        ax.set_title(title)
 
-    # ax.set_title(title)
-    ax.axis('off')
-    ax.view_init(azim=170, elev=20)
+    # Setup axis
+    equal_aspect_ratio(ax)
+    # ax.view_init(azim=170, elev=20)
+    if not show_axis:
+        ax.axis('off')
+    if not show_ticks:
+        ax.grid(False)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_zticks([])
 
     if return_ax:
         return ax
@@ -133,6 +150,8 @@ def make_plot(
 
     if show_plots:
         plt.show()
+
+    plt.close(fig)
 
 
 def plot_trajectory():
@@ -359,12 +378,141 @@ def plot_confined_particle_trajectory():
     )
 
 
+def plot_trajectory_trial_list():
+    """
+    Draw the trajectory coloured by the time elapsed.
+    """
+    args = get_args()
+    args.trajectory_point = -1
+
+    trial_ids = [65, 67, 172, 37, 64, 122, 9, 272, 76, 241, 1, 182, 106, 116, 35, 73, 124, 164, 114, 13, 103, 112, 17,
+                 236, 80, 251, 168, 232, 252, 320, 239, 79, 162, 145, 256, 321, 111, 19, 121, 15, 36, 151, 167, 154,
+                 127, 298, 72, 180, 279, 186, 265, 304, 110, 228, 247, 135, 123, 139, ]
+
+    for i, trial_id in enumerate(trial_ids):
+        args.trial = trial_id
+        X_slice, meta = get_trajectory_from_args(args, return_meta=True)
+        # np.savez(LOGS_PATH / f'{START_TIMESTAMP}_trajectory_trial={args.trial}', X_full)
+        if 'type' in meta and meta['type'] == 'tracking-only':
+            src = 'tracking'
+        else:
+            src = args.midline3d_source
+
+        trial = Trial.objects.get(id=trial_id)
+
+        make_plot(
+            title=f'Trial {args.trial}. '
+                  f'Duration {trial.duration:%M:%S}. '
+                  f'Concentration {trial.experiment.concentration:.2f}\% \n'
+                  f'User {trial.experiment.user}. Source={src}.',
+            filename=f'trajectory_{i:02d}_trial={args.trial:03d}_{src}',
+            X_full=None,
+            X_slice=X_slice,
+            draw_worm=False,
+        )
+
+
+def plot_multiple_trajectories(
+        trial_ids: list,
+        plot_combined: bool = True,
+        plot_individual: bool = True,
+):
+    """
+    Draw multiple trajectories on the same scale.
+    """
+    args = get_args()
+    args.trajectory_point = -1
+    Xs = []
+    metas = []
+    durations_frames = []
+    trials = []
+    for trial_id in trial_ids:
+        args.trial = trial_id
+        X_slice, meta = get_trajectory_from_args(args, return_meta=True)
+        Xs.append(X_slice)  # (T, 3)
+        metas.append(meta)
+        trial = Trial.objects.get(id=trial_id)
+        trials.append(trial)
+        durations_frames.append(trial.n_frames_min)
+
+    # Calculate the common range to use
+    ranges = np.zeros(3)
+    for i in range(3):
+        for X in Xs:
+            r = np.nanmax(X[:, i]) - np.nanmin(X[:, i])
+            ranges[i] = max(ranges[i], r)
+    r_max = max(ranges) * 0.75
+
+    if plot_combined:
+        fig_combined = plt.figure(figsize=(20, 10))
+        gs_combined = GridSpec(nrows=1, ncols=4)
+
+    for i, trial_id in enumerate(trial_ids):
+        args.trial = trial_id
+        trial = trials[i]
+        X_slice = Xs[i]
+        meta = metas[i]
+        if 'type' in meta and meta['type'] == 'tracking-only':
+            src = 'tracking'
+        else:
+            src = args.midline3d_source
+        # np.savez(LOGS_PATH / f'{START_TIMESTAMP}_trajectory_trial={args.trial}_src={src}', X_slice)
+
+        # Subsample for smaller svg sizes
+        # X_slice = X_slice[::4]
+
+        # Create colours consistent across all plots
+        colours = np.linspace(0, durations_frames[i] / max(durations_frames), len(X_slice))
+
+        axes = []
+        if plot_individual:
+            fig_individual = plt.figure(figsize=(10, 10))
+            axes.append(fig_individual.add_subplot(projection='3d'))
+        if plot_combined:
+            axes.append(fig_combined.add_subplot(gs_combined[0, i], projection='3d'))
+
+        for ax in axes:
+            make_plot(
+                title=f'Concentration {trial.experiment.concentration:.2f}\%\nDuration {trial.duration:%M:%S}',
+                X_slice=X_slice,
+                ax=ax,
+                colours=colours,
+                show_colourbar=False
+            )
+
+            # Set axis range
+            for j in range(3):
+                Xj_max = np.nanmax(X_slice[:, j])
+                Xj_min = np.nanmin(X_slice[:, j])
+                adj = (r_max - (Xj_max - Xj_min)) / 2
+                getattr(ax, f'set_{"xyz"[j]}lim')(Xj_min - adj, Xj_max + adj)
+
+        if plot_individual:
+            fig_individual.tight_layout()
+            if save_plots:
+                plt.savefig(
+                    LOGS_PATH / f'{START_TIMESTAMP}_trajectory_trial={trial.id:03d}_src={src}.{img_extension}',
+                    transparent=True
+                )
+
+    if plot_combined:
+        fig_combined.tight_layout()
+        if save_plots:
+            trial_ids = ','.join([f'{t:03d}' for t in trial_ids])
+            plt.savefig(
+                LOGS_PATH / f'{START_TIMESTAMP}_trajectory_trials={trial_ids}.{img_extension}',
+                transparent=False
+            )
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
     # from simple_worm.plot3d import interactive
     # interactive()
-    plot_trajectory()
+    # plot_trajectory()
     # plot_trajectory_head_tail_distance()
     # plot_trajectory_signed_speed()
     # plot_trajectory_K()
@@ -374,3 +522,10 @@ if __name__ == '__main__':
     # plot_active_particle_trajectories()
     # plot_bounded_particle_trajectory()
     # plot_confined_particle_trajectory()
+
+    # plot_trajectory_trial_list()
+    plot_multiple_trajectories(
+        trial_ids=[162, 17, 272, 37],
+        plot_combined=True,
+        plot_individual=True
+    )
