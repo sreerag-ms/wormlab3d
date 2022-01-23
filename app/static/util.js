@@ -46,16 +46,16 @@ window.HELP_IMPROVE_VIDEOJS = false;
 
 // ================================= Tracking plots =================================
 
-function timestamps_in_ms(timestamps) {
+function timestamps_to_dates(timestamps) {
     return timestamps.map(function (t) {
-        return t * 1000;
+        return new Date(t * 1000);
     });
 }
 
 function plot_tracking_single(X, idx, timestamps) {
     let xyz = ['x', 'y', 'z'][idx];
     let data = [{
-        x: timestamps_in_ms(timestamps),
+        x: timestamps_to_dates(timestamps),
         y: X[idx],
         type: 'scattergl',
         mode: 'markers',

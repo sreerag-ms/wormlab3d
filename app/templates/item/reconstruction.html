@@ -27,14 +27,20 @@
   <div class="row">
 
     <ul class="nav nav-tabs" id="reconstruction-{{ reconstruction.id }}-tabs" role="tablist">
-      {{ tabs.tab_item('Parameters', true) }}
-      {{ tabs.tab_item('Stats') }}
+      {% if reconstruction.source == 'MF' %}
+        {{ tabs.tab_item('Parameters', true) }}
+        {{ tabs.tab_item('Stats') }}
+      {% endif %}
       {{ tabs.tab_item('Tracking 2D') }}
-      {{ tabs.tab_item('Tracking 3D') }}
-      {{ tabs.tab_item('Cameras') }}
-      {{ tabs.tab_item('Point stats') }}
+      {{ tabs.tab_item('Tracking 3D', reconstruction.source != 'MF') }}
+      {% if reconstruction.source == 'MF' %}
+        {{ tabs.tab_item('Cameras') }}
+        {{ tabs.tab_item('Point stats') }}
+      {% endif %}
       {{ tabs.tab_item('Postures') }}
-      {{ tabs.tab_item('Lengths') }}
+      {% if reconstruction.source == 'MF' %}
+        {{ tabs.tab_item('Lengths') }}
+      {% endif %}
     </ul>
 
     <div class="frame-controls my-2" style="display: none;">
@@ -57,61 +63,65 @@
     </div>
 
     <div class="tab-content" id="reconstruction-{{ reconstruction.id }}-panels">
-      {% call tabs.tab_panel('Parameters', true) %}
-        {{ details.render(parameters_view, reconstruction.mf_parameters) }}
-      {% endcall %}
+      {% if reconstruction.source == 'MF' %}
+        {% call tabs.tab_panel('Parameters', true) %}
+          {{ details.render(parameters_view, reconstruction.mf_parameters) }}
+        {% endcall %}
 
-      {% call tabs.tab_panel('Stats') %}
-        <div class="g-0 mt-1 mb-5 stats-plots">
-          {% include 'includes/_loader.html' %}
+        {% call tabs.tab_panel('Stats') %}
+          <div class="g-0 mt-1 mb-5 stats-plots">
+            {% include 'includes/_loader.html' %}
 
-          <div class="form-floating form-group">
-            <select name="stat-key" id="stat-key-select" class="form-control form-select" placeholder="Statistic">
-              {% for stat_key in stat_keys %}
-                <option value="{{ stat_key }}">{{ stat_key }}</option>
-              {% endfor %}
-            </select>
-            <label for="stat-key-select">Statistic</label>
+            <div class="form-floating form-group">
+              <select name="stat-key" id="stat-key-select" class="form-control form-select" placeholder="Statistic">
+                {% for stat_key in stat_keys %}
+                  <option value="{{ stat_key }}">{{ stat_key }}</option>
+                {% endfor %}
+              </select>
+              <label for="stat-key-select">Statistic</label>
+            </div>
+
+            <div id="stats-plot"></div>
           </div>
-
-          <div id="stats-plot"></div>
-        </div>
-      {% endcall %}
+        {% endcall %}
+      {% endif %}
 
       {% call tabs.tab_panel('Tracking 2D') %}
         {% include 'includes/_tracking_plots_2d.html' %}
       {% endcall %}
 
-      {% call tabs.tab_panel('Tracking 3D') %}
+      {% call tabs.tab_panel('Tracking 3D', reconstruction.source != 'MF') %}
         {% include 'includes/_tracking_plots_3d.html' %}
       {% endcall %}
 
-      {% call tabs.tab_panel('Cameras') %}
-        <div class="g-0 mt-1 mb-5 cameras-plots">
-          {% include 'includes/_loader.html' %}
-          <div class="form-floating form-group">
-            <select name="cameras-key" id="cameras-key-select" class="form-control form-select"
-                    placeholder="Camera parameters">
-              {% for cam_key in cam_keys %}
-                <option value="{{ cam_key }}">{{ cam_key }}</option>
-              {% endfor %}
-            </select>
-            <label for="cameras-key-select">Camera parameters</label>
+      {% if reconstruction.source == 'MF' %}
+        {% call tabs.tab_panel('Cameras') %}
+          <div class="g-0 mt-1 mb-5 cameras-plots">
+            {% include 'includes/_loader.html' %}
+            <div class="form-floating form-group">
+              <select name="cameras-key" id="cameras-key-select" class="form-control form-select"
+                      placeholder="Camera parameters">
+                {% for cam_key in cam_keys %}
+                  <option value="{{ cam_key }}">{{ cam_key }}</option>
+                {% endfor %}
+              </select>
+              <label for="cameras-key-select">Camera parameters</label>
+            </div>
+            <div id="cameras-plots"></div>
           </div>
-          <div id="cameras-plots"></div>
-        </div>
-      {% endcall %}
+        {% endcall %}
 
-      {% call tabs.tab_panel('Point stats') %}
-        <div class="g-0 mt-1 mb-5 point-stats-plots">
-          {% include 'includes/_loader.html' %}
-          <div class="row g-1">
-            <div id="sigmas-plots" class="col"></div>
-            <div id="intensities-plots" class="col"></div>
-            <div id="scores-plots" class="col"></div>
+        {% call tabs.tab_panel('Point stats') %}
+          <div class="g-0 mt-1 mb-5 point-stats-plots">
+            {% include 'includes/_loader.html' %}
+            <div class="row g-1">
+              <div id="sigmas-plots" class="col"></div>
+              <div id="intensities-plots" class="col"></div>
+              <div id="scores-plots" class="col"></div>
+            </div>
           </div>
-        </div>
-      {% endcall %}
+        {% endcall %}
+      {% endif %}
 
       {% call tabs.tab_panel('Postures') %}
         <div class="g-0 mt-1 mb-5 postures-plots">
@@ -119,6 +129,7 @@
 
           <div class="row g-1">
             <div class="col col-md-8 flex">
+              {% if reconstruction.source == 'MF' %}
               <div class="form-floating form-group">
                 <select name="depth" id="depth-select" class="form-control form-select"
                         placeholder="Depth">
@@ -129,6 +140,7 @@
                 </select>
                 <label for="depth-select">Depth</label>
               </div>
+              {% endif %}
               <div id="posture-3d-plot" class="h-100"></div>
             </div>
 
@@ -142,12 +154,14 @@
         </div>
       {% endcall %}
 
-      {% call tabs.tab_panel('Lengths') %}
-        <div class="g-0 mt-1 mb-5 length-plots">
-          {% include 'includes/_loader.html' %}
-          <div id="length-plots"></div>
-        </div>
-      {% endcall %}
+      {% if reconstruction.source == 'MF' %}
+        {% call tabs.tab_panel('Lengths') %}
+          <div class="g-0 mt-1 mb-5 length-plots">
+            {% include 'includes/_loader.html' %}
+            <div id="length-plots"></div>
+          </div>
+        {% endcall %}
+      {% endif %}
 
     </div>
 
@@ -159,6 +173,7 @@
 {% block scripts %}
   <script>
       $(document).ready(function () {
+          {% if reconstruction.source == 'MF' %}
           // ========================== Stats ==========================
           let stats = {};
           let stats_plot_data = [{
@@ -179,7 +194,7 @@
               $('#stats-panel .loader').show();
               $.getJSON('{{ url_for('api.get_stats', _id=reconstruction.id) }}', {key: key}, function (data) {
                   stats[key] = {
-                      x: timestamps_in_ms(data['timestamps']),
+                      x: timestamps_to_dates(data['timestamps']),
                       y: data['values']
                   }
                   $('#stats-panel .loader').hide();
@@ -207,6 +222,7 @@
               $('#stat-key-select').change();
           });
 
+          {% endif %}
 
           // ========================== Tracking trajectories ==========================
           let X, ts;
@@ -296,7 +312,7 @@
 
           function plot_cameras_params(k) {
               let p = cameras_params[k];
-              let tms = timestamps_in_ms(p['timestamps']);
+              let tms = timestamps_to_dates(p['timestamps']);
               $('#cameras-plots div').each(function () {
                   Plotly.purge(this);
               });
@@ -320,6 +336,7 @@
           });
 
 
+          {% if reconstruction.source == 'MF' %}
           // ========================== Points stats (sigmas, intensities, scores) ==========================
 
           let ps_keys = ['sigmas', 'intensities', 'scores'];
@@ -381,13 +398,17 @@
               update_point_stats_plots();
           });
 
+          {% endif %}
 
           // ========================== Postures ==========================
           let depth = $('#depth-select').val();
+
           let postures_data = {
-          {% for d in range(reconstruction.mf_parameters.depth) %}
-              {{ d }}: {},
-          {% endfor %}
+          {% if reconstruction.source == 'MF' %}
+            {% for d in range(reconstruction.mf_parameters.depth) %}
+                {{ d }}: {},
+            {% endfor %}
+          {% endif %}
           };
 
           let postures_3d_plot_data = [{
@@ -522,6 +543,8 @@
               $('.frame-controls').hide();
           });
 
+
+          {% if reconstruction.source == 'MF' %}
           // ========================== Lengths ==========================
           let lengths_plot_data = [];
           for (let d = 1; d < {{ reconstruction.mf_parameters.depth }}; d++) {
@@ -546,7 +569,7 @@
               $('#lengths-panel .loader').show();
               $.getJSON('{{ url_for('api.get_worm_lengths', _id=reconstruction.id) }}', {frame_num: frame_num}, function (data) {
                   for (let d = 0; d < {{ reconstruction.mf_parameters.depth }} -1; d++) {
-                      lengths_plot_data[d]['x'] = timestamps_in_ms(data['timestamps']);
+                      lengths_plot_data[d]['x'] = timestamps_to_dates(data['timestamps']);
                       lengths_plot_data[d]['y'] = data['lengths'][d + 1];
                   }
                   Plotly.react('length-plots', lengths_plot_data, lengths_layout, plot_config);
@@ -558,6 +581,8 @@
           $('#lengths-tab').one('shown.bs.tab', function () {
               get_lengths();
           });
+
+          {% endif %}
 
       });
   </script>

@@ -20,9 +20,18 @@ def get_trajectory_data(_id: str):
         depth=-1,
         trajectory_point=-1,
     )
+
+    # Replace NaN's with Nones to allow json decoding on the frontend
+    Xo = X.astype(np.object)
+    Xo[np.isnan(X)] = None
+
+    # Prune timestamps
+    timestamps = _get_timestamps(reconstruction, meta['frame_nums'])
+    timestamps = timestamps[:len(Xo)]
+
     response = {
-        'timestamps': _get_timestamps(reconstruction, meta['frame_nums']),
-        'X': X.T.tolist(),
+        'timestamps': timestamps,
+        'X': Xo.T.tolist(),
     }
     return response
 
