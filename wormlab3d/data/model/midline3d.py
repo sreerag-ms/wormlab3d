@@ -68,7 +68,11 @@ class Midline3D(Document):
             masks.append(mask)
         return masks
 
-    def get_prepared_2d_coordinates(self, regenerate: bool = False, cameras: CameraModelTriplet = None) -> List[np.ndarray]:
+    def get_prepared_2d_coordinates(
+            self,
+            regenerate: bool = False,
+            cameras: CameraModelTriplet = None
+    ) -> List[np.ndarray]:
         """
         Project the 3D midline coordinates down and return relative to the prepared 2D images.
         Caches results into the database on request.
@@ -141,7 +145,11 @@ class Midline3D(Document):
         """
         Get the midline coordinates relative to the cropped image for the given camera.
         """
-        centre_2d = self.frame.centre_3d.reprojected_points_2d[camera_idx]
+        if self.frame.centre_3d_fixed is not None:
+            p3d = self.frame.centre_3d_fixed
+        else:
+            p3d = self.frame.centre_3d
+        centre_2d = p3d.reprojected_points_2d[camera_idx]
         X = image_points.copy()
         X[:, 0] = X[:, 0] - centre_2d[0] + PREPARED_IMAGE_SIZE[0] / 2
         X[:, 1] = X[:, 1] - centre_2d[1] + PREPARED_IMAGE_SIZE[1] / 2
@@ -150,7 +158,7 @@ class Midline3D(Document):
               & (X[:, 1] < PREPARED_IMAGE_SIZE[1] - 0.5)]
         return X
 
-    def get_natural_frame(self, regenerate: bool=False) -> np.ndarray:
+    def get_natural_frame(self, regenerate: bool = False) -> np.ndarray:
         """
         Get the natural frame (m1+i.m2) representation.
         """

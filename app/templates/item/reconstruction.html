@@ -144,12 +144,14 @@
               <div id="posture-3d-plot" class="h-100"></div>
             </div>
 
-            <div id="posture-2d-images" class="col col-md-2">
+            <div id="posture-2d-images" class="col col-md-{{ '2' if reconstruction.source == 'MF' else '4' }}">
               <div class="d-flex flex-column align-items-center"></div>
             </div>
-            <div id="posture-2d-masks" class="col col-md-2">
-              <div class="d-flex flex-column align-items-center"></div>
-            </div>
+            {% if reconstruction.source == 'MF' %}
+              <div id="posture-2d-masks" class="col col-md-2">
+                <div class="d-flex flex-column align-items-center"></div>
+              </div>
+            {% endif %}
           </div>
         </div>
       {% endcall %}
@@ -412,6 +414,8 @@
             {% for d in range(reconstruction.mf_parameters.depth) %}
                 {{ d }}: {},
             {% endfor %}
+          {% else %}
+              undefined: {}
           {% endif %}
           };
 
@@ -451,7 +455,7 @@
               postures_3d_plot_data[0].y = data[1];
               postures_3d_plot_data[0].z = data[2];
               postures_3d_plot_data[0].marker.color = linspace(0, 1, data[0].length);
-              Plotly.react('posture-3d-plot', postures_3d_plot_data, postures_3d_plot_layout, plot_config);
+              Plotly.react('posture-3d-plot', postures_3d_plot_data);
           }
 
           function draw_posture_2d_images() {
@@ -481,7 +485,9 @@
                   postures_data[depth][frame_num] = data;
                   $('#postures-panel .loader').hide();
                   draw_posture_2d_images();
-                  draw_posture_2d_masks();
+                  {% if reconstruction.source == 'MF' %}
+                    draw_posture_2d_masks();
+                  {% endif %}
                   plot_posture_3d();
               });
           }
@@ -490,7 +496,9 @@
               if (frame_num in postures_data[depth]) {
                   plot_posture_3d();
                   draw_posture_2d_images();
-                  draw_posture_2d_masks();
+                  {% if reconstruction.source == 'MF' %}
+                      draw_posture_2d_masks();
+                  {% endif %}
               } else {
                   get_posture();
               }
@@ -514,7 +522,9 @@
               let progress = (frame_num -{{ reconstruction.start_frame }}) / {{ reconstruction.n_frames }};
               $('.fc-current-frame').text(Number(frame_num).toLocaleString());
               $('.fc-progress .progress-bar').width((progress * 100) + '%');
+              {% if reconstruction.source == 'MF' %}
               update_point_stats_plots();
+              {% endif %}
               update_postures();
           }
 
