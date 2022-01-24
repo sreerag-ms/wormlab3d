@@ -55,9 +55,13 @@
 
     <ul class="nav nav-tabs" id="trial-{{ trial.id }}-tabs" role="tablist">
       {{ tabs.tab_item('Videos', true) }}
-      {{ tabs.tab_item('Tracking videos') }}
-      {{ tabs.tab_item('Tracking 2D') }}
-      {{ tabs.tab_item('Tracking 3D') }}
+      {% if trial.quality_checks.tracking_video %}
+        {{ tabs.tab_item('Tracking videos') }}
+      {% endif %}
+      {% if trial.quality_checks.triangulations %}
+        {{ tabs.tab_item('Tracking 2D') }}
+        {{ tabs.tab_item('Tracking 3D') }}
+      {% endif %}
       {{ tabs.tab_item('Frames') }}
       {{ tabs.tab_item('Reconstructions') }}
     </ul>
@@ -65,27 +69,34 @@
       {% call tabs.tab_panel('Videos', true) %}
         {% include 'includes/_video_triplet_player.html' %}
       {% endcall %}
-      {% call tabs.tab_panel('Tracking videos') %}
-        <div class="row g-0">
-          <video id="tracking-videos" class="video-js" preload="auto"></video>
-        </div>
-      {% endcall %}
-      {% call tabs.tab_panel('Tracking 2D') %}
-        <select name="tracking-fixed-2d-select" id="tracking-fixed-2d-select" class="form-control form-select"
-                placeholder="Fixed centres">
-          <option value="1">Fixed</option>
-          <option value="0">Raw triangulations</option>
-        </select>
-        {% include 'includes/_tracking_plots_2d.html' %}
-      {% endcall %}
-      {% call tabs.tab_panel('Tracking 3D') %}
-        <select name="tracking-fixed-3d-select" id="tracking-fixed-3d-select" class="form-control form-select"
-                placeholder="Fixed centres">
-          <option value="1">Fixed</option>
-          <option value="0">Raw triangulations</option>
-        </select>
-        {% include 'includes/_tracking_plots_3d.html' %}
-      {% endcall %}
+
+      {% if trial.quality_checks.tracking_video %}
+        {% call tabs.tab_panel('Tracking videos') %}
+          <div class="row g-0">
+            <video id="tracking-videos" class="video-js" preload="auto"></video>
+          </div>
+        {% endcall %}
+      {% endif %}
+
+      {% if trial.quality_checks.triangulations %}
+        {% call tabs.tab_panel('Tracking 2D') %}
+          <select name="tracking-fixed-2d-select" id="tracking-fixed-2d-select" class="form-control form-select"
+                  placeholder="Fixed centres">
+            {% if trial.quality_checks.triangulations_fixed %}<option value="1">Fixed</option>{% endif %}
+            <option value="0">Raw triangulations</option>
+          </select>
+          {% include 'includes/_tracking_plots_2d.html' %}
+        {% endcall %}
+        {% call tabs.tab_panel('Tracking 3D') %}
+          <select name="tracking-fixed-3d-select" id="tracking-fixed-3d-select" class="form-control form-select"
+                  placeholder="Fixed centres">
+            {% if trial.quality_checks.triangulations_fixed %}<option value="1">Fixed</option>{% endif %}
+            <option value="0">Raw triangulations</option>
+          </select>
+          {% include 'includes/_tracking_plots_3d.html' %}
+        {% endcall %}
+      {% endif %}
+
       {% call tabs.tab_panel('Frames') %}
         <div class="row">
           <div id="frames-table" class="col-md-8">
@@ -98,6 +109,7 @@
           </div>
         </div>
       {% endcall %}
+
       {% call tabs.tab_panel('Reconstructions') %}
         {{ table.render(reconstruction_view, table_name_reconstruction) }}
       {% endcall %}
@@ -127,6 +139,7 @@
 
   <script>
       $(document).ready(function () {
+          {% if trial.quality_checks.tracking_video %}
           // ========================== Tracking videos player ==========================
           let stream_endpoint = '/media/tracking-videos/{{ trial.id }}';
           let duration_endpoint = '/media/tracking-videos-duration/{{ trial.id }}';
@@ -180,7 +193,10 @@
               video.theDuration = data.duration;
           });
 
+          {% endif %}
 
+
+          {% if trial.quality_checks.triangulations %}
           // ========================== Tracking trajectories ==========================
           let X = {}, ts;
           let fixed_2d = $('#tracking-fixed-2d-select').val();
@@ -243,6 +259,7 @@
               $('#tracking-fixed-3d-select').change();
           });
 
+          {% endif %}
 
           // ========================== Frames ==========================
           $('#frames-tab').one('shown.bs.tab', function () {
