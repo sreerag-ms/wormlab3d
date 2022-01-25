@@ -78,9 +78,8 @@ class Midline3D(Document):
         Caches results into the database on request.
         """
         if self.X_projections is not None and len(self.X_projections) == 3 and not regenerate:
-            try:
-                self.X_projections = np.array(self.X_projections)
-            except Exception:
+            lengths = [len(self.X_projections[i]) for i in range(3)]
+            if not all([l == lengths[0] for l in lengths]):
                 logger.warning('Existing prepared 2D coordinates are ragged. Attempting to regenerate.')
                 return self.get_prepared_2d_coordinates(regenerate=True, cameras=cameras)
 
