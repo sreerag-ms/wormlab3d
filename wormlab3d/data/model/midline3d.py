@@ -78,6 +78,12 @@ class Midline3D(Document):
         Caches results into the database on request.
         """
         if self.X_projections is not None and len(self.X_projections) == 3 and not regenerate:
+            try:
+                self.X_projections = np.array(self.X_projections)
+            except Exception:
+                logger.warning('Existing prepared 2D coordinates are ragged. Attempting to regenerate.')
+                return self.get_prepared_2d_coordinates(regenerate=True, cameras=cameras)
+
             return self.X_projections
 
         if self.X_projections is None:
@@ -153,9 +159,9 @@ class Midline3D(Document):
         X = image_points.copy()
         X[:, 0] = X[:, 0] - centre_2d[0] + PREPARED_IMAGE_SIZE[0] / 2
         X[:, 1] = X[:, 1] - centre_2d[1] + PREPARED_IMAGE_SIZE[1] / 2
-        X = X[(X[:, 0] >= 0) & (X[:, 1] >= 0)
-              & (X[:, 0] < PREPARED_IMAGE_SIZE[0] - 0.5)
-              & (X[:, 1] < PREPARED_IMAGE_SIZE[1] - 0.5)]
+        # X = X[(X[:, 0] >= 0) & (X[:, 1] >= 0)
+        #       & (X[:, 0] < PREPARED_IMAGE_SIZE[0] - 0.5)
+        #       & (X[:, 1] < PREPARED_IMAGE_SIZE[1] - 0.5)]
         return X
 
     def get_natural_frame(self, regenerate: bool = False) -> np.ndarray:
