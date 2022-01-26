@@ -1,9 +1,9 @@
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
 import numpy as np
 
-from wormlab3d import DATA_PATH
-from wormlab3d.data.model import Frame, Tag
+from wormlab3d import DATA_PATH, logger
+from wormlab3d.data.model import Frame, Tag, Reconstruction
 
 TRAJECTORY_CACHE_PATH = DATA_PATH / 'trajectory_cache'
 SMOOTHING_WINDOW_TYPES = ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']
@@ -197,3 +197,36 @@ def calculate_angle(v1: np.ndarray, v2: np.ndarray) -> float:
         raise ValueError('Vectors of the wrong dimension!')
 
     return angle
+
+
+def fetch_reconstruction(
+        reconstruction_id: str = None,
+        trial_id: str = None,
+        midline_source: str = None,
+        midline_source_file: str = None,
+) -> Union[Reconstruction, None]:
+    """
+    Try to find a reconstruction satisfying arguments.
+    """
+    reconstruction = None
+    if reconstruction_id is not None:
+        reconstruction = Reconstruction.objects.get(id=reconstruction_id)
+    else:
+        # Try to find a suitable reconstruction
+        filters = {'trial': trial_id}
+        if midline_source is not None:
+            filters['source'] = midline_source
+        if midline_source_file is not None:
+            filters['source_file'] = midline_source_file
+
+        reconstructions = Reconstruction.objects(**filters).order_by('-updated')
+        if reconstructions.count() == 0:
+            logger.warning(f'Found no reconstructions for parameters {filters}.')
+        else:
+            logger.info(
+                f'Found {reconstructions.count()} matching reconstructions. '
+                f'Using most recent.'
+            )
+            reconstruction = reconstructions[0]
+
+    return reconstruction

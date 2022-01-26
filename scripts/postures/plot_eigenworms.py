@@ -1,5 +1,4 @@
 import os
-from typing import Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,16 +7,16 @@ from matplotlib.gridspec import GridSpec
 
 from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT
 from wormlab3d import LOGS_PATH, logger, START_TIMESTAMP
-from wormlab3d.data.model import Reconstruction
-from wormlab3d.postures.cpca import CPCA
+from wormlab3d.data.model import Reconstruction, Eigenworms
+from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.postures.plot_utils import plot_natural_frame_3d
 from wormlab3d.toolkit.util import parse_target_arguments
 from wormlab3d.trajectories.cache import get_trajectory
 
 plot_n_components = 4
-show_plots = False
-save_plots = True
+show_plots = True
+save_plots = False
 img_extension = 'png'
 eigenworm_length = 1
 eigenworm_scale = 64
@@ -34,43 +33,8 @@ def _get_reconstruction() -> Reconstruction:
     return Reconstruction.objects.get(id=args.reconstruction)
 
 
-def _calculate_basis(
-        reconstruction: Reconstruction,
-        n_components: int
-) -> Tuple[CPCA, np.ndarray]:
-    X_full, meta = get_trajectory(reconstruction_id=reconstruction.id)
-    M = X_full.shape[0]
-    N = X_full.shape[1]
-    if N == 1:
-        raise RuntimeError('Trajectory returned only a single point. Eigenworms requires full postures!')
-    logger.info(f'Loaded {M} midlines of length {N}.')
-
-    # Calculate the natural frame representations for all midlines
-    logger.info('Calculating natural frame representations.')
-    Z = []
-    bad_idxs = []
-    for i, X in enumerate(X_full):
-        if (i + 1) % 100 == 0:
-            logger.info(f'Calculating for midline {i + 1}/{M}.')
-        try:
-            nf = NaturalFrame(X)
-            Z.append(nf.mc)
-        except Exception:
-            bad_idxs.append(i)
-    if len(bad_idxs):
-        logger.warning(f'Failed to calculate {len(bad_idxs)} midline idxs: {bad_idxs}.')
-
-    # Calculate CPCA components
-    logger.info('Calculating basis.')
-    Z = np.array(Z)
-    cpca = CPCA(n_components=n_components, whiten=False)
-    cpca.fit(Z)
-
-    return cpca, X_full
-
-
 def _plot_eigenworms(
-        cpca: CPCA,
+        eigenworms: Eigenworms,
         title: str,
         filename: str
 ):
@@ -80,7 +44,7 @@ def _plot_eigenworms(
     gs = GridSpec(n_rows, n_cols)
 
     for i in range(plot_n_components):
-        component = cpca.components_[i]
+        component = eigenworms.components[i]
         NF = NaturalFrame(component * eigenworm_scale, length=eigenworm_length)
         N = NF.N
         ind = np.arange(N)
@@ -136,17 +100,17 @@ def _plot_eigenworms(
 
 
 def _plot_eigenvalues(
-        cpca: CPCA,
+        eigenworms: Eigenworms,
         title: str,
         filename: str
 ):
     fig, axes = plt.subplots(2)
     ax = axes[0]
     ax.set_title('Explained variance')
-    ax.plot(np.cumsum(cpca.explained_variance_))
+    ax.plot(np.cumsum(eigenworms.explained_variance))
     ax = axes[1]
     ax.set_title('Explained variance ratio')
-    ax.plot(np.cumsum(cpca.explained_variance_ratio_))
+    ax.plot(np.cumsum(eigenworms.explained_variance_ratio))
 
     fig.suptitle(title)
     fig.tight_layout()
@@ -163,7 +127,7 @@ def _plot_eigenvalues(
 
 
 def _plot_reconstruction(
-        cpca: CPCA,
+        eigenworms: Eigenworms,
         X_full: np.ndarray,
         idx: int,
         title: str,
@@ -172,8 +136,8 @@ def _plot_reconstruction(
     # Reconstruct a worm using the basis
     X = X_full[idx]
     NF_original = NaturalFrame(X)
-    coeffs = cpca.transform(np.array([NF_original.mc]))
-    mc = cpca.inverse_transform(coeffs)
+    coeffs = eigenworms.transform(np.array([NF_original.mc]))
+    mc = eigenworms.inverse_transform(coeffs)
     NF_reconstructed = NaturalFrame(
         mc[0],
         X0=NF_original.X_pos[0],
@@ -181,8 +145,8 @@ def _plot_reconstruction(
         M0=NF_original.M1[0],
     )
 
-    NF1_args = {'c': 'red', 'linestyle': '--', 'alpha': 0.8}
-    NF2_args = {'c': 'blue', 'linestyle': ':', 'alpha': 0.8}
+    NF_original_args = {'c': 'red', 'linestyle': '--', 'alpha': 0.8, 'label': 'Original'}
+    NF_reconst_args = {'c': 'blue', 'linestyle': ':', 'alpha': 0.8, 'label': 'Reconstructed'}
     N = NF_original.N
     ind = np.arange(N)
 
@@ -206,16 +170,17 @@ def _plot_reconstruction(
     # Kappa
     ax = fig.add_subplot(gs[1, 0])
     ax.set_title('$|\kappa|=|m_1|+|m_2|$')
-    ax.plot(ind, NF_original.kappa, **NF1_args)
-    ax.plot(ind, NF_reconstructed.kappa, **NF2_args)
+    ax.plot(ind, NF_original.kappa, **NF_original_args)
+    ax.plot(ind, NF_reconstructed.kappa, **NF_reconst_args)
     ax.set_xticks([0, ind[-1]])
     ax.set_xticklabels(['H', 'T'])
+    ax.legend()
 
     # Psi
     ax = fig.add_subplot(gs2[1, 1], projection='polar')
     ax.set_title('$\psi=arg(m_1+i m_2)$')
-    ax.plot(NF_original.psi, ind, **NF1_args)
-    ax.plot(NF_reconstructed.psi, ind, **NF2_args)
+    ax.plot(NF_original.psi, ind, **NF_original_args)
+    ax.plot(NF_reconstructed.psi, ind, **NF_reconst_args)
     ax.set_rticks([])
     thetaticks = np.arange(0, 2 * np.pi, np.pi / 2)
     ax.set_xticks(thetaticks)
@@ -243,20 +208,21 @@ def _plot_reconstruction(
 
 def main():
     reconstruction = _get_reconstruction()
-    cpca, X_full = _calculate_basis(reconstruction, n_components=20)
+    ew = generate_or_load_eigenworms(reconstruction_id=reconstruction.id, n_components=10, regenerate=False)
+    X_full, meta = get_trajectory(reconstruction_id=reconstruction.id)
 
     title = f'Trial {reconstruction.trial.id}.\n' \
             f'Reconstruction={reconstruction.id} ({reconstruction.source}).\n' \
-            f'Num worms={cpca.n_samples_}. ' \
-            f'Num points={cpca.n_features_}.'
+            f'Num worms={ew.n_samples}. ' \
+            f'Num points={ew.n_features}.'
 
     filename = f'trial={reconstruction.trial.id:03d}_' \
                f'reconstruction={reconstruction.id}_{reconstruction.source}_' \
-               f'M={cpca.n_samples_}_N={cpca.n_features_}'
+               f'M={ew.n_samples}_N={ew.n_features}'
 
-    _plot_eigenworms(cpca, title, filename)
-    _plot_eigenvalues(cpca, title, filename)
-    _plot_reconstruction(cpca, X_full, 0, title, filename)
+    _plot_eigenworms(ew, title, filename)
+    _plot_eigenvalues(ew, title, filename)
+    _plot_reconstruction(ew, X_full, 0, title, filename)
 
 
 if __name__ == '__main__':

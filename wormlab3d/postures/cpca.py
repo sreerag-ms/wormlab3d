@@ -121,25 +121,6 @@ class CPCA(PCA):
             X_transformed /= np.sqrt(self.explained_variance_)
         return X_transformed
 
-        # coeffs = []
-        # for PW in self.components_:
-        #     coeffs.append(np.dot(np.conj(PW), X[0]))
-        #
-        # coeffs = np.dot(X, self.components_.conj().T)
-        # return np.array(coeffs)
-
-    # def inverse_transform(self, X: np.ndarray):
-    #
-    #     if self.whiten:
-    #         return np.dot(X, np.sqrt(self.explained_variance_[:, np.newaxis]) *
-    #                       self.components_) + self.mean_
-    #     else:
-    #         return np.dot(X, self.components_) + self.mean_
-    #
-    #     assert (X.shape[0] == self.components_.shape[0])
-    #     w = np.dot(X, self.components_) + self.mean_
-    #     return w
-
     def _validate_data(self, X, y='no_validation', reset=True,
                        validate_separately=False, **check_params):
         if X.ndim != 2:

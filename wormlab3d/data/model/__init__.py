@@ -2,6 +2,7 @@ from wormlab3d.data.model.camera_shifts import CameraShifts
 from wormlab3d.data.model.cameras import Cameras
 from wormlab3d.data.model.checkpoint import Checkpoint
 from wormlab3d.data.model.dataset import Dataset, DatasetMidline2D, DatasetSegmentationMasks
+from wormlab3d.data.model.eigenworms import Eigenworms
 from wormlab3d.data.model.experiment import Experiment
 from wormlab3d.data.model.frame import Frame
 from wormlab3d.data.model.frame_sequence import FrameSequence
