@@ -20,7 +20,7 @@ def get_args(
     parser = ArgumentParser(description='Wormlab3D trajectory script.')
 
     # Source arguments
-    parser.add_argument('--reconstruction', type=int, help='Reconstruction id.', required=False)
+    parser.add_argument('--reconstruction', type=str, help='Reconstruction id.', required=False)
     parser.add_argument('--trial', type=int, help='Trial id.', required=False)
     parser.add_argument('--midline3d-source', type=str, default=M3D_SOURCE_RECONST, choices=M3D_SOURCES,
                         help='Midline3D source.')

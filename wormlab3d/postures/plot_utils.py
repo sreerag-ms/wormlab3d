@@ -1,77 +1,101 @@
+from typing import Union
+
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import cm
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpec
 
 from simple_worm.frame import FrameNumpy
-from simple_worm.plot3d import FrameArtist, cla, Arrow3D, MIDLINE_CMAP_DEFAULT
+from simple_worm.plot3d import FrameArtist, Arrow3D, MIDLINE_CMAP_DEFAULT
 from wormlab3d.postures.natural_frame import NaturalFrame
 
 
-def plot_natural_frame_3d(NF: NaturalFrame, azim: float = -67, elev: float = 75, arrow_opts: dict = None,
-                          arrow_scale: float = 0.1):
+def plot_natural_frame_3d(
+        NF: NaturalFrame,
+        azim: float = -60.,
+        elev: float = 30.,
+        show_frame_arrows: bool = True,
+        n_frame_arrows: int = 30,
+        arrow_opts: dict = None,
+        arrow_scale: float = 0.1,
+        show_pca_arrows: bool = True,
+        ax: Axes = None,
+) -> Union[Figure, Axes]:
     # Set up frame
-    F = FrameNumpy(x=NF.X.T)
+    F = FrameNumpy(x=NF.X_pos.T)
     F.e1 = NF.M1.T
     F.e2 = NF.M2.T
 
-    # Set up figure and 3d axes
-    fig = plt.figure(figsize=(10, 10))
-    ax = fig.add_subplot(projection='3d', azim=azim, elev=elev)
-    cla(ax)
+    # Create figure if required
+    return_ax = False
+    if ax is None:
+        fig = plt.figure(figsize=(10, 10))
+        ax = fig.add_subplot(projection='3d', azim=azim, elev=elev)
+    else:
+        fig = ax.get_figure()
+        return_ax = True
+    # cla(ax)
 
     # Add frame arrows and midline
+    # if show_frame_arrows:
     if arrow_opts is None:
         arrow_opts = {}
     arrow_opts = {**{'alpha': 0.3}, **arrow_opts}
-    fa = FrameArtist(F, n_arrows=30, arrow_opts=arrow_opts, arrow_scale=arrow_scale)
-    fa.add_component_vectors(ax)
+    fa = FrameArtist(F, n_arrows=n_frame_arrows, arrow_opts=arrow_opts, arrow_scale=arrow_scale)
+    if show_frame_arrows:
+        fa.add_component_vectors(ax)
     fa.add_midline(ax)
 
     # Add PCA component vectors
-    centre = NF.X.mean(axis=0)
-    for i in range(2, -1, -1):
-        vec = NF.pca.components_[i] * NF.pca.singular_values_[i] / 3
-        if vec.sum() == 0:
-            continue
-        origin = centre - vec / 2
-        arrow = Arrow3D(
-            origin=origin,
-            vec=vec,
-            color=fa.arrow_colours[f'e{i}'],
-            mutation_scale=25,
-            arrowstyle='->',
-            linewidth=3,
-            alpha=0.9
-        )
-        ax.add_artist(arrow)
+    if show_pca_arrows:
+        centre = NF.X_pos.mean(axis=0)
+        for i in range(2, -1, -1):
+            vec = NF.pca.components_[i] * NF.pca.singular_values_[i] / 3
+            if vec.sum() == 0:
+                continue
+            origin = centre - vec / 2
+            arrow = Arrow3D(
+                origin=origin,
+                vec=vec,
+                color=fa.arrow_colours[f'e{i}'],
+                mutation_scale=25,
+                arrowstyle='->',
+                linewidth=3,
+                alpha=0.9
+            )
+            ax.add_artist(arrow)
 
-        origin = origin - vec / np.linalg.norm(vec) * 0.15
-        ax.text(
-            origin[0],
-            origin[1],
-            origin[2],
-            f'$v_{i}$',
-            color=fa.arrow_colours[f'e{i}'],
-            fontsize=40,
-            zorder=10,
-            horizontalalignment='center',
-            verticalalignment='center',
-        )
+            origin = origin - vec / np.linalg.norm(vec) * 0.15
+            ax.text(
+                origin[0],
+                origin[1],
+                origin[2],
+                f'$v_{i}$',
+                color=fa.arrow_colours[f'e{i}'],
+                fontsize=40,
+                zorder=10,
+                horizontalalignment='center',
+                verticalalignment='center',
+            )
 
     # Fix axes range
     mins, maxs = F.get_bounding_box()
     ax.set_xlim(mins[0], maxs[0])
     ax.set_ylim(mins[1], maxs[1])
     ax.set_zlim(mins[2], maxs[2])
-    ax.axis('off')
+    # ax.axis('off')
+
+    if return_ax:
+        return ax
 
     fig.tight_layout()
 
     return fig
 
 
-def plot_natural_frame_components(NF: NaturalFrame):
+def plot_natural_frame_components(NF: NaturalFrame) -> Figure:
     fig = plt.figure(figsize=(6, 6))
     gs = GridSpec(2, 2)
     gs2 = GridSpec(2, 2, wspace=0.25, hspace=0.2, left=0.1, right=0.95, bottom=0.05, top=0.9)
@@ -113,7 +137,7 @@ def plot_natural_frame_components(NF: NaturalFrame):
     return fig
 
 
-def plot_component_comparison(NF1: NaturalFrame, NF2: NaturalFrame):
+def plot_component_comparison(NF1: NaturalFrame, NF2: NaturalFrame) -> Figure:
     fig = plt.figure(figsize=(6, 6))
     gs = GridSpec(2, 2)
     gs2 = GridSpec(2, 2, wspace=0.25, hspace=0.2, left=0.1, right=0.95, bottom=0.05, top=0.9)
