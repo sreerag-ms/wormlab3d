@@ -127,8 +127,8 @@
         <div class="g-0 mt-1 mb-5 postures-plots">
           {% include 'includes/_loader.html' %}
 
-          <div class="row g-1">
-            <div class="col col-md-8 flex">
+          <div class="row g-1 flex">
+            <div class="col col-md-8 flex vh-100">
               {% if reconstruction.source == 'MF' %}
               <div class="form-floating form-group">
                 <select name="depth" id="depth-select" class="form-control form-select"
@@ -144,12 +144,12 @@
               <div id="posture-3d-plot" class="h-100"></div>
             </div>
 
-            <div id="posture-2d-images" class="col col-md-{{ '2' if reconstruction.source == 'MF' else '4' }}">
-              <div class="d-flex flex-column align-items-center"></div>
+            <div id="posture-2d-images" class="col col-md-{{ '2' if reconstruction.source == 'MF' else '4' }} vh-100">
+              <div class="d-flex flex-column align-items-center h-100"></div>
             </div>
             {% if reconstruction.source == 'MF' %}
-              <div id="posture-2d-masks" class="col col-md-2">
-                <div class="d-flex flex-column align-items-center"></div>
+              <div id="posture-2d-masks" class="col col-md-2 vh-100">
+                <div class="d-flex flex-column align-items-center h-100"></div>
               </div>
             {% endif %}
           </div>
@@ -462,7 +462,7 @@
               let images = postures_data[depth][frame_num].images;
               let imgs = '';
               for (let i = 0; i < images.length; i++) {
-                  imgs += '<img src="' + images[i] + '" class="mt-1 w-100"/>'
+                  imgs += '<img src="' + images[i] + '" class="mt-1 mw-100 vh-100"/>'; // w-100
               }
               $('#posture-2d-images .flex-column').html(imgs);
           }
@@ -471,7 +471,7 @@
               let masks = postures_data[depth][frame_num].masks;
               let imgs = '';
               for (let i = 0; i < masks.length; i++) {
-                  imgs += '<img src="' + masks[i] + '" class="mt-1 w-100"/>'
+                  imgs += '<img src="' + masks[i] + '" class="mt-1 mw-100 vh-100"/>';
               }
               $('#posture-2d-masks .flex-column').html(imgs);
           }
