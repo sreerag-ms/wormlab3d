@@ -24,7 +24,7 @@ def index():
         flash('No database connection!\n' + str(e), category='error')
 
     # Check if .env file exists
-    if not os.path.exists(ROOT_PATH + '/.env'):
+    if not os.path.exists(ROOT_PATH / '.env'):
         flash('.env file does not exist!', category='error')
 
     # Get logger level

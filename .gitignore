@@ -14,7 +14,7 @@ __pycache__
 # Data directories
 /data/backgrounds
 /data/db
-/data/ds_cache
+/data/datasets
 /data/eigenworms
 /data/K_estimates_cache
 /data/MF_outputs

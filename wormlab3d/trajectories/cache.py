@@ -4,14 +4,13 @@ from typing import Tuple, Any, Dict, Union
 
 import numpy as np
 
-from wormlab3d import logger, DATA_PATH
+from wormlab3d import logger, TRAJECTORY_CACHE_PATH
 from wormlab3d.data.model import Midline3D, Frame, Reconstruction, Trial
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.trajectories.util import smooth_trajectory, prune_slowest_frames, prune_directionality, \
     fetch_reconstruction
 
-TRAJECTORY_CACHE_PATH = DATA_PATH / 'trajectory_cache'
 SMOOTHING_WINDOW_TYPES = ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']
 
 

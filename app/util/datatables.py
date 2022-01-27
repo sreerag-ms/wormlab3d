@@ -47,6 +47,7 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
         A json string containing the queried result and parameters required by DataTables.
     """
     collection_name = doc_view.collection_name
+    objects = doc_view.document_class.objects
 
     # Build aggregation pipeline
     pipeline = []
@@ -189,7 +190,7 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
         }}
     ]
     logger.debug(pipeline)
-    cursor = doc_view.document_class.objects.aggregate(pipeline)
+    cursor = objects.aggregate(pipeline)
     try:
         results = list(cursor)[0]
     except IndexError:
@@ -199,7 +200,9 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
         }
 
     # Fetch total count from collection metadata
-    cursor = doc_view.document_class.objects.aggregate([
+    objects._mongo_query = None
+    objects._cls_query = None
+    cursor = objects.aggregate([
         {'$collStats': {'count': {}}}
     ])
     try:

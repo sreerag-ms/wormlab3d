@@ -1,5 +1,5 @@
 from app.model.document_view import DocumentView
-from app.model.dataset import DatasetsView
+from app.model.dataset import DatasetView
 from app.model.experiment import ExperimentView
 from app.model.frame import FrameView
 from app.model.mf_parameters import MFParametersView

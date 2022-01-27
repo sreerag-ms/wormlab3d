@@ -29,10 +29,13 @@ def _load_env_path(k: str, default: Path):
 DATA_PATH = ROOT_PATH / 'data'
 ANNEX_PATH = _load_env_path('ANNEX_PATH', ROOT_PATH.parent / 'worm_data')
 WT3D_PATH = _load_env_path('WT3D_PATH', ROOT_PATH.parent / '3DWT_Data')
-PREPARED_IMAGES_PATH = _load_env_path('PREPARED_IMAGES_PATH', DATA_PATH / 'prepared_images')
-DATASET_CACHE_PATH = _load_env_path('DATASET_CACHE_PATH', DATA_PATH / 'ds_cache')
-TRACKING_VIDEOS_PATH = _load_env_path('TRACKING_VIDEOS_PATH', DATA_PATH / 'tracking_videos')
+DATASETS_PATH = _load_env_path('DATASETS_PATH', DATA_PATH / 'datasets')
+DATASETS_MIDLINES3D_PATH = _load_env_path('DATASETS_MIDLINES3D_PATH', DATASETS_PATH / 'midlines3d')
+DATASETS_SEG_MASKS_PATH = _load_env_path('DATASET_CACHE_PATH', DATASETS_PATH / 'seg_masks')
 EIGENWORMS_PATH = _load_env_path('EIGENWORMS_PATH', DATA_PATH / 'eigenworms')
+PREPARED_IMAGES_PATH = _load_env_path('PREPARED_IMAGES_PATH', DATA_PATH / 'prepared_images')
+TRACKING_VIDEOS_PATH = _load_env_path('TRACKING_VIDEOS_PATH', DATA_PATH / 'tracking_videos')
+TRAJECTORY_CACHE_PATH = _load_env_path('TRAJECTORY_CACHE_PATH', DATA_PATH / 'trajectory_cache')
 
 # When fetching annexed files on demand, ensure that this much space is always kept free
 MIN_FREE_DISK_SPACE = os.getenv('MIN_FREE_DISK_SPACE', '100G')

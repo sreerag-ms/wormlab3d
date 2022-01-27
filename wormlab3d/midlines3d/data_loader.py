@@ -7,7 +7,7 @@ from bson import ObjectId
 from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import default_collate
 
-from wormlab3d import logger, DATASET_CACHE_PATH, PREPARED_IMAGE_SIZE
+from wormlab3d import logger, DATASETS_SEG_MASKS_PATH, PREPARED_IMAGE_SIZE
 from wormlab3d.data.model import SegmentationMasks, Frame
 from wormlab3d.data.model.dataset import DatasetSegmentationMasks
 from wormlab3d.midlines3d.args import DatasetSegmentationMasksArgs
@@ -51,8 +51,8 @@ class DatasetSegmentationMasksLoader(DatasetLoader):
         hash = hash_data([str(m) for m in mask_ids])
         filename_Xs = f'{hash}x.npz'
         filename_images = f'{hash}i.npz'
-        path_Xs = DATASET_CACHE_PATH + '/' + filename_Xs
-        path_images = DATASET_CACHE_PATH + '/' + filename_images
+        path_Xs = DATASETS_SEG_MASKS_PATH / filename_Xs
+        path_images = DATASETS_SEG_MASKS_PATH / filename_images
         if os.path.exists(path_Xs) and os.path.exists(path_images):
             try:
                 self.Xs = np.memmap(path_Xs, dtype=np.float32, mode='r', shape=shape)

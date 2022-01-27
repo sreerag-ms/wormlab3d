@@ -1,12 +1,16 @@
 import datetime
+import os
+from pathlib import Path
 from typing import List, Tuple
 
 import numpy as np
 from mongoengine import *
 
-from wormlab3d import logger, CAMERA_IDXS
+from wormlab3d import logger, CAMERA_IDXS, DATASETS_MIDLINES3D_PATH
 from wormlab3d.data.model import Cameras
+from wormlab3d.data.model.experiment import STRAIN_CHOICES, SEX_CHOICES, AGE_CHOICES
 from wormlab3d.data.model.midline2d import Midline2D
+from wormlab3d.data.model.midline3d import M3D_SOURCES
 from wormlab3d.data.model.segmentation_masks import SegmentationMasks
 from wormlab3d.data.model.tag import Tag
 from wormlab3d.data.numpy_field import NumpyField, COMPRESS_BLOSC_POINTER
@@ -16,11 +20,13 @@ from wormlab3d.nn.args import DatasetArgs
 DATA_TYPES = ['xyz', 'xyz_inv', 'bishop', 'cpca']
 
 DATASET_TYPE_2D_MIDLINE = '2d_midline'
+DATASET_TYPE_3D_MIDLINE = '3d_midline'
 DATASET_TYPE_SEGMENTATION_MASKS = 'segmentation_masks'
-DATASET_TYPES = [
-    DATASET_TYPE_2D_MIDLINE,
-    DATASET_TYPE_SEGMENTATION_MASKS
-]
+DATASET_TYPES = {
+    DATASET_TYPE_2D_MIDLINE: '2D Midline',
+    DATASET_TYPE_3D_MIDLINE: '3D Midline',
+    DATASET_TYPE_SEGMENTATION_MASKS: 'Segmentation Masks'
+}
 
 
 class TagInfo(EmbeddedDocument):
@@ -35,20 +41,25 @@ class TagInfo(EmbeddedDocument):
 
 
 class Dataset(Document):
-    dataset_type = StringField(required=True, choices=DATASET_TYPES)
+    dataset_type = StringField(required=True, choices=list(DATASET_TYPES.keys()))
     created = DateTimeField(required=True, default=datetime.datetime.utcnow)
     train_test_split_target = FloatField(required=True, default=None, min_value=0, max_value=1)
     train_test_split_actual = FloatField(required=False, default=None, min_value=0, max_value=1)
     size_all = IntField(default=0)
     size_train = IntField(default=0)
     size_test = IntField(default=0)
+    restrict_users = ListField(StringField())
+    restrict_strains = ListField(StringField(choices=STRAIN_CHOICES))
+    restrict_sexes = ListField(StringField(choices=SEX_CHOICES))
+    restrict_ages = ListField(StringField(choices=AGE_CHOICES))
     restrict_tags = ListField(ReferenceField(Tag))
     restrict_concs = ListField(FloatField())
-    centre_3d_max_error = FloatField(required=True)
+    centre_3d_max_error = FloatField()
     exclude_experiments = ListField(ReferenceField('Experiment'))
     include_experiments = ListField(ReferenceField('Experiment'))
     exclude_trials = ListField(ReferenceField('Trial'))
     include_trials = ListField(ReferenceField('Trial'))
+    min_trial_quality = IntField()
     tag_info = EmbeddedDocumentListField(TagInfo)
 
     meta = {
@@ -69,6 +80,10 @@ class Dataset(Document):
         return queryset.filter(
             dataset_type=args.dataset_type,
             train_test_split_target=args.train_test_split,
+            restrict_users=args.restrict_users,
+            restrict_strains=args.restrict_strains,
+            restrict_sexes=args.restrict_sexes,
+            restrict_ages=args.restrict_ages,
             restrict_tags=args.restrict_tags,
             restrict_concs=args.restrict_concs,
             centre_3d_max_error=args.centre_3d_max_error,
@@ -76,12 +91,20 @@ class Dataset(Document):
             include_experiments=args.include_experiments,
             exclude_trials=args.exclude_trials,
             include_trials=args.include_trials,
+            min_trial_quality=args.min_trial_quality,
+            n_worm_points=args.n_worm_points,
+            restrict_sources=args.restrict_sources,
+            mf_depth=args.mf_depth,
         )
 
     @staticmethod
     def from_args(args: DatasetArgs) -> 'Dataset':
         common_args = dict(
             train_test_split_target=args.train_test_split,
+            restrict_users=args.restrict_users,
+            restrict_strains=args.restrict_strains,
+            restrict_sexes=args.restrict_sexes,
+            restrict_ages=args.restrict_ages,
             restrict_tags=args.restrict_tags,
             restrict_concs=args.restrict_concs,
             centre_3d_max_error=args.centre_3d_max_error,
@@ -89,12 +112,20 @@ class Dataset(Document):
             include_experiments=args.include_experiments,
             exclude_trials=args.exclude_trials,
             include_trials=args.include_trials,
+            min_trial_quality=args.min_trial_quality,
         )
 
         if args.dataset_type == DATASET_TYPE_2D_MIDLINE:
             DS = DatasetMidline2D(**common_args)
         elif args.dataset_type == DATASET_TYPE_SEGMENTATION_MASKS:
             DS = DatasetSegmentationMasks(**common_args)
+        elif args.dataset_type == DATASET_TYPE_3D_MIDLINE:
+            DS = DatasetMidline3D(
+                n_worm_points=args.n_worm_points,
+                restrict_sources=args.restrict_sources,
+                mf_depth=args.mf_depth,
+                **common_args
+            )
         else:
             raise RuntimeError(f'Unrecognised dataset_type={args.dataset_type}.')
 
@@ -268,3 +299,77 @@ class DatasetSegmentationMasks(Dataset):
             self.save()
             exit()
         return p2d
+
+
+class DatasetMidline3D(Dataset):
+    n_worm_points = IntField(required=True)
+    restrict_sources = ListField(StringField(choices=M3D_SOURCES))
+    mf_depth = IntField()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.dataset_type = DATASET_TYPE_3D_MIDLINE
+        self.X_train = None
+        self.X_test = None
+
+    @property
+    def data_path(self) -> Path:
+        dest = DATASETS_MIDLINES3D_PATH / f'{self.id}.npz'
+        return dest
+
+    def set_data(self, train: np.ndarray, test: np.ndarray = None):
+        """
+        Convenience method for setting the train and test data and automatically generating some stats.
+        """
+        if test is None:
+            test = np.zeros((0, *train.shape[1:]))
+        self.X_train = train
+        self.X_test = test
+        self.size_all = len(train) + len(test)
+        self.size_train = len(train)
+        self.size_test = len(test)
+        if self.size_all > 0:
+            self.train_test_split_actual = len(train) / self.size_all
+
+    def __getattribute__(self, k):
+        if k not in ['X_train', 'X_test']:
+            return super().__getattribute__(k)
+
+        # Check if the variable has been defined or loaded already
+        v = super().__getattribute__(k)
+        if v is not None:
+            return v
+
+        # If not then try to load it from the filesystem
+        try:
+            X = np.load(self.data_path)[k]
+            setattr(self, k, X)
+            return X
+        except Exception:
+            return None
+
+    def validate(self, clean=True):
+        super().validate(clean=clean)
+
+        # Validate the data
+        if self.X_train is None:
+            raise ValidationError('X_train not set.')
+        if type(self.X_train) != np.ndarray:
+            raise ValidationError('X_train is not a numpy array.')
+        if self.X_test is None:
+            raise ValidationError('X_test not set.')
+        if type(self.X_test) != np.ndarray:
+            raise ValidationError('X_test is not a numpy array.')
+
+    def save(self, *args, **kwargs):
+        res = super().save(*args, **kwargs)
+
+        # Store the data on the hard drive
+        os.makedirs(self.data_path.parent, exist_ok=True)
+        np.savez_compressed(
+            self.data_path,
+            X_train=self.X_train,
+            X_test=self.X_test,
+        )
+
+        return res
