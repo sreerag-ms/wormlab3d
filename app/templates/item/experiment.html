@@ -34,6 +34,7 @@
   {% with %}
     {% set doc_view=trial_view %}
     {% set table_order=[3, 'asc'] %}
+    {% set created_row_cb=created_trial_row_cb %}
     {% include 'includes/_table_js.html' %}
   {% endwith %}
 {% endblock %}

@@ -187,9 +187,14 @@ def _generate_trajectory_cache_data(
         Xs[frame_num] = X
 
     # Check for bad data
-    for i, X in enumerate(Xs):
-        if np.isnan(X).any():
-            logger.warning(f'3D midlines id={m_ids[i]} has a broken midline!')
+    if np.isnan(Xs).any():
+        bad_idxs = []
+        for i, X in enumerate(Xs):
+            if np.isnan(X).any():
+                bad_idxs.append(i)
+        logger.warning(f'Found {len(bad_idxs)} broken 3D midlines!')
+        bad_ids = [m_ids[i] for i in bad_idxs]
+        logger.debug(f'Broken midline ids: {bad_ids}.')
 
     return Xs
 

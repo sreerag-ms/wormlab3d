@@ -36,11 +36,14 @@ def experiment_instance(_id):
         field_values={'experiment': _id}
     )
 
+    created_trial_row_cb = 'function(row, data, dataIndex) {$(row).addClass(\'quality-\' + String(data[\'quality\']));}'
+
     return render_template(
         'item/experiment.html',
         title=f'Experiment #{_id}',
         active=active,
         experiment=experiment,
         experiment_view=experiment_view,
-        trial_view=trial_view
+        trial_view=trial_view,
+        created_trial_row_cb=created_trial_row_cb
     )

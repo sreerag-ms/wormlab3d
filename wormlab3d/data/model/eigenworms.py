@@ -51,12 +51,12 @@ class Eigenworms(Document):
         if k not in ['mean', 'components', 'cpca']:
             return super().__getattribute__(k)
 
-        if k == 'mean':
-            # Check if the mean has been defined or loaded already
-            mean = super().__getattribute__('mean')
-            if mean is not None:
-                return mean
+        # Check if the variable has been defined or loaded already
+        v = super().__getattribute__(k)
+        if v is not None:
+            return v
 
+        if k == 'mean':
             # If not then try to load it from the filesystem
             try:
                 mean = np.load(self.components_path)['mean']
@@ -66,11 +66,6 @@ class Eigenworms(Document):
                 return None
 
         if k == 'components':
-            # Check if the components have been defined or loaded already
-            components = super().__getattribute__('components')
-            if components is not None:
-                return components
-
             # If not then try to load them from the filesystem
             try:
                 components = np.load(self.components_path)['components']
@@ -80,11 +75,6 @@ class Eigenworms(Document):
                 return None
 
         if k == 'cpca':
-            # Check if the CPCA instance has been defined or loaded already
-            cpca = super().__getattribute__('cpca')
-            if isinstance(cpca, CPCA):
-                return cpca
-
             if self.id is None:
                 raise RuntimeError(
                     'Instantiating a CPCA instance from an unsaved Eigenworms instance is not supported.'
