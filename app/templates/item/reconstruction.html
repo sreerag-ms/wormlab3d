@@ -41,6 +41,7 @@
       {% if reconstruction.source == 'MF' %}
         {{ tabs.tab_item('Lengths') }}
       {% endif %}
+      {{ tabs.tab_item('Eigenworms') }}
     </ul>
 
     <div class="frame-controls my-2" style="display: none;">
@@ -164,6 +165,39 @@
           </div>
         {% endcall %}
       {% endif %}
+
+      {% call tabs.tab_panel('Eigenworms') %}
+        <div class="g-0 mt-1 mb-5 eigenworms-plots">
+          {% include 'includes/_loader.html' %}
+          <div class="form-floating form-group">
+            <select name="eigenworms-select" id="eigenworms-select" class="form-control form-select"
+                    placeholder="Eigenworms">
+              {% for ew in reconstruction.eigenworms %}
+                {% set selected = ' selected' if loop.first else '' %}
+                <option value="{{ ew.id }}"{{ selected }}>{{ ew }}</option>
+              {% endfor %}
+            </select>
+            <label for="eigenworms-select">Eigenworms</label>
+          </div>
+
+          <div class="row">
+            <div class="col col-md-4">
+{#              {% call cards.card() %}#}
+{#                {{ details.render(eigenworms_view, reconstruction) }}#}
+{#              {% endcall %}#}
+            </div>
+
+            <div class="col col-md-4">
+              <div id="ew-eigenvalues-plot"></div>
+            </div>
+            <div class="col col-md-4">
+              <div id="ew-variance-plot"></div>
+            </div>
+
+          </div>
+
+        </div>
+      {% endcall %}
 
     </div>
 
@@ -598,6 +632,71 @@
 
           {% endif %}
 
+
+          // ========================== Eigenworms ==========================
+          let eigenworms = {};
+
+          let ew_eigenvalues_plot_data = [{
+              x: [],
+              y: [],
+              type: 'line',
+          }];
+          let ew_eigenvalues_plot_layout = {
+              title: 'Eigenvalues',
+              xaxis: {
+                  title: 'Component',
+              }
+          };
+          Plotly.newPlot('ew-eigenvalues-plot', ew_eigenvalues_plot_data, ew_eigenvalues_plot_layout, plot_config);
+
+          let ew_variance_plot_data = [{
+              x: [],
+              y: [],
+              type: 'line',
+          }];
+          let ew_variance_plot_layout = {
+              title: 'Cumulative Variance',
+              xaxis: {
+                  title: 'Component',
+              }
+          };
+          Plotly.newPlot('ew-variance-plot', ew_variance_plot_data, ew_variance_plot_layout, plot_config);
+
+          function get_eigenworms(ewid) {
+              $('#eigenworms-panel .loader').show();
+              $.getJSON('/api/eigenworms/' + ewid, function (data) {
+                  eigenworms[ewid] = {
+                      x: data['idxs'],
+                      eigenvalues: data['singular_values'],
+                      variance: data['explained_variance_ratio']
+                  }
+                  $('#eigenworms-panel .loader').hide();
+                  plot_eigenworms(ewid);
+              });
+          }
+
+          function plot_eigenworms(ewid) {
+              ew_eigenvalues_plot_data[0]['x'] = eigenworms[ewid]['x'];
+              ew_eigenvalues_plot_data[0]['y'] = eigenworms[ewid]['eigenvalues'];
+              Plotly.react('ew-eigenvalues-plot', ew_eigenvalues_plot_data, ew_eigenvalues_plot_layout);
+              ew_variance_plot_data[0]['x'] = eigenworms[ewid]['x'];
+              ew_variance_plot_data[0]['y'] = eigenworms[ewid]['variance'];
+              Plotly.react('ew-variance-plot', ew_variance_plot_data, ew_variance_plot_layout);
+          }
+
+          $('#eigenworms-select').change(function () {
+              let ewid = $(this).val();
+              if (ewid in eigenworms) {
+                  plot_eigenworms(ewid);
+              } else {
+                  get_eigenworms(ewid);
+              }
+          });
+
+          // Load eigenworms and draw plots when the tab is activated
+          $('#eigenworms-tab').one('shown.bs.tab', function () {
+              $('#eigenworms-select').change();
+          });
       });
   </script>
 

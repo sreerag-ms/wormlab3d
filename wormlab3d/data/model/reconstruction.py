@@ -1,8 +1,10 @@
 import datetime
+from typing import List
 
 from mongoengine import *
 from wormlab3d.data.model.mf_parameters import MFParameters
 from wormlab3d.data.model.midline3d import M3D_SOURCES
+from wormlab3d.data.model.eigenworms import Eigenworms
 from wormlab3d.data.model.frame import Frame
 
 
@@ -40,3 +42,7 @@ class Reconstruction(Document):
     @property
     def n_frames(self) -> int:
         return self.end_frame - self.start_frame
+
+    @property
+    def eigenworms(self) -> List[Eigenworms]:
+        return Eigenworms.objects(reconstruction=self).order_by('-updated')

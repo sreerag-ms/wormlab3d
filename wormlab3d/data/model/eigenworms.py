@@ -165,3 +165,6 @@ class Eigenworms(Document):
         X_original array-like, shape (n_samples, n_features)
         """
         return self.cpca.inverse_transform(X)
+
+    def __str__(self):
+        return f'{self.updated:%Y-%m-%d}: {self.n_components} components.'
