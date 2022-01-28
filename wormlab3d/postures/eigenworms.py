@@ -3,7 +3,7 @@ from typing import Union
 import numpy as np
 
 from wormlab3d import logger
-from wormlab3d.data.model import Eigenworms
+from wormlab3d.data.model import Eigenworms, Dataset
 from wormlab3d.postures.cpca import CPCA
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.trajectories.cache import get_trajectory
@@ -77,11 +77,12 @@ def generate_or_load_eigenworms(
 
     X = None
 
-    # todo: datasets
+    # Generate eigenworms for a dataset
     if dataset_id is not None:
         logger.info(f'Building eigenworms basis for dataset id={dataset_id}.')
-        eigenworms.dataset = dataset_id
-        raise NotImplementedError('on the way!')
+        dataset = Dataset.objects.get(id=dataset_id)
+        eigenworms.dataset = dataset
+        X = dataset.X_all
 
     # Generate eigenworms for reconstruction
     if reconstruction_id is not None:

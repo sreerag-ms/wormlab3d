@@ -310,8 +310,8 @@ class DatasetMidline3D(Dataset):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.dataset_type = DATASET_TYPE_3D_MIDLINE
-        self.X_train = None
-        self.X_test = None
+        self.X_train: np.ndarray = None
+        self.X_test: np.ndarray = None
         self.metas = None
 
     @property
@@ -323,6 +323,10 @@ class DatasetMidline3D(Dataset):
     def metas_path(self) -> Path:
         dest = DATASETS_MIDLINES3D_PATH / f'{self.id}.meta.json'
         return dest
+
+    @property
+    def X_all(self) -> np.ndarray:
+        return np.concatenate([self.X_train, self.X_test])
 
     def set_data(self, train: np.ndarray, test: np.ndarray = None, metas: Dict[str, List[int]] = None):
         """

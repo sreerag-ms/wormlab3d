@@ -2,13 +2,15 @@ from argparse import ArgumentParser, Namespace
 from typing import List
 
 from wormlab3d import logger
-from wormlab3d.data.model import Reconstruction, Trial
+from wormlab3d.data.model import Reconstruction, Trial, Eigenworms
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.toolkit.util import str2bool, print_args
 
 
 def parse_args() -> Namespace:
     parser = ArgumentParser(description='Wormlab3D script to generate an eigenworm basis.')
+    parser.add_argument('--dataset', type=str,
+                        help='Dataset by id.')
     parser.add_argument('--experiment', type=int,
                         help='Experiment by id.')
     parser.add_argument('--trial', type=int,
@@ -20,6 +22,10 @@ def parse_args() -> Namespace:
     parser.add_argument('--regenerate', type=str2bool, default=False,
                         help='Regenerate existing bases.')
     args = parser.parse_args()
+
+    if args.dataset is not None:
+        assert args.experiment is None and args.trial is None and args.reconstruction is None, \
+            'Dataset cannot be specified along with any of experiment/trial/reconstruction.'
 
     print_args(args)
 
@@ -57,30 +63,54 @@ def _get_reconstruction_ids(args: Namespace) -> List[str]:
     return rids
 
 
+def _check_cpca(
+        eigenworms: Eigenworms,
+        regenerate: bool,
+        n_components: int,
+        dataset_id: str = None,
+        reconstruction_id: str = None
+):
+    # Check the CPCA works
+    try:
+        eigenworms.cpca
+    except RuntimeError:
+        if not regenerate:
+            logger.warning('Could not restore CPCA from eigenworms. Attempting to regenerate.')
+            args = {
+                'n_components': n_components,
+                'regenerate': True
+            }
+            if dataset_id is not None:
+                args['dataset_id'] = dataset_id
+            else:
+                assert reconstruction_id is not None
+                args['reconstruction_id'] = reconstruction_id
+            eigenworms = generate_or_load_eigenworms(**args)
+            eigenworms.cpca
+        raise
+
+
 def generate_eigenworms():
     args = parse_args()
-    reconstruction_ids = _get_reconstruction_ids(args)
-    for reconstruction_id in reconstruction_ids:
-        logger.info(f'------- Generating eigenworms for reconstruction id={reconstruction_id}.')
+
+    if args.dataset is not None:
+        logger.info(f'------- Generating eigenworms for dataset id={args.dataset}.')
         eigenworms = generate_or_load_eigenworms(
-            reconstruction_id=reconstruction_id,
+            dataset_id=args.dataset,
             n_components=args.n_components,
             regenerate=args.regenerate
         )
-
-        # Check the CPCA works
-        try:
-            eigenworms.cpca
-        except RuntimeError:
-            if not args.regenerate:
-                logger.warning('Could not restore CPCA from eigenworms. Attempting to regenerate.')
-                eigenworms = generate_or_load_eigenworms(
-                    reconstruction_id=reconstruction_id,
-                    n_components=args.n_components,
-                    regenerate=True
-                )
-                eigenworms.cpca
-            raise
+        _check_cpca(eigenworms, args.regenerate, args.n_components, dataset_id=args.dataset)
+    else:
+        reconstruction_ids = _get_reconstruction_ids(args)
+        for reconstruction_id in reconstruction_ids:
+            logger.info(f'------- Generating eigenworms for reconstruction id={reconstruction_id}.')
+            eigenworms = generate_or_load_eigenworms(
+                reconstruction_id=reconstruction_id,
+                n_components=args.n_components,
+                regenerate=args.regenerate
+            )
+            _check_cpca(eigenworms, args.regenerate, args.n_components, reconstruction_id=reconstruction_id)
 
 
 if __name__ == '__main__':
