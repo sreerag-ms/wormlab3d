@@ -188,9 +188,17 @@ def generate_midline3d_dataset(args: DatasetMidline3DArgs) -> DatasetMidline3D:
     # Fetch the full trajectories for all the reconstructions
     logger.info('Fetching trajectories.')
     Xs = []
+    metas = {
+        'user': {},
+        'concentration': {},
+        'source': {},
+    }
+    idx = 0
     for rid in reconstruction_ids:
         reconstruction = Reconstruction.objects.get(id=rid)
-        logger.info(f'------- Loading midlines for trial={reconstruction.trial.id} / reconstruction={rid}.')
+        trial = reconstruction.trial
+        experiment = trial.experiment
+        logger.info(f'------- Loading midlines for trial={trial.id} / reconstruction={rid}.')
         try:
             X, meta = get_trajectory(reconstruction_id=rid, depth=args.mf_depth)
         except Exception as e:
@@ -214,19 +222,36 @@ def generate_midline3d_dataset(args: DatasetMidline3DArgs) -> DatasetMidline3D:
             X = X.permute(0, 2, 1)
             X = X.numpy()
 
+        idxs = list(range(idx, idx + len(X)))
+        idx += len(X)
+
+        if experiment.user not in metas['user']:
+            metas['user'][experiment.user] = []
+        metas['user'][experiment.user].extend(idxs)
+
+        if experiment.concentration not in metas['concentration']:
+            metas['concentration'][experiment.concentration] = []
+        metas['concentration'][experiment.concentration].extend(idxs)
+
+        if reconstruction.source not in metas['source']:
+            metas['source'][reconstruction.source] = []
+        metas['source'][reconstruction.source].extend(idxs)
+
         Xs.append(X)
 
     # Combine and centre
     Xs = np.concatenate(Xs)
     Xs = Xs - Xs.mean(axis=1, keepdims=True)
 
-    # Shuffle
-    rng = default_rng()
-    rng.shuffle(Xs)
+    # # Shuffle todo: need to fix the metas
+    # rng = default_rng()
+    # rng.shuffle(Xs)
 
     # Train/test split
     N = len(Xs)
     if args.train_test_split < 1:
+        # todo: splitting breaks metas
+        raise NotImplementedError()
         N_train = int(np.floor(args.train_test_split * N))
         X_train = Xs[:N_train]
         X_test = Xs[N_train:]
@@ -241,7 +266,7 @@ def generate_midline3d_dataset(args: DatasetMidline3DArgs) -> DatasetMidline3D:
         DS = DSs[0]
     else:
         DS: DatasetMidline3D = Dataset.from_args(args)
-    DS.set_data(train=X_train, test=X_test)
+    DS.set_data(train=X_train, test=X_test, metas=metas)
 
     # Save dataset
     logger.debug('Saving dataset.')

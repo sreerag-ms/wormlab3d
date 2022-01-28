@@ -1,7 +1,8 @@
 import datetime
+import json
 import os
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 
 import numpy as np
 from mongoengine import *
@@ -311,13 +312,19 @@ class DatasetMidline3D(Dataset):
         self.dataset_type = DATASET_TYPE_3D_MIDLINE
         self.X_train = None
         self.X_test = None
+        self.metas = None
 
     @property
     def data_path(self) -> Path:
         dest = DATASETS_MIDLINES3D_PATH / f'{self.id}.npz'
         return dest
 
-    def set_data(self, train: np.ndarray, test: np.ndarray = None):
+    @property
+    def metas_path(self) -> Path:
+        dest = DATASETS_MIDLINES3D_PATH / f'{self.id}.meta.json'
+        return dest
+
+    def set_data(self, train: np.ndarray, test: np.ndarray = None, metas: Dict[str, List[int]] = None):
         """
         Convenience method for setting the train and test data and automatically generating some stats.
         """
@@ -330,15 +337,26 @@ class DatasetMidline3D(Dataset):
         self.size_test = len(test)
         if self.size_all > 0:
             self.train_test_split_actual = len(train) / self.size_all
+        self.metas = metas
 
     def __getattribute__(self, k):
-        if k not in ['X_train', 'X_test']:
+        if k not in ['X_train', 'X_test', 'metas']:
             return super().__getattribute__(k)
 
         # Check if the variable has been defined or loaded already
         v = super().__getattribute__(k)
         if v is not None:
             return v
+
+        if k == 'metas':
+            # Check for metadata first
+            try:
+                with open(self.metas_path, 'r') as f:
+                    metas = json.load(f)
+                    setattr(self, k, metas)
+                    return metas
+            except Exception:
+                return None
 
         # If not then try to load it from the filesystem
         try:
@@ -364,8 +382,14 @@ class DatasetMidline3D(Dataset):
     def save(self, *args, **kwargs):
         res = super().save(*args, **kwargs)
 
-        # Store the data on the hard drive
+        # Store the metas and data on the hard drive
         os.makedirs(self.data_path.parent, exist_ok=True)
+
+        # Metas
+        with open(self.metas_path, 'w') as f:
+            json.dump(self.metas, f, indent=2, separators=(',', ': '))
+
+        # Data
         np.savez_compressed(
             self.data_path,
             X_train=self.X_train,
