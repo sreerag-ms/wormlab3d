@@ -24,6 +24,8 @@ def build_target_arguments_parser() -> ArgumentParser:
                         help='Trial by id.')
     parser.add_argument('--reconstruction', type=str,
                         help='Reconstruction by id.')
+    parser.add_argument('--dataset', type=str,
+                        help='Dataset by id.')
     parser.add_argument('--camera', type=int,
                         help='Camera by index.')
     parser.add_argument('--frame-num', type=int,

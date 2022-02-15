@@ -1,36 +1,47 @@
 import os
+from argparse import Namespace, ArgumentParser
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import cm
 from matplotlib.gridspec import GridSpec
 
-from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT
+from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT, interactive
 from wormlab3d import LOGS_PATH, logger, START_TIMESTAMP
-from wormlab3d.data.model import Reconstruction, Eigenworms
+from wormlab3d.data.model import Reconstruction, Eigenworms, Dataset
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.postures.plot_utils import plot_natural_frame_3d
-from wormlab3d.toolkit.util import parse_target_arguments
+from wormlab3d.toolkit.util import print_args
 from wormlab3d.trajectories.cache import get_trajectory
 
-plot_n_components = 4
+plot_n_components = 2
 show_plots = True
-save_plots = False
+save_plots = True
 img_extension = 'png'
 eigenworm_length = 1
 eigenworm_scale = 64
 cmap = cm.get_cmap(MIDLINE_CMAP_DEFAULT)
 
 
-def _get_reconstruction() -> Reconstruction:
-    """
-    Find a reconstruction by id.
-    """
-    args = parse_target_arguments()
-    if args.reconstruction is None:
-        raise RuntimeError('This script must be run with the --reconstruction=ID argument defined.')
-    return Reconstruction.objects.get(id=args.reconstruction)
+def parse_args() -> Namespace:
+    parser = ArgumentParser(description='Wormlab3D script to plot an eigenworm basis.')
+    parser.add_argument('--dataset', type=str,
+                        help='Dataset by id.')
+    parser.add_argument('--reconstruction', type=str,
+                        help='Reconstruction by id.')
+    parser.add_argument('--n-components', type=int, default=10,
+                        help='Number of eigenworms to use (basis dimension).')
+    args = parser.parse_args()
+
+    assert args.reconstruction is not None or args.dataset is not None, \
+        'One of --reconstruction or --dataset must be defined.'
+    assert args.reconstruction is None or args.dataset is None, \
+        'Both --reconstruction and --dataset cannot be defined.'
+
+    print_args(args)
+
+    return args
 
 
 def _plot_eigenworms(
@@ -38,7 +49,7 @@ def _plot_eigenworms(
         title: str,
         filename: str
 ):
-    n_rows = 3
+    n_rows = 2
     n_cols = plot_n_components
     fig = plt.figure(figsize=(n_cols * 3, n_rows * 3))
     gs = GridSpec(n_rows, n_cols)
@@ -57,7 +68,7 @@ def _plot_eigenworms(
             show_frame_arrows=True,
             n_frame_arrows=20,
             arrow_scale=0.2,
-            show_pca_arrows=False,
+            show_pca_arrows=True,
             ax=ax
         )
         ax.set_title(f'Component = {i}')
@@ -207,25 +218,44 @@ def _plot_reconstruction(
 
 
 def main():
-    reconstruction = _get_reconstruction()
-    ew = generate_or_load_eigenworms(reconstruction_id=reconstruction.id, n_components=10, regenerate=False)
-    X_full, meta = get_trajectory(reconstruction_id=reconstruction.id)
+    args = parse_args()
 
-    title = f'Trial {reconstruction.trial.id}.\n' \
-            f'Reconstruction={reconstruction.id} ({reconstruction.source}).\n' \
-            f'Num worms={ew.n_samples}. ' \
-            f'Num points={ew.n_features}.'
+    if args.dataset is not None:
+        ew = generate_or_load_eigenworms(
+            dataset_id=args.dataset,
+            n_components=args.n_components,
+            regenerate=False
+        )
+        dataset = Dataset.objects.get(id=args.dataset)
+        X_full = dataset.X_all
 
-    filename = f'trial={reconstruction.trial.id:03d}_' \
-               f'reconstruction={reconstruction.id}_{reconstruction.source}_' \
-               f'M={ew.n_samples}_N={ew.n_features}'
+        title = f'Dataset {dataset.id}.'
+        filename = f'ds={dataset.id}'
+    else:
+        ew = generate_or_load_eigenworms(
+            reconstruction_id=args.reconstruction,
+            n_components=args.n_components,
+            regenerate=False
+        )
+        reconstruction = Reconstruction.objects.get(id=args.reconstruction)
+        X_full, meta = get_trajectory(reconstruction_id=args.reconstruction)
+
+        title = f'Trial {reconstruction.trial.id}.\n' \
+                f'Reconstruction={reconstruction.id} ({reconstruction.source}).'
+
+        filename = f'trial={reconstruction.trial.id:03d}_' \
+                   f'reconstruction={reconstruction.id}_{reconstruction.source}'
+
+    title += f'\nNum worms={ew.n_samples}. Num points={ew.n_features}.'
+    filename += f'_M={ew.n_samples}_N={ew.n_features}'
 
     _plot_eigenworms(ew, title, filename)
     _plot_eigenvalues(ew, title, filename)
-    _plot_reconstruction(ew, X_full, 0, title, filename)
+    _plot_reconstruction(ew, X_full, 500, title, filename)
 
 
 if __name__ == '__main__':
+    interactive()
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
     main()

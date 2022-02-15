@@ -231,3 +231,7 @@ class NaturalFrame:
     @property
     def length(self) -> float:
         return np.linalg.norm(self.X_pos[:-1] - self.X_pos[1:], axis=1).sum()
+
+    def non_planarity(self):
+        r = self.pca.explained_variance_ratio_
+        return r[2] / np.sqrt(r[1] * r[0])
