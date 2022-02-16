@@ -1,9 +1,7 @@
 from typing import List
 
 import numpy as np
-import torch
-import torch.nn.functional as F
-from numpy.random import default_rng
+from scipy import interpolate
 
 from wormlab3d import logger
 from wormlab3d.data.model import Trial, Reconstruction
@@ -216,11 +214,18 @@ def generate_midline3d_dataset(args: DatasetMidline3DArgs) -> DatasetMidline3D:
 
         # Resample if required
         if X.shape[1] != args.n_worm_points:
-            X = torch.from_numpy(X)
-            X = X.permute(0, 2, 1)
-            X = F.interpolate(X, size=(args.n_worm_points,), mode='linear', align_corners=True)
-            X = X.permute(0, 2, 1)
-            X = X.numpy()
+            X_new = np.zeros((X.shape[0], args.n_worm_points, 3))
+            sl = np.linalg.norm(X[:, :-1] - X[:, 1:], axis=-1)
+            u = np.c_[np.zeros((X.shape[0], 1)), sl.cumsum(axis=-1)]
+            u = u / u[:, -1][:, None]
+            u_new = np.linspace(0, 1, args.n_worm_points)
+
+            for i, Xi in enumerate(X):
+                for j in range(3):
+                    tck = interpolate.splrep(u[i], Xi[:, j], s=1e-4, k=3)
+                    X_new[i, :, j] = interpolate.splev(u_new, tck)
+
+            X = X_new
 
         idxs = list(range(idx, idx + len(X)))
         idx += len(X)
@@ -260,7 +265,7 @@ def generate_midline3d_dataset(args: DatasetMidline3DArgs) -> DatasetMidline3D:
         X_test = None
 
     # Build the dataset
-    logger.debug('Building dataset.')
+    logger.info('Building dataset.')
     DSs = Dataset.find_from_args(args)
     if len(DSs):
         DS = DSs[0]
@@ -269,7 +274,8 @@ def generate_midline3d_dataset(args: DatasetMidline3DArgs) -> DatasetMidline3D:
     DS.set_data(train=X_train, test=X_test, metas=metas)
 
     # Save dataset
-    logger.debug('Saving dataset.')
+    logger.info('Saving dataset.')
     DS.save()
+    logger.info(f'Dataset id={DS.id}.')
 
     return DS
