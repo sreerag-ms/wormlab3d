@@ -1,21 +1,23 @@
 import os
 from argparse import Namespace, ArgumentParser
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import cm
 from matplotlib.gridspec import GridSpec
 
-from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT, interactive
+from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT
 from wormlab3d import LOGS_PATH, logger, START_TIMESTAMP
 from wormlab3d.data.model import Reconstruction, Eigenworms, Dataset
+from wormlab3d.postures.cpca import load_cpca_from_file
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.postures.plot_utils import plot_natural_frame_3d
 from wormlab3d.toolkit.util import print_args
 from wormlab3d.trajectories.cache import get_trajectory
 
-plot_n_components = 2
+plot_n_components = 5
 show_plots = True
 save_plots = True
 img_extension = 'png'
@@ -32,12 +34,13 @@ def parse_args() -> Namespace:
                         help='Reconstruction by id.')
     parser.add_argument('--n-components', type=int, default=10,
                         help='Number of eigenworms to use (basis dimension).')
+    parser.add_argument('--cpca-file', type=str,
+                        help='Load CPCA from file.')
     args = parser.parse_args()
 
-    assert args.reconstruction is not None or args.dataset is not None, \
-        'One of --reconstruction or --dataset must be defined.'
-    assert args.reconstruction is None or args.dataset is None, \
-        'Both --reconstruction and --dataset cannot be defined.'
+    targets = np.array([getattr(args, k) is not None for k in ['reconstruction', 'dataset', 'cpca_file']],
+                       dtype=np.bool)
+    assert targets.sum() == 1, 'One of --reconstruction, --dataset or --cpca-file must be defined.'
 
     print_args(args)
 
@@ -49,7 +52,7 @@ def _plot_eigenworms(
         title: str,
         filename: str
 ):
-    n_rows = 2
+    n_rows = 3
     n_cols = plot_n_components
     fig = plt.figure(figsize=(n_cols * 3, n_rows * 3))
     gs = GridSpec(n_rows, n_cols)
@@ -68,7 +71,7 @@ def _plot_eigenworms(
             show_frame_arrows=True,
             n_frame_arrows=20,
             arrow_scale=0.2,
-            show_pca_arrows=True,
+            show_pca_arrows=False,
             ax=ax
         )
         ax.set_title(f'Component = {i}')
@@ -219,6 +222,7 @@ def _plot_reconstruction(
 
 def main():
     args = parse_args()
+    X_full = None
 
     if args.dataset is not None:
         ew = generate_or_load_eigenworms(
@@ -231,7 +235,8 @@ def main():
 
         title = f'Dataset {dataset.id}.'
         filename = f'ds={dataset.id}'
-    else:
+
+    elif args.reconstruction is not None:
         ew = generate_or_load_eigenworms(
             reconstruction_id=args.reconstruction,
             n_components=args.n_components,
@@ -246,16 +251,31 @@ def main():
         filename = f'trial={reconstruction.trial.id:03d}_' \
                    f'reconstruction={reconstruction.id}_{reconstruction.source}'
 
+    elif args.cpca_file is not None:
+        path = Path(args.cpca_file)
+        fn = path.parts[-1]
+        assert path.exists(), 'CPCA file not found!'
+        ew = Eigenworms()
+        ew.cpca = load_cpca_from_file(path)
+        ew.components = ew.cpca.components_
+        ew.n_samples = ew.cpca.n_samples_
+        ew.n_features = ew.cpca.n_features_
+        ew.n_components = ew.cpca.n_components_
+        title = f'Basis: {fn}.'
+        filename = f'basis={fn}'
+
     title += f'\nNum worms={ew.n_samples}. Num points={ew.n_features}.'
     filename += f'_M={ew.n_samples}_N={ew.n_features}'
 
     _plot_eigenworms(ew, title, filename)
     _plot_eigenvalues(ew, title, filename)
-    _plot_reconstruction(ew, X_full, 500, title, filename)
+    if X_full is not None:
+        _plot_reconstruction(ew, X_full, 500, title, filename)
 
 
 if __name__ == '__main__':
-    interactive()
+    # from simple_worm.plot3d import interactive
+    # interactive()
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
     main()

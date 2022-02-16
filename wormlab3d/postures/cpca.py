@@ -1,4 +1,5 @@
 import numbers
+from pathlib import Path
 
 import numpy as np
 from scipy.sparse import issparse
@@ -130,6 +131,67 @@ class CPCA(PCA):
         if self.copy:
             X = X.copy()
         return X
+
+
+def normalize_peakplane(m10, m20=[]):
+    if len(m20) == 0:
+        m20 = m10.imag
+        m10 = m10.real
+
+    j = np.argmax(m10**2 + m20**2)
+    theta = np.arctan2(-m20[j], m10[j])
+
+    st = np.sin(theta)
+    ct = np.cos(theta)
+
+    m1 = ct * m10 - st * m20
+    m2 = st * m10 + ct * m20
+
+    return m1, m2, theta
+
+
+def load_cpca_from_file(path: Path) -> CPCA:
+    """
+    Load eigenworms from .cpca file.
+    """
+
+    n_samples = 0
+    components = []
+    with open(path) as f:
+        for line in f:
+            if line[:15] == '# COMPLEX # PCA':
+                parts = line.split(' ')
+                n_samples = int(parts[-1])
+                continue
+            elif line[0] == '#':
+                continue
+
+            arr = np.array([float(x) for x in line.split(' ')])
+
+            s = len(arr)
+            assert s % 2 == 0
+            ar = arr[0:s // 2]
+            ai = arr[s // 2:]
+            ar, ai, t = normalize_peakplane(ar, ai)
+
+            arr = ar + 1j * ai
+
+            components.append(arr)
+
+    components = np.array(components)
+    n_components, n_features = components.shape
+
+    # Instantiate a new CPCA instance
+    cpca = CPCA(n_components=n_components, whiten=False)
+    cpca.n_components_ = n_components
+    cpca.n_samples_ = n_samples
+    cpca.n_features_ = n_features
+    cpca.explained_variance_ = np.zeros(n_components)
+    cpca.explained_variance_ratio_ = np.zeros(n_components)
+    cpca.singular_values_ = np.zeros(n_components)
+    cpca.components_ = components
+
+    return cpca
 
 
 def testit(phase):
