@@ -2,12 +2,13 @@ import os
 import re
 import subprocess
 
-import app.util.config as config
-from app.views.media import bp_media
 from flask import Response, jsonify, request, abort
 from mongoengine import DoesNotExist
+
+import app.util.config as config
+from app.views.media import bp_media
 from wormlab3d import CAMERA_IDXS, TRACKING_VIDEOS_PATH
-from wormlab3d.data.model import Trial
+from wormlab3d.data.model import Trial, Reconstruction
 from wormlab3d.data.util import fix_path
 
 
@@ -48,6 +49,27 @@ def get_tracking_videos_duration(_id: int):
     """
     trial = Trial.objects.get(id=_id)
     path = str(TRACKING_VIDEOS_PATH / f'{trial.id:03d}.mp4')
+    return _get_media_duration(path)
+
+
+@bp_media.route('/reconstruction-video/<string:_id>')
+def stream_reconstruction_video(_id: str):
+    """
+    Stream the reconstruction video.
+    """
+    reconstruction = Reconstruction.objects.get(id=_id)
+    start = request.args.get('start') or 0
+    path = str(reconstruction.video_filename)
+    return _generate_stream_response(path, start)
+
+
+@bp_media.route('/reconstruction-video-duration/<string:_id>')
+def get_reconstruction_video_duration(_id: str):
+    """
+    Get the duration of the reconstruction video.
+    """
+    reconstruction = Reconstruction.objects.get(id=_id)
+    path = str(reconstruction.video_filename)
     return _get_media_duration(path)
 
 

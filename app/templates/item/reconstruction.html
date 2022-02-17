@@ -31,6 +31,9 @@
         {{ tabs.tab_item('Parameters', true) }}
         {{ tabs.tab_item('Stats') }}
       {% endif %}
+      {% if reconstruction.has_video %}
+        {{ tabs.tab_item('Video') }}
+      {% endif %}
       {{ tabs.tab_item('Tracking 2D') }}
       {{ tabs.tab_item('Tracking 3D', reconstruction.source != 'MF') }}
       {% if reconstruction.source == 'MF' %}
@@ -83,6 +86,14 @@
             </div>
 
             <div id="stats-plot"></div>
+          </div>
+        {% endcall %}
+      {% endif %}
+
+      {% if reconstruction.has_video %}
+        {% call tabs.tab_panel('Video') %}
+          <div class="row">
+            <video id="reconstruction-video" class="video-js" preload="auto"></video>
           </div>
         {% endcall %}
       {% endif %}
@@ -256,6 +267,61 @@
           // Load stats data and draw plot when the tab is activated
           $('#stats-tab').one('shown.bs.tab', function () {
               $('#stat-key-select').change();
+          });
+
+          {% endif %}
+
+          {% if reconstruction.has_video %}
+          // ========================== Reconstruction video player ==========================
+          let stream_endpoint = '/media/reconstruction-video/{{ reconstruction.id }}';
+          let duration_endpoint = '/media/reconstruction-video-duration/{{ reconstruction.id }}';
+          let video = videojs('reconstruction-video', {
+              controls: true,
+              width: 600,
+              playbackRates: [0.1, 0.5, 1, 2, 3, 5, 10]
+          });
+          video.src({
+              src: stream_endpoint,
+              type: 'video/mp4'
+          });
+          video.start = 0;
+
+          // hack duration
+          video.duration = function () {
+              return video.theDuration;
+          };
+
+          // The original code for "currentTime"
+          video.oldCurrentTime = function currentTime(seconds) {
+              if (typeof seconds !== 'undefined') {
+                  if (seconds < 0) {
+                      seconds = 0;
+                  }
+
+                  this.techCall_('setCurrentTime', seconds);
+                  return;
+              }
+              this.cache_.currentTime = this.techGet_('currentTime') || 0;
+              return this.cache_.currentTime;
+          };
+
+          // Our modified currentTime
+          video.currentTime = function (time) {
+              if (time == undefined) {
+                  return video.oldCurrentTime() + video.start;
+              }
+              video.start = time;
+              video.oldCurrentTime(0);
+              video.src({
+                  src: stream_endpoint + '?start=' + time,
+                  type: 'video/mp4'
+              });
+              return this;
+          };
+
+          // Get the duration of the movie
+          $.getJSON(duration_endpoint, function (data) {
+              video.theDuration = data.duration;
           });
 
           {% endif %}
