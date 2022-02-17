@@ -23,6 +23,7 @@ tex_mode()
 width = PREPARED_IMAGE_SIZE[0] * 3
 height = PREPARED_IMAGE_SIZE[1] * 3
 n_revolutions = 2
+cmap = plt.get_cmap(MIDLINE_CMAP_DEFAULT)
 
 
 def get_reconstruction_ids() -> List[str]:
@@ -144,13 +145,17 @@ def _generate_annotated_images(image_triplet: np.ndarray, points_2d: np.ndarray,
     return np.concatenate(images).transpose(1, 0, 2)
 
 
-def generate_reconstruction_video(reconstruction_id: int):
+def generate_reconstruction_video(reconstruction_id: int, missing_only: bool = True):
     """
     Generate a reconstruction video showing a rotating 3D trajectory with reconstructed
     worm moving along it and camera images with overlaid 2D midline reprojections.
     """
     reconstruction = Reconstruction.objects.get(id=reconstruction_id)
-    cmap = plt.get_cmap(MIDLINE_CMAP_DEFAULT)
+
+    # Check if trajectory video is already present
+    if missing_only and reconstruction.has_video:
+        logger.info(f'Video already exists at: {reconstruction.video_filename}. Skipping.')
+        return
 
     if reconstruction.source == M3D_SOURCE_MF:
         D = reconstruction.mf_parameters.depth  # todo - different depth videos
@@ -229,7 +234,6 @@ def generate_reconstruction_video(reconstruction_id: int):
         n = res['frame_num']
         if i > 0 and i % 100 == 0:
             logger.info(f'Rendering frame {i}/{reconstruction.n_frames}.')
-            break
 
         # Check we don't miss any frames
         if i == 0:
@@ -289,18 +293,10 @@ def generate_reconstruction_videos(missing_only: bool = True):
     for reconstruction_id in reconstruction_ids:
         logger.info(f'------ Generating reconstruction video for reconstruction id={reconstruction_id}.')
 
-        # Check if trajectory video is already present
-        if missing_only:
-            video_filename = TRAJECTORY_VIDEOS_PATH / f'{reconstruction_id:03d}.mp4'
-            if video_filename.exists():
-                logger.info(f'Video already exists at: {video_filename}. Skipping.')
-                continue
-
         # Soft fail on errors
         try:
-            generate_reconstruction_video(reconstruction_id)
+            generate_reconstruction_video(reconstruction_id, missing_only)
         except Exception as e:
-            raise
             logger.error(str(e))
 
 
