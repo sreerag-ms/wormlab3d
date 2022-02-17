@@ -22,5 +22,6 @@ __pycache__
 /data/prepared_images
 /data/tracking_videos
 /data/trajectory_cache
+/data/trajectory_videos
 intermediate-data
 **/worm_data

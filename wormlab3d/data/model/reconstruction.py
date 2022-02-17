@@ -1,11 +1,14 @@
 import datetime
+from pathlib import Path
 from typing import List
 
 from mongoengine import *
-from wormlab3d.data.model.mf_parameters import MFParameters
-from wormlab3d.data.model.midline3d import M3D_SOURCES
+
+from wormlab3d import RECONSTRUCTION_VIDEOS_PATH
 from wormlab3d.data.model.eigenworms import Eigenworms
 from wormlab3d.data.model.frame import Frame
+from wormlab3d.data.model.mf_parameters import MFParameters
+from wormlab3d.data.model.midline3d import M3D_SOURCES
 
 
 class Reconstruction(Document):
@@ -46,3 +49,11 @@ class Reconstruction(Document):
     @property
     def eigenworms(self) -> List[Eigenworms]:
         return Eigenworms.objects(reconstruction=self).order_by('-updated')
+
+    @property
+    def video_filename(self) -> Path:
+        return RECONSTRUCTION_VIDEOS_PATH / f'{self.id}.mp4'
+
+    @property
+    def has_video(self) -> bool:
+        return self.video_filename.exists()

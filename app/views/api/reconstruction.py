@@ -8,6 +8,7 @@ from flask import request
 from app.util.encoders import base64img
 from app.views.api import bp_api
 from app.views.page.reconstructions import CAM_PARAMETER_KEYS
+from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT
 from wormlab3d.data.model import Reconstruction, Frame
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF, Midline3D
 from wormlab3d.midlines3d.trial_state import TrialState
@@ -123,7 +124,7 @@ def get_posture(_id):
     reconstruction = Reconstruction.objects.get(id=_id)
     frame_num = request.args.get('frame_num', type=int)
     frame = reconstruction.get_frame(frame_num)
-    cmap = plt.get_cmap('jet')
+    cmap = plt.get_cmap(MIDLINE_CMAP_DEFAULT)
     masks = None
 
     if reconstruction.source == M3D_SOURCE_MF:
