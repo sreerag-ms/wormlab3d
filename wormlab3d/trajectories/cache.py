@@ -311,7 +311,7 @@ def generate_or_load_trajectory_cache(
                 json.dump(meta, f)
 
     # Take a slice of the full array
-    X = X_full[start_frame:end_frame]
+    X = X_full[start_frame:end_frame + 1]
     meta['start_frame'] = start_frame
     meta['end_frame'] = end_frame
 

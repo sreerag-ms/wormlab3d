@@ -94,12 +94,12 @@ def _make_3d_plot(
     azims = np.linspace(start=0, stop=360 * n_revolutions, num=len(X_slice))
     ax.view_init(azim=azims[0])  # elev
 
-    def update(frame_num: int):
+    def update(frame_idx: int):
         # Rotate the view.
-        ax.view_init(azim=azims[frame_num])
+        ax.view_init(azim=azims[frame_idx])
 
         # Update the worm
-        fa.update(FS[frame_num])
+        fa.update(FS[frame_idx])
 
         # Redraw the canvas
         fig.canvas.draw()
@@ -272,7 +272,7 @@ def generate_reconstruction_video(reconstruction_id: int, missing_only: bool = T
             images = _generate_annotated_images(image_triplet, points_2d, colours)
 
         # Update the 3D plot and extract rendered image
-        update_plot(n)
+        update_plot(i)
         plot = np.asarray(fig.canvas.renderer._renderer).take([0, 1, 2], axis=2)
 
         # Join plot to images and write to stream
