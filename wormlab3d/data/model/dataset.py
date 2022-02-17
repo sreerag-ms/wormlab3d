@@ -17,6 +17,7 @@ from wormlab3d.data.model.tag import Tag
 from wormlab3d.data.numpy_field import NumpyField, COMPRESS_BLOSC_POINTER
 from wormlab3d.data.triplet_field import TripletField
 from wormlab3d.nn.args import DatasetArgs
+from wormlab3d.postures.natural_frame import NaturalFrame
 
 DATA_TYPES = ['xyz', 'xyz_inv', 'bishop', 'cpca']
 
@@ -313,6 +314,7 @@ class DatasetMidline3D(Dataset):
         self.X_train: np.ndarray = None
         self.X_test: np.ndarray = None
         self.metas = None
+        self.nonplanarities = None
 
     @property
     def data_path(self) -> Path:
@@ -322,6 +324,11 @@ class DatasetMidline3D(Dataset):
     @property
     def metas_path(self) -> Path:
         dest = DATASETS_MIDLINES3D_PATH / f'{self.id}.meta.json'
+        return dest
+
+    @property
+    def nonplanarities_path(self) -> Path:
+        dest = DATASETS_MIDLINES3D_PATH / f'{self.id}_nonplanarities.npz'
         return dest
 
     @property
@@ -401,3 +408,39 @@ class DatasetMidline3D(Dataset):
         )
 
         return res
+
+    def get_nonplanarities(self, recalculate: bool = False) -> np.ndarray:
+        """
+        Calculate the non-planarity score for all postures.
+        Uses a result cache on disk.
+        """
+        if self.nonplanarities is None:
+            nonp = None
+
+            # Try to load
+            if not recalculate:
+                try:
+                    nonp = np.load(self.nonplanarities_path)['data']
+                except Exception:
+                    pass
+
+            # Can't be loaded or asked to recalculate so calculate.
+            if nonp is None:
+                logger.info('Calculating planarities.')
+                nonp = np.zeros(len(self.X_all))
+                for i, X in enumerate(self.X_all):
+                    if (i + 1) % 100 == 0:
+                        logger.info(f'Calculating planarity for midline {i + 1}/{self.size_train}.')
+                    NF = NaturalFrame(X)
+                    nonp[i] = NF.non_planarity()
+
+                # Save
+                logger.info(f'Saving planarities to {self.nonplanarities_path}.')
+                np.savez_compressed(
+                    self.nonplanarities_path,
+                    data=nonp,
+                )
+
+            self.nonplanarities = nonp
+
+        return self.nonplanarities
