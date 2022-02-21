@@ -1,7 +1,9 @@
 {% extends '__layout.html' %}
+{% import 'includes/_data_table.html' as table %}
 {% import 'includes/_details_table.html' as details %}
 {% import 'includes/_tabs.html' as tabs %}
 {% import 'includes/_cards.html' as cards %}
+{% set table_name="data-table-dataset-" + dataset.id|string + "-reconstructions" %}
 
 
 {% block content %}
@@ -10,6 +12,9 @@
 
     <ul class="nav nav-tabs" id="dataset-{{ dataset.id }}-tabs" role="tablist">
       {{ tabs.tab_item('Details', true) }}
+      {% if dataset.reconstructions | length > 0 %}
+        {{ tabs.tab_item('Reconstructions') }}
+      {% endif %}
       {{ tabs.tab_item('Eigenworms') }}
     </ul>
 
@@ -17,6 +22,12 @@
       {% call tabs.tab_panel('Details', true) %}
         {{ details.render(dataset_view, dataset) }}
       {% endcall %}
+
+      {% if dataset.reconstructions | length > 0 %}
+        {% call tabs.tab_panel('Reconstructions') %}
+          {{ table.render(reconstruction_view, table_name) }}
+        {% endcall %}
+      {% endif %}
 
       {% call tabs.tab_panel('Eigenworms') %}
         <div class="g-0 mt-1 mb-5 eigenworms-plots">
@@ -56,8 +67,23 @@
 
 
 {% block scripts %}
+  {% if dataset.reconstructions | length > 0 %}
+    {% with %}
+      {% set doc_view=reconstruction_view %}
+      {% set table_order=[1, 'asc'] %}
+      {% set initialise=False %}
+      {% include 'includes/_table_js.html' %}
+    {% endwith %}
+  {% endif %}
+
   <script>
       $(document).ready(function () {
+
+          // ========================== Reconstructions ==========================
+          $('#reconstructions-tab').one('shown.bs.tab', function () {
+              initialise_{{ reconstruction_view.collection_name }}_table()
+          });
+
           {% if dataset.eigenworms | length > 0 %}
               // ========================== Eigenworms ==========================
               let eigenworms = {};

@@ -29,6 +29,7 @@ class ReconstructionView(DocumentView):
                 self.prefix + '_id', {
                     'title': 'ID',
                     'type': 'relation',
+                    'type_rel': 'objectid',
                     'collection_name': 'reconstruction'
                 },
             ),

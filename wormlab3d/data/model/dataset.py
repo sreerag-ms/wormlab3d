@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List, Tuple, Dict
 
 import numpy as np
+from bson import ObjectId
 from mongoengine import *
 
 from wormlab3d import logger, CAMERA_IDXS, DATASETS_MIDLINES3D_PATH
@@ -312,7 +313,7 @@ class DatasetMidline3D(Dataset):
     n_worm_points = IntField(required=True)
     restrict_sources = ListField(StringField(choices=M3D_SOURCES))
     mf_depth = IntField()
-    reconstructions = ListField(LazyReferenceField('Reconstruction'))
+    reconstructions = ListField(ReferenceField('Reconstruction'))
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -357,7 +358,7 @@ class DatasetMidline3D(Dataset):
         self.metas = metas
 
         # Set reconstructions
-        self.reconstructions = self.metas['reconstruction'].keys()
+        self.reconstructions = [ObjectId(k) for k in self.metas['reconstruction'].keys()]
 
     def __getattribute__(self, k):
         if k not in ['X_train', 'X_test', 'metas']:
@@ -453,3 +454,7 @@ class DatasetMidline3D(Dataset):
             self.nonplanarities = nonp
 
         return self.nonplanarities
+
+    @property
+    def n_reconstructions(self):
+        return len(self.reconstructions)

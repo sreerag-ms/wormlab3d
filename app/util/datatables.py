@@ -6,6 +6,9 @@ Module to handle conversation between DataTables and MongoDB.
 
 import json
 import re
+from typing import Any
+
+from bson import ObjectId
 
 from app.model import DocumentView
 from app.util.encoders import JSONEncoder
@@ -128,23 +131,37 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
         else:
             projects[key_as] = f'${key}'
 
+    def _cast_filter_value(raw_val: Any, ftype: str, spec: dict = None) -> Any:
+        if ftype == 'integer':
+            cast_val = int(raw_val)
+        elif ftype == 'float':
+            cast_val = float(raw_val)
+        elif ftype == 'string':
+            cast_val = str(raw_val)
+        elif ftype == 'objectid':
+            cast_val = ObjectId(raw_val)
+        elif ftype == 'relation':
+            cast_val = _cast_filter_value(raw_val, spec['type_rel'])
+        elif ftype == 'enum':
+            cast_val = int(raw_val)
+        else:
+            cast_val = raw_val
+        return cast_val
+
     # Filters
     matches = {}
     filters = {}
     for i, (key, field_spec) in enumerate(doc_view.fields.items()):
         filter_value = request.get(f'columns[{i}][search][value]')
         if filter_value != '':
-            if field_spec['type'] == 'integer':
-                filter_value = int(filter_value)
-            elif field_spec['type'] == 'float':
-                filter_value = float(filter_value)
-            elif field_spec['type'] == 'relation':
-                filter_value = int(filter_value)
-            # elif field_spec['type'] == 'float':
-            #     filter_value = float(filter_value)
-            elif field_spec['type'] == 'enum':
-                filter_value = int(filter_value)
-
+            filter_vals = [
+                _cast_filter_value(v, field_spec['type'], field_spec)
+                for v in filter_value.split('|')
+            ]
+            if len(filter_vals) == 1:
+                filter_value = filter_vals[0]
+            else:
+                filter_value = {'$in': filter_vals}
             if 'early_match' in field_spec and field_spec['early_match'] is True:
                 matches[key] = filter_value
             else:

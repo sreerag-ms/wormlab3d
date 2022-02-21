@@ -2,9 +2,7 @@ import os
 
 from flask import Blueprint, render_template
 
-from app.model.dataset import DatasetView
-
-# Form blueprint
+from app.model import DatasetView, ReconstructionView
 from wormlab3d.data.model import Dataset
 
 bp_datasets = Blueprint('datasets', __name__, url_prefix='/dataset')
@@ -40,10 +38,35 @@ def dataset_instance(_id: str):
         hide_fields=['_id']
     )
 
+    reconstruction_view = ReconstructionView(
+        hide_fields=[
+            'trial___id',
+            'trial__experiment___id',
+            'trial__experiment__legacy_id',
+            'trial__experiment__num_trials',
+            'trial__experiment__num_frames',
+            'trial__trial_num',
+            'trial__duration',
+            'trial__legacy_id',
+            'trial__comments',
+            'trial__num_reconstructions',
+            'mf_parameters___id',
+            'mf_parameters__created',
+            'mf_parameters__use_master',
+            'mf_parameters__sigmas_init',
+            'mf_parameters__n_steps*',
+            'mf_parameters__conv*',
+            'mf_parameters__algorithm',
+            'mf_parameters__lr*'
+        ],
+        field_values={'_id': '|'.join(str(r.id) for r in dataset.reconstructions)}
+    )
+
     return render_template(
         'item/dataset.html',
         title=f'Dataset #{_id}',
         active=active,
         dataset=dataset,
         dataset_view=dataset_view,
+        reconstruction_view=reconstruction_view,
     )

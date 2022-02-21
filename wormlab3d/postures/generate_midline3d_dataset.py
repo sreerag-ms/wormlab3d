@@ -231,9 +231,8 @@ def generate_midline3d_dataset(args: DatasetMidline3DArgs) -> DatasetMidline3D:
         idxs = list(range(idx, idx + len(X)))
         idx += len(X)
 
-        if rid not in metas['reconstruction']:
-            metas['reconstruction'][rid] = []
-        metas['reconstruction'][rid].extend(idxs)
+        # Set meta data
+        metas['reconstruction'][str(rid)] = idxs
 
         if experiment.user not in metas['user']:
             metas['user'][experiment.user] = []

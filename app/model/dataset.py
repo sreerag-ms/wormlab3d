@@ -21,6 +21,7 @@ class DatasetView(DocumentView):
                 self.prefix + '_id', {
                     'title': 'ID',
                     'type': 'relation',
+                    'type_rel': 'objectid',
                     'collection_name': 'dataset'
                 },
             ),
@@ -196,7 +197,7 @@ class DatasetView(DocumentView):
                 },
             ),
             (
-                self.prefix + 'num_reconstructions', {
+                self.prefix + 'n_reconstructions', {
                     'title': 'Num. Reconstructions',
                     'type': 'integer',
                     'query': {

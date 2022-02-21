@@ -26,6 +26,7 @@ class TrialView(DocumentView):
                 self.prefix + '_id', {
                     'title': 'ID',
                     'type': 'relation',
+                    'type_rel': 'int',
                     'collection_name': 'trial'
                 },
             ),
