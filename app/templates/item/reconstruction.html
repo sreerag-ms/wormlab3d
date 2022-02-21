@@ -45,6 +45,7 @@
         {{ tabs.tab_item('Lengths') }}
       {% endif %}
       {{ tabs.tab_item('Eigenworms') }}
+      {{ tabs.tab_item('Planarity') }}
     </ul>
 
     <div class="frame-controls my-2" style="display: none;">
@@ -52,7 +53,7 @@
         <button type="button" class="fc-prev btn btn-primary btn-large">
           <span class="oi oi-arrow-thick-left"></span>
         </button>
-        <div class="fc-progress progress mx-2">
+        <div class="fc-progress progress mx-2" title="">
           <div class="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0"
                aria-valuemax="100"></div>
         </div>
@@ -207,6 +208,15 @@
 
           </div>
 
+        </div>
+      {% endcall %}
+
+      {% call tabs.tab_panel('Planarity') %}
+        <div class="g-0 mt-1 mb-5 planarity-plots">
+          {% include 'includes/_loader.html' %}
+          <div class="row">
+            <div id="planarity-plot"></div>
+          </div>
         </div>
       {% endcall %}
 
@@ -643,8 +653,14 @@
           $('.fc-progress').on('mousedown', function (e) {
               e.preventDefault();
               let progress = (e.pageX - $(this).offset().left) / $(this).width();
-              let new_frame_num = Math.round({{ reconstruction.start_frame }} +progress * {{ reconstruction.n_frames }});
+              let new_frame_num = Math.round({{ reconstruction.start_frame }} + progress * {{ reconstruction.n_frames }});
               set_frame_num(new_frame_num);
+          });
+
+          $('.fc-progress').on('mousemove', function (e) {
+              let progress = (e.pageX - $(this).offset().left) / $(this).width();
+              let t = ({{ reconstruction.start_frame }} + progress * {{ reconstruction.n_frames }}) / {{ reconstruction.trial.fps }};
+              $(this).attr('title', moment(t * 1000).format('mm:ss'))
           });
 
           // Show frame controls when the relevant tabs are activated
@@ -705,7 +721,8 @@
           let ew_eigenvalues_plot_data = [{
               x: [],
               y: [],
-              type: 'line',
+              mode: 'markers',
+              type: 'scattergl',
           }];
           let ew_eigenvalues_plot_layout = {
               title: 'Eigenvalues',
@@ -718,7 +735,8 @@
           let ew_variance_plot_data = [{
               x: [],
               y: [],
-              type: 'line',
+              mode: 'markers',
+              type: 'scattergl',
           }];
           let ew_variance_plot_layout = {
               title: 'Cumulative Variance',
@@ -762,6 +780,38 @@
           // Load eigenworms and draw plots when the tab is activated
           $('#eigenworms-tab').one('shown.bs.tab', function () {
               $('#eigenworms-select').change();
+          });
+
+
+          // ========================== Planarity ==========================
+          let planarity_plot_data = [{
+              x: [],
+              y: [],
+              type: 'scattergl',
+          }];
+          let planarity_plot_layout = {
+              title: 'Planarity',
+              xaxis: {
+                  title: 'Time (s)',
+                  type: 'date',
+                  tickformat: '%M:%S'
+              }
+          };
+          Plotly.newPlot('planarity-plot', planarity_plot_data, planarity_plot_layout, plot_config);
+
+          function plot_planarity() {
+              $('#planarity-panel .loader').show();
+              $.getJSON('{{ url_for('api.get_planarity', _id=reconstruction.id) }}', function (data) {
+                  $('#planarity-panel .loader').hide();
+                  planarity_plot_data[0]['x'] = timestamps_to_dates(data['timestamps']);
+                  planarity_plot_data[0]['y'] = data.planarities;
+                  Plotly.react('planarity-plot', planarity_plot_data, planarity_plot_layout);
+              });
+          }
+
+          // Load planarity and draw plots when the tab is activated
+          $('#planarity-tab').one('shown.bs.tab', function () {
+              plot_planarity();
           });
       });
   </script>

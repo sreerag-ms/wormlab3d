@@ -7,11 +7,9 @@ from typing import Tuple, Dict, Any, List, Union
 import numpy as np
 from sklearn.decomposition import PCA
 
-from wormlab3d import logger, DATA_PATH, N_WORKERS
+from wormlab3d import logger, PCA_CACHE_PATH, N_WORKERS
 from wormlab3d.toolkit.util import hash_data
 from wormlab3d.trajectories.cache import get_trajectory
-
-PCA_CACHE_PATH = DATA_PATH / 'pca_cache'
 
 
 class PCACache:
@@ -95,8 +93,9 @@ def calculate_pcas(X: np.ndarray, window_size: int) -> List[PCA]:
 
 
 def generate_pca_cache_data(
-        trial_id: str,
-        midline_source: str,
+        reconstruction_id: str = None,
+        trial_id: str = None,
+        midline_source: str = None,
         midline_source_file: str = None,
         start_frame: int = None,
         end_frame: int = None,
@@ -108,6 +107,7 @@ def generate_pca_cache_data(
         rebuild_cache: bool = False
 ) -> Tuple[PCACache, Dict[str, Any]]:
     X, X_meta = get_trajectory(
+        reconstruction_id=reconstruction_id,
         trial_id=trial_id,
         midline_source=midline_source,
         midline_source_file=midline_source_file,
@@ -126,8 +126,9 @@ def generate_pca_cache_data(
 
 
 def generate_or_load_pca_cache(
-        trial_id: str,
-        midline_source: str,
+        reconstruction_id: str = None,
+        trial_id: str = None,
+        midline_source: str = None,
         midline_source_file: str = None,
         start_frame: int = None,
         end_frame: int = None,
@@ -143,6 +144,7 @@ def generate_or_load_pca_cache(
     if start_frame is None:
         start_frame = 0
     args = {
+        'reconstruction_id': str(reconstruction_id),
         'trial_id': trial_id,
         'midline_source': midline_source,
         'midline_source_file': midline_source_file,
@@ -157,8 +159,8 @@ def generate_or_load_pca_cache(
     arg_hash = hash_data(args)
     filename_meta = f'{arg_hash}.meta'
     filename_pca = f'{arg_hash}.npz'
-    path_meta = PCA_CACHE_PATH + '/' + filename_meta
-    path_pca = PCA_CACHE_PATH + '/' + filename_pca
+    path_meta = PCA_CACHE_PATH / filename_meta
+    path_pca = PCA_CACHE_PATH / filename_pca
     if not rebuild_cache and os.path.exists(path_meta) and os.path.exists(path_pca):
         try:
             with open(path_meta, 'r') as f:
@@ -217,7 +219,8 @@ def get_pca_cache_from_args(args: Namespace) -> PCACache:
 
 def get_planarity_from_args(args: Namespace) -> np.ndarray:
     """
-    Planarity metric is 1 - the contribution from the 3rd component.
+    Planarity metric is 1 - the relative contribution from the 3rd component.
     """
     pcas = get_pca_cache_from_args(args)
-    return 1 - pcas.explained_variance_ratio[:, 2]
+    r = pcas.explained_variance_ratio_
+    return 1 - r[2] / np.sqrt(r[1] * r[0])

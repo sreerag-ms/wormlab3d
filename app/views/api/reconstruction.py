@@ -13,6 +13,7 @@ from wormlab3d.data.model import Reconstruction, Frame
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF, Midline3D
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.trajectories.cache import get_trajectory
+from wormlab3d.trajectories.pca import generate_or_load_pca_cache
 
 
 @bp_api.route('/reconstruction/<string:_id>/trajectory', methods=['GET'])
@@ -217,6 +218,24 @@ def get_worm_lengths(_id: str):
     return {
         'timestamps': _get_timestamps(reconstruction),
         'lengths': lengths
+    }
+
+
+@bp_api.route('/reconstruction/<string:_id>/planarity', methods=['GET'])
+def get_planarity(_id: str):
+    reconstruction = Reconstruction.objects.get(id=_id)
+
+    pcas, meta = generate_or_load_pca_cache(
+        reconstruction_id=reconstruction.id,
+        window_size=1,
+    )
+
+    r = pcas.explained_variance_ratio.T
+    planarities = 1 - r[2] / np.sqrt(r[1] * r[0])
+
+    return {
+        'timestamps': _get_timestamps(reconstruction),
+        'planarities': planarities.tolist()
     }
 
 
