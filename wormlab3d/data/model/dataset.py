@@ -222,7 +222,7 @@ class Dataset(Document):
 
     @property
     def eigenworms(self) -> List[Eigenworms]:
-        return Eigenworms.objects(reconstruction=self).order_by('-updated')
+        return Eigenworms.objects(dataset=self).order_by('-updated')
 
 
 class DatasetMidline2D(Dataset):
