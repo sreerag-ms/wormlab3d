@@ -28,7 +28,8 @@ class ReconstructionView(DocumentView):
             (
                 self.prefix + '_id', {
                     'title': 'ID',
-                    'type': 'objectid',
+                    'type': 'relation',
+                    'collection_name': 'reconstruction'
                 },
             ),
             (
@@ -48,6 +49,7 @@ class ReconstructionView(DocumentView):
                     'title': 'Trial',
                     'type': 'relation',
                     'filter_type': 'integer',
+                    'collection_name': 'trial',
                     'view_class': trial_view,
                 },
             ),

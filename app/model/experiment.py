@@ -18,7 +18,8 @@ class ExperimentView(DocumentView):
             (
                 self.prefix + '_id', {
                     'title': 'ID',
-                    'type': 'integer',
+                    'type': 'relation',
+                    'collection_name': 'experiment'
                 }
             ),
             (

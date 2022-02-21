@@ -9,6 +9,7 @@ from mongoengine import *
 
 from wormlab3d import logger, CAMERA_IDXS, DATASETS_MIDLINES3D_PATH
 from wormlab3d.data.model import Cameras
+from wormlab3d.data.model.eigenworms import Eigenworms
 from wormlab3d.data.model.experiment import STRAIN_CHOICES, SEX_CHOICES, AGE_CHOICES
 from wormlab3d.data.model.midline2d import Midline2D
 from wormlab3d.data.model.midline3d import M3D_SOURCES
@@ -218,6 +219,10 @@ class Dataset(Document):
         amax = p2d_all.max(axis=0)
         arange = (amax - amin)
         return mean, arange
+
+    @property
+    def eigenworms(self) -> List[Eigenworms]:
+        return Eigenworms.objects(reconstruction=self).order_by('-updated')
 
 
 class DatasetMidline2D(Dataset):

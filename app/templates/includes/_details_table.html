@@ -1,3 +1,41 @@
+{%- macro render_value(value, field) -%}
+  {% if field.type == 'array' %}
+    {% set type = field.type_array %}
+  {% else %}
+    {% set type = field.type %}
+  {% endif %}
+  {% if type == 'relation' %}
+    {% if value is iterable %}
+      {% set value = value.id %}
+    {% endif %}
+    <a href="/{{ field.collection_name }}/{{ value }}">{{ value }}</a>
+  {% elif value is none %}
+    {# empty cell #}
+  {% elif type == 'boolean' %}
+    {% if value %}
+      <span class="oi oi-check text-success"></span>
+    {% else %}
+      <span class="oi oi-x text-danger"></span>
+    {% endif %}
+  {% elif type == 'integer' %}
+    {{ '{:,}'.format(value) }}
+  {% elif type == 'float' %}
+    {{ ('{:,.' + field.precision|string + 'f}').format(value) }}
+  {% elif type == 'scientific' %}
+    {{ ('{:,.' + field.precision|string + 'e}').format(value) }}
+  {% elif type == 'date' %}
+    {{ value.strftime('%Y-%m-%d') }}
+  {% elif type == 'datetime' %}
+    {{ value.strftime('%Y-%m-%d %H:%M:%S') }}
+  {% elif type == 'time' %}
+    {{ value.strftime('%M:%S') }}
+  {% elif type == 'enum' %}
+    {{ field.choices[value] }}
+  {% else %}
+    {{ value }}
+  {% endif %}
+{%- endmacro -%}
+
 {% macro render(doc_view, doc) -%}
   <table class="table w-30">
     <tbody>
@@ -5,32 +43,15 @@
       <tr>
         <th width="40%">{{ field.title }}</th>
         <td>
-        {% if key == '_id' %}
-          <a href="/{{ doc_view.collection_name }}/{{ doc.id }}">{{ doc.id }}</a>
-        {% elif doc[key] is none %}
-          {# empty cell #}
-        {% elif field.type == 'boolean' %}
-          {% if doc[key] %}
-            <span class="oi oi-check text-success"></span>
-          {% else %}
-            <span class="oi oi-x text-danger"></span>
-          {% endif %}
-        {% elif field.type == 'integer' %}
-          {{ '{:,}'.format(doc[key]) }}
-        {% elif field.type == 'float' %}
-          {{ ('{:,.' + field.precision|string + 'f}').format(doc[key]) }}
-        {% elif field.type == 'scientific' %}
-          {{ ('{:,.' + field.precision|string + 'e}').format(doc[key]) }}
-        {% elif field.type == 'date' %}
-          {{ doc[key].strftime('%Y-%m-%d') }}
-        {% elif field.type == 'datetime' %}
-          {{ doc[key].strftime('%Y-%m-%d %H:%M:%S') }}
-        {% elif field.type == 'time' %}
-          {{ doc[key].strftime('%M:%S') }}
-        {% elif field.type == 'enum' %}
-          {{ field.choices[doc[key]] }}
+        {% if key == '_id' and not doc._id %}
+          {% set key = 'id' %}
+        {% endif %}
+        {% if field.type == 'array' %}
+          {% for val in doc[key] %}
+            {{ render_value(val, field) | trim }}{{ ', ' if not loop.last else '' }}
+          {% endfor %}
         {% else %}
-          {{ doc[key] }}
+          {{ render_value(doc[key], field) }}
         {% endif %}
         </td>
       </tr>

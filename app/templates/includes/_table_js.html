@@ -35,7 +35,7 @@
     {% elif field.type == 'scientific' %}
       return Number(data).toExponential({{ field.precision }});
     {% elif field.type == 'relation' %}
-      return '<a href="/{{ key }}/' + data + '">' + data + '</a>';
+      return '<a href="/{{ field.collection_name }}/' + data + '">' + data + '</a>';
     {% elif field.type == 'date' %}
       if (type === 'display' || type === 'filter') {
         return moment(data).format("DD-MMM-YYYY");
@@ -66,7 +66,10 @@
         return renderer.display(d);
       {% endif %}
       });
-      return '[' + data.join(', ') + ']';
+      if (data.length > 0) {
+        return data.join(', ');
+      }
+      return '';
     {% elif field.type == 'enum' %}
       if (type === 'display' || type === 'filter') {
       return {{ field.choices | tojson}}[data];

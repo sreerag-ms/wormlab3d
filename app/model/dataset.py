@@ -20,7 +20,8 @@ class DatasetView(DocumentView):
             (
                 self.prefix + '_id', {
                     'title': 'ID',
-                    'type': 'objectid',
+                    'type': 'relation',
+                    'collection_name': 'dataset'
                 },
             ),
             (
@@ -76,63 +77,70 @@ class DatasetView(DocumentView):
             (
                 self.prefix + 'restrict_users', {
                     'title': 'Users',
-                    'type': 'string',
+                    'type': 'array',
+                    'type_array': 'string',
                     'filter_type': 'choice_query',
                 },
             ),
             (
                 self.prefix + 'restrict_strains', {
                     'title': 'Strains',
-                    'type': 'string',
+                    'type': 'array',
+                    'type_array': 'string',
                     'filter_type': 'choice_query',
                 },
             ),
             (
                 self.prefix + 'restrict_sexes', {
                     'title': 'Sexes',
-                    'type': 'string',
+                    'type': 'array',
+                    'type_array': 'string',
                     'filter_type': 'choice_query',
                 },
             ),
             (
                 self.prefix + 'restrict_ages', {
                     'title': 'Ages',
-                    'type': 'string',
+                    'type': 'array',
+                    'type_array': 'string',
                     'filter_type': 'choice_query',
                 },
             ),
             (
                 self.prefix + 'restrict_tags', {
                     'title': 'Tags',
-                    'type': 'string',
+                    'type': 'array',
+                    'type_array': 'integer',
                     'filter_type': 'choice_query',
                 },
             ),
             (
                 self.prefix + 'restrict_concs', {
                     'title': 'Concs.',
-                    'type': 'string',
+                    'type': 'array',
+                    'type_array': 'string',
                     'filter_type': 'choice_query',
                 },
             ),
             (
                 self.prefix + 'restrict_sources', {
                     'title': 'Source',
-                    'type': 'string',
+                    'type': 'array',
+                    'type_array': 'string',
                     'filter_type': 'choice_query',
                 },
             ),
             (
                 self.prefix + 'mf_depth', {
                     'title': 'MF Depth',
-                    'type': 'int',
+                    'type': 'integer',
                     'filter_type': 'choice_query',
                 },
             ),
             (
                 self.prefix + 'n_worm_points', {
                     'title': 'Num. worm points',
-                    'type': 'int',
+                    'type': 'integer',
                     'filter_type': 'choice_query',
                 },
             ),
@@ -147,21 +155,27 @@ class DatasetView(DocumentView):
             (
                 self.prefix + 'exclude_experiments', {
                     'title': 'Exclude Experiments',
-                    'type': 'string',
+                    'type': 'array',
+                    'type_array': 'relation',
+                    'collection_name': 'experiment',
                     'filter_type': 'choice_query',
                 },
             ),
             (
                 self.prefix + 'include_experiments', {
                     'title': 'Include Experiments',
-                    'type': 'string',
+                    'type': 'array',
+                    'type_array': 'relation',
+                    'collection_name': 'experiment',
                     'filter_type': 'choice_query',
                 },
             ),
             (
                 self.prefix + 'exclude_trials', {
                     'title': 'Exclude Trials',
-                    'type': 'string',
+                    'type': 'array',
+                    'type_array': 'relation',
+                    'collection_name': 'trial',
                     'filter_type': 'choice_query',
                 },
             ),
@@ -169,7 +183,8 @@ class DatasetView(DocumentView):
                 self.prefix + 'include_trials', {
                     'title': 'Include Trials',
                     'type': 'array',
-                    'type_array': 'integer',
+                    'type_array': 'relation',
+                    'collection_name': 'trial',
                     'filter_type': 'choice_query',
                 },
             ),
