@@ -49,6 +49,7 @@ class ReconstructionView(DocumentView):
                 self.prefix + 'trial', {
                     'title': 'Trial',
                     'type': 'relation',
+                    'type_rel': 'int',
                     'filter_type': 'integer',
                     'collection_name': 'trial',
                     'view_class': trial_view,
@@ -84,6 +85,7 @@ class ReconstructionView(DocumentView):
                 self.prefix + 'mf_parameters', {
                     'title': 'Parameters',
                     'type': 'relation',
+                    'type_rel': 'objectid',
                     'filter_type': 'string',
                     'view_class': parameters_view,
                 },
