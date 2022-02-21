@@ -312,6 +312,7 @@ class DatasetMidline3D(Dataset):
     n_worm_points = IntField(required=True)
     restrict_sources = ListField(StringField(choices=M3D_SOURCES))
     mf_depth = IntField()
+    reconstructions = ListField(LazyReferenceField('Reconstruction'))
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -354,6 +355,9 @@ class DatasetMidline3D(Dataset):
         if self.size_all > 0:
             self.train_test_split_actual = len(train) / self.size_all
         self.metas = metas
+
+        # Set reconstructions
+        self.reconstructions = self.metas['reconstruction'].keys()
 
     def __getattribute__(self, k):
         if k not in ['X_train', 'X_test', 'metas']:

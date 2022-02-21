@@ -19,7 +19,12 @@ def datasets():
         title='Datasets',
         active=active,
         doc_view=DatasetView(
-            hide_fields=['include_experiments', 'exclude_experiments', 'include_trials', 'exclude_trials']
+            hide_fields=[
+                'include_experiments',
+                'exclude_experiments',
+                'include_trials',
+                'exclude_trials',
+            ]
         ),
         table_order=[2, 'desc']
     )

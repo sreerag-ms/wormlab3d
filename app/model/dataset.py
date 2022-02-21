@@ -195,4 +195,14 @@ class DatasetView(DocumentView):
                     'choices': TRIAL_QUALITY_CHOICES
                 },
             ),
+            (
+                self.prefix + 'num_reconstructions', {
+                    'title': 'Num. Reconstructions',
+                    'type': 'integer',
+                    'query': {
+                        'operation': 'size',
+                        'field': 'reconstructions',
+                    }
+                },
+            ),
         ])

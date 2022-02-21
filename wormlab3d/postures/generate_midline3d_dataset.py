@@ -187,6 +187,7 @@ def generate_midline3d_dataset(args: DatasetMidline3DArgs) -> DatasetMidline3D:
     logger.info('Fetching trajectories.')
     Xs = []
     metas = {
+        'reconstruction': {},
         'user': {},
         'concentration': {},
         'source': {},
@@ -229,6 +230,10 @@ def generate_midline3d_dataset(args: DatasetMidline3DArgs) -> DatasetMidline3D:
 
         idxs = list(range(idx, idx + len(X)))
         idx += len(X)
+
+        if rid not in metas['reconstruction']:
+            metas['reconstruction'][rid] = []
+        metas['reconstruction'][rid].extend(idxs)
 
         if experiment.user not in metas['user']:
             metas['user'][experiment.user] = []

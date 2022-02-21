@@ -111,6 +111,14 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
                         {'$divide': [numerator, divisor]}
                     ]}
                     projects[key_as] = cond
+                elif q['operation'] == 'size':
+                    f = q['field']
+                    cond = {'$cond': [
+                        {'$isArray': f'${f}'},
+                        {'$size': f'${f}'},
+                        0
+                    ]}
+                    projects[key_as] = cond
                 else:
                     projects[key_as] = {f'${q["operation"]}': [f'${f}' for f in q['fields']]}
 
