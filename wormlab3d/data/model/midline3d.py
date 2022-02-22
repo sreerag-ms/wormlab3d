@@ -117,7 +117,7 @@ class Midline3D(Document):
 
         return prepared_coords
 
-    def get_cameras(self) -> Cameras:
+    def get_cameras(self, use_shifts: bool = True) -> Cameras:
         """
         Fetch the correct camera model for this midline.
         """
@@ -128,23 +128,29 @@ class Midline3D(Document):
 
         # If no cams found for the same midline source and trial, fetch the best for the frame.
         if cams.count() == 0:
-            return self.frame.get_cameras()
+            return self.frame.get_cameras(use_shifts=use_shifts)
 
         # If just one model was found return this.
         if cams.count() == 1:
-            return cams[0]
+            cams = cams[0]
+        else:
+            # Otherwise we have multiple cameras for this trial and source, pick the one closest to the frame
+            frame_num = self.frame.frame_num
+            offsets = np.zeros(cams.count())
+            for i, cam in enumerate(cams):
+                if cam.frame is not None and cam.frame.frame_num is not None:
+                    offsets[i] = abs(cam.frame.frame_num - frame_num)
+                else:
+                    offsets[i] = np.inf
+            cams = cams[int(np.argmin(offsets))]
 
-        # Otherwise we have multiple cameras for this trial and source, pick the one closest to the frame
-        frame_num = self.frame.frame_num
-        offsets = np.zeros(cams.count())
-        for i, cam in enumerate(cams):
-            if cam.frame is not None and cam.frame.frame_num is not None:
-                offsets[i] = abs(cam.frame.frame_num - frame_num)
-            else:
-                offsets[i] = np.inf
-        best_cams = cams[int(np.argmin(offsets))]
+        # Apply shifts correction
+        if use_shifts and cams.source == CAM_SOURCE_ANNEX:
+            shifts = self.frame.get_shifts()
+            if shifts is not None:
+                cams.set_shifts(shifts)
 
-        return best_cams
+        return cams
 
     def _project_coordinates(self, camera_idx: int, image_points: np.ndarray) -> np.ndarray:
         """

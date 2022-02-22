@@ -158,7 +158,7 @@ def generate_reconstruction_video(reconstruction_id: int, missing_only: bool = T
         return
 
     if reconstruction.source == M3D_SOURCE_MF:
-        D = reconstruction.mf_parameters.depth  # todo - different depth videos
+        D = reconstruction.mf_parameters.depth - 1  # todo - different depth videos
         ts = TrialState(reconstruction=reconstruction)
         from_idx = sum([2**d2 for d2 in range(D)])
         to_idx = from_idx + 2**D
@@ -169,7 +169,7 @@ def generate_reconstruction_video(reconstruction_id: int, missing_only: bool = T
 
         # Get 2D projections
         all_projections = ts.get('points_2d')  # (M, N, 3, 2)
-        points_2d = np.round(all_projections[from_idx:to_idx]).astype(np.int32)
+        points_2d = np.round(all_projections[:, from_idx:to_idx]).astype(np.int32)
 
         # Colour map
         colours = np.array([cmap(d) for d in np.linspace(0, 1, 2**D)])
@@ -261,7 +261,7 @@ def generate_reconstruction_video(reconstruction_id: int, missing_only: bool = T
             )
 
             # Get 2D projections
-            points_2d = np.round(m3d.get_prepared_2d_coordinates()).astype(np.int32)
+            points_2d = np.round(m3d.get_prepared_2d_coordinates(regenerate=True)).astype(np.int32)
             points_2d = points_2d.transpose(1, 0, 2)
 
             # Colour map
@@ -297,6 +297,7 @@ def generate_reconstruction_videos(missing_only: bool = True):
         try:
             generate_reconstruction_video(reconstruction_id, missing_only)
         except Exception as e:
+            raise
             logger.error(str(e))
 
 
