@@ -3,7 +3,7 @@ from typing import List, Tuple
 import numpy as np
 
 from wormlab3d import logger
-from wormlab3d.data.model import Trial, Frame
+from wormlab3d.data.model import Trial, Frame, Midline3D
 from wormlab3d.data.model.reconstruction import Reconstruction
 
 
@@ -52,8 +52,15 @@ def fetch_reconstructed_frames(
         # Check that the frame number is increasing
         frame_num = res['frame_num']
         if len(frame_nums) and frame_num != frame_nums[-1] + 1:
-            logger.warning(f'Breakage in reconstruction sequence, stopping here.')
+            logger.warning('Breakage in reconstruction sequence, stopping here.')
             break
+
+        # Check that the midline is valid
+        X = Midline3D.X.to_python(res['X'])
+        if np.isnan(X).any():
+            logger.warning('Invalid midline, stopping here.')
+            break
+
         frame_nums.append(frame_num)
         midline_ids.append(res['midline_id'])
 
@@ -126,7 +133,7 @@ def populate_reconstructions():
                     existing.save()
                 else:
                     logger.info('Existing record found.')
-                    continue
+                continue
 
             reconst = Reconstruction(
                 trial=trial_id,
