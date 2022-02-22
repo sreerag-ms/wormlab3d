@@ -19,7 +19,7 @@ class FrameView(DocumentView):
                 self.prefix + 'trial', {
                     'title': 'Trial',
                     'type': 'relation',
-                    'type_rel': 'int',
+                    'type_rel': 'integer',
                     'collection_name': 'trial',
                     'filter_type': 'integer',
                     'early_match': True

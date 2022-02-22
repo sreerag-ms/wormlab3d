@@ -26,7 +26,7 @@ class TrialView(DocumentView):
                 self.prefix + '_id', {
                     'title': 'ID',
                     'type': 'relation',
-                    'type_rel': 'int',
+                    'type_rel': 'integer',
                     'collection_name': 'trial'
                 },
             ),
@@ -34,7 +34,7 @@ class TrialView(DocumentView):
                 self.prefix + 'experiment', {
                     'title': 'Experiment',
                     'type': 'relation',
-                    'type_rel': 'int',
+                    'type_rel': 'integer',
                     'filter_type': 'integer',
                     'collection_name': 'experiment',
                     'view_class': experiment_view,

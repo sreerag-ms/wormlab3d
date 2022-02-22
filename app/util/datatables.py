@@ -153,7 +153,7 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
     filters = {}
     for i, (key, field_spec) in enumerate(doc_view.fields.items()):
         filter_value = request.get(f'columns[{i}][search][value]')
-        if filter_value != '':
+        if filter_value != '' and filter_value is not None:
             filter_vals = [
                 _cast_filter_value(v, field_spec['type'], field_spec)
                 for v in filter_value.split('|')

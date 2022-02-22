@@ -49,7 +49,7 @@ class ReconstructionView(DocumentView):
                 self.prefix + 'trial', {
                     'title': 'Trial',
                     'type': 'relation',
-                    'type_rel': 'int',
+                    'type_rel': 'integer',
                     'filter_type': 'integer',
                     'collection_name': 'trial',
                     'view_class': trial_view,
@@ -66,6 +66,16 @@ class ReconstructionView(DocumentView):
                 self.prefix + 'end_frame', {
                     'title': 'End frame',
                     'type': 'integer',
+                },
+            ),
+            (
+                self.prefix + 'n_frames', {
+                    'title': 'Num. frames',
+                    'type': 'integer',
+                    'query': {
+                        'operation': 'subtract',
+                        'fields': [self.prefix + 'end_frame', self.prefix + 'start_frame']
+                    },
                 },
             ),
             (
