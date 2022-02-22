@@ -8,6 +8,7 @@ import h5py
 import numpy as np
 import scipy.io as sio
 from mongoengine import DoesNotExist
+
 from wormlab3d import WT3D_PATH, logger, CAMERA_IDXS, ANNEX_PATH, DATA_PATH
 from wormlab3d.data.model import *
 from wormlab3d.data.model.cameras import CAM_SOURCE_ANNEX, CAM_SOURCE_WT3D
@@ -16,12 +17,12 @@ from wormlab3d.data.util import ANNEX_PATH_PLACEHOLDER
 
 VIDEO_DIR = 'video'
 CALIB_DIR = 'calib'
-CAMERA_SHIFTS_DIR = ANNEX_PATH + '/calib/shifts'
+CAMERA_SHIFTS_DIR = ANNEX_PATH / 'calib' / 'shifts'
 BACKGROUND_IMAGES_DIR = 'background'
-MIDLINES_2D_DIR = ANNEX_PATH + '/midlines'
-MIDLINES_3D_DIR = ANNEX_PATH + '/reconst'
-TAGS_DIR = ANNEX_PATH + '/tags'
-TAGS_MAT_PATH = DATA_PATH + '/Behavior_Dictionary.mat'
+MIDLINES_2D_DIR = ANNEX_PATH / 'midlines'
+MIDLINES_3D_DIR = ANNEX_PATH / 'reconst'
+TAGS_DIR = ANNEX_PATH / 'tags'
+TAGS_MAT_PATH = DATA_PATH / 'Behavior_Dictionary.mat'
 
 fields = [
     '#id',
@@ -188,6 +189,7 @@ def find_or_create_cameras(row: dict, experiment: Experiment) -> Cameras:
         except DoesNotExist:
             pass
 
+        cams = None
         try:
             # Try to find existing cameras
             if trial is None:
@@ -197,17 +199,12 @@ def find_or_create_cameras(row: dict, experiment: Experiment) -> Cameras:
                     cams = Cameras.objects.get(experiment=experiment, trial=trial, timestamp=timestamp)
                 except DoesNotExist:
                     cams = Cameras.objects.get(experiment=experiment, timestamp=timestamp)
-                    cams.trial = trial
-            cams.source = CAM_SOURCE_ANNEX
-            cams.source_file = f'{int(row["#id"]):03d}.xml'
-            cams.save()
-
             logger.debug(f'Found existing cameras, id={cams.id}')
-            return cams
         except DoesNotExist:
             pass
 
-        cams = Cameras()
+        if cams is None:
+            cams = Cameras()
         cams.source = CAM_SOURCE_ANNEX
         cams.source_file = f'{int(row["#id"]):03d}.xml'
         cams.experiment = experiment
@@ -385,7 +382,7 @@ def migrate_tags():
 def migrate_runinfo():
     skipped_rows = []
 
-    with open(ANNEX_PATH + '/run_info.csv') as f:
+    with open(ANNEX_PATH / 'run_info.csv') as f:
         reader = csv.DictReader(f)
 
         for row in reader:
