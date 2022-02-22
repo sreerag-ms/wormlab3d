@@ -3,8 +3,7 @@ from typing import List, Tuple
 import numpy as np
 
 from wormlab3d import logger
-from wormlab3d.data.model import Trial, Frame, Midline3D
-from wormlab3d.data.model.reconstruction import Reconstruction
+from wormlab3d.data.model import Trial, Frame, Midline3D, Reconstruction
 
 
 def fetch_reconstructed_frames(
@@ -30,6 +29,7 @@ def fetch_reconstructed_frames(
             '_id': 0,
             'frame_id': '$_id',
             'frame_num': '$frame_num',
+            'X': '$midline.X',
             'midline_id': '$midline._id',
             'midline_error': '$midline.error',
         }},
@@ -88,7 +88,7 @@ def populate_reconstructions():
             {'$lookup': {'from': 'midline3d', 'localField': '_id', 'foreignField': 'frame', 'as': 'midline'}},
             {'$unwind': {'path': '$midline'}},
             {'$group': {
-                '_id': {'source': '$midline.source', 'source_file': '$midline.source_file', 'model': '$midline.model'},
+                '_id': {'source': '$midline.source', 'source_file': '$midline.source_file'},
                 'count': {'$sum': 1},
             }},
         ]
@@ -100,7 +100,7 @@ def populate_reconstructions():
             continue
 
         for res in attempt_types:
-            attempt_keys = {**{'source_file': None, 'model': None}, **res['_id']}
+            attempt_keys = {**{'source_file': None}, **res['_id']}
             logger.info(f'Checking for reconstructed frames for {attempt_keys}.')
 
             frame_nums, midline_ids = fetch_reconstructed_frames(
@@ -119,8 +119,7 @@ def populate_reconstructions():
             existing = Reconstruction.objects(
                 trial=trial_id,
                 source=attempt_keys['source'],
-                source_file=attempt_keys['source_file'],
-                model=attempt_keys['model']
+                source_file=attempt_keys['source_file']
             )
 
             if existing.count() > 0:
@@ -142,7 +141,6 @@ def populate_reconstructions():
                 midlines=midline_ids,
                 source=attempt_keys['source'],
                 source_file=attempt_keys['source_file'],
-                model=attempt_keys['model'],
             )
             reconst.save()
             logger.info(f'Added new reconstruction record id={reconst.id}.')
