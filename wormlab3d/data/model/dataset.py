@@ -434,13 +434,13 @@ class DatasetMidline3D(Dataset):
             if not recalculate:
                 try:
                     nonp = np.load(self.nonplanarities_path)['data']
+
+                    # Check that the size is the same
+                    if nonp.shape[0] != self.size_all:
+                        logger.warning('Nonplanarities data does not match size of dataset!')
+                        nonp = None
                 except Exception:
                     pass
-
-            # Check that the size is the same
-            if nonp.shape[0] != self.size_all:
-                logger.warning('Nonplanarities data does not match size of dataset!')
-                nonp = None
 
             # Can't be loaded or asked to recalculate so calculate.
             if nonp is None:
