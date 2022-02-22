@@ -98,6 +98,7 @@ class Dataset(Document):
             min_trial_quality=args.min_trial_quality,
             n_worm_points=args.n_worm_points,
             restrict_sources=args.restrict_sources,
+            min_reconstruction_frames=args.min_reconstruction_frames,
             mf_depth=args.mf_depth,
         )
 
@@ -127,6 +128,7 @@ class Dataset(Document):
             DS = DatasetMidline3D(
                 n_worm_points=args.n_worm_points,
                 restrict_sources=args.restrict_sources,
+                min_reconstruction_frames=args.min_reconstruction_frames,
                 mf_depth=args.mf_depth,
                 **common_args
             )
@@ -314,6 +316,7 @@ class DatasetMidline3D(Dataset):
     restrict_sources = ListField(StringField(choices=M3D_SOURCES))
     mf_depth = IntField()
     reconstructions = ListField(ReferenceField('Reconstruction'))
+    min_reconstruction_frames = IntField()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -433,6 +436,11 @@ class DatasetMidline3D(Dataset):
                     nonp = np.load(self.nonplanarities_path)['data']
                 except Exception:
                     pass
+
+            # Check that the size is the same
+            if nonp.shape[0] != self.size_all:
+                logger.warning('Nonplanarities data does not match size of dataset!')
+                nonp = None
 
             # Can't be loaded or asked to recalculate so calculate.
             if nonp is None:

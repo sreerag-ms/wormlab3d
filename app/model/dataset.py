@@ -132,6 +132,13 @@ class DatasetView(DocumentView):
                 },
             ),
             (
+                self.prefix + 'min_reconstruction_frames', {
+                    'title': 'Min. Frames',
+                    'type': 'integer',
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
                 self.prefix + 'mf_depth', {
                     'title': 'MF Depth',
                     'type': 'integer',
@@ -140,7 +147,7 @@ class DatasetView(DocumentView):
             ),
             (
                 self.prefix + 'n_worm_points', {
-                    'title': 'Num. worm points',
+                    'title': 'Num. Worm Points',
                     'type': 'integer',
                     'filter_type': 'choice_query',
                 },

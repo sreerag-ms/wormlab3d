@@ -96,12 +96,23 @@ def fetch_matching_reconstruction_ids(trial_ids: List[int], args: DatasetMidline
     # Add matches to pipeline
     pipeline.append({'$match': matches})
 
+    # Project necessary reconstruction fields
+    pipeline.append({'$project': {'_id': 1, 'trial': 1, 'source': 1, 'source_file': 1,
+                                  'n_frames': {'$subtract': ['$end_frame', '$start_frame']}}})
+
+    # Match minimum reconstruction duration
+    if args.min_reconstruction_frames is not None:
+        pipeline.append({'$match': {'n_frames': {'$gte': args.min_reconstruction_frames}}})
+
     # Group results by trial
     pipeline.extend([
-        {'$project': {'_id': 1, 'trial': 1, 'source': 1, 'source_file': 1}},
         {'$group': {
             '_id': '$trial',
-            'reconstructions': {'$push': {'_id': '$_id', 'source': '$source', 'source_file': '$source_file'}}
+            'reconstructions': {'$push': {
+                '_id': '$_id',
+                'source': '$source',
+                'source_file': '$source_file',
+            }}
         }},
         {'$sort': {'_id': 1}},
     ])
