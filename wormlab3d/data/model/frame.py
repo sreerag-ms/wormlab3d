@@ -31,15 +31,6 @@ class Frame(Document):
     centre_3d = EmbeddedDocumentField(ObjectPoint)
     centre_3d_fixed = EmbeddedDocumentField(ObjectPoint)
 
-    # Prepared images (we don't store high-resolution images)
-    images = TripletField(
-        NumpyField(
-            shape=PREPARED_IMAGE_SIZE,
-            dtype=np.float32,
-            compression=COMPRESS_BLOSC_POINTER
-        )
-    )
-
     # Tags
     tags = ListField(ReferenceField(Tag))
 
