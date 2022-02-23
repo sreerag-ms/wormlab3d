@@ -255,8 +255,8 @@ def generate_centres_3d(
                     x0=prev_point,
                     error_threshold=error_threshold,
                     try_experiment_cams=has_exp_cameras,
-                    try_all_cams=True,
-                    only_replace_if_better=True,
+                    try_all_cams=False,
+                    only_replace_if_better=False,
                     store_bad_result=store_bad_results,
                     ratio_adj_orig=ratio_adj_orig,
                     ratio_adj_exp=ratio_adj_exp,
@@ -280,7 +280,7 @@ if __name__ == '__main__':
     # frame_num=823
 
     # Lots of 2d points
-    trial_id = 301
+    trial_id = 167
     frame_num = 79
 
     # 0-length video
@@ -289,13 +289,15 @@ if __name__ == '__main__':
     # Frame.unlock_all()
     # Frame.reset_centres()
 
-    generate_centres_2d(
-    # trial_id=trial_id,
-    # frame_num=frame_num
-        missing_only=True
-    )
+#    generate_centres_2d(
+#        trial_id=trial_id,
+#    # frame_num=frame_num
+#        missing_only=False
+#    )
     generate_centres_3d(
-        missing_only=True,
+        trial_id=trial_id,
+        error_threshold=100,
+        missing_only=False,
         ratio_adj_orig=0.1,
         ratio_adj_exp=0,
         ratio_adj_all=0.1,

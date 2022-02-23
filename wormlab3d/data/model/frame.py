@@ -271,8 +271,8 @@ class Frame(Document):
             results = []
             for cams in cameras_list:
                 # If the camera reprojection error is greater than the best error we currently have, skip it
-                if cams.reprojection_error > best_err:
-                    continue
+                #if cams.reprojection_error > best_err:
+                #    continue
                 results.append(_triangulate(cams))
             return any(results)
 
