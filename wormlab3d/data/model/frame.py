@@ -11,7 +11,6 @@ from wormlab3d.data.model.midline2d import Midline2D
 from wormlab3d.data.model.midline3d import Midline3D
 from wormlab3d.data.model.object_point import ObjectPoint
 from wormlab3d.data.model.tag import Tag
-from wormlab3d.data.numpy_field import NumpyField, COMPRESS_BLOSC_POINTER
 from wormlab3d.data.triplet_field import TripletField
 from wormlab3d.preprocessing.contour import CONT_THRESH_RATIO_DEFAULT, MIN_REQ_THRESHOLD
 from wormlab3d.preprocessing.cropper import crop_image
@@ -49,19 +48,14 @@ class Frame(Document):
     }
 
     def __getattribute__(self, k):
-        # If the database field does not exist or is not a triplet then check file system
+        # Load images from the file system
         if k != 'images':
             return super().__getattribute__(k)
-        images_db = super().__getattribute__(k)
-        if images_db is None or len(images_db) != 3:
-            path = PREPARED_IMAGES_PATH / f'{self.trial.id:03d}' / f'{self.frame_num:06d}.npz'
-            try:
-                return np.load(path)['images']
-            except Exception:
-                return None
-        else:
-            return images_db
-
+        path = PREPARED_IMAGES_PATH / f'{self.trial.id:03d}' / f'{self.frame_num:06d}.npz'
+        try:
+            return np.load(path)['images']
+        except Exception:
+            return None
 
     def get_midlines2d(
             self,
