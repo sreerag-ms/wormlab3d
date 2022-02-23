@@ -177,7 +177,11 @@ def find_or_create_cameras(row: dict, experiment: Experiment) -> Cameras:
         logger.info(f'Found calibration file: {calib_path}')
         try:
             fs = cv2.FileStorage(calib_path, cv2.FILE_STORAGE_READ)
-            timestamp = dateutil.parser.parse(fs.getNode('calibration_time').string())
+            calib_time = fs.getNode('calibration_time').string()
+            if calib_time == '':
+                timestamp = datetime.datetime.fromtimestamp(0)
+            else:
+                timestamp = dateutil.parser.parse(fs.getNode('calibration_time').string())
         except Exception:
             logger.error(f'Could not parse calibration file: {calib_path}')
             return
@@ -211,23 +215,29 @@ def find_or_create_cameras(row: dict, experiment: Experiment) -> Cameras:
         if trial is not None:
             cams.trial = trial
 
+        def _parse_number(k, iof):
+            v = fs.getNode(k)
+            if v.string().lower() == 'nan' or v.string() == '':
+                return -1
+            return iof(v.real())
+
         try:
             cams.timestamp = timestamp
             cams.wormcv_version = fs.getNode('WormCV_Version').string()
             cams.opencv_version = fs.getNode('OpenCV_Version').string()
             cams.opencv_contrib_hash = fs.getNode('OpenCV_contrib_hash').string()
-            cams.total_calib_images = int(fs.getNode('total_filenames').real())
+            cams.total_calib_images = _parse_number('total_filenames', int)
             if cams.total_calib_images == 0 and fs.getNode('image_filenames').size() > 0:
                 cams.total_calib_images = fs.getNode('image_filenames').size()
-            cams.pattern_height = float(fs.getNode('pattern_height').real())
-            cams.pattern_width = float(fs.getNode('pattern_width').real())
-            cams.square_size = float(fs.getNode('square_size').real())
-            cams.flag_value = int(fs.getNode('flag_value').real())
-            cams.n_mini_matches = int(fs.getNode('n_mini_matches').real())
-            cams.n_cameras = int(fs.getNode('nCameras').real())
-            cams.camera_type = int(fs.getNode('camera_type').real())
-            cams.reprojection_error = float(fs.getNode('meanReprojectError').real())
-            cams.n_images_used = [int(fs.getNode(f'images_used_{c}').real()) for c in CAMERA_IDXS]
+            cams.pattern_height = _parse_number('pattern_height', float)
+            cams.pattern_width = _parse_number('pattern_width', float)
+            cams.square_size = _parse_number('square_size', float)
+            cams.flag_value = _parse_number('flag_value', int)
+            cams.n_mini_matches = _parse_number('n_mini_matches', int)
+            cams.n_cameras = _parse_number('nCameras', int)
+            cams.camera_type = _parse_number('camera_type', int)
+            cams.reprojection_error = _parse_number('meanReprojectError', float)
+            cams.n_images_used = [_parse_number(f'images_used_{c}', int) for c in CAMERA_IDXS]
             cams.pose = [fs.getNode(f'camera_pose_{c}').mat() for c in CAMERA_IDXS]
             cams.matrix = [fs.getNode(f'camera_matrix_{c}').mat() for c in CAMERA_IDXS]
             cams.distortion = [fs.getNode(f'camera_distortion_{c}').mat()[0] for c in CAMERA_IDXS]
