@@ -628,14 +628,14 @@ def migrate_WT3D(
         update_cameras: bool = False
 ):
     # Project *.mat files
-    path = WT3D_PATH + '/Project_Files'
+    path = WT3D_PATH / 'Project_Files'
 
     files = os.listdir(path)
     for i, filename in enumerate(files):
         logger.info(f'Processing file {i + 1}/{len(files)}: {filename}')
         if not filename.endswith('.mat'):
             continue
-        mat = sio.loadmat(path + '/' + filename)
+        mat = sio.loadmat(path / filename)
         mat = mat['Project_3DWT']
 
         # Top level keys: 'Camera_Parameters', 'Tracing_Parameters', 'Trace', 'Behavior', 'Info'
@@ -845,6 +845,7 @@ def migrate_WT3D(
                 pose = list(extrinsic_matrix)
                 cams.pose = [np.r_[pose[c], np.zeros((1, 4))] for c in CAMERA_IDXS]
                 cams.matrix = list(intrinsic_matrix)
+                cams.frame = frame
 
                 # Reshape the distortion parameters into [k1, k2, p1, p2, k3]
                 cams.distortion = [

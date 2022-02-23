@@ -134,9 +134,11 @@ class Midline3D(Document):
         if cams.count() == 1:
             cams = cams[0]
         else:
+            cams = list(cams)
+
             # Otherwise we have multiple cameras for this trial and source, pick the one closest to the frame
             frame_num = self.frame.frame_num
-            offsets = np.zeros(cams.count())
+            offsets = np.zeros(len(cams))
             for i, cam in enumerate(cams):
                 if cam.frame is not None and cam.frame.frame_num is not None:
                     offsets[i] = abs(cam.frame.frame_num - frame_num)
