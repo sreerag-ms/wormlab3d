@@ -77,14 +77,15 @@ class Trial(Document):
             **filters
         )
 
-    def get_cameras(self, best: bool = True, fallback_to_experiment: bool = True) -> Union[Cameras, List[Cameras]]:
+    def get_cameras(self, best: bool = True, fallback_to_experiment: bool = True, source: str = None) -> Union[Cameras, List[Cameras]]:
         """
         Fetch the camera models for this trial.
         If best=False then returns a list of all associated, otherwise picks the best according to reprojection_error.
         """
-        cameras = Cameras.objects(
-            trial=self
-        )
+        filters = {'trial': self}
+        if source is not None:
+            filters['source'] = source
+        cameras = Cameras.objects(**filters)
 
         # If no cameras are found for the trial, return what we can from the experiment
         if len(cameras) == 0:

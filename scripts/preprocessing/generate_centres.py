@@ -2,6 +2,7 @@ import gc
 
 from wormlab3d import logger
 from wormlab3d.data.model import Frame, Trial
+from wormlab3d.data.model.cameras import CAM_SOURCE_ANNEX
 from wormlab3d.preprocessing.contour import MIN_REQ_THRESHOLD, CONT_THRESH_RATIO_DEFAULT
 from wormlab3d.toolkit.util import resolve_targets
 
@@ -170,6 +171,7 @@ def generate_centres_3d(
         ratio_adj_orig: float = 0,
         ratio_adj_exp: float = 0,
         ratio_adj_all: float = 0,
+        cam_source: str = None
 ):
     """
     Find a unique 3d centre-point for the worm.
@@ -261,6 +263,7 @@ def generate_centres_3d(
                     ratio_adj_orig=ratio_adj_orig,
                     ratio_adj_exp=ratio_adj_exp,
                     ratio_adj_all=ratio_adj_all,
+                    cam_source=cam_source
                 )
                 if not res:
                     logger.error(log_prefix + f'Failed to find 3D centre.')
@@ -289,11 +292,11 @@ if __name__ == '__main__':
     # Frame.unlock_all()
     # Frame.reset_centres()
 
-#    generate_centres_2d(
-#        trial_id=trial_id,
-#    # frame_num=frame_num
-#        missing_only=False
-#    )
+    # generate_centres_2d(
+    #    trial_id=trial_id,
+    #    # frame_num=frame_num
+    #    missing_only=False
+    # )
     generate_centres_3d(
         trial_id=trial_id,
         error_threshold=100,
@@ -301,4 +304,5 @@ if __name__ == '__main__':
         ratio_adj_orig=0.1,
         ratio_adj_exp=0,
         ratio_adj_all=0.1,
+        cam_source=CAM_SOURCE_ANNEX
     )

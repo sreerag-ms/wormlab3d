@@ -182,6 +182,7 @@ class Frame(Document):
             ratio_adj_orig: float = 0,
             ratio_adj_exp: float = 0,
             ratio_adj_all: float = 0,
+            cam_source: str = None
     ) -> bool:
         """
         Find the triangulated 3d object centre point.
@@ -194,7 +195,7 @@ class Frame(Document):
             centres_2d, centres_2d_thresholds = self.generate_centres_2d()
 
         # Try own camera model for the benchmark
-        trial_cameras = self.trial.get_cameras(best=False, fallback_to_experiment=False)
+        trial_cameras = self.trial.get_cameras(best=False, fallback_to_experiment=False, source=cam_source)
         best_err = 1000
         best = None
         best_centres_2d = None
@@ -336,13 +337,16 @@ class Frame(Document):
             # Check to see if another camera model from the same experiment can do a better job
             if not res and step >= 2 and try_experiment_cams:
                 logger.debug(f'Trying other camera models from same experiment.')
-                exp_cameras = self.experiment.get_cameras(best=False)
+                exp_cameras = self.experiment.get_cameras(best=False, source=cam_source)
                 res = _triangulate_batch(exp_cameras)
 
             # Check to see if another camera model from any experiment can do a better job
             if not res and step >= 3 and try_all_cams:
                 logger.debug(f'Trying other camera models from any experiment.')
-                all_cameras = list(Cameras.objects(reprojection_error__lte=min(best_err, 10)))
+                filters = {'reprojection_error__lte': min(best_err, 10)}
+                if cam_source is not None:
+                    filters['source'] = cam_source
+                all_cameras = list(Cameras.objects(**filters))
                 np.random.shuffle(all_cameras)
                 all_cameras = all_cameras[:10]  # just take 10 at random
                 res = _triangulate_batch(all_cameras)

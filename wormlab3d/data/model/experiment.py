@@ -19,14 +19,15 @@ class Experiment(Document):
     worm_length = FloatField(min_value=0)
     legacy_id = IntField(null=True, default=None)
 
-    def get_cameras(self, best: bool = True) -> Union[Cameras, List[Cameras]]:
+    def get_cameras(self, best: bool = True, source: str = None) -> Union[Cameras, List[Cameras]]:
         """
         Fetch the camera models for this experiment.
         If best=False then returns a list of all associated, otherwise picks the best according to reprojection_error.
         """
-        cameras = Cameras.objects(
-            experiment=self
-        )
+        filters = {'experiment': self}
+        if source is not None:
+            filters['source'] = source
+        cameras = Cameras.objects(**filters)
         if best:
             return cameras.first()
         return cameras
