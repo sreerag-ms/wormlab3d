@@ -56,9 +56,9 @@ class Midline3DFinder:
         self.source_args = source_args
         self.parameter_args = parameter_args
 
-        # Initialise the model and parameters
-        self.model = self._init_model()
+        # Initialise the parameters and model
         self.parameters: MFParameters = self._init_parameters()
+        self.model = self._init_model()
 
         # Initialise convergence detector
         self.convergence_detector = self._init_convergence_detector()
@@ -109,17 +109,6 @@ class Midline3DFinder:
         if key in PARAMETER_NAMES + BUFFER_NAMES:
             return [fs.get_state(key) for fs in self.frame_batch]
 
-    def _init_model(self) -> ProjectRenderScoreModel:
-        """
-        Build the model.
-        """
-        logger.info(f'Initialising model.')
-        model = ProjectRenderScoreModel(
-            image_size=PREPARED_IMAGE_SIZE[0]
-        )
-        model = torch.jit.script(model)
-        return model
-
     def _init_parameters(self) -> MFParameters:
         """
         Build the model.
@@ -152,6 +141,18 @@ class Midline3DFinder:
             logger.info(f'Saved parameters to database (id={parameters.id})')
 
         return parameters
+
+    def _init_model(self) -> ProjectRenderScoreModel:
+        """
+        Build the model.
+        """
+        logger.info(f'Initialising model.')
+        model = ProjectRenderScoreModel(
+            image_size=PREPARED_IMAGE_SIZE[0],
+            render_mode=self.parameters.render_mode
+        )
+        model = torch.jit.script(model)
+        return model
 
     def _init_convergence_detector(self) -> ConvergenceDetector:
         """
@@ -700,12 +701,12 @@ class Midline3DFinder:
                 sigs = [*self.master_frame_state.get_state('sigmas'), ]
                 sigs.extend(*[f.get_state('sigmas') for f in self.frame_batch])
                 for sigs_i in sigs:
-                    sigs_i.data = sigs_i.clamp(min=5e-3)
+                    sigs_i.data = sigs_i.clamp(min=1e-2)
 
                 ints = [*self.master_frame_state.get_state('intensities'), ]
                 ints.extend(*[f.get_state('intensities') for f in self.frame_batch])
                 for ints_i in ints:
-                    ints_i.data = ints_i.clamp(min=1e-2, max=1.5)
+                    ints_i.data = ints_i.clamp(min=1e-1, max=10)
 
         # Update master state
         self.master_frame_state.set_state('masks_curve', [masks[d][self.active_idx] for d in range(D)])

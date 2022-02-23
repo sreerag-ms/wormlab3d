@@ -1,7 +1,15 @@
 import datetime
 
 from mongoengine import *
+
 from wormlab3d.nn.args.optimiser_args import LOSSES, OPTIMISER_ALGORITHMS
+
+RENDER_MODE_GAUSSIANS = 'gaussians'
+RENDER_MODE_CIRCLES = 'circles'
+RENDER_MODES = [
+    RENDER_MODE_GAUSSIANS,
+    RENDER_MODE_CIRCLES
+]
 
 
 class MFParameters(Document):
@@ -13,6 +21,7 @@ class MFParameters(Document):
     use_master = BooleanField()
     sigmas_init = FloatField()
     masks_threshold = FloatField()
+    render_mode = StringField(choices=RENDER_MODES)
 
     n_steps_init = IntField()
     n_steps_max = IntField()

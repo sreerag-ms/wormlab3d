@@ -3,7 +3,9 @@ from typing import Tuple, List, Final
 import torch
 import torch.nn.functional as F
 from torch import nn
+
 from wormlab3d import PREPARED_IMAGE_SIZE
+from wormlab3d.data.model.mf_parameters import RENDER_MODE_GAUSSIANS, RENDER_MODE_CIRCLES, RENDER_MODES
 from wormlab3d.midlines3d.dynamic_cameras import DynamicCameras
 
 
@@ -14,7 +16,8 @@ def render_points(
         intensities: torch.Tensor,
         camera_sigmas: torch.Tensor,
         cameras_intensities: torch.Tensor,
-        image_size: int = PREPARED_IMAGE_SIZE[0]
+        image_size: int = PREPARED_IMAGE_SIZE[0],
+        render_mode: str = RENDER_MODE_GAUSSIANS
 ):
     """
     Render points as Gaussian blobs onto a 2D image.
@@ -47,13 +50,27 @@ def render_points(
     m = torch.cat([xv[..., None], yv[..., None]], dim=-1)[None, None]
     p2 = points[:, :, None, None, :]
 
-    # Make (un-normalised) gaussian blobs centred at the coordinates
+    # Centre the grids around the coordinates
     mmp2 = m - p2
     dst = mmp2[..., 0]**2 + mmp2[..., 1]**2
-    blobs = torch.exp(-(dst / (2 * sigmas**2)))
 
-    # The rendering is the sum of blobs where each blob is scaled by its intensity
-    masks = (blobs * intensities).sum(dim=1)
+    if render_mode == RENDER_MODE_GAUSSIANS:
+        # Make (un-normalised) gaussian blobs
+        blobs = torch.exp(-(dst / (2 * sigmas**2)))
+
+        # The rendering is the sum of blobs where each blob is scaled by its intensity
+        masks = (blobs * intensities).sum(dim=1)
+
+    elif render_mode == RENDER_MODE_CIRCLES:
+        # Make circles with radii equal to the sigmas
+        blobs = torch.ceil(torch.relu(sigmas - dst))
+
+        # The rendering is the intersection of all circles
+        masks = blobs.sum(dim=1)
+
+    else:
+        raise RuntimeError(f'Unknown rendering mode: "{render_mode}".')
+
     masks = masks.clamp(max=1.)
     masks = masks.reshape(bs, 3, image_size, image_size)
 
@@ -66,9 +83,11 @@ def render_points(
 class ProjectRenderScoreModel(nn.Module):
     image_size: Final[int]
 
-    def __init__(self, image_size: int = PREPARED_IMAGE_SIZE[0]):
+    def __init__(self, image_size: int = PREPARED_IMAGE_SIZE[0], render_mode: str = RENDER_MODE_GAUSSIANS):
         super().__init__()
         self.image_size = image_size
+        assert render_mode in RENDER_MODES
+        self.render_mode = render_mode
         self.cams = torch.jit.script(DynamicCameras())
 
     def forward(
@@ -146,7 +165,7 @@ class ProjectRenderScoreModel(nn.Module):
             # Project and render
             points_2d_d = self._project_to_2d(cam_coeffs, points_d, points_3d_base, points_2d_base)
             masks_d, blobs = render_points(points_2d_d, sigmas_d, intensities_d, camera_sigmas, camera_intensities,
-                                           self.image_size)
+                                           self.image_size, self.render_mode)
 
             # Normalise blobs
             sum_ = blobs.amax(dim=(2, 3), keepdim=True)
