@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 import torch
 import torch.nn.functional as F
@@ -305,8 +305,7 @@ def calculate_smoothness_losses(
     for d in range(3, D):
         points_d = points[d]
         points_smoothed_d = points_smoothed[d]
-        sf = (d - 3) / (D - 3)
-        loss = sf * torch.sum((points_d - points_smoothed_d)**2)
+        loss = torch.sum((points_d - points_smoothed_d)**2)
         losses.append(loss)
 
     return losses
@@ -315,19 +314,22 @@ def calculate_smoothness_losses(
 @torch.jit.script
 def calculate_temporal_losses(
         points: List[torch.Tensor],
+        points_prev: Optional[List[torch.Tensor]],
 ) -> List[torch.Tensor]:
     """
     The points should change smoothly in time.
     """
     D = len(points)
+
+    # If there are no previous points available then just return zeros.
+    if points_prev is None:
+        return [torch.tensor(0., device=points[0].device) for _ in range(D)]
+
     losses = []
     for d in range(D):
-        # todo:
-        # points_d = points[d]
-        # points_smoothed_d = points_smoothed[d]
-        # sf = (d - 3) / (self.parameters.depth - 3)
-        # loss = sf * torch.sum((points_d - points_smoothed_d)**2)
-        loss = torch.tensor(0., device=points[0].device)
+        points_d = points[d]
+        points_prev_d = points_prev[d]
+        loss = torch.sum((points_d - points_prev_d)**2)
         losses.append(loss)
 
     return losses

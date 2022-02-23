@@ -3,6 +3,7 @@ from typing import Dict, Optional, Union, List
 import numpy as np
 import torch
 from torch import nn
+
 from wormlab3d import CAMERA_IDXS
 from wormlab3d.data.model import Cameras, MFParameters
 from wormlab3d.midlines3d.mf_methods import make_rotation_matrix
@@ -201,7 +202,12 @@ class FrameState(nn.Module):
         """
         self.is_frozen = True
         for key in PARAMETER_NAMES:
-            self.get_state(key).requires_grad_(False)
+            p = self.get_state(key)
+            if type(p) == list:
+                for pi in p:
+                    pi.requires_grad_(False)
+            else:
+                p.requires_grad_(False)
 
     def _init_parameters(self):
         """

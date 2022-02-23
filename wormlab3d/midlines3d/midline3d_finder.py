@@ -38,6 +38,7 @@ PRINT_KEYS = [
     'loss/neighbours',
     'loss/parents',
     'loss/aunts',
+    'loss/temporal',
 ]
 
 # torch.autograd.set_detect_anomaly(True)
@@ -228,7 +229,7 @@ class Midline3DFinder:
                 end_frame=self.source_args.start_frame
             )
             reconstruction.save()
-            logger.info('Created ')
+            logger.info('Created reconstruction')
 
         # Prepare trial state
         self.trial_state = TrialState(
@@ -247,6 +248,9 @@ class Midline3DFinder:
         for i in range(self.parameters.window_size):
             fs = self._init_frame_state(self.trial_state.frame_nums[i], master_frame_state=mfs)
             self.frame_batch.append(fs)
+
+        # Previous frame state
+        self.prev_frame_state: FrameState = None
 
     def _init_frame_state(
             self,
@@ -574,6 +578,13 @@ class Midline3DFinder:
         start_step = self.checkpoint.step_frame + 1
         final_step = start_step + max_steps
 
+        # Get previous frame state
+        if self.checkpoint.frame_num > self.reconstruction.start_frame:
+            self.prev_frame_state = self._init_frame_state(self.checkpoint.frame_num - 1)
+            self.prev_frame_state.freeze()
+        else:
+            self.prev_frame_state = None
+
         # Train the cam coeffs and multiscale curve
         for step in range(start_step, final_step):
             loss, loss_global, losses_depths, stats = self._train_step()
@@ -742,6 +753,12 @@ class Midline3DFinder:
             if d_ > 1:
                 stats[f'{key_}/{d_}/var'] = var_.var()
 
+        # Previous points used for temporal losses
+        if self.prev_frame_state is not None:
+            points_prev = self.prev_frame_state.points
+        else:
+            points_prev = None
+
         # Losses calculated at each depth
         losses = {
             # 'masks': self._calculate_mask_losses(masks_target, masks),
@@ -753,7 +770,7 @@ class Midline3DFinder:
             'sigmas': calculate_sigmas_losses(sigmas, sigmas_smoothed),
             'intensities': calculate_intensities_losses(intensities, intensities_smoothed),
             'smoothness': calculate_smoothness_losses(points, points_smoothed),
-            'temporal': calculate_temporal_losses(points),
+            'temporal': calculate_temporal_losses(points, points_prev),
         }
 
         # Log the total loss for each type
