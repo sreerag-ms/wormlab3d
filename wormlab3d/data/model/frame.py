@@ -219,8 +219,8 @@ class Frame(Document):
 
             # # If the 3d point has changed then we need to discard any associated images as these will need recreating
             # prev_3d = (0, 0, 0) if self.centre_3d is None else list(self.centre_3d.point_3d)
-            # self.update_centres_2d(best_centres_2d, best_centres_2d_thresholds)
-            # self.centre_3d = best
+            self.update_centres_2d(best_centres_2d, best_centres_2d_thresholds)
+            self.centre_3d = best
             # if prev_3d != list(self.centre_3d.point_3d) and self.images:
             #     self.images = None
             return True
