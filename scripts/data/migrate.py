@@ -202,7 +202,7 @@ def find_or_create_cameras(row: dict, experiment: Experiment) -> Cameras:
                 try:
                     cams = Cameras.objects.get(experiment=experiment, trial=trial, timestamp=timestamp)
                 except DoesNotExist:
-                    cams = Cameras.objects.get(experiment=experiment, timestamp=timestamp)
+                    cams = Cameras.objects.get(experiment=experiment, source_file=f'{int(row["#id"]):03d}.xml')
             logger.debug(f'Found existing cameras, id={cams.id}')
         except DoesNotExist:
             pass
