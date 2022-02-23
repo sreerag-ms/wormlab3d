@@ -200,7 +200,7 @@ class Frame(Document):
             centres_2d, centres_2d_thresholds = self.generate_centres_2d()
 
         # Try own camera model for the benchmark
-        trial_cameras = self.trial.get_cameras(best=True, fallback_to_experiment=False)
+        trial_cameras = self.trial.get_cameras(best=False, fallback_to_experiment=False)
         best_err = 1000
         best = None
         best_centres_2d = None
@@ -223,12 +223,12 @@ class Frame(Document):
             else:
                 logger.debug(f'Error ({best_err:.2f}) < Threshold ({error_threshold:.1f}), happy days.')
 
-            # If the 3d point has changed then we need to discard any associated images as these will need recreating
-            prev_3d = (0, 0, 0) if self.centre_3d is None else list(self.centre_3d.point_3d)
-            self.update_centres_2d(best_centres_2d, best_centres_2d_thresholds)
-            self.centre_3d = best
-            if prev_3d != list(self.centre_3d.point_3d) and self.images:
-                self.images = None
+            # # If the 3d point has changed then we need to discard any associated images as these will need recreating
+            # prev_3d = (0, 0, 0) if self.centre_3d is None else list(self.centre_3d.point_3d)
+            # self.update_centres_2d(best_centres_2d, best_centres_2d_thresholds)
+            # self.centre_3d = best
+            # if prev_3d != list(self.centre_3d.point_3d) and self.images:
+            #     self.images = None
             return True
 
         def _triangulate(cams: Cameras) -> bool:
@@ -236,6 +236,12 @@ class Frame(Document):
             if cams.id in all_results:
                 return False
             try:
+                # Apply shifts
+                if cams.source == CAM_SOURCE_ANNEX:
+                    shifts = self.get_shifts()
+                    if shifts is not None:
+                        cams.set_shifts(shifts)
+
                 res_3d = triangulate(
                     image_points=centres_2d,
                     cameras=cams,
@@ -296,22 +302,22 @@ class Frame(Document):
             # Trial cameras
             if trial_cameras is not None:
                 logger.debug('Trying trial cameras.')
-                if _triangulate(trial_cameras):
+                if _triangulate_batch(trial_cameras):
                     return True
 
-            # Cameras from nearby frames
-            btfs = Frame.objects(  # "best triangulated frames"
-                trial=self.trial,
-                frame_num__gte=self.frame_num - 15,
-                frame_num__lte=self.frame_num + 15,
-                centre_3d__error__exists=True,
-                centre_3d__error__lte=min(best_err, error_threshold * 3),
-            ).order_by('+centre_3d__error')[:10]
-            btfs_cameras = [f.centre_3d.cameras for f in btfs]
-            if len(btfs_cameras) > 0:
-                logger.debug('Trying cameras used in nearby frames.')
-                if _triangulate_batch(btfs_cameras):
-                    return True
+            # # Cameras from nearby frames
+            # btfs = Frame.objects(  # "best triangulated frames"
+            #     trial=self.trial,
+            #     frame_num__gte=self.frame_num - 15,
+            #     frame_num__lte=self.frame_num + 15,
+            #     centre_3d__error__exists=True,
+            #     centre_3d__error__lte=min(best_err, error_threshold * 3),
+            # ).order_by('+centre_3d__error')[:10]
+            # btfs_cameras = [f.centre_3d.cameras for f in btfs]
+            # if len(btfs_cameras) > 0:
+            #     logger.debug('Trying cameras used in nearby frames.')
+            #     if _triangulate_batch(btfs_cameras):
+            #         return True
 
             return False
 
