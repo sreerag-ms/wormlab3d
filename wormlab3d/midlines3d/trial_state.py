@@ -190,7 +190,6 @@ class TrialState:
         Update the state of a single frame.
         """
         assert self.start_frame <= frame_num <= self.end_frame, 'Requested frame is not available.'
-        i = frame_num - self.start_frame
         for k in BUFFER_NAMES + PARAMETER_NAMES:
             # Collate outputs generated at each depth
             if k in ['points', 'points_2d', 'sigmas', 'intensities', 'scores', 'masks_target', 'masks_target_residuals',
@@ -205,15 +204,15 @@ class TrialState:
                 else:
                     p = np.concatenate([to_numpy(p) for p in p_ms], axis=0)
 
-                self.states[k][i] = p
+                self.states[k][frame_num] = p
             else:
-                self.states[k][i] = to_numpy(frame_state.get_state(k))
+                self.states[k][frame_num] = to_numpy(frame_state.get_state(k))
 
         # Add the stats into the json dictionary
         for k, v in frame_state.stats.items():
             if k not in self.stats:
                 self.stats[k] = [0. for _ in range(self.n_frames)]
-            self.stats[k][i] = float(v)
+            self.stats[k][frame_num] = float(v)
 
     def get(self, k: str, start_frame: int = None, end_frame: int = None) -> np.ndarray:
         """
@@ -221,6 +220,10 @@ class TrialState:
         """
         assert k in BUFFER_NAMES + PARAMETER_NAMES
         state = self.states[k]
+
+        if start_frame is None and end_frame is None:
+            return state
+
         if start_frame is not None:
             assert start_frame >= self.frame_nums[0]
         else:
@@ -229,6 +232,7 @@ class TrialState:
             assert end_frame >= self.frame_nums[-1]
         else:
             end_frame = self.end_frame + 1
+
         return state[start_frame:end_frame]
 
     def __len__(self):

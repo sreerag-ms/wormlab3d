@@ -43,6 +43,7 @@ PRINT_KEYS = [
     'loss/temporal',
 ]
 
+
 # torch.autograd.set_detect_anomaly(True)
 
 
@@ -275,7 +276,7 @@ class Midline3DFinder:
         # Threshold images to make the target masks
         # masks_fr = torch.zeros_like(images)
         # masks_fr[images >= self.parameters.masks_threshold] = 1
-        masks_fr = images / images.amax(dim=(1,2), keepdim=True)
+        masks_fr = images / images.amax(dim=(1, 2), keepdim=True)
         masks_fr[images < self.parameters.masks_threshold] = 0
         masks_fr = masks_fr.unsqueeze(0)
 
@@ -584,10 +585,11 @@ class Midline3DFinder:
 
         # Get previous frame state
         if self.checkpoint.frame_num > self.reconstruction.start_frame:
-            self.prev_frame_state = self._init_frame_state(self.checkpoint.frame_num - 1)
-            self.prev_frame_state.freeze()
+            pp = self.trial_state.get('points')[self.checkpoint.frame_num - 1]
+            pp = torch.from_numpy(pp).to(self.device)
+            self.prev_points = [pp[2**d - 1:2**(d + 1) - 1] for d in range(self.parameters.depth)]
         else:
-            self.prev_frame_state = None
+            self.prev_points = None
 
         # Train the cam coeffs and multiscale curve
         for step in range(start_step, final_step):
@@ -758,14 +760,13 @@ class Midline3DFinder:
                 stats[f'{key_}/{d_}/var'] = var_.var()
 
         # Previous points used for temporal losses
-        if self.prev_frame_state is not None:
-            points_prev = self.prev_frame_state.points
+        if self.prev_points is not None:
+            points_prev = self.prev_points
         else:
             points_prev = None
 
         # Losses calculated at each depth
         losses = {
-            # 'masks': self._calculate_mask_losses(masks_target, masks),
             'masks': calculate_renders_losses(masks, masks_target, p.loss_masks_metric, p.loss_masks_multiscale),
             'neighbours': calculate_neighbours_losses(points),
             'parents': calculate_parents_losses(points),
