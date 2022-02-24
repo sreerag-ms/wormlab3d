@@ -312,6 +312,34 @@ def calculate_smoothness_losses(
 
 
 @torch.jit.script
+def calculate_curvature_losses(
+        points: List[torch.Tensor],
+) -> List[torch.Tensor]:
+    """
+    The points should change smoothly along the body.
+    """
+    D = len(points)
+    device = points[0].device
+    losses = [torch.tensor(0., device=device)] * 3
+    for d in range(3, D):
+        loss = torch.tensor(0., device=device)
+        for points_d in points[d]:
+            sl = torch.norm(points_d[1:] - points_d[:-1], dim=-1)
+            sp = torch.cat([torch.zeros(1, device=device), sl.cumsum(dim=0)])
+            K = torch.zeros_like(points_d)
+            for i in range(3):
+                x = points_d[:, i]
+                Tx = torch.gradient(x, spacing=(sp,))[0]
+                Kx = torch.gradient(Tx, spacing=(sp,))[0]
+                K[:, i] = Kx
+            k = torch.norm(K, dim=-1)
+            loss = loss + torch.sum(k**2)
+        losses.append(loss)
+
+    return losses
+
+
+@torch.jit.script
 def calculate_temporal_losses(
         points: List[torch.Tensor],
         points_prev: Optional[List[torch.Tensor]],

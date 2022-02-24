@@ -50,6 +50,7 @@ class MFParameters(Document):
     loss_sigmas = FloatField()
     loss_intensities = FloatField()
     loss_smoothness = FloatField()
+    loss_curvature = FloatField()
     loss_temporal = FloatField()
 
     algorithm = StringField(choices=OPTIMISER_ALGORITHMS)

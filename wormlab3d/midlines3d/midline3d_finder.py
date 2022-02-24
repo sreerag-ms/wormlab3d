@@ -22,7 +22,8 @@ from wormlab3d.midlines3d.args_finder import ParameterArgs, RuntimeArgs, SourceA
 from wormlab3d.midlines3d.frame_state import FrameState, BUFFER_NAMES, PARAMETER_NAMES, CAM_PARAMETER_NAMES
 from wormlab3d.midlines3d.mf_methods import generate_residual_targets, calculate_renders_losses, \
     calculate_neighbours_losses, calculate_parents_losses, calculate_aunts_losses, calculate_scores_losses, \
-    calculate_sigmas_losses, calculate_intensities_losses, calculate_smoothness_losses, calculate_temporal_losses
+    calculate_sigmas_losses, calculate_intensities_losses, calculate_smoothness_losses, calculate_temporal_losses, \
+    calculate_curvature_losses
 from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.nn.detector import ConvergenceDetector
@@ -38,6 +39,7 @@ PRINT_KEYS = [
     'loss/neighbours',
     'loss/parents',
     'loss/aunts',
+    'loss/curvature',
     'loss/temporal',
 ]
 
@@ -772,6 +774,7 @@ class Midline3DFinder:
             'sigmas': calculate_sigmas_losses(sigmas, sigmas_smoothed),
             'intensities': calculate_intensities_losses(intensities, intensities_smoothed),
             'smoothness': calculate_smoothness_losses(points, points_smoothed),
+            'curvature': calculate_curvature_losses(points_smoothed),
             'temporal': calculate_temporal_losses(points, points_prev),
         }
 

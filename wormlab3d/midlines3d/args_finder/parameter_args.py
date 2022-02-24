@@ -46,7 +46,8 @@ class ParameterArgs(BaseArgs):
             loss_sigmas: float = 1.,
             loss_intensities: float = 1.,
             loss_smoothness: float = 1.,
-            loss_temporal: float = 0.,  # todo
+            loss_curvature: float = 1.,
+            loss_temporal: float = 0.,
 
             algorithm: str = OPTIMISER_ADAM,
 
@@ -100,6 +101,7 @@ class ParameterArgs(BaseArgs):
         self.loss_sigmas = loss_sigmas
         self.loss_intensities = loss_intensities
         self.loss_smoothness = loss_smoothness
+        self.loss_curvature = loss_curvature
         self.loss_temporal = loss_temporal
 
         assert algorithm in OPTIMISER_ALGORITHMS
@@ -186,6 +188,8 @@ class ParameterArgs(BaseArgs):
                            help='Regularisation weight for penalising rendering intensity variance.')
         group.add_argument('--loss-smoothness', type=float, default=1.,
                            help='Regularisation weight for penalising curve non-smoothness.')
+        group.add_argument('--loss-curvature', type=float, default=1.,
+                           help='Regularisation weight for penalising curvature.')
         group.add_argument('--loss-temporal', type=float, default=0.,
                            help='Temporal smoothing weight between frames.')
 

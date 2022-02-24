@@ -24,12 +24,12 @@ setup(
         'pymongo >= 3.11, < 3.12',
         'blosc >= 1.10, < 1.11',
         'python-dotenv >= 0.16, < 1',
-        'torch >= 1.8, < 1.9',
+        'torch >= 1.10, < 1.11',
         'scikit-image >= 0.18, < 0.19',
         'scikit-learn >= 0.24, < 0.25',
         'simple-worm[inv] @ git+https://gitlab.com/tom-ranner/simple-worm.git@master',
         'tensorboard >= 2.4, < 2.5',
-        'torchvision >= 0.9, < 1.0'
+        'torchvision >= 0.11, < 1.0'
     ],
     extras_require={
         'test': [
