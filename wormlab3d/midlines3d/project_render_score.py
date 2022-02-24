@@ -155,8 +155,8 @@ class ProjectRenderScoreModel(nn.Module):
                 # Smooth with a gaussian kernel
                 k_sig = ks / 5
                 k = make_gaussian_kernel(k_sig, device=cp.device)
-                k = torch.stack([torch.stack([k] * 3)] * 3)
-                cps = F.conv1d(cp, weight=k)
+                k = torch.stack([k] * 3)[:, None, :]
+                cps = F.conv1d(cp, weight=k, groups=3)
 
                 # Average pooling smoothing
                 # cps = F.avg_pool1d(cp, kernel_size=ks, stride=1, padding=0)
