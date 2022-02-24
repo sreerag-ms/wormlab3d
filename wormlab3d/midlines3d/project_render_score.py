@@ -141,7 +141,7 @@ class ProjectRenderScoreModel(nn.Module):
 
             # Smooth the points, sigmas and intensities using average pooling convolutions.
             if d > 1:
-                ks = int(2**(d - 1)) + 1
+                ks = int(2 * d + 1)
                 pad_size = int(ks / 2)
 
                 # Smooth the curve points
