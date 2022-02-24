@@ -271,8 +271,9 @@ class Midline3DFinder:
         images = torch.from_numpy(np.stack(frame.images))
 
         # Threshold images to make the target masks
-        masks_fr = torch.zeros_like(images)
-        masks_fr[images >= self.parameters.masks_threshold] = 1
+        # masks_fr = torch.zeros_like(images)
+        # masks_fr[images >= self.parameters.masks_threshold] = 1
+        masks_fr = images / images.amax(dim=(1,2), keepdim=True)
         masks_fr[images < self.parameters.masks_threshold] = 0
         masks_fr = masks_fr.unsqueeze(0)
 
