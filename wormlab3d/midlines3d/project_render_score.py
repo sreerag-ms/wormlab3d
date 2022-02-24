@@ -5,8 +5,20 @@ import torch.nn.functional as F
 from torch import nn
 
 from wormlab3d import PREPARED_IMAGE_SIZE
-from wormlab3d.data.model.mf_parameters import RENDER_MODE_GAUSSIANS, RENDER_MODE_CIRCLES, RENDER_MODES
+from wormlab3d.data.model.mf_parameters import RENDER_MODE_GAUSSIANS, RENDER_MODES
 from wormlab3d.midlines3d.dynamic_cameras import DynamicCameras
+
+
+@torch.jit.script
+def make_gaussian_kernel(sigma: float) -> torch.Tensor:
+    ks = int(sigma * 5)
+    if ks % 2 == 0:
+        ks += 1
+    ts = torch.linspace(-ks // 2, ks // 2 + 1, ks)
+    gauss = torch.exp((-(ts / sigma)**2 / 2))
+    kernel = gauss / gauss.sum()
+
+    return kernel
 
 
 @torch.jit.script
@@ -54,14 +66,14 @@ def render_points(
     mmp2 = m - p2
     dst = mmp2[..., 0]**2 + mmp2[..., 1]**2
 
-    if render_mode == RENDER_MODE_GAUSSIANS:
+    if render_mode == 'gaussians':
         # Make (un-normalised) gaussian blobs
         blobs = torch.exp(-(dst / (2 * sigmas**2)))
 
         # The rendering is the sum of blobs where each blob is scaled by its intensity
         masks = (blobs * intensities).sum(dim=1)
 
-    elif render_mode == RENDER_MODE_CIRCLES:
+    elif render_mode == 'circles':
         # Make circles with radii equal to the sigmas
         blobs = torch.ceil(torch.relu(sigmas - dst))
 
@@ -129,7 +141,7 @@ class ProjectRenderScoreModel(nn.Module):
 
             # Smooth the points, sigmas and intensities using average pooling convolutions.
             if d > 1:
-                ks = int(d / 2) * 2 + 1
+                ks = 2**(d - 1) + 1
                 pad_size = int(ks / 2)
 
                 # Smooth the curve points
@@ -139,7 +151,16 @@ class ProjectRenderScoreModel(nn.Module):
                     torch.repeat_interleave(points_d[:, -1].unsqueeze(1), pad_size, dim=1)
                 ], dim=1)
                 cp = cp.permute(0, 2, 1)
-                cps = F.avg_pool1d(cp, kernel_size=ks, stride=1, padding=0)
+
+                # Smooth with a gaussian kernel
+                k_sig = ks / 5
+                k = make_gaussian_kernel(k_sig)
+                k = torch.stack([torch.stack([k] * 3)] * 3)
+                cps = F.conv1d(cp, weight=k)
+
+                # Average pooling smoothing
+                # cps = F.avg_pool1d(cp, kernel_size=ks, stride=1, padding=0)
+
                 points_d = cps.permute(0, 2, 1)
 
                 # Smooth the sigmas
