@@ -10,11 +10,11 @@ from wormlab3d.midlines3d.dynamic_cameras import DynamicCameras
 
 
 @torch.jit.script
-def make_gaussian_kernel(sigma: float) -> torch.Tensor:
+def make_gaussian_kernel(sigma: float, device: torch.device) -> torch.Tensor:
     ks = int(sigma * 5)
     if ks % 2 == 0:
         ks += 1
-    ts = torch.linspace(-ks // 2, ks // 2 + 1, ks)
+    ts = torch.linspace(-ks // 2, ks // 2 + 1, ks, device=device)
     gauss = torch.exp((-(ts / sigma)**2 / 2))
     kernel = gauss / gauss.sum()
 
@@ -154,7 +154,7 @@ class ProjectRenderScoreModel(nn.Module):
 
                 # Smooth with a gaussian kernel
                 k_sig = ks / 5
-                k = make_gaussian_kernel(k_sig)
+                k = make_gaussian_kernel(k_sig, device=cp.device)
                 k = torch.stack([torch.stack([k] * 3)] * 3)
                 cps = F.conv1d(cp, weight=k)
 
