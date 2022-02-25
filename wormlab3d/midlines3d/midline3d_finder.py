@@ -505,6 +505,7 @@ class Midline3DFinder:
         p = self.parameters
         self._configure_paths()
         self._init_tb_logger()
+        logger.info(f'Logs path: {self.logs_path}.')
 
         # Initial plots
         self._make_plots(pre_step=True)
@@ -706,7 +707,7 @@ class Midline3DFinder:
                 sigs = [*self.master_frame_state.get_state('sigmas'), ]
                 sigs.extend(*[f.get_state('sigmas') for f in self.frame_batch])
                 for sigs_i in sigs:
-                    sigs_i.data = sigs_i.clamp(min=1e-2)
+                    sigs_i.data = sigs_i.clamp(min=3e-2)
 
                 ints = [*self.master_frame_state.get_state('intensities'), ]
                 ints.extend(*[f.get_state('intensities') for f in self.frame_batch])

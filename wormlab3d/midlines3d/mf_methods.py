@@ -173,13 +173,29 @@ def calculate_parents_losses(
     losses = [torch.tensor(0., device=points[0].device), ]
     for d in range(1, D):
         points_d = points[d]
-        points_parent = torch.repeat_interleave(points[d - 1], repeats=2, dim=1)
+        parents = points[d - 1].detach()
+        points_parent = torch.repeat_interleave(parents, repeats=2, dim=1)
 
         # Calculate distances to parents
         dists = torch.norm(points_d - points_parent, dim=-1)
 
         # Distance to parent should be same for siblings
-        loss = torch.sum((torch.log(1 + dists[:, ::2]) - torch.log(1 + dists[:, 1::2]))**2)
+        # loss_equidistant = torch.sum((torch.log(1 + dists[:, ::2]) - torch.log(1 + dists[:, 1::2]))**2)
+
+        # Distance from child to parent should be equal to half the distance of the parent to it's neighbour
+        left_dist_target = torch.norm(parents[1:] - parents[:-1]) / 4
+        right_dist_target = torch.norm(parents[:-1] - parents[1:]) / 4
+        left_children_to_parent = dists[:, ::2]
+        right_children_to_parent = dists[:, 1::2]
+        loss_left_children = torch.sum(
+            (torch.log(1 + left_dist_target) -
+             torch.log(1 + left_children_to_parent[:, 1:]))**2
+        )
+        loss_right_children = torch.sum(
+            (torch.log(1 + right_dist_target) -
+             torch.log(1 + right_children_to_parent[:, :-1]))**2
+        )
+        loss = loss_left_children + loss_right_children
         losses.append(loss)
 
     return losses
@@ -242,25 +258,26 @@ def calculate_sigmas_losses(
     losses = []
     for d in range(D):
         sigmas_d = sigmas[d]
-        sigmas_smoothed_d = sigmas_smoothed[d]
+        # sigmas_smoothed_d = sigmas_smoothed[d]
 
         # Smoothness loss
-        loss = torch.sum((sigmas_d - sigmas_smoothed_d)**2)
+        # loss = torch.sum((sigmas_d - sigmas_smoothed_d)**2)
 
         # Penalise too much deviation from the mean
-        loss += 0.1 * torch.sum((torch.log(1 + sigmas_d) - torch.log(1 + sigmas_d.mean().detach()))**2)
+        # loss += 0.1 * torch.sum((torch.log(1 + sigmas_d) - torch.log(1 + sigmas_d.mean().detach()))**2)
 
-        # if d > 1:
-        #     n = sigmas_d.shape[1]
-        #     mp = int(n/2)
-        #     sd1 = torch.clamp(sigmas_d[:, :mp-1] - sigmas_d[:, 1:mp], min=0).sum()
-        #     sd2 = torch.clamp(sigmas_d[:, mp+1:] - sigmas_d[:, mp:-1], min=0).sum()
-        #     qp = int(n/4)
-        #     middle_section = sigmas_d[:, qp:3*qp]
-        #     sd3 = torch.sum((torch.log(1 + middle_section) - torch.log(1 + middle_section.mean().detach()))**2)
-        #     loss_sigmas_d = 0.1*sd1 + 0.1*sd2 + sd3
-        # else:
-        #     loss_sigmas_d = torch.sum((torch.log(1 + sigmas_d) - torch.log(1 + sigmas_d.mean().detach()))**2)
+        # Sigmas should be equal in the middle section but taper towards the ends
+        if d > 1:
+            n = sigmas_d.shape[1]
+            mp = int(n / 2)
+            sd1 = torch.clamp(sigmas_d[:, :mp - 1] - sigmas_d[:, 1:mp], min=0).sum()
+            sd2 = torch.clamp(sigmas_d[:, mp + 1:] - sigmas_d[:, mp:-1], min=0).sum()
+            qp = int(n / 4)
+            middle_section = sigmas_d[:, qp:3 * qp]
+            sd3 = torch.sum((torch.log(1 + middle_section) - torch.log(1 + middle_section.mean().detach()))**2)
+            loss = 0.1 * sd1 + 0.1 * sd2 + sd3
+        else:
+            loss = torch.sum((torch.log(1 + sigmas_d) - torch.log(1 + sigmas_d.mean().detach()))**2)
 
         losses.append(loss)
 
@@ -285,7 +302,7 @@ def calculate_intensities_losses(
         loss = torch.sum((intensities_d - intensities_smoothed_d)**2)
 
         # Penalise too much deviation from the mean
-        loss += 0.1 * torch.sum((torch.log(1 + intensities_d) - torch.log(1 + intensities_d.mean().detach()))**2)
+        # loss += 0.1 * torch.sum((torch.log(1 + intensities_d) - torch.log(1 + intensities_d.mean().detach()))**2)
 
         losses.append(loss)
 
@@ -333,7 +350,9 @@ def calculate_curvature_losses(
                 Kx = torch.gradient(Tx, spacing=(sp,))[0]
                 K[:, i] = Kx
             k = torch.norm(K, dim=-1)
-            loss = loss + torch.sum(k**2)
+
+            # Only penalise curvatures greater than 2-revolutions
+            loss = loss + k[k > (2 * 2 * torch.pi) / sl.sum()].sum()
         losses.append(loss)
 
     return losses

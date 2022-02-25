@@ -70,8 +70,8 @@ def render_points(
         # Make (un-normalised) gaussian blobs
         blobs = torch.exp(-(dst / (2 * sigmas**2)))
 
-        # The rendering is the sum of blobs where each blob is scaled by its intensity
-        masks = (blobs * intensities).sum(dim=1)
+        # The rendering is the maximum of the intensity-scaled overlapping blobs
+        masks = (blobs * intensities).amax(dim=1)
 
     elif render_mode == 'circles':
         # Make circles with radii equal to the sigmas
