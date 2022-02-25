@@ -16,8 +16,10 @@ PARAMETER_NAMES = [
     'cam_shifts',
     'points',
     'sigmas',
+    'exponents',
     'intensities',
     'camera_sigmas',
+    'camera_exponents',
     'camera_intensities',
 ]
 
@@ -242,6 +244,14 @@ class FrameState(nn.Module):
             sigmas.append(sigmas_d)
         self.register_parameter('sigmas', sigmas)
 
+        # Initialise the exponents all to 1
+        exponents = []
+        for d in range(mp.depth):
+            exponents_d = torch.ones(2**d)
+            exponents_d = nn.Parameter(exponents_d, requires_grad=mp.optimise_exponents)
+            exponents.append(exponents_d)
+        self.register_parameter('exponents', exponents)
+
         # Initialise the intensities all to 1
         intensities = []
         for d in range(mp.depth):
@@ -250,10 +260,14 @@ class FrameState(nn.Module):
             intensities.append(intensities_d)
         self.register_parameter('intensities', intensities)
 
-        # Camera sigma and intensity scale factors
+        # Camera sigma, exponent and intensity scale factors
         self.register_parameter(
             'camera_sigmas',
             nn.Parameter(torch.ones(3), requires_grad=mp.optimise_sigmas)
+        )
+        self.register_parameter(
+            'camera_exponents',
+            nn.Parameter(torch.ones(3), requires_grad=mp.optimise_exponents)
         )
         self.register_parameter(
             'camera_intensities',

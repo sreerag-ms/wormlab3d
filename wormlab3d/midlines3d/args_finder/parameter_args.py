@@ -34,6 +34,7 @@ class ParameterArgs(BaseArgs):
             optimise_cam_shifts: bool = True,
 
             optimise_sigmas: bool = True,
+            optimise_exponents: bool = True,
             optimise_intensities: bool = True,
 
             loss_masks_metric: str = LOSS_MSE,
@@ -44,6 +45,7 @@ class ParameterArgs(BaseArgs):
             loss_aunts: float = 1.,
             loss_scores: float = 0.,
             loss_sigmas: float = 1.,
+            loss_exponents: float = 1.,
             loss_intensities: float = 1.,
             loss_smoothness: float = 1.,
             loss_curvature: float = 1.,
@@ -54,6 +56,7 @@ class ParameterArgs(BaseArgs):
             lr_cam_coeffs: float = 1e-5,
             lr_points: float = 1e-3,
             lr_sigmas: float = 1e-3,
+            lr_exponents: float = 1e-3,
             lr_intensities: float = 1e-3,
             **kwargs
     ):
@@ -89,6 +92,7 @@ class ParameterArgs(BaseArgs):
         self.optimise_cam_shifts = optimise_cam_shifts
 
         self.optimise_sigmas = optimise_sigmas
+        self.optimise_exponents = optimise_exponents
         self.optimise_intensities = optimise_intensities
 
         self.loss_masks_metric = loss_masks_metric
@@ -99,6 +103,7 @@ class ParameterArgs(BaseArgs):
         self.loss_aunts = loss_aunts
         self.loss_scores = loss_scores
         self.loss_sigmas = loss_sigmas
+        self.loss_exponents = loss_exponents
         self.loss_intensities = loss_intensities
         self.loss_smoothness = loss_smoothness
         self.loss_curvature = loss_curvature
@@ -110,6 +115,7 @@ class ParameterArgs(BaseArgs):
         self.lr_cam_coeffs = lr_cam_coeffs
         self.lr_points = lr_points
         self.lr_sigmas = lr_sigmas
+        self.lr_exponents = lr_exponents
         self.lr_intensities = lr_intensities
 
     @classmethod
@@ -165,6 +171,8 @@ class ParameterArgs(BaseArgs):
 
         group.add_argument('--optimise-sigmas', type=str2bool, default=True,
                            help='Optimise the rendering sigmas. Default = True.')
+        group.add_argument('--optimise-exponents', type=str2bool, default=True,
+                           help='Optimise the rendering exponents. Default = True.')
         group.add_argument('--optimise-intensities', type=str2bool, default=True,
                            help='Optimise the rendering intensities. Default = True.')
 
@@ -184,6 +192,8 @@ class ParameterArgs(BaseArgs):
                            help='Regularisation weight for rewarding large projection scores.')
         group.add_argument('--loss-sigmas', type=float, default=1.,
                            help='Regularisation weight for penalising rendering sigma variance.')
+        group.add_argument('--loss-exponents', type=float, default=1.,
+                           help='Regularisation weight for penalising rendering exponents variance.')
         group.add_argument('--loss-intensities', type=float, default=1.,
                            help='Regularisation weight for penalising rendering intensity variance.')
         group.add_argument('--loss-smoothness', type=float, default=1.,
@@ -202,6 +212,8 @@ class ParameterArgs(BaseArgs):
                            help='Learning rate for the curve points.')
         group.add_argument('--lr-sigmas', type=float, default=1e-2,
                            help='Learning rate for the rendering sigmas.')
+        group.add_argument('--lr-exponents', type=float, default=1e-3,
+                           help='Learning rate for the rendering exponents.')
         group.add_argument('--lr-intensities', type=float, default=1e-3,
                            help='Learning rate for the rendering intensities.')
         return group

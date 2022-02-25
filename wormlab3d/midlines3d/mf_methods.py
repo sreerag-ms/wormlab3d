@@ -285,6 +285,28 @@ def calculate_sigmas_losses(
 
 
 @torch.jit.script
+def calculate_exponents_losses(
+        exponents: List[torch.Tensor],
+        exponents_smoothed: List[torch.Tensor],
+) -> List[torch.Tensor]:
+    """
+    The exponents should be smooth along the body and not vary too much.
+    """
+    D = len(exponents)
+    losses = []
+    for d in range(D):
+        exponents_d = exponents[d]
+        exponents_smoothed_d = exponents_smoothed[d]
+
+        # Smoothness loss
+        loss = torch.sum((exponents_d - exponents_smoothed_d)**2)
+
+        losses.append(loss)
+
+    return losses
+
+
+@torch.jit.script
 def calculate_intensities_losses(
         intensities: List[torch.Tensor],
         intensities_smoothed: List[torch.Tensor],

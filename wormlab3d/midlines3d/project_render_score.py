@@ -25,8 +25,10 @@ def make_gaussian_kernel(sigma: float, device: torch.device) -> torch.Tensor:
 def render_points(
         points: torch.Tensor,
         sigmas: torch.Tensor,
+        exponents: torch.Tensor,
         intensities: torch.Tensor,
         camera_sigmas: torch.Tensor,
+        camera_exponents: torch.Tensor,
         cameras_intensities: torch.Tensor,
         image_size: int = PREPARED_IMAGE_SIZE[0],
         render_mode: str = RENDER_MODE_GAUSSIANS
@@ -51,6 +53,11 @@ def render_points(
     sfs = camera_sigmas.reshape(bs * 3)[:, None, None, None]
     sigmas = sigmas * sfs
 
+    # Reshape and scale gaussian exponents
+    exponents = exponents.repeat_interleave(3, 0)[:, :, None, None]
+    sfs = camera_exponents.reshape(bs * 3)[:, None, None, None]
+    exponents = exponents * sfs
+
     # Reshape and scale intensities
     intensities = intensities.repeat_interleave(3, 0)[:, :, None, None]
     sfs = cameras_intensities.reshape(bs * 3)[:, None, None, None]
@@ -68,7 +75,7 @@ def render_points(
 
     if render_mode == 'gaussians':
         # Make (un-normalised) gaussian blobs
-        blobs = torch.exp(-(dst / (2 * sigmas**2)))
+        blobs = torch.exp(-(dst / (2 * sigmas**2))**exponents)
 
         # The rendering is the maximum of the intensity-scaled overlapping blobs
         masks = (blobs * intensities).amax(dim=1)
@@ -108,12 +115,15 @@ class ProjectRenderScoreModel(nn.Module):
             points: List[torch.Tensor],
             masks_target: List[torch.Tensor],
             sigmas: List[torch.Tensor],
+            exponents: List[torch.Tensor],
             intensities: List[torch.Tensor],
             camera_sigmas: torch.Tensor,
+            camera_exponents: torch.Tensor,
             camera_intensities: torch.Tensor,
             points_3d_base: torch.Tensor,
             points_2d_base: torch.Tensor,
     ) -> Tuple[
+        List[torch.Tensor],
         List[torch.Tensor],
         List[torch.Tensor],
         List[torch.Tensor],
@@ -130,6 +140,7 @@ class ProjectRenderScoreModel(nn.Module):
         scores = []
         points_smoothed = []
         sigmas_smoothed = []
+        exponents_smoothed = []
         intensities_smoothed = []
 
         # Run the parameters through the model at each scale to get the outputs
@@ -137,6 +148,7 @@ class ProjectRenderScoreModel(nn.Module):
             points_d = points[d]
             masks_target_d = masks_target[d]
             sigmas_d = sigmas[d]
+            exponents_d = exponents[d]
             intensities_d = intensities[d]
 
             # Smooth the points, sigmas and intensities using average pooling convolutions.
@@ -164,20 +176,31 @@ class ProjectRenderScoreModel(nn.Module):
                 points_d = cps.permute(0, 2, 1)
 
                 # Smooth the sigmas
+                # todo: this is the wrong padding - swap to repeated edge values
                 sigs = torch.cat([
-                    sigmas_d[:, 1:pad_size + 1].flip(dims=(1,)),
+                    torch.repeat_interleave(sigmas_d[:, 0].unsqueeze(1), pad_size, dim=1),
                     sigmas_d,
-                    sigmas_d[:, -pad_size - 1:-1].flip(dims=(1,)),
+                    torch.repeat_interleave(sigmas_d[:, -1].unsqueeze(1), pad_size, dim=1),
                 ], dim=1)
                 sigs = sigs[:, None, :]
                 sigs = F.avg_pool1d(sigs, kernel_size=ks, stride=1, padding=0)
                 sigmas_d = sigs.squeeze(1)
 
+                # Smooth the exponents
+                exps = torch.cat([
+                    torch.repeat_interleave(exponents_d[:, 0].unsqueeze(1), pad_size, dim=1),
+                    exponents_d,
+                    torch.repeat_interleave(exponents_d[:, -1].unsqueeze(1), pad_size, dim=1),
+                ], dim=1)
+                exps = exps[:, None, :]
+                exps = F.avg_pool1d(exps, kernel_size=ks, stride=1, padding=0)
+                exponents_d = exps.squeeze(1)
+
                 # Smooth the intensities
                 ints = torch.cat([
-                    intensities_d[:, 1:pad_size + 1].flip(dims=(1,)),
+                    torch.repeat_interleave(intensities_d[:, 0].unsqueeze(1), pad_size, dim=1),
                     intensities_d,
-                    intensities_d[:, -pad_size - 1:-1].flip(dims=(1,)),
+                    torch.repeat_interleave(intensities_d[:, -1].unsqueeze(1), pad_size, dim=1),
                 ], dim=1)
                 ints = ints[:, None, :]
                 ints = F.avg_pool1d(ints, kernel_size=ks, stride=1, padding=0)
@@ -185,8 +208,17 @@ class ProjectRenderScoreModel(nn.Module):
 
             # Project and render
             points_2d_d = self._project_to_2d(cam_coeffs, points_d, points_3d_base, points_2d_base)
-            masks_d, blobs = render_points(points_2d_d, sigmas_d, intensities_d, camera_sigmas, camera_intensities,
-                                           self.image_size, self.render_mode)
+            masks_d, blobs = render_points(
+                points_2d_d,
+                sigmas_d,
+                exponents_d,
+                intensities_d,
+                camera_sigmas,
+                camera_exponents,
+                camera_intensities,
+                self.image_size,
+                self.render_mode
+            )
 
             # Normalise blobs
             sum_ = blobs.amax(dim=(2, 3), keepdim=True)
@@ -201,9 +233,10 @@ class ProjectRenderScoreModel(nn.Module):
             scores.append(scores_d)
             points_smoothed.append(points_d)
             sigmas_smoothed.append(sigmas_d)
+            exponents_smoothed.append(exponents_d)
             intensities_smoothed.append(intensities_d)
 
-        return masks, points_2d, scores, points_smoothed, sigmas_smoothed, intensities_smoothed
+        return masks, points_2d, scores, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed
 
     def _project_to_2d(
             self,

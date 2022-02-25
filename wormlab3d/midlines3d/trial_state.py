@@ -146,9 +146,9 @@ class TrialState:
                 shape = (T, N, 3, 2)
             elif k == 'curve_lengths':
                 shape = (T, D)
-            elif k in ['sigmas', 'intensities', 'scores']:
+            elif k in ['sigmas', 'exponents', 'intensities', 'scores']:
                 shape = (T, N)
-            elif k in ['camera_sigmas', 'camera_intensities']:
+            elif k in ['camera_sigmas', 'camera_exponents', 'camera_intensities']:
                 shape = (T, 3)
             else:
                 raise RuntimeError(f'Unknown shape for buffer/parameter key: {k}')
@@ -192,8 +192,8 @@ class TrialState:
         assert self.start_frame <= frame_num <= self.end_frame, 'Requested frame is not available.'
         for k in BUFFER_NAMES + PARAMETER_NAMES:
             # Collate outputs generated at each depth
-            if k in ['points', 'points_2d', 'sigmas', 'intensities', 'scores', 'masks_target', 'masks_target_residuals',
-                     'masks_curve']:
+            if k in ['points', 'points_2d', 'sigmas', 'exponents', 'intensities', 'scores', 'masks_target',
+                     'masks_target_residuals', 'masks_curve']:
                 p_ms = frame_state.get_state(k)
 
                 # Only store the deepest target and output masks

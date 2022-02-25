@@ -38,6 +38,7 @@ class MFParameters(Document):
     optimise_cam_shifts = BooleanField()
 
     optimise_sigmas = BooleanField()
+    optimise_exponents = BooleanField()
     optimise_intensities = BooleanField()
 
     loss_masks_metric = StringField(choices=LOSSES)
@@ -48,6 +49,7 @@ class MFParameters(Document):
     loss_aunts = FloatField()
     loss_scores = FloatField()
     loss_sigmas = FloatField()
+    loss_exponents = FloatField()
     loss_intensities = FloatField()
     loss_smoothness = FloatField()
     loss_curvature = FloatField()
@@ -58,6 +60,7 @@ class MFParameters(Document):
     lr_cam_coeffs = FloatField()
     lr_points = FloatField()
     lr_sigmas = FloatField()
+    lr_exponents = FloatField()
     lr_intensities = FloatField()
 
     meta = {

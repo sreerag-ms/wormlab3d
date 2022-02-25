@@ -19,6 +19,7 @@ class RuntimeArgs(BaseArgs):
             plot_every_n_frames: int = -1,
             plot_n_examples: int = 1,
             plot_sigmas: bool = True,
+            plot_exponents: bool = True,
             plot_intensities: bool = True,
             plot_scores: bool = True,
             save_plots: bool = True,
@@ -36,6 +37,7 @@ class RuntimeArgs(BaseArgs):
         self.plot_every_n_frames = plot_every_n_frames
         self.plot_n_examples = plot_n_examples
         self.plot_sigmas = plot_sigmas
+        self.plot_exponents = plot_exponents
         self.plot_intensities = plot_intensities
         self.plot_scores = plot_scores
         self.save_plots = save_plots
@@ -74,6 +76,8 @@ class RuntimeArgs(BaseArgs):
                            help='Plot this number of examples from the batch at each iteration.')
         group.add_argument('--plot-sigmas', type=str2bool, default=True,
                            help='Plot sigmas.')
+        group.add_argument('--plot-exponents', type=str2bool, default=True,
+                           help='Plot exponents.')
         group.add_argument('--plot-intensities', type=str2bool, default=True,
                            help='Plot intensities.')
         group.add_argument('--plot-scores', type=str2bool, default=True,

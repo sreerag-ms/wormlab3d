@@ -23,7 +23,7 @@ from wormlab3d.midlines3d.frame_state import FrameState, BUFFER_NAMES, PARAMETER
 from wormlab3d.midlines3d.mf_methods import generate_residual_targets, calculate_renders_losses, \
     calculate_neighbours_losses, calculate_parents_losses, calculate_aunts_losses, calculate_scores_losses, \
     calculate_sigmas_losses, calculate_intensities_losses, calculate_smoothness_losses, calculate_temporal_losses, \
-    calculate_curvature_losses
+    calculate_curvature_losses, calculate_exponents_losses
 from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.nn.detector import ConvergenceDetector
@@ -357,8 +357,10 @@ class Midline3DFinder:
             {'params': cam_params, 'lr': p.lr_cam_coeffs},
             {'params': params['points'], 'lr': p.lr_points},
             {'params': params['sigmas'], 'lr': p.lr_sigmas},
+            {'params': params['exponents'], 'lr': p.lr_exponents},
             {'params': params['intensities'], 'lr': p.lr_intensities},
             {'params': params['camera_sigmas'], 'lr': p.lr_sigmas},
+            {'params': params['camera_exponents'], 'lr': p.lr_exponents},
             {'params': params['camera_intensities'], 'lr': p.lr_intensities},
         ]
 
@@ -645,10 +647,12 @@ class Midline3DFinder:
             points_3d_base = self.master_frame_state.get_state('points_3d_base').unsqueeze(0)
             points_2d_base = self.master_frame_state.get_state('points_2d_base').unsqueeze(0)
             camera_sigmas = self.master_frame_state.get_state('camera_sigmas').unsqueeze(0)
+            camera_exponents = self.master_frame_state.get_state('camera_exponents').unsqueeze(0)
             camera_intensities = self.master_frame_state.get_state('camera_intensities').unsqueeze(0)
             points = [self.master_frame_state.get_state('points')[d].unsqueeze(0) for d in range(D)]
             masks_target = [self.master_frame_state.get_state('masks_target')[d].unsqueeze(0) for d in range(D)]
             sigmas = [self.master_frame_state.get_state('sigmas')[d].unsqueeze(0) for d in range(D)]
+            exponents = [self.master_frame_state.get_state('exponents')[d].unsqueeze(0) for d in range(D)]
             intensities = [self.master_frame_state.get_state('intensities')[d].unsqueeze(0) for d in range(D)]
         else:
             cam_coeffs = torch.stack([f.get_state('cam_coeffs') for f in self.frame_batch])
@@ -656,22 +660,26 @@ class Midline3DFinder:
             points_3d_base = torch.stack([f.get_state('points_3d_base') for f in self.frame_batch])
             points_2d_base = torch.stack([f.get_state('points_2d_base') for f in self.frame_batch])
             camera_sigmas = torch.stack([f.get_state('camera_sigmas') for f in self.frame_batch])
+            camera_exponents = torch.stack([f.get_state('camera_exponents') for f in self.frame_batch])
             camera_intensities = torch.stack([f.get_state('camera_intensities') for f in self.frame_batch])
             points = [torch.stack([f.get_state('points')[d] for f in self.frame_batch]) for d in range(D)]
             masks_target = [torch.stack([f.get_state('masks_target')[d] for f in self.frame_batch]) for d in range(D)]
             sigmas = [torch.stack([f.get_state('sigmas')[d] for f in self.frame_batch]) for d in range(D)]
+            exponents = [torch.stack([f.get_state('exponents')[d] for f in self.frame_batch]) for d in range(D)]
             intensities = [torch.stack([f.get_state('intensities')[d] for f in self.frame_batch]) for d in range(D)]
 
         # Generate the outputs
-        masks, points_2d, scores, points_smoothed, sigmas_smoothed, intensities_smoothed = self.model.forward(
+        masks, points_2d, scores, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed = self.model.forward(
             cam_coeffs=cam_coeffs,
             points_3d_base=points_3d_base,
             points_2d_base=points_2d_base,
             points=points,
             masks_target=masks_target,
             sigmas=sigmas,
+            exponents=exponents,
             intensities=intensities,
             camera_sigmas=camera_sigmas,
+            camera_exponents=camera_exponents,
             camera_intensities=camera_intensities,
         )
 
@@ -684,13 +692,16 @@ class Midline3DFinder:
             points=points,
             masks_target=masks_target_residuals,
             sigmas=sigmas,
+            exponents=exponents,
             intensities=intensities,
             camera_sigmas=camera_sigmas,
+            camera_exponents=camera_exponents,
             camera_intensities=camera_intensities,
             masks=masks,
             scores=scores,
             points_smoothed=points_smoothed,
             sigmas_smoothed=sigmas_smoothed,
+            exponents_smoothed=exponents_smoothed,
             intensities_smoothed=intensities_smoothed,
         )
 
@@ -702,12 +713,17 @@ class Midline3DFinder:
             loss.backward()
             self.optimiser.step()
 
-            # Clamp the sigmas and intensities
+            # Clamp the sigmas, exponents and intensities
             with torch.no_grad():
                 sigs = [*self.master_frame_state.get_state('sigmas'), ]
                 sigs.extend(*[f.get_state('sigmas') for f in self.frame_batch])
                 for sigs_i in sigs:
                     sigs_i.data = sigs_i.clamp(min=3e-2)
+
+                exps = [*self.master_frame_state.get_state('exponents'), ]
+                exps.extend(*[f.get_state('exponents') for f in self.frame_batch])
+                for exps_i in exps:
+                    exps_i.data = exps_i.clamp(min=0.5, max=10)
 
                 ints = [*self.master_frame_state.get_state('intensities'), ]
                 ints.extend(*[f.get_state('intensities') for f in self.frame_batch])
@@ -738,13 +754,16 @@ class Midline3DFinder:
             points: torch.Tensor,
             masks_target: torch.Tensor,
             sigmas: torch.Tensor,
+            exponents: torch.Tensor,
             intensities: torch.Tensor,
             camera_sigmas: torch.Tensor,
+            camera_exponents: torch.Tensor,
             camera_intensities: torch.Tensor,
             masks: torch.Tensor,
             scores: torch.Tensor,
             points_smoothed: torch.Tensor,
             sigmas_smoothed: torch.Tensor,
+            exponents_smoothed: torch.Tensor,
             intensities_smoothed: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, List[torch.Tensor], Dict[str, float]]:
         """
@@ -774,6 +793,7 @@ class Midline3DFinder:
             'aunts': calculate_aunts_losses(points),
             'scores': calculate_scores_losses(scores),
             'sigmas': calculate_sigmas_losses(sigmas, sigmas_smoothed),
+            'exponents': calculate_exponents_losses(exponents, exponents_smoothed),
             'intensities': calculate_intensities_losses(intensities, intensities_smoothed),
             'smoothness': calculate_smoothness_losses(points, points_smoothed),
             'curvature': calculate_curvature_losses(points_smoothed),
@@ -812,15 +832,21 @@ class Midline3DFinder:
                     dist_parent = torch.norm(points[d] - curve_points_parent, dim=-1)
                     _log_parameter_stats(d, 'dists/parent', dist_parent)
 
-                # Scores, sigmas, intensities
+                # Scores, sigmas, exponents and intensities
                 _log_parameter_stats(d, 'scores', scores[d])
                 _log_parameter_stats(d, 'sigmas', sigmas[d])
+                _log_parameter_stats(d, 'exponents', exponents[d])
                 _log_parameter_stats(d, 'intensities', intensities[d])
 
         # Sigma cameras sfs should average 1
         camera_sigmas_loss = torch.sum((camera_sigmas - 1)**2)
         loss_global += camera_sigmas_loss
         stats['loss/camera_sigmas'] = camera_sigmas_loss.item()
+
+        # Exponents cameras sfs should average 1
+        camera_exponents_loss = torch.sum((camera_exponents - 1)**2)
+        loss_global += camera_exponents_loss
+        stats['loss/camera_exponents'] = camera_exponents_loss.item()
 
         # Intensities cameras sfs should average 1
         camera_intensities_loss = torch.sum((camera_intensities - 1)**2)
@@ -842,6 +868,7 @@ class Midline3DFinder:
             # Log the scale factors
             for i in range(3):
                 stats[f'camera_sigmas/{i}'] = camera_sigmas[:, i].mean()
+                stats[f'camera_exponents/{i}'] = camera_exponents[:, i].mean()
                 stats[f'camera_intensities/{i}'] = camera_intensities[:, i].mean()
 
         # Sum the global losses with the losses generated at each depth
@@ -1059,16 +1086,17 @@ class Midline3DFinder:
 
     def _plot_point_stats(self):
         """
-        Plot the point scores, sigmas and intensities for the curves.
+        Plot the point scores, sigmas, exponents and intensities for the curves.
         """
         ra = self.runtime_args
         D = self.parameters.depth
         cmap = plt.get_cmap('jet')
         scores = self.master_frame_state.get_state('scores')
         sigmas = self.master_frame_state.get_state('sigmas')
+        exponents = self.master_frame_state.get_state('exponents')
         intensities = self.master_frame_state.get_state('intensities')
 
-        n_rows = int(ra.plot_scores) + int(ra.plot_sigmas) + int(ra.plot_intensities)
+        n_rows = int(ra.plot_scores) + int(ra.plot_sigmas) + int(ra.plot_exponents) + int(ra.plot_intensities)
         if n_rows == 0:
             return
 
@@ -1085,6 +1113,12 @@ class Midline3DFinder:
             camera_sigmas = self.master_frame_state.get_state('camera_sigmas')
             sfs = ', '.join([f'{sf:.3f}' for sf in camera_sigmas])
             ax_sigmas.set_title(f'sigmas\nCameras: {sfs}.')
+            i += 1
+        if ra.plot_exponents:
+            ax_exponents = axes[i]
+            camera_exponents = self.master_frame_state.get_state('camera_exponents')
+            sfs = ', '.join([f'{sf:.3f}' for sf in camera_exponents])
+            ax_exponents.set_title(f'exponents\nCameras: {sfs}.')
             i += 1
         if ra.plot_intensities:
             ax_intensities = axes[i]
@@ -1115,6 +1149,12 @@ class Midline3DFinder:
                 sigmas_d = to_numpy(sigmas[d])
                 ax_sigmas.plot(positions[d], sigmas_d, **plot_args)
                 ax_sigmas.scatter(x=positions[d], y=sigmas_d, **scatter_args)
+
+            # Exponents
+            if ra.plot_exponents:
+                exponents_d = to_numpy(exponents[d])
+                ax_exponents.plot(positions[d], exponents_d, **plot_args)
+                ax_exponents.scatter(x=positions[d], y=exponents_d, **scatter_args)
 
             # Intensities
             if ra.plot_intensities:
