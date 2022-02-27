@@ -118,7 +118,7 @@ def calculate_renders_losses(
         target_d = masks_target[d]
 
         # Add some mask to the target so only give errors where the projection is
-        # target_d[masks_d < 0.01] = 0
+        target_d[masks_d < 0.01] = 0
 
         if multiscale:
             # Multiscale loss
