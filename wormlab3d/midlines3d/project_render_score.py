@@ -174,14 +174,14 @@ class ProjectRenderScoreModel(nn.Module):
                 cps = F.conv1d(cp, weight=k, groups=3)
                 points_d = cps.permute(0, 2, 1)
 
-                # Smooth the sigmas, exponents and intensities
-                sigmas_d = self._smooth_parameter(sigmas_d, ks)
-                exponents_d = self._smooth_parameter(exponents_d, ks)
-                intensities_d = self._smooth_parameter(sigmas_d, ks)
-
                 # Ensure tapering of rendered worm to avoid holes
                 sigmas_d = self._taper_parameter(sigmas_d)
                 intensities_d = self._taper_parameter(intensities_d)
+
+                # Smooth the sigmas, exponents and intensities
+                sigmas_d = self._smooth_parameter(sigmas_d, ks)
+                exponents_d = self._smooth_parameter(exponents_d, ks)
+                intensities_d = self._smooth_parameter(intensities_d, ks)
 
             # Project and render
             points_2d_d = self._project_to_2d(cam_coeffs, points_d, points_3d_base, points_2d_base)
@@ -236,20 +236,20 @@ class ProjectRenderScoreModel(nn.Module):
         """
         N = param.shape[1]
         mp = int(N / 2)
-        tapered = torch.zeros_like(param)
+        tapered = torch.zeros_like(param) + 1e-5
         tapered[:, mp - 1:mp + 1] = param[:, mp - 1:mp + 1]
 
         # Middle to head
         for i in range(mp - 2, -1, -1):
             tapered[:, i] = torch.amin(
-                torch.stack([param[:, i], tapered[:, i + 1]], dim=1),
+                torch.stack([param[:, i], tapered[:, i + 1].clone()], dim=1),
                 dim=1
             )
 
         # Middle to tail
         for i in range(mp + 1, N):
             tapered[:, i] = torch.amin(
-                torch.stack([param[:, i], tapered[:, i - 1]], dim=1),
+                torch.stack([param[:, i], tapered[:, i - 1].clone()], dim=1),
                 dim=1
             )
 
