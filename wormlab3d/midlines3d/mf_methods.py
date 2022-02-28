@@ -49,6 +49,7 @@ def make_rotation_matrix(
 def generate_residual_targets(
         masks_target: List[torch.Tensor],
         masks: List[torch.Tensor],
+        detection_masks: List[torch.Tensor],
 ) -> List[torch.Tensor]:
     """
     Generate the target masks including residual passed up from high-resolution to low-resolution.
@@ -73,12 +74,12 @@ def generate_residual_targets(
             sf = 1 / (2**(d2 - d))
             residual_next += sf * masks_diffs[d2]
         target_d = target_d + residual_next
+
+        # Only allow the target through where there was something detected
+        target_d[detection_masks[d] < 0.01] = 0
+
         target_d = torch.clamp(target_d, min=0, max=1)
         target_d = target_d.detach()
-
-        # Add some mask to the target so only give errors where the projection is
-        # target_d[masks_d < 0.01] = 0
-
         targets.append(target_d)
 
     return targets
@@ -116,9 +117,6 @@ def calculate_renders_losses(
     for d in range(D):
         masks_d = masks[d]
         target_d = masks_target[d]
-
-        # Add some mask to the target so only give errors where the projection is
-        target_d[masks_d < 0.01] = 0
 
         if multiscale:
             # Multiscale loss
@@ -183,8 +181,8 @@ def calculate_parents_losses(
         # loss_equidistant = torch.sum((torch.log(1 + dists[:, ::2]) - torch.log(1 + dists[:, 1::2]))**2)
 
         # Distance from child to parent should be equal to half the distance of the parent to it's neighbour
-        left_dist_target = torch.norm(parents[1:] - parents[:-1]) / 4
-        right_dist_target = torch.norm(parents[:-1] - parents[1:]) / 4
+        left_dist_target = torch.norm(parents[:, 1:] - parents[:, :-1], dim=-1) / 4
+        right_dist_target = torch.norm(parents[:, :-1] - parents[:, 1:], dim=-1) / 4
         left_children_to_parent = dists[:, ::2]
         right_children_to_parent = dists[:, 1::2]
         loss_left_children = torch.sum(

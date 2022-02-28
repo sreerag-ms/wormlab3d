@@ -673,7 +673,7 @@ class Midline3DFinder:
             intensities = [torch.stack([f.get_state('intensities')[d] for f in self.frame_batch]) for d in range(D)]
 
         # Generate the outputs
-        masks, points_2d, scores, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed = self.model.forward(
+        masks, detection_masks, points_2d, scores, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed = self.model.forward(
             cam_coeffs=cam_coeffs,
             points_3d_base=points_3d_base,
             points_2d_base=points_2d_base,
@@ -688,7 +688,7 @@ class Midline3DFinder:
         )
 
         # Generate targets with added residuals
-        masks_target_residuals = generate_residual_targets(masks_target, masks)
+        masks_target_residuals = generate_residual_targets(masks_target, masks, detection_masks)
 
         # Calculate the losses
         loss, loss_global, losses_depths, stats = self._calculate_losses(
@@ -717,20 +717,30 @@ class Midline3DFinder:
             loss.backward()
 
             # Weight the point gradients by the relative tapered scores
-            p = self.master_frame_state.get_state('points')
+            points = self.master_frame_state.get_state('points')
             for d in range(self.parameters.depth):
                 tapered_scores = scores[d][0, :, None].detach()
                 max_score = tapered_scores.amax(keepdim=True)
                 if max_score > 0:
                     rel_scores = tapered_scores / max_score
-                    p[d].grad = p[d].grad * rel_scores
+                    points[d].grad = points[d].grad * rel_scores
                 else:
-                    p[d].grad.zero_()
+                    points[d].grad.zero_()
 
             self.optimiser.step()
 
-            # Clamp the sigmas, exponents and intensities
             with torch.no_grad():
+                # Adjust points to be a quarter of the mean segment-length between parent points
+                for d in range(2, self.parameters.depth):
+                    points_d = points[d]
+                    parents = points_smoothed[d - 1][0]
+                    x = torch.mean(torch.norm(parents[1:] - parents[:-1], dim=-1)) / 4
+                    parents_repeated = torch.repeat_interleave(parents, repeats=2, dim=0)
+                    direction = points_d - parents_repeated
+                    points_anchored = parents_repeated + x * (direction / torch.norm(direction, dim=-1, keepdim=True))
+                    points[d].data = torch.cat([points_d[0][None, :], points_anchored[1:-1], points_d[-1][None, :]], dim=0)
+
+                # Clamp the sigmas, exponents and intensities
                 sigs = [*self.master_frame_state.get_state('sigmas'), ]
                 sigs.extend(*[f.get_state('sigmas') for f in self.frame_batch])
                 for sigs_i in sigs:

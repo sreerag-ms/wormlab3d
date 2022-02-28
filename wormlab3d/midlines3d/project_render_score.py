@@ -129,6 +129,7 @@ class ProjectRenderScoreModel(nn.Module):
         List[torch.Tensor],
         List[torch.Tensor],
         List[torch.Tensor],
+        List[torch.Tensor],
         List[torch.Tensor]
     ]:
         """
@@ -136,6 +137,7 @@ class ProjectRenderScoreModel(nn.Module):
         """
         D = len(points)
         masks = []
+        detection_masks = []
         points_2d = []
         scores = []
         points_smoothed = []
@@ -157,10 +159,12 @@ class ProjectRenderScoreModel(nn.Module):
 
                 # Distance to parent points fixed as a quarter of the mean segment-length between parents
                 parents = points_smoothed[d - 1]
-                x = torch.mean(torch.norm(parents[:, 1:] - parents[:, :-1], dim=-1))
+                x = torch.mean(torch.norm(parents[:, 1:] - parents[:, :-1], dim=-1)) / 4
                 parents_repeated = torch.repeat_interleave(parents, repeats=2, dim=1)
-                points_anchored = parents_repeated + x * (points_d - parents_repeated)
-                points_d = torch.cat([points_d[:, 0][:, None, :], points_anchored[:, 1:-1], points_d[:, -1][:, None, :]], dim=1)
+                direction = points_d - parents_repeated
+                points_anchored = parents_repeated + x * (direction / torch.norm(direction, dim=-1, keepdim=True))
+                points_d = torch.cat(
+                    [points_d[:, 0][:, None, :], points_anchored[:, 1:-1], points_d[:, -1][:, None, :]], dim=1)
 
                 # Smooth the curve points
                 pad_size = int(ks / 2)
@@ -214,7 +218,19 @@ class ProjectRenderScoreModel(nn.Module):
             if d > 1:
                 scores_d = self._taper_parameter(scores_d)
 
+                # Make new render with blobs scaled by relative scores to get detection masks
+                max_score = scores_d.amax(keepdim=True)
+                if max_score.item() > 0:
+                    rel_scores = scores_d / max_score
+                    sf = rel_scores[:, None, :, None, None]
+                    detection_masks_d = (blobs * sf).amax(dim=2)
+                else:
+                    detection_masks_d = masks_d.clone()
+            else:
+                detection_masks_d = masks_d.clone()
+
             masks.append(masks_d)
+            detection_masks.append(detection_masks_d)
             points_2d.append(points_2d_d.transpose(1, 2))
             scores.append(scores_d)
             points_smoothed.append(points_d)
@@ -222,7 +238,7 @@ class ProjectRenderScoreModel(nn.Module):
             exponents_smoothed.append(exponents_d)
             intensities_smoothed.append(intensities_d)
 
-        return masks, points_2d, scores, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed
+        return masks, detection_masks, points_2d, scores, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed
 
     def _smooth_parameter(self, param: torch.Tensor, ks: int) -> torch.Tensor:
         """
