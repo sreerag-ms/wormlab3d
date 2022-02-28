@@ -154,9 +154,16 @@ class ProjectRenderScoreModel(nn.Module):
             # Smooth the points, sigmas and intensities using average pooling convolutions.
             if d > 1:
                 ks = int(2 * d + 1)
-                pad_size = int(ks / 2)
+
+                # Distance to parent points fixed as a quarter of the mean segment-length between parents
+                parents = points_smoothed[d - 1]
+                x = torch.mean(torch.norm(parents[:, 1:] - parents[:, :-1], dim=-1))
+                parents_repeated = torch.repeat_interleave(parents, repeats=2, dim=1)
+                points_anchored = parents_repeated + x * (points_d - parents_repeated)
+                points_d = torch.cat([points_d[:, 0][:, None, :], points_anchored[:, 1:-1], points_d[:, -1][:, None, :]], dim=1)
 
                 # Smooth the curve points
+                pad_size = int(ks / 2)
                 cp = torch.cat([
                     torch.repeat_interleave(points_d[:, 0].unsqueeze(1), pad_size, dim=1),
                     points_d,
@@ -204,6 +211,8 @@ class ProjectRenderScoreModel(nn.Module):
 
             # Score the points
             scores_d = (blobs_normed * masks_target_d.unsqueeze(2)).sum(dim=(3, 4)).mean(dim=1)
+            if d > 1:
+                scores_d = self._taper_parameter(scores_d)
 
             masks.append(masks_d)
             points_2d.append(points_2d_d.transpose(1, 2))

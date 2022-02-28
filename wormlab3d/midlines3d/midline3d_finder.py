@@ -39,6 +39,10 @@ PRINT_KEYS = [
     'loss/neighbours',
     'loss/parents',
     'loss/aunts',
+    'loss/sigmas',
+    'loss/exponents',
+    'loss/intensities',
+    'loss/smoothness',
     'loss/curvature',
     'loss/temporal',
 ]
@@ -711,6 +715,18 @@ class Midline3DFinder:
         else:
             self.optimiser.zero_grad()
             loss.backward()
+
+            # Weight the point gradients by the relative tapered scores
+            p = self.master_frame_state.get_state('points')
+            for d in range(self.parameters.depth):
+                tapered_scores = scores[d][0, :, None].detach()
+                max_score = tapered_scores.amax(keepdim=True)
+                if max_score > 0:
+                    rel_scores = tapered_scores / max_score
+                    p[d].grad = p[d].grad * rel_scores
+                else:
+                    p[d].grad.zero_()
+
             self.optimiser.step()
 
             # Clamp the sigmas, exponents and intensities
