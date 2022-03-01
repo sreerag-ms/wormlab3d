@@ -22,6 +22,7 @@ class MFParameters(Document):
     sigmas_init = FloatField()
     masks_threshold = FloatField()
     render_mode = StringField(choices=RENDER_MODES)
+    frame_skip = IntField()
 
     n_steps_init = IntField()
     n_steps_max = IntField()

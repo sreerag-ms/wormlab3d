@@ -13,13 +13,13 @@ from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from torch.backends import cudnn
 from torch.optim import Optimizer
 from torch.utils.tensorboard import SummaryWriter
-from torchvision.transforms.functional import gaussian_blur
 
 from wormlab3d import logger, LOGS_PATH, PREPARED_IMAGE_SIZE, START_TIMESTAMP
-from wormlab3d.data.model import Trial, Cameras, MFCheckpoint, MFParameters, Reconstruction
+from wormlab3d.data.model import Trial, MFCheckpoint, MFParameters, Reconstruction
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
 from wormlab3d.midlines3d.args_finder import ParameterArgs, RuntimeArgs, SourceArgs
-from wormlab3d.midlines3d.frame_state import FrameState, BUFFER_NAMES, PARAMETER_NAMES, CAM_PARAMETER_NAMES
+from wormlab3d.midlines3d.frame_state import FrameState, BUFFER_NAMES, PARAMETER_NAMES, CAM_PARAMETER_NAMES, \
+    TRANSIENTS_NAMES
 from wormlab3d.midlines3d.mf_methods import generate_residual_targets, calculate_renders_losses, \
     calculate_neighbours_losses, calculate_parents_losses, calculate_aunts_losses, calculate_scores_losses, \
     calculate_sigmas_losses, calculate_intensities_losses, calculate_smoothness_losses, calculate_temporal_losses, \
@@ -113,7 +113,7 @@ class Midline3DFinder:
         """
         Allow batched parameters to be accessed as member variables.
         """
-        if key in PARAMETER_NAMES + BUFFER_NAMES:
+        if key in PARAMETER_NAMES + BUFFER_NAMES + TRANSIENTS_NAMES:
             return [fs.get_state(key) for fs in self.frame_batch]
 
     def _init_parameters(self) -> MFParameters:
@@ -248,93 +248,28 @@ class Midline3DFinder:
         )
 
         # Master state
-        self.master_frame_state = self._init_frame_state(self.trial_state.frame_nums[0])
+        self.master_frame_state = self.trial_state.init_frame_state(
+            self.trial_state.frame_nums[0],
+            trainable=True,
+            load=self.runtime_args.resume,
+            device=self.device
+        )
 
         # Prepare batch state
         self.frame_batch: List[FrameState] = []
         mfs = self.master_frame_state if self.parameters.use_master else None
         for i in range(self.parameters.window_size):
-            fs = self._init_frame_state(self.trial_state.frame_nums[i], master_frame_state=mfs)
+            fs = self.trial_state.init_frame_state(
+                self.trial_state.frame_nums[i],
+                trainable=True,
+                load=self.runtime_args.resume,
+                master_frame_state=mfs,
+                device=self.device
+            )
             self.frame_batch.append(fs)
 
-        # Previous frame state
-        self.prev_frame_state: FrameState = None
-
-    def _init_frame_state(
-            self,
-            frame_num: int,
-            prev_frame_state: FrameState = None,
-            master_frame_state: FrameState = None
-    ) -> FrameState:
-        """
-        Load the frame.
-        """
-        frame = self.trial.get_frame(frame_num)
-        logger.info(f'Initialising frame state for frame #{frame_num} (id={frame.id}).')
-
-        # Load images
-        if frame.images is None or len(frame.images) != 3:
-            raise RuntimeError('Frame does not have a triplet of prepared images. Aborting!')
-        images = torch.from_numpy(np.stack(frame.images))
-
-        # Threshold images to make the target masks
-        # masks_fr = torch.zeros_like(images)
-        # masks_fr[images >= self.parameters.masks_threshold] = 1
-        masks_fr = images / images.amax(dim=(1, 2), keepdim=True)
-        masks_fr[images < self.parameters.masks_threshold] = 0
-        masks_fr = masks_fr.unsqueeze(0)
-
-        # Linearly interpolate target mask resolutions from 8x8 to 200x200
-        sizes = torch.linspace(8, PREPARED_IMAGE_SIZE[0], self.parameters.depth).to(torch.int32)
-
-        # Generate downsampled target masks
-        masks = []
-        for d in range(self.parameters.depth):
-            image_size = sizes[d]
-
-            if d < self.parameters.depth - 1:
-                # Downsample the full resolution version to the reduced size
-                masks_ds = F.interpolate(masks_fr, (image_size, image_size), mode='nearest')
-
-                # Upsample to restore the target size
-                masks_rs = F.interpolate(masks_ds, PREPARED_IMAGE_SIZE, mode='bilinear', align_corners=False)
-
-                # Add a gaussian-blur, smaller at lower depths.
-                blur_sigma = 1 / (2**(d + 1))
-                ks = int(blur_sigma * 5)
-                if ks % 2 == 0:
-                    ks += 1
-                masks_rs = gaussian_blur(masks_rs, kernel_size=ks, sigma=blur_sigma)
-            else:
-                masks_rs = masks_fr
-
-            masks_rs = masks_rs.squeeze(0)
-            masks.append(masks_rs)
-
-        # Load cameras
-        cameras: Cameras = frame.get_cameras()
-
-        # Use the fixed (interpolated and smoothed) centre point if available
-        if frame.centre_3d_fixed is not None:
-            p3d = frame.centre_3d_fixed
-        else:
-            p3d = frame.centre_3d
-
-        # Initialise frame state
-        frame_state = FrameState(
-            frame_num=frame_num,
-            images=images,
-            masks_target=masks,
-            cameras=cameras,
-            points_3d_base=torch.tensor(p3d.point_3d),
-            points_2d_base=torch.tensor(p3d.reprojected_points_2d),
-            parameters=self.parameters,
-            prev_frame_state=prev_frame_state,
-            master_frame_state=master_frame_state
-        )
-        frame_state.to(self.device)
-
-        return frame_state
+        # Last optimised frame state
+        self.last_frame_state: FrameState = None
 
     def _init_optimiser(self) -> Optimizer:
         """
@@ -518,11 +453,13 @@ class Midline3DFinder:
 
         # Train
         w2 = int((p.window_size - 1) / 2)
+        frame_skip = 1 if p.frame_skip is None else p.frame_skip
         first_frame = self.checkpoint.frame_num
-        n_frames = len(self.trial_state) - first_frame + 1
+        frame_nums = list(range(first_frame, self.trial_state.frame_nums[-1]))[::frame_skip]
+        n_frames = len(frame_nums)
 
-        for i, frame_num in enumerate(range(first_frame, self.trial_state.frame_nums[-1])):
-            logger.info(f'======== Training frame #{frame_num} ({i}/{n_frames}) ========')
+        for i, frame_num in enumerate(frame_nums):
+            logger.info(f'======== Training frame #{frame_num} ({i + 1}/{n_frames}) ========')
             active_idx = min(i, w2)
             self.frame_num = frame_num
             self.active_idx = active_idx
@@ -543,17 +480,60 @@ class Midline3DFinder:
             self.reconstruction.end_frame = max(frame_num + 1, self.reconstruction.end_frame)
             self.reconstruction.save()
 
+            # Interpolate skipped frame parameters
+            if p.frame_skip and self.last_frame_state is not None:
+                logger.info('Interpolating skipped frames.')
+                for k in BUFFER_NAMES + PARAMETER_NAMES:
+                    var = self.trial_state.get(k, start_frame=self.last_frame_state.frame_num, end_frame=frame_num + 1)
+                    v = torch.from_numpy(np.stack([var[0], var[-1]]))
+                    v = v.to(self.device)
+                    v = v.reshape([1, 2, -1])
+                    v = v.permute(0, 2, 1)
+                    v = F.interpolate(v, size=p.frame_skip + 1, mode='linear', align_corners=True)
+                    v = v.squeeze().T.reshape(var.shape)
+                    v = v.numpy()
+                    var[1:-1] = v[1:-1]
+                self.trial_state.save()
+
             # Make plots
-            if self.runtime_args.plot_every_n_frames > -1 \
-                    and (i + 1) % self.runtime_args.plot_every_n_frames == 0:
-                self._make_plots(final_step=True)
+            if self.runtime_args.plot_every_n_frames > -1:
+                if self.last_frame_state is None \
+                        and (frame_num - first_frame + 1) % self.runtime_args.plot_every_n_frames == 0:
+                    self._make_plots(final_step=True)
+                else:
+                    for j in range(p.frame_skip):
+                        plot_frame_num = self.last_frame_state.frame_num + j + 1
+                        if (plot_frame_num - first_frame + 1) % self.runtime_args.plot_every_n_frames == 0:
+                            if plot_frame_num == self.master_frame_state.frame_num:
+                                fs = self.master_frame_state
+                                skipped = False
+                            else:
+                                fs = self.trial_state.init_frame_state(frame_num=plot_frame_num)
+                                skipped = True
+                            self._make_plots(final_step=True, frame_state=fs, skipped=skipped)
+
+            # Freeze just-optimised frame
+            self.last_frame_state = self.trial_state.init_frame_state(
+                frame_num=frame_num,
+                trainable=False,
+                load=False,
+                prev_frame_state=self.master_frame_state,
+                device=self.device
+            )
 
             # Roll window
-            next_frame = self._init_frame_state(frame_num + w2 + 1, self.master_frame_state)
+            next_frame_num = frame_num + w2 + frame_skip
+            next_frame = self.trial_state.init_frame_state(
+                frame_num=next_frame_num,
+                trainable=True,
+                load=False,
+                prev_frame_state=self.master_frame_state,
+                device=self.device
+            )
             if p.use_master:
                 self.master_frame_state.frame_num = next_frame.frame_num
                 with torch.no_grad():
-                    for k in BUFFER_NAMES + PARAMETER_NAMES:
+                    for k in BUFFER_NAMES + PARAMETER_NAMES + TRANSIENTS_NAMES:
                         self.master_frame_state.set_state(k, next_frame.get_state(k))
 
             for j in range(p.window_size):
@@ -565,12 +545,18 @@ class Midline3DFinder:
                     if j + 1 < p.window_size:
                         next_frame = self.frame_batch[j + 1]
                     elif i + w2 < len(self.trial_state):
-                        next_frame = self._init_frame_state(frame_num + w2 + 1, curr_frame)
+                        next_frame = self.trial_state.init_frame_state(
+                            frame_num=next_frame_num,
+                            trainable=True,
+                            load=False,
+                            prev_frame_state=curr_frame,
+                            device=self.device
+                        )
                     else:
                         continue
 
                     with torch.no_grad():
-                        for k in BUFFER_NAMES + PARAMETER_NAMES:
+                        for k in BUFFER_NAMES + PARAMETER_NAMES + TRANSIENTS_NAMES:
                             curr_frame.set_state(k, next_frame.get_state(k))
                     curr_frame.frame_num = next_frame.frame_num
 
@@ -589,14 +575,6 @@ class Midline3DFinder:
         max_steps = p.n_steps_init if first_frame else p.n_steps_max
         start_step = self.checkpoint.step_frame + 1
         final_step = start_step + max_steps
-
-        # Get previous frame state
-        if self.checkpoint.frame_num > self.reconstruction.start_frame:
-            pp = self.trial_state.get('points')[self.checkpoint.frame_num - 1]
-            pp = torch.from_numpy(pp).to(self.device)
-            self.prev_points = [pp[2**d - 1:2**(d + 1) - 1] for d in range(self.parameters.depth)]
-        else:
-            self.prev_points = None
 
         # Train the cam coeffs and multiscale curve
         for step in range(start_step, final_step):
@@ -738,7 +716,11 @@ class Midline3DFinder:
                     parents_repeated = torch.repeat_interleave(parents, repeats=2, dim=0)
                     direction = points_d - parents_repeated
                     points_anchored = parents_repeated + x * (direction / torch.norm(direction, dim=-1, keepdim=True))
-                    points[d].data = torch.cat([points_d[0][None, :], points_anchored[1:-1], points_d[-1][None, :]], dim=0)
+                    points[d].data = torch.cat([
+                        points_d[0][None, :],
+                        points_anchored[1:-1],
+                        points_d[-1][None, :]
+                    ], dim=0)
 
                 # Clamp the sigmas, exponents and intensities
                 sigs = [*self.master_frame_state.get_state('sigmas'), ]
@@ -806,8 +788,8 @@ class Midline3DFinder:
                 stats[f'{key_}/{d_}/var'] = var_.var()
 
         # Previous points used for temporal losses
-        if self.prev_points is not None:
-            points_prev = self.prev_points
+        if self.last_frame_state is not None:
+            points_prev = self.last_frame_state.get_state('points')
         else:
             points_prev = None
 
@@ -960,26 +942,30 @@ class Midline3DFinder:
             self,
             pre_step: bool = False,
             final_step: bool = False,
+            frame_state: FrameState = None,
+            skipped: bool = False
     ):
         """
         Generate some plots.
         """
+        if frame_state is None:
+            frame_state = self.master_frame_state
 
         # Make initial plots for all batch elements
         if pre_step:
-            self._plot_3d()
+            self._plot_3d(frame_state, skipped)
             return
 
         if final_step or (
                 self.runtime_args.plot_every_n_steps > -1
                 and self.step % self.runtime_args.plot_every_n_steps == 0
         ):
-            logger.info('Plotting.')
-            self._plot_3d()
-            self._plot_2d()
-            self._plot_point_stats()
+            logger.info(f'Plotting frame #{frame_state.frame_num}.')
+            self._plot_3d(frame_state, skipped)
+            self._plot_2d(frame_state, skipped)
+            self._plot_point_stats(frame_state, skipped)
 
-    def _plot_3d(self):
+    def _plot_3d(self, frame_state: FrameState, skipped: bool = False):
         """
         Make a multiscale curve 3D scatter plot.
         """
@@ -993,13 +979,13 @@ class Midline3DFinder:
         self.plot_3d_azim += 1
 
         fig = plt.figure(figsize=(n_cols * 4, 1 + n_rows * 4))
-        fig.suptitle(self._plot_title())
+        fig.suptitle(self._plot_title(frame_state, skipped))
         gs = GridSpec(n_rows, n_cols)
         d = 0
 
-        points = self.master_frame_state.get_state('points')
-        sigmas = self.master_frame_state.get_state('sigmas')
-        scores = self.master_frame_state.get_state('scores')
+        points = frame_state.get_state('points')
+        sigmas = frame_state.get_state('sigmas')
+        scores = frame_state.get_state('scores')
 
         for i in range(n_rows):
             for j in range(n_cols):
@@ -1036,9 +1022,9 @@ class Midline3DFinder:
                 d += 1
 
         fig.tight_layout()
-        self._save_plot(fig, '3D')
+        self._save_plot(fig, '3D', frame_state)
 
-    def _plot_2d(self):
+    def _plot_2d(self, frame_state: FrameState, skipped: bool = False):
         """
         Plot the 2D mask renderings of the mutiscale curves.
         """
@@ -1047,15 +1033,15 @@ class Midline3DFinder:
         n_cols = int(np.ceil(np.sqrt(D)))
 
         fig = plt.figure(figsize=(n_cols * 3, 1 + n_rows * 3))
-        fig.suptitle(self._plot_title())
+        fig.suptitle(self._plot_title(frame_state, skipped))
         gs = GridSpec(n_rows, n_cols)
         d = 0
 
-        masks_target = self.master_frame_state.get_state('masks_target_residuals')
-        points_2d = self.master_frame_state.get_state('points_2d')
-        masks_curve = self.master_frame_state.get_state('masks_curve')
+        masks_target = frame_state.get_state('masks_target_residuals')
+        points_2d = frame_state.get_state('points_2d')
+        masks_curve = frame_state.get_state('masks_curve')
 
-        images = to_numpy(self.master_frame_state.get_state('images'))
+        images = to_numpy(frame_state.get_state('images'))
         image_triplet = np.concatenate(images, axis=1)
         image_grid = np.concatenate([np.ones_like(image_triplet), image_triplet, np.ones_like(image_triplet)], axis=0)
         M, N = tuple(image_grid.shape)
@@ -1108,19 +1094,19 @@ class Midline3DFinder:
                 d += 1
 
         fig.tight_layout()
-        self._save_plot(fig, '2D')
+        self._save_plot(fig, '2D', frame_state)
 
-    def _plot_point_stats(self):
+    def _plot_point_stats(self, frame_state: FrameState, skipped: bool = False):
         """
         Plot the point scores, sigmas, exponents and intensities for the curves.
         """
         ra = self.runtime_args
         D = self.parameters.depth
         cmap = plt.get_cmap('jet')
-        scores = self.master_frame_state.get_state('scores')
-        sigmas = self.master_frame_state.get_state('sigmas')
-        exponents = self.master_frame_state.get_state('exponents')
-        intensities = self.master_frame_state.get_state('intensities')
+        scores = frame_state.get_state('scores')
+        sigmas = frame_state.get_state('sigmas')
+        exponents = frame_state.get_state('exponents')
+        intensities = frame_state.get_state('intensities')
 
         n_rows = int(ra.plot_scores) + int(ra.plot_sigmas) + int(ra.plot_exponents) + int(ra.plot_intensities)
         if n_rows == 0:
@@ -1136,23 +1122,23 @@ class Midline3DFinder:
             i += 1
         if ra.plot_sigmas:
             ax_sigmas = axes[i]
-            camera_sigmas = self.master_frame_state.get_state('camera_sigmas')
+            camera_sigmas = frame_state.get_state('camera_sigmas')
             sfs = ', '.join([f'{sf:.3f}' for sf in camera_sigmas])
             ax_sigmas.set_title(f'sigmas\nCameras: {sfs}.')
             i += 1
         if ra.plot_exponents:
             ax_exponents = axes[i]
-            camera_exponents = self.master_frame_state.get_state('camera_exponents')
+            camera_exponents = frame_state.get_state('camera_exponents')
             sfs = ', '.join([f'{sf:.3f}' for sf in camera_exponents])
             ax_exponents.set_title(f'exponents\nCameras: {sfs}.')
             i += 1
         if ra.plot_intensities:
             ax_intensities = axes[i]
-            camera_intensities = self.master_frame_state.get_state('camera_intensities')
+            camera_intensities = frame_state.get_state('camera_intensities')
             sfs = ', '.join([f'{sf:.3f}' for sf in camera_intensities])
             ax_intensities.set_title(f'Intensities\nCameras: {sfs}.')
 
-        fig.suptitle(self._plot_title())
+        fig.suptitle(self._plot_title(frame_state, skipped))
 
         colours = [cmap(d) for d in np.linspace(0, 1, D)]
         positions = [
@@ -1189,21 +1175,27 @@ class Midline3DFinder:
                 ax_intensities.scatter(x=positions[d], y=intensities_d, **scatter_args)
 
         fig.tight_layout()
-        self._save_plot(fig, 'point_stats')
+        self._save_plot(fig, 'point_stats', frame_state)
 
-    def _plot_title(self) -> str:
-        return f'Trial: {self.trial.id}. {self.trial.date:%Y%m%d}. ' \
-               f'Frame: {self.master_frame_state.frame_num}/{self.trial_state.frame_nums[-1]}.\n' \
-               f'Global step: {self.checkpoint.step}. Frame step: {self.checkpoint.step_frame}.'
+    def _plot_title(self, frame_state: FrameState, skipped: bool = False) -> str:
+        title = f'Trial: {self.trial.id}. {self.trial.date:%Y%m%d}. ' \
+                f'Frame: {frame_state.frame_num}/{self.trial_state.frame_nums[-1]}.\n' \
+                f'Global step: {self.checkpoint.step}. '
+        if not skipped:
+            title += f'Frame step: {self.checkpoint.step_frame}.'
+        else:
+            title += f'(Interpolated).'
 
-    def _save_plot(self, fig: Figure, plot_type: str):
+        return title
+
+    def _save_plot(self, fig: Figure, plot_type: str, frame_state: FrameState):
         """
         Either log the figure to the tensorboard logger or save it to disk.
         """
         if self.runtime_args.save_plots:
             save_dir = self.logs_path / 'plots' / plot_type
             os.makedirs(save_dir, exist_ok=True)
-            path = save_dir / f'{self.frame_num:05d}_{self.step:06d}.{img_extension}'
+            path = save_dir / f'{frame_state.frame_num:05d}_{self.step:06d}.{img_extension}'
             plt.savefig(path, bbox_inches='tight')
 
         else:

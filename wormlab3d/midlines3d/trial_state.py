@@ -4,11 +4,11 @@ from pathlib import Path
 from typing import Dict, Any
 
 import numpy as np
+import torch
 
 from wormlab3d import PREPARED_IMAGE_SIZE, DATA_PATH
 from wormlab3d import logger
 from wormlab3d.data.model import MFParameters, MFCheckpoint, Reconstruction
-from wormlab3d.midlines3d.dynamic_cameras import N_CAM_COEFFICIENTS
 from wormlab3d.midlines3d.frame_state import FrameState, BUFFER_NAMES, PARAMETER_NAMES, BINARY_DATA_KEYS
 from wormlab3d.toolkit.util import to_numpy
 
@@ -120,10 +120,8 @@ class TrialState:
         for k in BUFFER_NAMES + PARAMETER_NAMES:
             path_state = self.path / f'{k}.npz'
 
-            if k in ['images', 'masks_target', 'masks_target_residuals', 'masks_curve']:
+            if k in ['masks_target', 'masks_target_residuals', 'masks_curve']:
                 shape = (T, 3, *PREPARED_IMAGE_SIZE)
-            elif k in ['cam_coeffs_db', 'cam_coeffs']:
-                shape = (T, 3, N_CAM_COEFFICIENTS)
             elif k == 'cam_intrinsics':
                 shape = (T, 3, 4)
             elif k == 'cam_rotations':
@@ -136,10 +134,6 @@ class TrialState:
                 shape = (T, 3, 5)
             elif k == 'cam_shifts':
                 shape = (T, 3, 1)
-            elif k == 'points_3d_base':
-                shape = (T, 3)
-            elif k == 'points_2d_base':
-                shape = (T, 3, 2)
             elif k == 'points':
                 shape = (T, N, 3)
             elif k == 'points_2d':
@@ -214,6 +208,53 @@ class TrialState:
                 self.stats[k] = [0. for _ in range(self.n_frames)]
             self.stats[k][frame_num] = float(v)
 
+    def init_frame_state(
+            self,
+            frame_num: int,
+            trainable: bool = False,
+            load: bool = True,
+            prev_frame_state: FrameState = None,
+            master_frame_state: FrameState = None,
+            device: torch.device = None
+    ) -> FrameState:
+        """
+        Initialise a frame state
+        """
+        assert self.start_frame <= frame_num <= self.end_frame, 'Requested frame is not available.'
+        frame = self.trial.get_frame(frame_num)
+        logger.info(f'Initialising frame state for frame #{frame_num} (id={frame.id}).')
+
+        frame_state = FrameState(
+            frame=frame,
+            parameters=self.parameters,
+            prev_frame_state=prev_frame_state,
+            master_frame_state=master_frame_state
+        )
+
+        if not trainable:
+            frame_state.freeze()
+
+        # Restore buffer and parameter values from saved
+        if load:
+            for k in BUFFER_NAMES + PARAMETER_NAMES:
+                v = torch.from_numpy(self.get(k)[frame_num])
+
+                # Only the deepest of these are stored so just duplicate them into lists first
+                if k in ['masks_target', 'masks_target_residuals', 'masks_curve']:
+                    v = [v] * self.parameters.depth
+
+                # Expand collapsed
+                elif k in ['points', 'points_2d', 'sigmas', 'exponents', 'intensities', 'scores']:
+                    v = [v[2**d - 1:2**(d + 1) - 1] for d in range(self.parameters.depth)]
+
+                frame_state.set_state(k, v)
+
+        # Move onto target device
+        if device is not None:
+            frame_state.to(device)
+
+        return frame_state
+
     def get(self, k: str, start_frame: int = None, end_frame: int = None) -> np.ndarray:
         """
         Return a slice of data for a given buffer/parameter key.
@@ -229,7 +270,7 @@ class TrialState:
         else:
             start_frame = self.start_frame
         if end_frame is not None:
-            assert end_frame >= self.frame_nums[-1]
+            assert end_frame <= self.frame_nums[-1]
         else:
             end_frame = self.end_frame + 1
 

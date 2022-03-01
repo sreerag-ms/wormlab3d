@@ -65,7 +65,7 @@ def render_points(
 
     # Build x and y grids
     grid = torch.linspace(-1.0, 1.0, image_size, dtype=torch.float32, device=device)
-    yv, xv = torch.meshgrid([grid, grid])
+    yv, xv = torch.meshgrid([grid, grid], indexing='ij')
     m = torch.cat([xv[..., None], yv[..., None]], dim=-1)[None, None]
     p2 = points[:, :, None, None, :]
 

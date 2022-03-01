@@ -2,10 +2,12 @@ from typing import Dict, Optional, Union, List
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch import nn
+from torchvision.transforms.functional import gaussian_blur
 
-from wormlab3d import CAMERA_IDXS
-from wormlab3d.data.model import Cameras, MFParameters
+from wormlab3d import CAMERA_IDXS, PREPARED_IMAGE_SIZE
+from wormlab3d.data.model import Cameras, MFParameters, Frame
 from wormlab3d.midlines3d.mf_methods import make_rotation_matrix
 
 PARAMETER_NAMES = [
@@ -32,22 +34,23 @@ CAM_PARAMETER_NAMES = [
 ]
 
 BUFFER_NAMES = [
-    'images',
     'masks_target',
     'masks_target_residuals',
-    'cam_coeffs_db',
     'cam_rotations',
-    'points_3d_base',
-    'points_2d_base',
     'points_2d',
     'masks_curve',
     'scores',
     'curve_lengths'
 ]
 
-BINARY_DATA_KEYS = [
-    'masks_target',
+TRANSIENTS_NAMES = [
+    'images',
+    'cam_coeffs_db',
+    'points_3d_base',
+    'points_2d_base',
 ]
+
+BINARY_DATA_KEYS = []
 
 
 def _extract_camera_coefficients(cameras: Cameras) -> torch.Tensor:
@@ -71,30 +74,22 @@ def _extract_camera_coefficients(cameras: Cameras) -> torch.Tensor:
 class FrameState(nn.Module):
     def __init__(
             self,
-            frame_num: int,
-            images: torch.Tensor,
-            masks_target: torch.Tensor,
-            cameras: Cameras,
-            points_3d_base: torch.Tensor,
-            points_2d_base: torch.Tensor,
+            frame: Frame,
             parameters: MFParameters,
             prev_frame_state: 'FrameState' = None,
             master_frame_state: 'FrameState' = None,
     ):
         super().__init__()
         self.parameters = parameters
-        self.frame_num = frame_num
+        self.frame = frame
+        self.frame_num = frame.frame_num
         self.is_frozen = False
 
         # Register buffers
-        self.register_buffer('images', images)
-        self.register_buffer('cam_coeffs_db', _extract_camera_coefficients(cameras))
-        self.register_buffer('points_3d_base', points_3d_base)
-        self.register_buffer('points_2d_base', points_2d_base)
-
-        # Create buffers for masks created at all depths
-        for d, mt in enumerate(masks_target):
-            self.register_buffer(f'masks_target_{d}', mt)
+        self._init_images()
+        self._init_cameras()
+        self._init_base_points()
+        self._init_masks_targets()
 
         # If we are using a master frame state then just reference those parameters.
         if master_frame_state is not None:
@@ -118,98 +113,69 @@ class FrameState(nn.Module):
                 for k in ['masks_curve', 'points_2d', 'curve_lengths', 'scores']:
                     self.set_state(k, prev_frame_state.get_state(k))
 
-    def register_parameter(
-            self,
-            name: str,
-            param: Optional[Union[List[nn.Parameter], nn.Parameter]]
-    ) -> None:
+    def _init_images(self):
         """
-        Override to allow setting of a parameter with a list defining the parameter at each depth.
+        Load images.
         """
-        if type(param) == list:
-            param_list = []
-            for d, p in enumerate(param):
-                self.register_parameter(f'{name}_{d}', p)
-                param_list.append(self._parameters[f'{name}_{d}'])
-            setattr(self, name, param_list)
+        if self.frame.images is None or len(self.frame.images) != 3:
+            raise RuntimeError('Frame does not have a triplet of prepared images. Aborting!')
+        images = torch.from_numpy(np.stack(self.frame.images))
+        self.register_buffer('images', images)
+
+    def _init_cameras(self):
+        """
+        Load cameras.
+        """
+        cameras: Cameras = self.frame.get_cameras()
+        self.register_buffer('cam_coeffs_db', _extract_camera_coefficients(cameras))
+
+    def _init_base_points(self):
+        """
+        Load the 3D and reprojected 2D base points.
+        """
+        # Use the fixed (interpolated and smoothed) centre point if available
+        if self.frame.centre_3d_fixed is not None:
+            p3d = self.frame.centre_3d_fixed
         else:
-            return super().register_parameter(name, param)
+            p3d = self.frame.centre_3d
+        self.register_buffer('points_3d_base', torch.tensor(p3d.point_3d))
+        self.register_buffer('points_2d_base', torch.tensor(p3d.reprojected_points_2d))
 
-    def get_state(self, key: str) -> torch.Tensor:
+    def _init_masks_targets(self):
         """
-        Retrieve a buffer or parameter.
+        Generate the target masks at all depths.
         """
-        if key in self._parameters:
-            return self._parameters[key]
-        elif key in self._buffers:
-            return self._buffers[key]
-        elif key == 'cam_coeffs':
-            return self.get_cam_coeffs()
-        elif key in ['masks_target', 'masks_target_residuals', 'masks_curve', 'points_2d', 'scores']:
-            return [self._buffers[f'{key}_{d}'] for d in range(self.parameters.depth)]
-        elif hasattr(self, key):
-            return getattr(self, key)
-        else:
-            raise RuntimeError(f'Could not get state for {key}.')
 
-    def set_state(self, key: str, data: torch.Tensor):
-        """
-        Set a buffer or parameter value.
-        """
-        if type(data) == list:
-            params = self.get_state(key)
-            assert type(params) == list and len(data) == len(params)
-            for i in range(len(data)):
-                params[i].data = data[i].clone()
-        elif key in self._parameters:
-            self._parameters[key].data = data.clone()
-        elif key in self._buffers:
-            self._buffers[key].data = data.clone()
-        else:
-            raise RuntimeError(f'Could not set state for {key}.')
+        # Threshold images to make the full-resolution target masks
+        masks_fr = self.images / self.images.amax(dim=(1, 2), keepdim=True)
+        masks_fr[self.images < self.parameters.masks_threshold] = 0
+        masks_fr = masks_fr.unsqueeze(0)
 
-    def get_cam_coeffs(self) -> torch.Tensor:
-        """
-        Build rotation matrices and collate all the camera coefficients together.
-        """
-        Rs = []
-        rotation_preangles = self._parameters['cam_rotation_preangles']
-        for i in range(3):
-            pre = rotation_preangles[i]
-            cos_phi, sin_phi = pre[0]
-            cos_theta, sin_theta = pre[1]
-            cos_psi, sin_psi = pre[2]
-            Ri = make_rotation_matrix(cos_phi, sin_phi, cos_theta, sin_theta, cos_psi, sin_psi)
-            Rs.append(Ri.flatten())
-        Rs = torch.stack(Rs)
-        self.set_state('cam_rotations', Rs)
+        # Linearly interpolate target mask resolutions from 8x8 to 200x200
+        sizes = torch.linspace(8, PREPARED_IMAGE_SIZE[0], self.parameters.depth).to(torch.int32)
 
-        return torch.cat([
-            self.cam_intrinsics,
-            Rs,
-            self.cam_translations,
-            self.cam_distortions,
-            self.cam_shifts,
-        ], dim=1)
+        # Generate downsampled target masks
+        for d in range(self.parameters.depth):
+            image_size = sizes[d]
 
-    def set_stats(self, stats: Dict[str, torch.Tensor]):
-        """
-        Set frame stats.
-        """
-        self.stats = {**self.stats, **stats}
+            if d < self.parameters.depth - 1:
+                # Downsample the full resolution version to the reduced size
+                masks_ds = F.interpolate(masks_fr, (image_size, image_size), mode='nearest')
 
-    def freeze(self):
-        """
-        Freeze the frame - turns off requires_grad for all parameters.
-        """
-        self.is_frozen = True
-        for key in PARAMETER_NAMES:
-            p = self.get_state(key)
-            if type(p) == list:
-                for pi in p:
-                    pi.requires_grad_(False)
+                # Upsample to restore the target size
+                masks_rs = F.interpolate(masks_ds, PREPARED_IMAGE_SIZE, mode='bilinear', align_corners=False)
+
+                # Add a gaussian-blur, smaller at lower depths.
+                blur_sigma = 1 / (2**(d + 1))
+                ks = int(blur_sigma * 5)
+                if ks % 2 == 0:
+                    ks += 1
+                masks_rs = gaussian_blur(masks_rs, kernel_size=ks, sigma=blur_sigma)
             else:
-                p.requires_grad_(False)
+                masks_rs = masks_fr
+
+            masks_rs = masks_rs.squeeze(0)
+            self.register_buffer(f'masks_target_{d}', masks_rs)
 
     def _init_parameters(self):
         """
@@ -371,3 +337,96 @@ class FrameState(nn.Module):
 
         # Curve lengths
         self.register_buffer('curve_lengths', torch.zeros(D))
+
+    def register_parameter(
+            self,
+            name: str,
+            param: Optional[Union[List[nn.Parameter], nn.Parameter]]
+    ) -> None:
+        """
+        Override to allow setting of a parameter with a list defining the parameter at each depth.
+        """
+        if type(param) == list:
+            param_list = []
+            for d, p in enumerate(param):
+                self.register_parameter(f'{name}_{d}', p)
+                param_list.append(self._parameters[f'{name}_{d}'])
+            setattr(self, name, param_list)
+        else:
+            return super().register_parameter(name, param)
+
+    def get_state(self, key: str) -> torch.Tensor:
+        """
+        Retrieve a buffer or parameter.
+        """
+        if key in self._parameters:
+            return self._parameters[key]
+        elif key in self._buffers:
+            return self._buffers[key]
+        elif key == 'cam_coeffs':
+            return self.get_cam_coeffs()
+        elif key in ['masks_target', 'masks_target_residuals', 'masks_curve', 'points_2d', 'scores']:
+            return [self._buffers[f'{key}_{d}'] for d in range(self.parameters.depth)]
+        elif hasattr(self, key):
+            return getattr(self, key)
+        else:
+            raise RuntimeError(f'Could not get state for {key}.')
+
+    def set_state(self, key: str, data: torch.Tensor):
+        """
+        Set a buffer or parameter value.
+        """
+        if type(data) == list:
+            params = self.get_state(key)
+            assert type(params) == list and len(data) == len(params)
+            for i in range(len(data)):
+                params[i].data = data[i].clone()
+        elif key in self._parameters:
+            self._parameters[key].data = data.clone()
+        elif key in self._buffers:
+            self._buffers[key].data = data.clone()
+        else:
+            raise RuntimeError(f'Could not set state for {key}.')
+
+    def get_cam_coeffs(self) -> torch.Tensor:
+        """
+        Build rotation matrices and collate all the camera coefficients together.
+        """
+        Rs = []
+        rotation_preangles = self._parameters['cam_rotation_preangles']
+        for i in range(3):
+            pre = rotation_preangles[i]
+            cos_phi, sin_phi = pre[0]
+            cos_theta, sin_theta = pre[1]
+            cos_psi, sin_psi = pre[2]
+            Ri = make_rotation_matrix(cos_phi, sin_phi, cos_theta, sin_theta, cos_psi, sin_psi)
+            Rs.append(Ri.flatten())
+        Rs = torch.stack(Rs)
+        self.set_state('cam_rotations', Rs)
+
+        return torch.cat([
+            self.cam_intrinsics,
+            Rs,
+            self.cam_translations,
+            self.cam_distortions,
+            self.cam_shifts,
+        ], dim=1)
+
+    def set_stats(self, stats: Dict[str, torch.Tensor]):
+        """
+        Set frame stats.
+        """
+        self.stats = {**self.stats, **stats}
+
+    def freeze(self):
+        """
+        Freeze the frame - turns off requires_grad for all parameters.
+        """
+        self.is_frozen = True
+        for key in PARAMETER_NAMES:
+            p = self.get_state(key)
+            if type(p) == list:
+                for pi in p:
+                    pi.requires_grad_(False)
+            else:
+                p.requires_grad_(False)
