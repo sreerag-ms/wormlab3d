@@ -76,7 +76,7 @@ def generate_residual_targets(
         target_d = target_d + residual_next
 
         # Only allow the target through where there was something detected
-        target_d[detection_masks[d] < 0.01] = 0
+        target_d[detection_masks[d] < 0.1] = 0
 
         target_d = torch.clamp(target_d, min=0, max=1)
         target_d = target_d.detach()
