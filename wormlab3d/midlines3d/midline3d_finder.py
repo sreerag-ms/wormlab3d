@@ -491,7 +491,7 @@ class Midline3DFinder:
                     v = v.permute(0, 2, 1)
                     v = F.interpolate(v, size=p.frame_skip + 1, mode='linear', align_corners=True)
                     v = v.squeeze().T.reshape(var.shape)
-                    v = v.numpy()
+                    v = v.cpu().numpy()
                     var[1:-1] = v[1:-1]
                 self.trial_state.save()
 
