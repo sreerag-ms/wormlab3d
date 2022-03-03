@@ -9,6 +9,7 @@ from matplotlib.backend_bases import Event
 from matplotlib.collections import PathCollection
 from matplotlib.image import AxesImage
 from matplotlib.widgets import Slider
+from scipy.cluster.hierarchy import dendrogram
 
 from simple_worm.controls import ControlSequenceNumpy
 from simple_worm.frame import FrameSequenceNumpy
@@ -43,7 +44,7 @@ def tex_mode():
 def equal_aspect_ratio(ax: Axes):
     """Fix equal aspect ratio for 3D plots."""
     limits = np.array([getattr(ax, f'get_{axis}lim')() for axis in 'xyz'])
-    ax.set_box_aspect(np.ptp(limits, axis = 1))
+    ax.set_box_aspect(np.ptp(limits, axis=1))
 
 
 class CameraImageArtist:
@@ -285,3 +286,32 @@ def generate_interactive_3d_clip_with_projections(
     fig.canvas.mpl_connect('button_press_event', on_click)
     ani = animation.FuncAnimation(fig, update_plot, interval=1 / fps)
     plt.show()
+
+
+def fancy_dendrogram(ax: Axes, *args, **kwargs) -> dict:
+    """
+    Plot a fancy dendogram.
+    """
+    max_d = kwargs.pop('max_d', None)
+    if max_d and 'color_threshold' not in kwargs:
+        kwargs['color_threshold'] = max_d
+    annotate_above = kwargs.pop('annotate_above', 0)
+
+    ddata = dendrogram(*args, **kwargs)
+
+    if not kwargs.get('no_plot', False):
+        ax.set_title('Hierarchical Clustering Dendrogram (truncated)')
+        ax.set_xlabel('Sample index or (cluster size)')
+        ax.set_ylabel('Distance')
+        for i, d, c in zip(ddata['icoord'], ddata['dcoord'], ddata['color_list']):
+            x = 0.5 * sum(i[1:3])
+            y = d[1]
+            if y > annotate_above:
+                ax.plot(x, y, 'o', c=c)
+                ax.annotate("%.3g" % y, (x, y), xytext=(0, -5),
+                            textcoords='offset points',
+                            va='top', ha='center')
+        if max_d:
+            plt.axhline(y=max_d, c='k', linestyle='--')
+
+    return ddata
