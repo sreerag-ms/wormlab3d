@@ -9,24 +9,28 @@ TRAJECTORY_CACHE_PATH = DATA_PATH / 'trajectory_cache'
 SMOOTHING_WINDOW_TYPES = ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']
 
 
-def smooth_trajectory(X: np.ndarray, window_len=5, window_type='flat'):
+def smooth_trajectory(X: np.ndarray, window_len: int=5, window_type: str='flat') -> np.ndarray:
     """
     Smooth the trajectory data using a window with requested size.
     Adapted from https://scipy-cookbook.readthedocs.io/items/SignalSmooth.html
     Extended to smooth along each of the body points and coordinate axes.
     todo: remove for loops!
     """
-
-    assert X.ndim == 3, 'X must have 3 dimensions: [T, N, 3].'
+    squeeze = False
+    if X.ndim == 2:
+        X = X[..., None]
+        squeeze = True
+    if X.ndim != 3:
+        raise ValueError('X must have 2 or 3 dimensions.')
     assert X.shape[0] > window_len, 'Time dimension needs to be bigger than window size.'
     assert window_len > 2, 'Window size must be > 2.'
     assert window_len % 2 == 1, 'Window size must be odd.'
     assert window_type in SMOOTHING_WINDOW_TYPES, f'Window type must be one of {SMOOTHING_WINDOW_TYPES}.'
 
     X_padded = np.r_[
-        X[1:window_len // 2 + 1][::-1],
+        np.stack([X[0]] * (window_len // 2)),
         X,
-        X[-window_len // 2:-1][::-1]
+        np.stack([X[-1]] * (window_len // 2))
     ]
 
     if window_type == 'flat':  # moving average
@@ -39,9 +43,13 @@ def smooth_trajectory(X: np.ndarray, window_len=5, window_type='flat'):
 
     # Convolve window with trajectory
     X_s = np.zeros_like(X)
-    for i in range(3):
+    for i in range(X.shape[-1]):
         for u in range(X.shape[1]):
             X_s[:, u, i] = np.convolve(w, X_padded[:, u, i], mode='valid')
+
+    # Remove extra dimension is one was added
+    if squeeze:
+        X_s = X_s.squeeze(axis=-1)
 
     return X_s
 
@@ -197,6 +205,25 @@ def calculate_angle(v1: np.ndarray, v2: np.ndarray) -> float:
         raise ValueError('Vectors of the wrong dimension!')
 
     return angle
+
+
+def calculate_rotation_matrix(v1: np.ndarray, v2: np.ndarray) -> np.ndarray:
+    """
+    Calculate the rotation matrix between two vectors.
+    """
+    assert len(v1) == 3 and len(v2) == 3, 'Only 3D vectors supported!'
+    a = v1 / np.linalg.norm(v1)
+    b = v2 / np.linalg.norm(v2)
+    v = np.cross(a,b)
+    s = np.linalg.norm(v)
+    c = np.dot(a, b)
+    vx = np.array([
+        [0, -v[2], v[1]],
+        [v[2], 0, -v[0]],
+        [-v[1], v[0], 0],
+    ])
+    R = np.eye(3) + vx + np.dot(vx, vx) * (1-c) / s**2
+    return R
 
 
 def fetch_reconstruction(
