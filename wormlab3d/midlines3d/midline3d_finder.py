@@ -595,7 +595,7 @@ class Midline3DFinder:
             )
 
             # Make plots
-            self._make_plots()
+            self._make_plots(first_frame=first_frame)
 
             # Checkpoint
             if self.runtime_args.checkpoint_every_n_steps > 0 \
@@ -943,7 +943,8 @@ class Midline3DFinder:
             pre_step: bool = False,
             final_step: bool = False,
             frame_state: FrameState = None,
-            skipped: bool = False
+            skipped: bool = False,
+            first_frame: bool = False
     ):
         """
         Generate some plots.
@@ -959,6 +960,10 @@ class Midline3DFinder:
         if final_step or (
                 self.runtime_args.plot_every_n_steps > -1
                 and self.step % self.runtime_args.plot_every_n_steps == 0
+        ) or (
+                first_frame
+                and self.runtime_args.plot_every_n_init_steps > -1
+                and self.step % self.runtime_args.plot_every_n_init_steps == 0
         ):
             logger.info(f'Plotting frame #{frame_state.frame_num}.')
             self._plot_3d(frame_state, skipped)

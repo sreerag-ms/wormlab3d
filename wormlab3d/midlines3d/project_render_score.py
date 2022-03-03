@@ -136,6 +136,7 @@ class ProjectRenderScoreModel(nn.Module):
         Project the 3D points to 2D, render the projected points as blobs on an image and score each point for overlap.
         """
         D = len(points)
+        blobs = []
         masks = []
         detection_masks = []
         points_2d = []
@@ -148,7 +149,7 @@ class ProjectRenderScoreModel(nn.Module):
         # Run the parameters through the model at each scale to get the outputs
         for d in range(D):
             points_d = points[d]
-            masks_target_d = masks_target[d]
+            # masks_target_d = masks_target[d]
             sigmas_d = sigmas[d]
             exponents_d = exponents[d]
             intensities_d = intensities[d]
@@ -196,7 +197,7 @@ class ProjectRenderScoreModel(nn.Module):
 
             # Project and render
             points_2d_d = self._project_to_2d(cam_coeffs, points_d, points_3d_base, points_2d_base)
-            masks_d, blobs = render_points(
+            masks_d, blobs_d = render_points(
                 points_2d_d,
                 sigmas_d,
                 exponents_d,
@@ -208,35 +209,73 @@ class ProjectRenderScoreModel(nn.Module):
                 self.render_mode
             )
 
+            # # Normalise blobs
+            # sum_ = blobs_d.amax(dim=(2, 3), keepdim=True)
+            # sum_ = sum_.clamp(min=1e-8)
+            # blobs_normed = blobs_d / sum_
+            #
+            # # Score the points
+            # scores_d = (blobs_normed * masks_target_d.unsqueeze(2)).sum(dim=(3, 4)).mean(dim=1)
+            # if d > 1:
+            #     scores_d = self._taper_parameter(scores_d)
+            #
+            #     # Make new render with blobs scaled by relative scores to get detection masks
+            #     max_score = scores_d.amax(keepdim=True)
+            #     if max_score.item() > 0:
+            #         rel_scores = scores_d / max_score
+            #         sf = rel_scores[:, None, :, None, None]
+            #         detection_masks_d = (blobs_d * sf).amax(dim=2)
+            #     else:
+            #         detection_masks_d = masks_d.clone()
+            # else:
+            #     detection_masks_d = masks_d.clone()
+
+            blobs.append(blobs_d)
+            masks.append(masks_d)
+            points_2d.append(points_2d_d.transpose(1, 2))
+            points_smoothed.append(points_d)
+            sigmas_smoothed.append(sigmas_d)
+            exponents_smoothed.append(exponents_d)
+            intensities_smoothed.append(intensities_d)
+
+        # Scores need to feed back up the chain to inform parent points
+        for d in range(D - 1, -1, -1):
+            blobs_d = blobs[d]
+            masks_d = masks[d]
+            masks_target_d = masks_target[d]
+
             # Normalise blobs
-            sum_ = blobs.amax(dim=(2, 3), keepdim=True)
+            sum_ = blobs_d.amax(dim=(2, 3), keepdim=True)
             sum_ = sum_.clamp(min=1e-8)
-            blobs_normed = blobs / sum_
+            blobs_normed = blobs_d / sum_
 
             # Score the points
             scores_d = (blobs_normed * masks_target_d.unsqueeze(2)).sum(dim=(3, 4)).mean(dim=1)
             if d > 1:
                 scores_d = self._taper_parameter(scores_d)
 
+            # Parent points can only score the minimum of their child points
+            if d < D - 1:
+                scores_children = torch.amin(scores[-1].reshape((scores_d.shape[0], scores_d.shape[1], 2)), dim=-1)
+                scores_d = torch.amin(torch.stack([scores_d, scores_children]), dim=0)
+
+            if d > 1:
                 # Make new render with blobs scaled by relative scores to get detection masks
                 max_score = scores_d.amax(keepdim=True)
                 if max_score.item() > 0:
                     rel_scores = scores_d / max_score
                     sf = rel_scores[:, None, :, None, None]
-                    detection_masks_d = (blobs * sf).amax(dim=2)
+                    detection_masks_d = (blobs_d * sf).amax(dim=2)
                 else:
                     detection_masks_d = masks_d.clone()
             else:
                 detection_masks_d = masks_d.clone()
 
-            masks.append(masks_d)
-            detection_masks.append(detection_masks_d)
-            points_2d.append(points_2d_d.transpose(1, 2))
             scores.append(scores_d)
-            points_smoothed.append(points_d)
-            sigmas_smoothed.append(sigmas_d)
-            exponents_smoothed.append(exponents_d)
-            intensities_smoothed.append(intensities_d)
+            detection_masks.append(detection_masks_d)
+        scores = scores[::-1]
+        detection_masks = detection_masks[::-1]
+
 
         return masks, detection_masks, points_2d, scores, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed
 

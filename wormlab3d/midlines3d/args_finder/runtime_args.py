@@ -16,6 +16,7 @@ class RuntimeArgs(BaseArgs):
             checkpoint_every_n_frames: int = 1,
             log_level: int = 0,
             plot_every_n_steps: int = -1,
+            plot_every_n_init_steps: int = -1,
             plot_every_n_frames: int = -1,
             plot_n_examples: int = 1,
             plot_sigmas: bool = True,
@@ -34,6 +35,7 @@ class RuntimeArgs(BaseArgs):
         self.checkpoint_every_n_frames = checkpoint_every_n_frames
         self.log_level = log_level
         self.plot_every_n_steps = plot_every_n_steps
+        self.plot_every_n_init_steps = plot_every_n_init_steps
         self.plot_every_n_frames = plot_every_n_frames
         self.plot_n_examples = plot_n_examples
         self.plot_sigmas = plot_sigmas
@@ -68,6 +70,8 @@ class RuntimeArgs(BaseArgs):
                            help='Save a checkpoint every n frames, -1 turns this off. Default=1.')
         group.add_argument('--plot-every-n-steps', type=int, default=-1,
                            help='Plot example inputs and outputs every n steps, -1 turns this off.')
+        group.add_argument('--plot-every-n-init-steps', type=int, default=-1,
+                           help='Plot example inputs and outputs every n init steps, -1 turns this off.')
         group.add_argument('--log-level', type=int, default=2, choices=[0, 1, 2],
                            help='Tensorboard logging level. 0=Totals only. 1=Depth losses. 2=All losses and parameter stats.')
         group.add_argument('--plot-every-n-frames', type=int, default=-1,

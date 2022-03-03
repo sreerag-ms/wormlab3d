@@ -75,8 +75,14 @@ def generate_residual_targets(
             residual_next += sf * masks_diffs[d2]
         target_d = target_d + residual_next
 
-        # Only allow the target through where there was something detected
-        target_d[detection_masks[d] < 0.1] = 0
+        # Only allow the target through where there was something detected at this depth or the next
+        if d < D - 1:
+            dm = torch.amax(torch.stack([detection_masks[d], detection_masks[d + 1]]), dim=0)
+        elif d == D - 1:
+            dm = torch.ones_like(detection_masks[d])  # Let everything through at the deepest level
+        else:
+            dm = detection_masks[d]
+        target_d[dm < 0.1] = 0
 
         target_d = torch.clamp(target_d, min=0, max=1)
         target_d = target_d.detach()
@@ -93,7 +99,15 @@ def loss_(m: str, x: torch.Tensor, y: torch.Tensor, reduce: bool = True) -> torc
     elif m == 'kl':
         l = F.kl_div(x, y, reduction='batchmean' if reduce else 'none')
     elif m == 'logdiff':
-        l = torch.sum((torch.log(1 + x) - torch.log(1 + y))**2)
+        # todo: is this worth it? if so needs parametrising
+        # l = torch.sum((torch.log(1 + x) - torch.log(1 + y))**2)
+        l = torch.sum(
+            torch.where(
+                x > y,
+                torch.log(1 + 2 * x) - torch.log(1 + y),
+                torch.log(1 + x) - torch.log(1 + y)
+            )**2
+        )
     elif m == 'bce':
         l = F.binary_cross_entropy(x, y, reduction='mean' if reduce else 'none')
     else:
@@ -238,7 +252,13 @@ def calculate_scores_losses(
     losses = []
     for d in range(D):
         scores_d = scores[d]
+
+        # Scores should be even along body
         loss = torch.sum((torch.log(1 + scores_d) - torch.log(1 + scores_d.mean().detach()))**2)
+
+        # Scores should be maximised
+        loss = loss + 1 / (torch.sum(scores_d) + 1e-6)
+
         losses.append(loss)
 
     return losses
