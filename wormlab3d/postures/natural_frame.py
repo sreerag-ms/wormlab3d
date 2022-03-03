@@ -19,6 +19,22 @@ def an_orthonormal(x):
     return X / norm(X)
 
 
+def rotate(v: np.ndarray, theta: float):
+    """
+    Rotate a complex vector by angle theta.
+    """
+    return np.exp(1j * theta) * v
+
+
+def align_complex_vectors(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """
+    Align vector a to vector b.
+    """
+    opt_angle = -np.angle(np.dot(a, b.conj()))
+    a_aligned = rotate(a, opt_angle)
+    return a_aligned
+
+
 class NaturalFrame:
     def __init__(
             self,

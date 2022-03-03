@@ -8,6 +8,7 @@ from wormlab3d import logger, TRAJECTORY_CACHE_PATH
 from wormlab3d.data.model import Midline3D, Frame, Reconstruction, Trial
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
 from wormlab3d.midlines3d.trial_state import TrialState
+from wormlab3d.postures.natural_frame import NaturalFrame, align_complex_vectors
 from wormlab3d.trajectories.util import smooth_trajectory, prune_slowest_frames, prune_directionality, \
     fetch_reconstruction
 
@@ -27,6 +28,7 @@ def get_trajectory(
         prune_slowest_ratio: float = None,
         projection: str = None,
         trajectory_point: float = None,
+        natural_frame: bool = False,
         rebuild_cache: bool = False
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
     """
@@ -40,16 +42,21 @@ def get_trajectory(
         start_frame=start_frame,
         end_frame=end_frame,
         depth=depth,
+        natural_frame=natural_frame,
         rebuild_cache=rebuild_cache
     )
     N = X.shape[1]
     meta['frame_nums'] = np.arange(meta['start_frame'], meta['end_frame'] + 1)
 
-    # Convert to float64
-    X = X.astype(np.float64)
-
     if smoothing_window is not None:
         X = smooth_trajectory(X, window_len=smoothing_window)
+
+    # If NF requested, return here
+    if natural_frame:
+        return X, meta
+
+    # Convert to float64
+    X = X.astype(np.float64)
 
     if directionality is not None and directionality != 'both':
         X, kept_idxs = prune_directionality(X, directionality=directionality)
@@ -198,6 +205,51 @@ def _generate_trajectory_cache_data(
     return Xs
 
 
+def _generate_natural_frame_trajectory_cache_data(
+        reconstruction: Reconstruction,
+        depth: int = -1,
+) -> np.ndarray:
+    """
+    Load a trajectory and convert to the natural frame representation.
+    """
+    # Get the midlines
+    X, meta = get_trajectory(reconstruction_id=reconstruction.id, depth=depth, rebuild_cache=False)
+    if X is None or len(X) == 0:
+        raise RuntimeError('Failed to find any midlines.')
+
+    M = X.shape[0]
+    N = X.shape[1]
+    if N == 1:
+        raise RuntimeError('Trajectory returned only a single point. Eigenworms requires full postures!')
+    logger.info(f'Calculating eigenworms with {M} midlines of length {N}.')
+
+    # Calculate the natural frame representations for all midlines
+    logger.info('Calculating natural frame representations.')
+    Z = []
+    bad_idxs = []
+    mc_prev = None
+    for i, Xi in enumerate(X):
+        if (i + 1) % 100 == 0:
+            logger.info(f'Calculating for midline {i + 1}/{M}.')
+        try:
+            nf = NaturalFrame(Xi)
+            mc = nf.mc
+
+            # Align the frames
+            if mc_prev is not None:
+                mc = align_complex_vectors(mc, mc_prev)
+
+            mc_prev = mc
+            Z.append(mc)
+        except Exception:
+            bad_idxs.append(i)
+    if len(bad_idxs):
+        logger.warning(f'Failed to calculate {len(bad_idxs)} midline idxs: {bad_idxs}.')
+    Z = np.array(Z)
+
+    return Z
+
+
 def _fetch_mf_trajectory(
         reconstruction: Reconstruction,
         start_frame: int,
@@ -239,6 +291,7 @@ def generate_or_load_trajectory_cache(
         start_frame: int = None,
         end_frame: int = None,
         depth: int = -1,
+        natural_frame: bool = False,
         rebuild_cache: bool = False
 ) -> Tuple[np.ndarray, dict]:
     """
@@ -249,6 +302,8 @@ def generate_or_load_trajectory_cache(
     # Get trial
     trial: Trial
     if reconstruction is None:
+        if natural_frame:
+            raise RuntimeError('No matching reconstruction found, cannot evaluate natural frame.')
         logger.warning('No matching reconstruction found, using tracking data.')
         assert trial_id is not None
         trial = Trial.objects.get(id=trial_id)
@@ -265,7 +320,42 @@ def generate_or_load_trajectory_cache(
         start_frame = max(start_frame, reconstruction.start_frame)
         end_frame = min(end_frame, reconstruction.end_frame)
 
-    if reconstruction is None:
+    if natural_frame:
+        # Generate or load a reconstruction trajectory in the natural frame representation.
+        filename_meta = f'{reconstruction.id}_nf.meta'
+        filename_Xnf = f'{reconstruction.id}_nf.npz'
+        path_meta = TRAJECTORY_CACHE_PATH / filename_meta
+        path_Xnf = TRAJECTORY_CACHE_PATH / filename_Xnf
+        X_full = None
+        if not rebuild_cache and path_meta.exists() and path_Xnf.exists():
+            try:
+                with open(path_meta, 'r') as f:
+                    meta = json.load(f)
+                X_full = np.memmap(path_Xnf, dtype=np.complex128, mode='r', shape=tuple(meta['shape']))
+                logger.info(f'Loaded natural frame trajectory data from {path_Xnf}.')
+            except Exception as e:
+                logger.warning(f'Could not load natural frame trajectory from {path_Xnf}. {e}')
+        elif not rebuild_cache:
+            logger.info('Natural frame trajectory file cache unavailable, building.')
+        else:
+            logger.info('Rebuilding natural frame trajectory cache.')
+
+        if X_full is None:
+            # Generate the natural frame trajectory data cache
+            Xnf_data = _generate_natural_frame_trajectory_cache_data(reconstruction, depth)
+            X_full = np.memmap(path_Xnf, dtype=np.complex128, mode='w+', shape=Xnf_data.shape)
+            X_full[:] = Xnf_data
+
+            # Save the cache onto the hard drive
+            logger.debug(f'Saving natural frame trajectory file cache to {path_Xnf}.')
+            X_full.flush()
+
+            # Save the meta data
+            meta = {'shape': X_full.shape, }
+            with open(path_meta, 'w') as f:
+                json.dump(meta, f)
+
+    elif reconstruction is None:
         # If no reconstruction construct a trajectory from the tracking data
         centres_3d, timestamps = trial.get_tracking_data(fixed=True)
         X_full = centres_3d[:, None, :]
@@ -301,8 +391,7 @@ def generate_or_load_trajectory_cache(
             X_full[:] = X_data
 
             # Save the cache onto the hard drive
-            path_Xs = TRAJECTORY_CACHE_PATH / filename_X
-            logger.debug(f'Saving trajectory file cache to {path_Xs}.')
+            logger.debug(f'Saving trajectory file cache to {path_X}.')
             X_full.flush()
 
             # Save the meta data
