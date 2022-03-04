@@ -1,12 +1,9 @@
 import json
-from multiprocessing import Pool
-from pathlib import PosixPath
 from typing import Tuple, Any, Dict
 
 import numpy as np
-from scipy.spatial.distance import pdist
+from scipy.spatial.distance import pdist, squareform
 
-from wormlab3d import N_WORKERS
 from wormlab3d import logger, POSTURE_DISTANCES_CACHE_PATH
 from wormlab3d.data.model import Reconstruction, Eigenworms
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
@@ -19,37 +16,12 @@ def distance_ab(a: np.ndarray, b: np.ndarray) -> float:
     return np.linalg.norm(a2 - b)
 
 
-def _calculate_distance_ab(postures: np.ndarray, output: np.ndarray, i: int, j: int, k: int):
-    output[k] = distance_ab(postures[i], postures[j])
-
-
-def _calculate_distance_wrapper(args):
-    return _calculate_distance_ab(*args)
-
-
-def _calculate_distances_parallel(postures: np.ndarray, output: np.ndarray):
-    """
-    Calculate the distances in parallel.
-    """
-    N = postures.shape[0]
-    idxs = np.triu(np.ones(N), k=1).nonzero()
-    out_idxs = np.arange(len(idxs[0]))
-    with Pool(processes=N_WORKERS) as pool:
-        pool.map(
-            _calculate_distance_wrapper,
-            [[postures, output, i, j, k] for i, j, k in zip(idxs[0], idxs[1], out_idxs)]
-        )
-
-
-def _calculate_posture_distances(postures: np.ndarray, output: np.ndarray) -> np.ndarray:
+def _calculate_posture_distances(postures: np.ndarray) -> np.ndarray:
     """
     Calculate distances between postures.
     """
-    if 1 and N_WORKERS > 1:
-        _calculate_distances_parallel(postures, output)
-    else:
-        distances = pdist(postures, distance_ab)
-        output[:] = distances
+    distances = pdist(postures, distance_ab)
+    return distances
 
 
 def get_posture_distances(
@@ -87,7 +59,6 @@ def get_posture_distances(
 
 
 def _generate_distances_cache_data(
-        path_X: PosixPath,
         reconstruction: Reconstruction,
         depth: int = -1,
         ew: Eigenworms = None,
@@ -105,15 +76,11 @@ def _generate_distances_cache_data(
     if ew is not None:
         Z = ew.transform(np.array(Z))
 
-    # Initialise the memmap output first as it might not fit in memory
-    N = Z.shape[0]
-    output = np.memmap(path_X, dtype=np.float32, mode='w+', shape=(int(N * (N - 1) / 2)))
-
     # Calculate distances matrix
     logger.info('Calculating pairwise distances.')
-    _calculate_posture_distances(Z, output)
+    distances = _calculate_posture_distances(Z)
 
-    return output
+    return distances
 
 
 def generate_or_load_distances_cache(
@@ -164,7 +131,9 @@ def generate_or_load_distances_cache(
 
     if X_full is None:
         # Generate the distances cache
-        X_full = _generate_distances_cache_data(path_X, reconstruction, depth, ew)
+        X_data = _generate_distances_cache_data(reconstruction, depth, ew)
+        X_full = np.memmap(path_X, dtype=np.float32, mode='w+', shape=X_data.shape)
+        X_full[:] = X_data
 
         # Save the cache onto the hard drive
         logger.debug(f'Saving posture distances file cache to {path_X}.')
@@ -184,7 +153,8 @@ def generate_or_load_distances_cache(
     end_frame = min(end_frame, reconstruction.end_frame)
 
     # Take a slice of the full array
-    X = X_full[start_frame:end_frame + 1]
+    X_sf = squareform(X_full)
+    X = X_sf[start_frame:end_frame + 1, start_frame:end_frame + 1]
     meta['start_frame'] = start_frame
     meta['end_frame'] = end_frame
 

@@ -102,20 +102,20 @@ def cluster_postures(
     max_clusters = 14
 
     # Fetch distances
-    distances = get_posture_distances(
+    distances, _ = get_posture_distances(
         reconstruction_id=reconstruction.id,
         use_eigenworms=use_ews,
         eigenworms_id=args.eigenworms,
         eigenworms_n_components=args.n_components,
         start_frame=args.start_frame,
         end_frame=args.end_frame,
-        rebuild_cache=True
+        rebuild_cache=False
     )
-    dists_sf = squareform(distances, checks=False)
+    dists_vf = squareform(distances, checks=False)
 
     # Do clustering
     logger.info('Calculating linkage.')
-    L = linkage(distances, linkage_method, optimal_ordering=True)
+    L = linkage(dists_vf, linkage_method, optimal_ordering=True)
 
     # Set up plots
     n_cluster_plots = max_clusters - min_clusters + 1
@@ -127,7 +127,7 @@ def cluster_postures(
 
     # Show original data
     ax = plt.subplot(gs[0, 0])
-    ax.matshow(dists_sf, cmap=plt.cm.Blues)
+    ax.matshow(distances, cmap=plt.cm.Blues)
     ax.set_title('Distances between postures')
 
     # Calculate and plot full dendrogram
@@ -157,7 +157,7 @@ def cluster_postures(
             logger.info(f'Clustering into {n_clusters} clusters.')
             clusters = fcluster(L, n_clusters, criterion='maxclust')
             ax = plt.subplot(gs[row_idx + 1, col_idx])
-            _plot_reordered_distances(ax, dists_sf, clusters)
+            _plot_reordered_distances(ax, distances, clusters)
             ax.axis('off')
             cluster_idx += 1
 
