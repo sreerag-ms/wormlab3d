@@ -37,6 +37,7 @@ PREPARED_IMAGES_PATH = _load_env_path('PREPARED_IMAGES_PATH', DATA_PATH / 'prepa
 TRACKING_VIDEOS_PATH = _load_env_path('TRACKING_VIDEOS_PATH', DATA_PATH / 'tracking_videos')
 TRAJECTORY_CACHE_PATH = _load_env_path('TRAJECTORY_CACHE_PATH', DATA_PATH / 'trajectory_cache')
 POSTURE_DISTANCES_CACHE_PATH = _load_env_path('POSTURE_DISTANCES_CACHE_PATH', DATA_PATH / 'posture_distances_cache')
+POSTURE_CLUSTERS_CACHE_PATH = _load_env_path('POSTURE_CLUSTERS_CACHE_PATH', DATA_PATH / 'posture_clusters_cache')
 RECONSTRUCTION_VIDEOS_PATH = _load_env_path('RECONSTRUCTION_VIDEOS_PATH', DATA_PATH / 'reconstruction_videos')
 PCA_CACHE_PATH = _load_env_path('PCA_CACHE_PATH', DATA_PATH / 'pca_cache')
 

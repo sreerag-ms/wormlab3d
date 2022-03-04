@@ -20,6 +20,7 @@ __pycache__
 /data/MF_outputs
 /data/pca_cache
 /data/posture_distances_cache
+/data/posture_clusters_cache
 /data/prepared_images
 /data/reconstruction_videos
 /data/tracking_videos

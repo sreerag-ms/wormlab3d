@@ -31,11 +31,12 @@ def get_posture_distances(
         eigenworms_n_components: int = None,
         start_frame: int = None,
         end_frame: int = None,
-        depth: int = None,
+        depth: int = -1,
+        return_squareform: bool = False,
         rebuild_cache: bool = False
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
     """
-    Load the full 3D trajectory and then either take a slice at the required point or use the centre of mass.
+    Load the full distances matrix and then return required section.
     """
     X, meta = generate_or_load_distances_cache(
         reconstruction_id=reconstruction_id,
@@ -45,6 +46,7 @@ def get_posture_distances(
         start_frame=start_frame,
         end_frame=end_frame,
         depth=depth,
+        return_squareform=return_squareform,
         rebuild_cache=rebuild_cache
     )
     meta['frame_nums'] = np.arange(meta['start_frame'], meta['end_frame'] + 1)
@@ -91,6 +93,7 @@ def generate_or_load_distances_cache(
         start_frame: int = None,
         end_frame: int = None,
         depth: int = -1,
+        return_squareform: bool = False,
         rebuild_cache: bool = False
 ) -> Tuple[np.ndarray, dict]:
     """
@@ -111,8 +114,10 @@ def generate_or_load_distances_cache(
 
     # Generate or load the pairwise distances between all postures in the reconstruction.
     ews_suffix = f'ew_{ew.id}' if use_eigenworms else 'nf'
-    filename_meta = f'{reconstruction.id}_{ews_suffix}.meta'
-    filename_X = f'{reconstruction.id}_{ews_suffix}.npz'
+    depth_suffix = f'_d={depth}' if depth != -1 else ''
+    filename = f'{reconstruction.id}{depth_suffix}_{ews_suffix}'
+    filename_meta = f'{filename}.meta'
+    filename_X = f'{filename}.npz'
     path_meta = POSTURE_DISTANCES_CACHE_PATH / filename_meta
     path_X = POSTURE_DISTANCES_CACHE_PATH / filename_X
     X_full = None
@@ -151,11 +156,21 @@ def generate_or_load_distances_cache(
         end_frame = trial.n_frames_min
     start_frame = max(start_frame, reconstruction.start_frame)
     end_frame = min(end_frame, reconstruction.end_frame)
-
-    # Take a slice of the full array
-    X_sf = squareform(X_full)
-    X = X_sf[start_frame:end_frame + 1, start_frame:end_frame + 1]
     meta['start_frame'] = start_frame
     meta['end_frame'] = end_frame
+
+    if return_squareform or (start_frame > 0 or end_frame < reconstruction.end_frame):
+        X_sf = squareform(X_full)
+
+        # Take a slice of the full array
+        if start_frame > 0 or end_frame < reconstruction.end_frame:
+            X_sf = X_sf[start_frame:end_frame + 1, start_frame:end_frame + 1]
+
+        if return_squareform:
+            X = X_sf
+        else:
+            X = squareform(X_sf, checks=False)
+    else:
+        X = X_full
 
     return X, meta

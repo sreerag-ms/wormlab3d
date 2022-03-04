@@ -8,14 +8,13 @@ import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
 from scipy.cluster.hierarchy import fcluster
-from scipy.cluster.hierarchy import linkage
-from scipy.spatial.distance import squareform
 from sklearn.manifold import TSNE
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d import logger
 from wormlab3d.data.model import Reconstruction
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
+from wormlab3d.postures.posture_clusters import get_posture_clusters
 from wormlab3d.postures.posture_distances import get_posture_distances
 from wormlab3d.toolkit.plot_utils import fancy_dendrogram
 from wormlab3d.toolkit.util import print_args
@@ -109,13 +108,21 @@ def cluster_postures(
         eigenworms_n_components=args.n_components,
         start_frame=args.start_frame,
         end_frame=args.end_frame,
+        return_squareform=True,
         rebuild_cache=False
     )
-    dists_vf = squareform(distances, checks=False)
 
-    # Do clustering
-    logger.info('Calculating linkage.')
-    L = linkage(dists_vf, linkage_method, optimal_ordering=True)
+    # Fetch clusters
+    L, _ = get_posture_clusters(
+        reconstruction_id=reconstruction.id,
+        use_eigenworms=use_ews,
+        eigenworms_id=args.eigenworms,
+        eigenworms_n_components=args.n_components,
+        start_frame=args.start_frame,
+        end_frame=args.end_frame,
+        linkage_method=linkage_method,
+        rebuild_cache=False
+    )
 
     # Set up plots
     n_cluster_plots = max_clusters - min_clusters + 1
