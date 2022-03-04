@@ -1,12 +1,13 @@
 import os
 from argparse import ArgumentParser
 from argparse import Namespace
+from typing import List, Tuple
 
 import matplotlib.gridspec as gridspec
-import matplotlib.patches as patches
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
+from matplotlib.patches import Rectangle
 from scipy.cluster.hierarchy import fcluster
 from sklearn.manifold import TSNE
 
@@ -48,7 +49,10 @@ def parse_args() -> Namespace:
     return args
 
 
-def _reorder_distance_correlations(distances: np.ndarray, clusters):
+def _reorder_distance_correlations(
+        distances: np.ndarray,
+        clusters: np.ndarray
+) -> Tuple[np.ndarray, List[Rectangle], np.ndarray]:
     """
     Reorder the distance correlations.
     """
@@ -62,8 +66,8 @@ def _reorder_distance_correlations(distances: np.ndarray, clusters):
         cluster_size = len(idxs)
         reordered_distances[block_idx:(block_idx + cluster_size)] = distances[idxs].copy()
         all_idxs.append(idxs)
-        sqr = patches.Rectangle((block_idx - 0.5, block_idx - 0.5), cluster_size, cluster_size,
-                                linewidth=1, edgecolor='r', linestyle='--', facecolor='none')
+        sqr = Rectangle((block_idx - 0.5, block_idx - 0.5), cluster_size, cluster_size,
+                        linewidth=1, edgecolor='r', linestyle='--', facecolor='none')
         squares.append(sqr)
         block_idx += cluster_size
 
@@ -94,6 +98,9 @@ def cluster_postures(
         use_ews: bool = True,
         linkage_method: str = 'average',
 ):
+    """
+    Plot clustered posture matrices.
+    """
     args = parse_args()
     reconstruction = Reconstruction.objects.get(id=args.reconstruction)
 
