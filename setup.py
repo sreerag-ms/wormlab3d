@@ -11,6 +11,7 @@ setup(
     tests_require=['pytest'],
     install_requires=[
         'av >= 8.0, < 8.1',
+        'fastcluster >= 1.2, < 1.3',
         'ffmpeg-python >= 0.2, < 0.3',
         'flask >= 2.0, < 2.1',
         'flask_wtf >= 1.0.0, < 1.1',

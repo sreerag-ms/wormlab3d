@@ -2,7 +2,8 @@ import json
 from typing import Tuple, Any, Dict
 
 import numpy as np
-from scipy.cluster.hierarchy import linkage
+from fastcluster import linkage
+from scipy.cluster.hierarchy import optimal_leaf_ordering
 
 from wormlab3d import POSTURE_CLUSTERS_CACHE_PATH
 from wormlab3d import logger
@@ -15,7 +16,9 @@ def _calculate_linkage(distances: np.ndarray, linkage_method: str) -> np.ndarray
     """
     Calculate linkage matrix.
     """
-    return linkage(distances, linkage_method, optimal_ordering=True)
+    L = linkage(distances, linkage_method)
+    L = optimal_leaf_ordering(L, distances)
+    return L
 
 
 def get_posture_clusters(
