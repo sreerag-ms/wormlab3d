@@ -96,16 +96,15 @@ def _plot_reordered_distances(ax: Axes, distances: np.ndarray, clusters: np.ndar
 
 def cluster_postures(
         use_ews: bool = True,
-        linkage_method: str = 'average',
+        linkage_method: str = 'ward',
+        min_clusters: int = 3,
+        max_clusters: int = 14
 ):
     """
     Plot clustered posture matrices.
     """
     args = parse_args()
     reconstruction = Reconstruction.objects.get(id=args.reconstruction)
-
-    min_clusters = 3
-    max_clusters = 14
 
     # Fetch distances
     distances, _ = get_posture_distances(
@@ -187,6 +186,7 @@ def cluster_postures(
         path = LOGS_PATH / f'{START_TIMESTAMP}_clusters' \
                            f'_{"ew" if use_ews else "nf"}' \
                            f'_l={linkage_method}' \
+                           f'_c={min_clusters}-{max_clusters}' \
                            f'_r={reconstruction.id}' \
                            f'_f={args.start_frame}-{args.end_frame}' \
                            f'.{img_extension}'
@@ -287,7 +287,7 @@ if __name__ == '__main__':
     # tsne_postures(embedding_dim=2, nonp_threshold=0.3)
     # tsne_postures(embedding_dim=3, nonp_threshold=0.3)
 
-    cluster_postures(use_ews=True, linkage_method='ward')
+    cluster_postures(use_ews=True, linkage_method='ward', min_clusters=3, max_clusters=14)
     # for ews in [True, False]:
     #     for l_method in ['single', 'complete', 'average', 'weighted', 'centroid', 'median', 'ward']:
     #         cluster_postures(use_ews=ews, linkage_method=l_method)
