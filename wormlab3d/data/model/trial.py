@@ -2,6 +2,7 @@ from typing import List, Dict, Union, Tuple
 
 import numpy as np
 from mongoengine import *
+
 from wormlab3d import CAMERA_IDXS, TRACKING_VIDEOS_PATH
 from wormlab3d.data.model import Cameras
 from wormlab3d.data.model.experiment import Experiment
@@ -77,7 +78,8 @@ class Trial(Document):
             **filters
         )
 
-    def get_cameras(self, best: bool = True, fallback_to_experiment: bool = True, source: str = None) -> Union[Cameras, List[Cameras]]:
+    def get_cameras(self, best: bool = True, fallback_to_experiment: bool = True, source: str = None) -> Union[
+        Cameras, List[Cameras]]:
         """
         Fetch the camera models for this trial.
         If best=False then returns a list of all associated, otherwise picks the best according to reprojection_error.
@@ -210,3 +212,32 @@ class Trial(Document):
     def has_tracking_video(self) -> bool:
         video_filename = TRACKING_VIDEOS_PATH / f'{self.id:03d}.mp4'
         return video_filename.exists()
+
+    def find_next_frame_with_different_images(self, start_frame: int, threshold: float) -> Frame:
+        """
+        Find the next frame from the one given which has an image difference greater than the threshold.
+        """
+        f0 = self.get_frame(start_frame)
+        if f0.images is None or len(f0.images) != 3:
+            raise RuntimeError('Start frame does not have a triplet of prepared images.')
+        images0 = np.stack(f0.images)
+        diff = 0
+        step = 15
+        frame_num = start_frame + step
+        while diff < threshold or abs(step) > 1:
+            f1 = self.get_frame(frame_num)
+            if f1.images is None or len(f1.images) != 3:
+                raise RuntimeError('Cannot find subsequent frame with a triplet of prepared images.')
+            images1 = np.stack(f1.images)
+            diff = np.sum((images0 - images1)**2)
+
+            # If the difference is large enough step back in the with smaller steps.
+            if step > 0 and diff > threshold:
+                step = min(-1, -int(step / 2))
+
+            # If we're stepping backwards and are now below threshold again step forward with smaller steps.
+            elif step < 0 and diff < threshold:
+                step = min(1, -int(step / 2))
+
+            frame_num += step
+        return f1

@@ -14,6 +14,7 @@ class ParameterArgs(BaseArgs):
 
             depth: int = 5,
             window_size: int = 1,
+            window_image_diff_threshold: float = 3e3,
             use_master: bool = True,
             sigmas_init: float = 0.1,
             masks_threshold: float = 0.4,
@@ -64,10 +65,8 @@ class ParameterArgs(BaseArgs):
         self.load = load
         self.params_id = params_id
         self.depth = depth
-        assert window_size % 2 == 1, 'Window size must be an odd number.'
         self.window_size = window_size
-        if window_size == 1:
-            assert use_master, 'Must set use-master=True when using a window size of 1.'
+        self.window_image_diff_threshold = window_image_diff_threshold
         self.use_master = use_master
         self.sigmas_init = sigmas_init
         self.masks_threshold = masks_threshold
@@ -138,6 +137,8 @@ class ParameterArgs(BaseArgs):
                            help='Depth of multi-scale curves to use. Default=5 (=1,2,4,8,16).')
         group.add_argument('--window-size', type=int, default=9,
                            help='Sliding window size.')
+        group.add_argument('--window-image-diff-threshold', type=float, default=3e3,
+                           help='Minimum image difference threshold between subsequent frames in the window.')
         group.add_argument('--use-master', type=str2bool, default=True,
                            help='Optimise a single parameter set for the full window. Default = True.')
         group.add_argument('--sigmas-init', type=float, default=0.01,

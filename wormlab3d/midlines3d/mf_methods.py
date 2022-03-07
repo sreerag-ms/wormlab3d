@@ -161,8 +161,8 @@ def calculate_neighbours_losses(
     The distance between neighbours should be the same.
     """
     D = len(points)
-    losses = [torch.tensor(0., device=points[0].device), ]
-    for d in range(1, D):
+    losses = [torch.tensor(0., device=points[0].device)] * 2
+    for d in range(2, D):
         points_d = points[d]
 
         # Take central differences
@@ -182,8 +182,8 @@ def calculate_parents_losses(
     The distance between points and their parent should be equal siblings.
     """
     D = len(points)
-    losses = [torch.tensor(0., device=points[0].device), ]
-    for d in range(1, D):
+    losses = [torch.tensor(0., device=points[0].device)] * 2
+    for d in range(2, D):
         points_d = points[d]
         parents = points[d - 1].detach()
         points_parent = torch.repeat_interleave(parents, repeats=2, dim=1)
@@ -222,8 +222,8 @@ def calculate_aunts_losses(
     sum of the distances between those points and their parents.
     """
     D = len(points)
-    losses = [torch.tensor(0., device=points[0].device), ]
-    for d in range(1, D):
+    losses = [torch.tensor(0., device=points[0].device)] * 2
+    for d in range(2, D):
         points_d = points[d]
         parents = points[d - 1]
 
@@ -254,7 +254,10 @@ def calculate_scores_losses(
         scores_d = scores[d]
 
         # Scores should be even along body
-        loss = torch.sum((torch.log(1 + scores_d) - torch.log(1 + scores_d.mean().detach()))**2)
+        loss = torch.sum(
+            (torch.log(1 + scores_d)
+             - torch.log(1 + scores_d.mean(dim=1, keepdim=True).detach()))**2
+        )
 
         # Scores should be maximised
         loss = loss + 1 / (torch.sum(scores_d) + 1e-6)
@@ -292,10 +295,13 @@ def calculate_sigmas_losses(
             sd2 = torch.clamp(sigmas_d[:, mp + 1:] - sigmas_d[:, mp:-1], min=0).sum()
             qp = int(n / 4)
             middle_section = sigmas_d[:, qp:3 * qp]
-            sd3 = torch.sum((torch.log(1 + middle_section) - torch.log(1 + middle_section.mean().detach()))**2)
+            sd3 = torch.sum(
+                (torch.log(1 + middle_section)
+                 - torch.log(1 + middle_section.mean(dim=1, keepdim=True).detach()))**2
+            )
             loss = 0.1 * sd1 + 0.1 * sd2 + sd3
         else:
-            loss = torch.sum((torch.log(1 + sigmas_d) - torch.log(1 + sigmas_d.mean().detach()))**2)
+            loss = torch.sum((torch.log(1 + sigmas_d) - torch.log(1 + sigmas_d.mean(dim=1, keepdim=True).detach()))**2)
 
         losses.append(loss)
 
@@ -408,15 +414,22 @@ def calculate_temporal_losses(
     """
     D = len(points)
 
-    # If there are no previous points available then just return zeros.
-    if points_prev is None:
+    # If there are no other time points available then just return zeros.
+    if points_prev is None and points[0].shape[0] == 1:
         return [torch.tensor(0., device=points[0].device) for _ in range(D)]
 
     losses = []
     for d in range(D):
         points_d = points[d]
-        points_prev_d = points_prev[d]
-        loss = torch.sum((points_d - points_prev_d)**2)
+
+        # Prepend the previous points
+        if points_prev is not None:
+            points_prev_d = points_prev[d].unsqueeze(0)
+            points_d = torch.cat([points_prev_d, points_d], dim=0)
+
+        # Calculate losses to temporal neighbours
+        loss = torch.sum((points_d[1:] - points_d[:-1])**2)
+
         losses.append(loss)
 
     return losses

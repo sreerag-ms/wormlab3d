@@ -78,6 +78,7 @@ class FrameState(nn.Module):
             parameters: MFParameters,
             prev_frame_state: 'FrameState' = None,
             master_frame_state: 'FrameState' = None,
+            use_master_points: bool = True,
     ):
         super().__init__()
         self.parameters = parameters
@@ -94,7 +95,10 @@ class FrameState(nn.Module):
         # If we are using a master frame state then just reference those parameters.
         if master_frame_state is not None:
             for k in PARAMETER_NAMES:
-                self.register_parameter(k, master_frame_state.get_state(k))
+                if k == 'points' and not use_master_points:
+                    self._init_points_parameters()
+                else:
+                    self.register_parameter(k, master_frame_state.get_state(k))
 
         # Otherwise, initialise fully
         else:
@@ -182,25 +186,7 @@ class FrameState(nn.Module):
         Initialise the multiscale curve parameters.
         """
         mp = self.parameters
-
-        # Initialise the points perfectly spaced along a line of random length.
-        curve_points = []
-        for d in range(mp.depth):
-            if d == 0:
-                x = torch.normal(mean=torch.zeros(3), std=1 / (2**(d + 4)))
-                x = x.unsqueeze(0)
-            elif d == 1:
-                x = torch.normal(mean=torch.cat([x, x]), std=1 / (2**(d + 4)))
-            else:
-                r = (x[1:] - x[:-1]).mean(dim=0, keepdim=True)
-                r = r[0] / 3
-                x = torch.stack([
-                    torch.linspace(float(x[0, j] - r[j]), float(x[-1, j] + r[j]), 2**d)
-                    for j in range(3)
-                ], axis=1)
-            x = nn.Parameter(x, requires_grad=True)
-            curve_points.append(x)
-        self.register_parameter('points', curve_points)
+        self._init_points_parameters()
 
         # Initialise the sigmas equally at each level, decreasing with depth
         sigmas = []
@@ -239,6 +225,31 @@ class FrameState(nn.Module):
             'camera_intensities',
             nn.Parameter(torch.ones(3), requires_grad=mp.optimise_intensities)
         )
+
+    def _init_points_parameters(self):
+        """
+        Initialise the multiscale curve points.
+        """
+        mp = self.parameters
+
+        # Initialise the points perfectly spaced along a line of random length.
+        curve_points = []
+        for d in range(mp.depth):
+            if d == 0:
+                x = torch.normal(mean=torch.zeros(3), std=1 / (2**(d + 4)))
+                x = x.unsqueeze(0)
+            elif d == 1:
+                x = torch.normal(mean=torch.cat([x, x]), std=1 / (2**(d + 4)))
+            else:
+                r = (x[1:] - x[:-1]).mean(dim=0, keepdim=True)
+                r = r[0] / 3
+                x = torch.stack([
+                    torch.linspace(float(x[0, j] - r[j]), float(x[-1, j] + r[j]), 2**d)
+                    for j in range(3)
+                ], axis=1)
+            x = nn.Parameter(x, requires_grad=True)
+            curve_points.append(x)
+        self.register_parameter('points', curve_points)
 
     def _init_cam_coeffs(self):
         """
@@ -387,6 +398,14 @@ class FrameState(nn.Module):
             self._buffers[key].data = data.clone()
         else:
             raise RuntimeError(f'Could not set state for {key}.')
+
+    def copy_state(self, from_state: 'FrameState'):
+        """
+        Copy buffers, parameters and transient values over from another frame state.
+        """
+        with torch.no_grad():
+            for k in BUFFER_NAMES + PARAMETER_NAMES + TRANSIENTS_NAMES:
+                self.set_state(k, from_state.get_state(k))
 
     def get_cam_coeffs(self) -> torch.Tensor:
         """

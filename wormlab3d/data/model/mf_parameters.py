@@ -18,6 +18,7 @@ class MFParameters(Document):
     depth = IntField()
     n_points_total = IntField()
     window_size = IntField()
+    window_image_diff_threshold = FloatField()
     use_master = BooleanField()
     sigmas_init = FloatField()
     masks_threshold = FloatField()

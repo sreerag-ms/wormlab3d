@@ -8,7 +8,7 @@ import torch
 
 from wormlab3d import PREPARED_IMAGE_SIZE, DATA_PATH
 from wormlab3d import logger
-from wormlab3d.data.model import MFParameters, MFCheckpoint, Reconstruction
+from wormlab3d.data.model import MFParameters, MFCheckpoint, Reconstruction, Trial
 from wormlab3d.midlines3d.frame_state import FrameState, BUFFER_NAMES, PARAMETER_NAMES, BINARY_DATA_KEYS
 from wormlab3d.toolkit.util import to_numpy
 
@@ -24,7 +24,7 @@ class TrialState:
             read_only: bool = True
     ):
         self.reconstruction = reconstruction
-        self.trial = reconstruction.trial
+        self.trial: Trial = reconstruction.trial
         if start_frame is None:
             start_frame = reconstruction.start_frame
         if end_frame is None:
@@ -215,6 +215,7 @@ class TrialState:
             load: bool = True,
             prev_frame_state: FrameState = None,
             master_frame_state: FrameState = None,
+            use_master_points: bool = True,
             device: torch.device = None
     ) -> FrameState:
         """
@@ -228,7 +229,8 @@ class TrialState:
             frame=frame,
             parameters=self.parameters,
             prev_frame_state=prev_frame_state,
-            master_frame_state=master_frame_state
+            master_frame_state=master_frame_state,
+            use_master_points=use_master_points
         )
 
         if not trainable:
