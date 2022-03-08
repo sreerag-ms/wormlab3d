@@ -99,6 +99,50 @@ def render_points(
     return masks, blobs
 
 
+@torch.jit.script
+def _smooth_parameter(param: torch.Tensor, ks: int) -> torch.Tensor:
+    """
+    Apply 1D average pooling to smooth a parameter vector.
+    """
+    pad_size = int(ks / 2)
+    p_smoothed = torch.cat([
+        torch.repeat_interleave(param[:, 0].unsqueeze(1), pad_size, dim=1),
+        param,
+        torch.repeat_interleave(param[:, -1].unsqueeze(1), pad_size, dim=1),
+    ], dim=1)
+    p_smoothed = p_smoothed[:, None, :]
+    p_smoothed = F.avg_pool1d(p_smoothed, kernel_size=ks, stride=1, padding=0)
+
+    return p_smoothed.squeeze(1)
+
+
+@torch.jit.script
+def _taper_parameter(param: torch.Tensor) -> torch.Tensor:
+    """
+    Ensure the parameter vector decreases from the middle-out.
+    """
+    N = param.shape[1]
+    mp = int(N / 2)
+    tapered = torch.zeros_like(param) + 1e-5
+    tapered[:, mp - 1:mp + 1] = param[:, mp - 1:mp + 1]
+
+    # Middle to head
+    for i in range(mp - 2, -1, -1):
+        tapered[:, i] = torch.amin(
+            torch.stack([param[:, i], tapered[:, i + 1].clone()], dim=1),
+            dim=1
+        )
+
+    # Middle to tail
+    for i in range(mp + 1, N):
+        tapered[:, i] = torch.amin(
+            torch.stack([param[:, i], tapered[:, i - 1].clone()], dim=1),
+            dim=1
+        )
+
+    return tapered
+
+
 class ProjectRenderScoreModel(nn.Module):
     image_size: Final[int]
 
@@ -154,18 +198,25 @@ class ProjectRenderScoreModel(nn.Module):
             exponents_d = exponents[d]
             intensities_d = intensities[d]
 
+            N = points_d.shape[1]
+            depth = int(torch.log2(torch.tensor(N)))
+
             # Smooth the points, sigmas and intensities using average pooling convolutions.
-            if d > 1:
-                ks = int(2 * d + 1)
+            if depth > 1:
+                ks = int(2 * depth + 1)
 
                 # Distance to parent points fixed as a quarter of the mean segment-length between parents
-                parents = points_smoothed[d - 1]
-                x = torch.mean(torch.norm(parents[:, 1:] - parents[:, :-1], dim=-1)) / 4
-                parents_repeated = torch.repeat_interleave(parents, repeats=2, dim=1)
-                direction = points_d - parents_repeated
-                points_anchored = parents_repeated + x * (direction / torch.norm(direction, dim=-1, keepdim=True))
-                points_d = torch.cat(
-                    [points_d[:, 0][:, None, :], points_anchored[:, 1:-1], points_d[:, -1][:, None, :]], dim=1)
+                if d > 0:
+                    parents = points_smoothed[d - 1]
+                    x = torch.mean(torch.norm(parents[:, 1:] - parents[:, :-1], dim=-1)) / 4
+                    parents_repeated = torch.repeat_interleave(parents, repeats=2, dim=1)
+                    direction = points_d - parents_repeated
+                    points_anchored = parents_repeated + x * (direction / torch.norm(direction, dim=-1, keepdim=True))
+                    points_d = torch.cat([
+                        points_d[:, 0][:, None, :],
+                        points_anchored[:, 1:-1],
+                        points_d[:, -1][:, None, :]
+                    ], dim=1)
 
                 # Smooth the curve points
                 pad_size = int(ks / 2)
@@ -187,13 +238,13 @@ class ProjectRenderScoreModel(nn.Module):
                 points_d = cps.permute(0, 2, 1)
 
                 # Ensure tapering of rendered worm to avoid holes
-                sigmas_d = self._taper_parameter(sigmas_d)
-                intensities_d = self._taper_parameter(intensities_d)
+                sigmas_d = _taper_parameter(sigmas_d)
+                intensities_d = _taper_parameter(intensities_d)
 
                 # Smooth the sigmas, exponents and intensities
-                sigmas_d = self._smooth_parameter(sigmas_d, ks)
-                exponents_d = self._smooth_parameter(exponents_d, ks)
-                intensities_d = self._smooth_parameter(intensities_d, ks)
+                sigmas_d = _smooth_parameter(sigmas_d, ks)
+                exponents_d = _smooth_parameter(exponents_d, ks)
+                intensities_d = _smooth_parameter(intensities_d, ks)
 
             # Project and render
             points_2d_d = self._project_to_2d(cam_coeffs, points_d, points_3d_base, points_2d_base)
@@ -252,7 +303,7 @@ class ProjectRenderScoreModel(nn.Module):
             # Score the points
             scores_d = (blobs_normed * masks_target_d.unsqueeze(2)).sum(dim=(3, 4)).mean(dim=1)
             if d > 1:
-                scores_d = self._taper_parameter(scores_d)
+                scores_d = _taper_parameter(scores_d)
 
             # Parent points can only score the minimum of their child points
             if d < D - 1:
@@ -276,48 +327,7 @@ class ProjectRenderScoreModel(nn.Module):
         scores = scores[::-1]
         detection_masks = detection_masks[::-1]
 
-
         return masks, detection_masks, points_2d, scores, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed
-
-    def _smooth_parameter(self, param: torch.Tensor, ks: int) -> torch.Tensor:
-        """
-        Apply 1D average pooling to smooth a parameter vector.
-        """
-        pad_size = int(ks / 2)
-        p_smoothed = torch.cat([
-            torch.repeat_interleave(param[:, 0].unsqueeze(1), pad_size, dim=1),
-            param,
-            torch.repeat_interleave(param[:, -1].unsqueeze(1), pad_size, dim=1),
-        ], dim=1)
-        p_smoothed = p_smoothed[:, None, :]
-        p_smoothed = F.avg_pool1d(p_smoothed, kernel_size=ks, stride=1, padding=0)
-
-        return p_smoothed.squeeze(1)
-
-    def _taper_parameter(self, param: torch.Tensor) -> torch.Tensor:
-        """
-        Ensure the parameter vector decreases from the middle-out.
-        """
-        N = param.shape[1]
-        mp = int(N / 2)
-        tapered = torch.zeros_like(param) + 1e-5
-        tapered[:, mp - 1:mp + 1] = param[:, mp - 1:mp + 1]
-
-        # Middle to head
-        for i in range(mp - 2, -1, -1):
-            tapered[:, i] = torch.amin(
-                torch.stack([param[:, i], tapered[:, i + 1].clone()], dim=1),
-                dim=1
-            )
-
-        # Middle to tail
-        for i in range(mp + 1, N):
-            tapered[:, i] = torch.amin(
-                torch.stack([param[:, i], tapered[:, i - 1].clone()], dim=1),
-                dim=1
-            )
-
-        return tapered
 
     def _project_to_2d(
             self,

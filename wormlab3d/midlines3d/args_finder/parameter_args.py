@@ -13,6 +13,7 @@ class ParameterArgs(BaseArgs):
             params_id: str = None,
 
             depth: int = 5,
+            depth_min: int = 0,
             window_size: int = 1,
             window_image_diff_threshold: float = 3e3,
             use_master: bool = True,
@@ -65,6 +66,7 @@ class ParameterArgs(BaseArgs):
         self.load = load
         self.params_id = params_id
         self.depth = depth
+        self.depth_min = depth_min
         self.window_size = window_size
         self.window_image_diff_threshold = window_image_diff_threshold
         self.use_master = use_master
@@ -83,7 +85,7 @@ class ParameterArgs(BaseArgs):
 
         # Calculate total number of curve points
         N = 0
-        for mi in range(depth):
+        for mi in range(depth_min, depth):
             N += 2**mi
         self.n_points_total = N
 
@@ -135,6 +137,8 @@ class ParameterArgs(BaseArgs):
 
         group.add_argument('--depth', type=int, default=5,
                            help='Depth of multi-scale curves to use. Default=5 (=1,2,4,8,16).')
+        group.add_argument('--depth-min', type=int, default=0,
+                           help='Minimum depth of multi-scale curves to use. Default=0.')
         group.add_argument('--window-size', type=int, default=9,
                            help='Sliding window size.')
         group.add_argument('--window-image-diff-threshold', type=float, default=3e3,

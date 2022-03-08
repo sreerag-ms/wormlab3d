@@ -113,7 +113,7 @@ class TrialState:
         mp = self.parameters
         T = self.trial.n_frames_min
         N = mp.n_points_total
-        D = mp.depth
+        D = mp.depth - mp.depth_min
         states = {}
         shapes = {}
 
@@ -238,16 +238,19 @@ class TrialState:
 
         # Restore buffer and parameter values from saved
         if load:
+            D = self.parameters.depth
+            D_min = self.parameters.depth_min
+            idx_offset = 2**D_min - 1
             for k in BUFFER_NAMES + PARAMETER_NAMES:
                 v = torch.from_numpy(self.get(k)[frame_num])
 
                 # Only the deepest of these are stored so just duplicate them into lists first
                 if k in ['masks_target', 'masks_target_residuals', 'masks_curve']:
-                    v = [v] * self.parameters.depth
+                    v = [v] * (D - D_min)
 
                 # Expand collapsed
                 elif k in ['points', 'points_2d', 'sigmas', 'exponents', 'intensities', 'scores']:
-                    v = [v[2**d - 1:2**(d + 1) - 1] for d in range(self.parameters.depth)]
+                    v = [v[2**d - idx_offset - 1:2**(d + 1) - idx_offset - 1] for d in range(D_min, D)]
 
                 frame_state.set_state(k, v)
 

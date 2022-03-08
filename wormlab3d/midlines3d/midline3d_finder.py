@@ -166,12 +166,13 @@ class Midline3DFinder:
         Initialise the convergence detector.
         """
         logger.info(f'Initialising convergence detector.')
+        p = self.parameters
         cd = ConvergenceDetector(
-            shape=(1 + self.parameters.depth,),
-            tau_fast=self.parameters.convergence_tau_fast,
-            tau_slow=self.parameters.convergence_tau_slow,
-            threshold=self.parameters.convergence_threshold,
-            patience=self.parameters.convergence_patience
+            shape=(1 + p.depth - p.depth_min,),
+            tau_fast=p.convergence_tau_fast,
+            tau_slow=p.convergence_tau_slow,
+            threshold=p.convergence_threshold,
+            patience=p.convergence_patience
         )
         cd = torch.jit.script(cd)
         return cd
@@ -659,7 +660,7 @@ class Midline3DFinder:
         Train the cam coeffs and multiscale curve for a single step.
         """
         p = self.parameters
-        D = p.depth
+        D = p.depth - p.depth_min
 
         # Collect parameters
         cam_coeffs = torch.stack([f.get_state('cam_coeffs') for f in self.frame_batch])
@@ -722,7 +723,7 @@ class Midline3DFinder:
             # Weight the point gradients by the relative tapered scores
             for i, fs in enumerate(self.frame_batch):
                 points = fs.get_state('points')
-                for d in range(self.parameters.depth):
+                for d in range(D):
                     tapered_scores = scores[d][i, :, None].detach()
                     max_score = tapered_scores.amax(keepdim=True)
                     if max_score > 0:
@@ -737,7 +738,7 @@ class Midline3DFinder:
                 # Adjust points to be a quarter of the mean segment-length between parent points
                 for i, fs in enumerate(self.frame_batch):
                     points = fs.get_state('points')
-                    for d in range(2, self.parameters.depth):
+                    for d in range(2, D):
                         points_d = points[d]
                         parents = points_smoothed[d - 1][i]
                         x = torch.mean(torch.norm(parents[1:] - parents[:-1], dim=-1)) / 4
@@ -843,37 +844,38 @@ class Midline3DFinder:
             stats[f'loss/{k}'] = loss_k.item()
 
         # Sum the losses at each depth
-        for d in range(p.depth):
+        for i, d in enumerate(range(p.depth_min, p.depth)):
             loss_d = 0.
             for k, losses_k in losses.items():
                 w = getattr(p, f'loss_{k}')
                 if w > 0:
-                    loss_d += w * losses_k[d]
+                    loss_d += w * losses_k[i]
             stats[f'loss/depth/{d}'] = loss_d.item()
             losses_depths.append(loss_d)
 
             # Log actual losses at each depth
             if self.runtime_args.log_level > 0:
                 for k in losses.keys():
-                    stats[f'loss_d/{k}/{d}'] = losses[k][d].item()
+                    stats[f'loss_d/{k}/{d}'] = losses[k][i].item()
 
             # Log additional stats
             if self.runtime_args.log_level > 1:
                 if d > 0:
                     # Track distance to neighbours
-                    dist_neighbours = torch.norm(points[d][:, 1:] - points[d][:, -1], dim=-1)
+                    dist_neighbours = torch.norm(points[i][:, 1:] - points[i][:, -1], dim=-1)
                     _log_parameter_stats(d, 'dists/neighbours', dist_neighbours)
 
                     # Track distance to parent
-                    curve_points_parent = torch.repeat_interleave(points[d - 1], repeats=2, dim=1)
-                    dist_parent = torch.norm(points[d] - curve_points_parent, dim=-1)
-                    _log_parameter_stats(d, 'dists/parent', dist_parent)
+                    if i > 0:
+                        curve_points_parent = torch.repeat_interleave(points[i - 1], repeats=2, dim=1)
+                        dist_parent = torch.norm(points[i] - curve_points_parent, dim=-1)
+                        _log_parameter_stats(d, 'dists/parent', dist_parent)
 
                 # Scores, sigmas, exponents and intensities
-                _log_parameter_stats(d, 'scores', scores[d])
-                _log_parameter_stats(d, 'sigmas', sigmas[d])
-                _log_parameter_stats(d, 'exponents', exponents[d])
-                _log_parameter_stats(d, 'intensities', intensities[d])
+                _log_parameter_stats(d, 'scores', scores[i])
+                _log_parameter_stats(d, 'sigmas', sigmas[i])
+                _log_parameter_stats(d, 'exponents', exponents[i])
+                _log_parameter_stats(d, 'intensities', intensities[i])
 
         # Sigma cameras sfs should average 1
         camera_sigmas_loss = torch.sum((camera_sigmas - 1)**2)
@@ -962,8 +964,8 @@ class Midline3DFinder:
             detector = self.convergence_detector
             if detector is not None:
                 state_vars = ['mu_fast', 'mu_slow', 'convergence_count', 'converged']
-                for d in range(self.parameters.depth + 1):
-                    d_str = 'global' if d == 0 else d - 1
+                for d in range(self.parameters.depth_min, self.parameters.depth + 1):
+                    d_str = 'global' if d == self.parameters.depth_min else d - 1
                     for k in state_vars:
                         self.tb_logger.add_scalar(f'detector/{d_str}/{k}', getattr(detector, k)[d].item(), step)
 
@@ -1007,7 +1009,7 @@ class Midline3DFinder:
         """
         cmap_vertices = 'autumn_r'
         cmap_curve = 'jet'
-        D = self.parameters.depth
+        D = self.parameters.depth - self.parameters.depth_min
         n_rows = int(np.ceil(np.sqrt(D)))
         n_cols = int(np.ceil(np.sqrt(D)))
 
@@ -1029,7 +1031,7 @@ class Midline3DFinder:
                     break
                 ax = fig.add_subplot(gs[i, j], projection='3d')
                 ax.view_init(azim=self.plot_3d_azim)
-                ax.set_title(f'd={d}')
+                ax.set_title(f'd={d + self.parameters.depth_min}')
                 # cla(ax)
 
                 # Scatter vertices
@@ -1071,7 +1073,8 @@ class Midline3DFinder:
         fig = plt.figure(figsize=(n_cols * 3, 1 + n_rows * 3))
         fig.suptitle(self._plot_title(frame_state, skipped))
         gs = GridSpec(n_rows, n_cols)
-        d = 0
+        d = self.parameters.depth_min
+        di = 0
 
         masks_target = frame_state.get_state('masks_target_residuals')
         points_2d = frame_state.get_state('points_2d')
@@ -1092,8 +1095,8 @@ class Midline3DFinder:
                 ax.set_title(f'd={d}')
                 ax.axis('off')
 
-                X_target = to_numpy(masks_target[d])
-                X_curve = to_numpy(masks_curve[d])
+                X_target = to_numpy(masks_target[di])
+                X_curve = to_numpy(masks_curve[di])
 
                 # Stitch images and masks together
                 ax.imshow(image_grid, cmap='gray', vmin=0, vmax=1)
@@ -1112,7 +1115,7 @@ class Midline3DFinder:
                           extent=(0, N - 1, 2 * int(M / 3), int(M / 3)))
 
                 # Scatter the midline points
-                p2d = to_numpy(points_2d[d]).transpose(1, 0, 2)
+                p2d = to_numpy(points_2d[di]).transpose(1, 0, 2)
                 for k in range(3):
                     p = p2d[k] + (0, 200)
                     if k == 1:
@@ -1137,7 +1140,8 @@ class Midline3DFinder:
         Plot a batch of 2D mask renderings of the mutiscale curves.
         """
         D = self.parameters.depth
-        n_rows = D
+        D_min = self.parameters.depth_min
+        n_rows = D - D_min
         n_cols = self.parameters.window_size
 
         fig = plt.figure(figsize=(n_cols * 2, 1 + n_rows * 2))
@@ -1167,7 +1171,7 @@ class Midline3DFinder:
 
             scatter_sizes = (np.linspace(1, 0, D)**2 * 100) + 0.3
 
-            for j, d in enumerate(range(D)):
+            for j, d in enumerate(range(D_min, D)):
                 ax = fig.add_subplot(gs[j, i])
                 if j == 0:
                     ax.set_title(f'frame_num={frame_state.frame_num}')
@@ -1175,8 +1179,8 @@ class Midline3DFinder:
                     ax.text(-0.1, 0.45, f'd={d}', transform=ax.transAxes, rotation='vertical')
                 ax.axis('off')
 
-                X_target = to_numpy(masks_target[d])
-                X_curve = to_numpy(masks_curve[d])
+                X_target = to_numpy(masks_target[j])
+                X_curve = to_numpy(masks_curve[j])
 
                 # Stitch images and masks together
                 ax.imshow(image_grid, cmap='gray', vmin=0, vmax=1)
@@ -1195,7 +1199,7 @@ class Midline3DFinder:
                           extent=(0, N - 1, 2 * int(M / 3), int(M / 3)))
 
                 # Scatter the midline points
-                p2d = to_numpy(points_2d[d]).transpose(1, 0, 2)
+                p2d = to_numpy(points_2d[j]).transpose(1, 0, 2)
                 for k in range(3):
                     p = p2d[k] + (0, 200)
                     if k == 1:
@@ -1210,7 +1214,7 @@ class Midline3DFinder:
                 ax.imshow(errors_triplet, vmin=-1, vmax=1, cmap='PRGn', aspect='equal',
                           extent=(0, N - 1, M - 1, 2 * int(M / 3)))
 
-        self._save_plot(fig, '2D_batch', frame_state)
+        self._save_plot(fig, '2D_batch', self.master_frame_state)
 
     def _plot_point_stats(self, frame_state: FrameState, skipped: bool = False):
         """
@@ -1218,6 +1222,7 @@ class Midline3DFinder:
         """
         ra = self.runtime_args
         D = self.parameters.depth
+        D_min = self.parameters.depth_min
         cmap = plt.get_cmap('jet')
         scores = frame_state.get_state('scores')
         sigmas = frame_state.get_state('sigmas')
@@ -1262,31 +1267,31 @@ class Midline3DFinder:
             for d in range(D)
         ]
 
-        for d in range(D):
+        for i, d in enumerate(range(D_min, D)):
             plot_args = {'label': f'd={d}', 'color': colours[d], 'alpha': 0.5}
             scatter_args = {'color': colours[d], 'alpha': 0.8, 's': 10}
 
             # Scores
             if ra.plot_scores:
-                scores_d = to_numpy(scores[d])
+                scores_d = to_numpy(scores[i])
                 ax_scores.plot(positions[d], scores_d, **plot_args)
                 ax_scores.scatter(x=positions[d], y=scores_d, **scatter_args)
 
             # Sigmas
             if ra.plot_sigmas:
-                sigmas_d = to_numpy(sigmas[d])
+                sigmas_d = to_numpy(sigmas[i])
                 ax_sigmas.plot(positions[d], sigmas_d, **plot_args)
                 ax_sigmas.scatter(x=positions[d], y=sigmas_d, **scatter_args)
 
             # Exponents
             if ra.plot_exponents:
-                exponents_d = to_numpy(exponents[d])
+                exponents_d = to_numpy(exponents[i])
                 ax_exponents.plot(positions[d], exponents_d, **plot_args)
                 ax_exponents.scatter(x=positions[d], y=exponents_d, **scatter_args)
 
             # Intensities
             if ra.plot_intensities:
-                intensities_d = to_numpy(intensities[d])
+                intensities_d = to_numpy(intensities[i])
                 ax_intensities.plot(positions[d], intensities_d, **plot_args)
                 ax_intensities.scatter(x=positions[d], y=intensities_d, **scatter_args)
 

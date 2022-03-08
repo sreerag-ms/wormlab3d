@@ -16,6 +16,7 @@ class MFParameters(Document):
     created = DateTimeField(required=True, default=datetime.datetime.utcnow)
 
     depth = IntField()
+    depth_min = IntField()
     n_points_total = IntField()
     window_size = IntField()
     window_image_diff_threshold = FloatField()

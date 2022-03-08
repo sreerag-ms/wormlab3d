@@ -97,6 +97,8 @@ class FrameState(nn.Module):
             for k in PARAMETER_NAMES:
                 if k == 'points' and not use_master_points:
                     self._init_points_parameters()
+                    with torch.no_grad():
+                        self.set_state('points', master_frame_state.get_state('points'))
                 else:
                     self.register_parameter(k, master_frame_state.get_state(k))
 
@@ -156,13 +158,15 @@ class FrameState(nn.Module):
         masks_fr = masks_fr.unsqueeze(0)
 
         # Linearly interpolate target mask resolutions from 8x8 to 200x200
-        sizes = torch.linspace(8, PREPARED_IMAGE_SIZE[0], self.parameters.depth).to(torch.int32)
+        D = self.parameters.depth
+        D_min = self.parameters.depth_min
+        sizes = torch.linspace(8, PREPARED_IMAGE_SIZE[0], D).to(torch.int32)
 
         # Generate downsampled target masks
-        for d in range(self.parameters.depth):
+        for d in range(D_min, D):
             image_size = sizes[d]
 
-            if d < self.parameters.depth - 1:
+            if d < D - 1:
                 # Downsample the full resolution version to the reduced size
                 masks_ds = F.interpolate(masks_fr, (image_size, image_size), mode='nearest')
 
@@ -190,7 +194,7 @@ class FrameState(nn.Module):
 
         # Initialise the sigmas equally at each level, decreasing with depth
         sigmas = []
-        for d in range(mp.depth):
+        for d in range(mp.depth_min, mp.depth):
             sigmas_d = torch.ones(2**d) * mp.sigmas_init / (2**d)
             sigmas_d = nn.Parameter(sigmas_d, requires_grad=mp.optimise_sigmas)
             sigmas.append(sigmas_d)
@@ -198,7 +202,7 @@ class FrameState(nn.Module):
 
         # Initialise the exponents all to 1
         exponents = []
-        for d in range(mp.depth):
+        for d in range(mp.depth_min, mp.depth):
             exponents_d = torch.ones(2**d)
             exponents_d = nn.Parameter(exponents_d, requires_grad=mp.optimise_exponents)
             exponents.append(exponents_d)
@@ -206,7 +210,7 @@ class FrameState(nn.Module):
 
         # Initialise the intensities all to 1
         intensities = []
-        for d in range(mp.depth):
+        for d in range(mp.depth_min, mp.depth):
             intensities_d = torch.ones(2**d)
             intensities_d = nn.Parameter(intensities_d, requires_grad=mp.optimise_intensities)
             intensities.append(intensities_d)
@@ -247,8 +251,9 @@ class FrameState(nn.Module):
                     torch.linspace(float(x[0, j] - r[j]), float(x[-1, j] + r[j]), 2**d)
                     for j in range(3)
                 ], axis=1)
-            x = nn.Parameter(x, requires_grad=True)
-            curve_points.append(x)
+            if d >= mp.depth_min:
+                x = nn.Parameter(x, requires_grad=True)
+                curve_points.append(x)
         self.register_parameter('points', curve_points)
 
     def _init_cam_coeffs(self):
@@ -334,20 +339,21 @@ class FrameState(nn.Module):
         Initialise the output buffers.
         """
         D = self.parameters.depth
+        D_min = self.parameters.depth_min
 
         # Camera rotation matrices (flattened)
         self.register_buffer('cam_rotations', torch.zeros(3, 9))
 
         # Setup buffers for the outputs
         mt = self.get_state('masks_target')
-        for d in range(D):
+        for i, d in enumerate(range(D_min, D)):
             self.register_buffer(f'points_2d_{d}', torch.zeros(2**d))
-            self.register_buffer(f'masks_curve_{d}', torch.zeros_like(mt[d]))
-            self.register_buffer(f'masks_target_residuals_{d}', torch.zeros_like(mt[d]))
+            self.register_buffer(f'masks_curve_{d}', torch.zeros_like(mt[i]))
+            self.register_buffer(f'masks_target_residuals_{d}', torch.zeros_like(mt[i]))
             self.register_buffer(f'scores_{d}', torch.zeros(2**d))
 
         # Curve lengths
-        self.register_buffer('curve_lengths', torch.zeros(D))
+        self.register_buffer('curve_lengths', torch.zeros(D - D_min))
 
     def register_parameter(
             self,
@@ -360,8 +366,9 @@ class FrameState(nn.Module):
         if type(param) == list:
             param_list = []
             for d, p in enumerate(param):
-                self.register_parameter(f'{name}_{d}', p)
-                param_list.append(self._parameters[f'{name}_{d}'])
+                d_str = f'{d + self.parameters.depth_min}'
+                self.register_parameter(f'{name}_{d_str}', p)
+                param_list.append(self._parameters[f'{name}_{d_str}'])
             setattr(self, name, param_list)
         else:
             return super().register_parameter(name, param)
@@ -377,7 +384,7 @@ class FrameState(nn.Module):
         elif key == 'cam_coeffs':
             return self.get_cam_coeffs()
         elif key in ['masks_target', 'masks_target_residuals', 'masks_curve', 'points_2d', 'scores']:
-            return [self._buffers[f'{key}_{d}'] for d in range(self.parameters.depth)]
+            return [self._buffers[f'{key}_{d}'] for d in range(self.parameters.depth_min, self.parameters.depth)]
         elif hasattr(self, key):
             return getattr(self, key)
         else:
