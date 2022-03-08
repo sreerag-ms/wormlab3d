@@ -1131,6 +1131,7 @@ class Midline3DFinder:
                           extent=(0, N - 1, M - 1, 2 * int(M / 3)))
 
                 d += 1
+                di += 1
 
         fig.tight_layout()
         self._save_plot(fig, '2D', frame_state)

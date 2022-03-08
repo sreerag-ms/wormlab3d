@@ -99,15 +99,15 @@ def loss_(m: str, x: torch.Tensor, y: torch.Tensor, reduce: bool = True) -> torc
     elif m == 'kl':
         l = F.kl_div(x, y, reduction='batchmean' if reduce else 'none')
     elif m == 'logdiff':
+        l = torch.sum((torch.log(1 + x) - torch.log(1 + y))**2)
         # todo: is this worth it? if so needs parametrising
-        # l = torch.sum((torch.log(1 + x) - torch.log(1 + y))**2)
-        l = torch.sum(
-            torch.where(
-                x > y,
-                torch.log(1 + 2 * x) - torch.log(1 + y),
-                torch.log(1 + x) - torch.log(1 + y)
-            )**2
-        )
+        # l = torch.sum(
+        #     torch.where(
+        #         x > y,
+        #         torch.log(1 + 2 * x) - torch.log(1 + y),
+        #         torch.log(1 + x) - torch.log(1 + y)
+        #     )**2
+        # )
     elif m == 'bce':
         l = F.binary_cross_entropy(x, y, reduction='mean' if reduce else 'none')
     else:
@@ -161,14 +161,18 @@ def calculate_neighbours_losses(
     The distance between neighbours should be the same.
     """
     D = len(points)
-    losses = [torch.tensor(0., device=points[0].device)] * 2
-    for d in range(2, D):
+    losses = []
+    for d in range(D):
         points_d = points[d]
 
         # Take central differences
-        dist_ltr = torch.norm(points_d[:, 1:-1] - points_d[:, :-2], dim=-1)
-        dist_rtl = torch.norm(points_d[:, 2:] - points_d[:, 1:-1], dim=-1)
-        loss = torch.sum((torch.log(1 + dist_ltr) - torch.log(1 + dist_rtl))**2)
+        if points_d.shape[1] > 2:
+            dist_ltr = torch.norm(points_d[:, 1:-1] - points_d[:, :-2], dim=-1)
+            dist_rtl = torch.norm(points_d[:, 2:] - points_d[:, 1:-1], dim=-1)
+            loss = torch.sum((torch.log(1 + dist_ltr) - torch.log(1 + dist_rtl))**2)
+        else:
+            loss = torch.tensor(0., device=points[0].device)
+
         losses.append(loss)
 
     return losses
@@ -182,8 +186,8 @@ def calculate_parents_losses(
     The distance between points and their parent should be equal siblings.
     """
     D = len(points)
-    losses = [torch.tensor(0., device=points[0].device)] * 2
-    for d in range(2, D):
+    losses = [torch.tensor(0., device=points[0].device), ]
+    for d in range(1, D):
         points_d = points[d]
         parents = points[d - 1].detach()
         points_parent = torch.repeat_interleave(parents, repeats=2, dim=1)
@@ -195,19 +199,23 @@ def calculate_parents_losses(
         # loss_equidistant = torch.sum((torch.log(1 + dists[:, ::2]) - torch.log(1 + dists[:, 1::2]))**2)
 
         # Distance from child to parent should be equal to half the distance of the parent to it's neighbour
-        left_dist_target = torch.norm(parents[:, 1:] - parents[:, :-1], dim=-1) / 4
-        right_dist_target = torch.norm(parents[:, :-1] - parents[:, 1:], dim=-1) / 4
-        left_children_to_parent = dists[:, ::2]
-        right_children_to_parent = dists[:, 1::2]
-        loss_left_children = torch.sum(
-            (torch.log(1 + left_dist_target) -
-             torch.log(1 + left_children_to_parent[:, 1:]))**2
-        )
-        loss_right_children = torch.sum(
-            (torch.log(1 + right_dist_target) -
-             torch.log(1 + right_children_to_parent[:, :-1]))**2
-        )
-        loss = loss_left_children + loss_right_children
+        if parents.shape[1] > 2:
+            left_dist_target = torch.norm(parents[:, 1:] - parents[:, :-1], dim=-1) / 4
+            right_dist_target = torch.norm(parents[:, :-1] - parents[:, 1:], dim=-1) / 4
+            left_children_to_parent = dists[:, ::2]
+            right_children_to_parent = dists[:, 1::2]
+            loss_left_children = torch.sum(
+                (torch.log(1 + left_dist_target) -
+                 torch.log(1 + left_children_to_parent[:, 1:]))**2
+            )
+            loss_right_children = torch.sum(
+                (torch.log(1 + right_dist_target) -
+                 torch.log(1 + right_children_to_parent[:, :-1]))**2
+            )
+            loss = loss_left_children + loss_right_children
+        else:
+            loss = torch.sum((torch.log(1 + dists[:, 0]) - torch.log(1 + dists[:, 1]))**2)
+
         losses.append(loss)
 
     return losses
@@ -222,20 +230,23 @@ def calculate_aunts_losses(
     sum of the distances between those points and their parents.
     """
     D = len(points)
-    losses = [torch.tensor(0., device=points[0].device)] * 2
-    for d in range(2, D):
+    losses = [torch.tensor(0., device=points[0].device), ]
+    for d in range(1, D):
         points_d = points[d]
         parents = points[d - 1]
 
-        left_children = points_d[:, ::2]
-        right_children = points_d[:, 1::2]
-        left_children_to_left_aunt = torch.norm(left_children[:, 1:] - parents[:, :-1], dim=-1)**2
-        right_children_to_right_aunt = torch.norm(right_children[:, :-1] - parents[:, 1:], dim=-1)**2
-        left_children_to_right_children = torch.norm(left_children[:, 1:] - right_children[:, :-1], dim=-1)**2
+        if parents.shape[1] > 2:
+            left_children = points_d[:, ::2]
+            right_children = points_d[:, 1::2]
+            left_children_to_left_aunt = torch.norm(left_children[:, 1:] - parents[:, :-1], dim=-1)**2
+            right_children_to_right_aunt = torch.norm(right_children[:, :-1] - parents[:, 1:], dim=-1)**2
+            left_children_to_right_children = torch.norm(left_children[:, 1:] - right_children[:, :-1], dim=-1)**2
 
-        a = left_children_to_right_children
-        b = (left_children_to_left_aunt + right_children_to_right_aunt)
-        loss = torch.sum((torch.log(1 + a) - torch.log(1 + b))**2)
+            a = left_children_to_right_children
+            b = (left_children_to_left_aunt + right_children_to_right_aunt)
+            loss = torch.sum((torch.log(1 + a) - torch.log(1 + b))**2)
+        else:
+            loss = torch.tensor(0., device=points[0].device)
         losses.append(loss)
 
     return losses
@@ -288,7 +299,7 @@ def calculate_sigmas_losses(
         # loss += 0.1 * torch.sum((torch.log(1 + sigmas_d) - torch.log(1 + sigmas_d.mean().detach()))**2)
 
         # Sigmas should be equal in the middle section but taper towards the ends
-        if d > 1:
+        if sigmas_d.shape[1] > 2:
             n = sigmas_d.shape[1]
             mp = int(n / 2)
             sd1 = torch.clamp(sigmas_d[:, :mp - 1] - sigmas_d[:, 1:mp], min=0).sum()
@@ -364,11 +375,14 @@ def calculate_smoothness_losses(
     The points should change smoothly along the body.
     """
     D = len(points)
-    losses = [torch.tensor(0., device=points[0].device)] * 3
-    for d in range(3, D):
+    losses = []
+    for d in range(D):
         points_d = points[d]
-        points_smoothed_d = points_smoothed[d]
-        loss = torch.sum((points_d - points_smoothed_d)**2)
+        if points_d.shape[1] > 4:
+            points_smoothed_d = points_smoothed[d]
+            loss = torch.sum((points_d - points_smoothed_d)**2)
+        else:
+            loss = torch.tensor(0., device=points[0].device)
         losses.append(loss)
 
     return losses
@@ -383,22 +397,24 @@ def calculate_curvature_losses(
     """
     D = len(points)
     device = points[0].device
-    losses = [torch.tensor(0., device=device)] * 3
-    for d in range(3, D):
+    losses = []
+    for d in range(D):
         loss = torch.tensor(0., device=device)
-        for points_d in points[d]:
-            sl = torch.norm(points_d[1:] - points_d[:-1], dim=-1)
-            sp = torch.cat([torch.zeros(1, device=device), sl.cumsum(dim=0)])
-            K = torch.zeros_like(points_d)
-            for i in range(3):
-                x = points_d[:, i]
-                Tx = torch.gradient(x, spacing=(sp,))[0]
-                Kx = torch.gradient(Tx, spacing=(sp,))[0]
-                K[:, i] = Kx
-            k = torch.norm(K, dim=-1)
 
-            # Only penalise curvatures greater than 2-revolutions
-            loss = loss + k[k > (2 * 2 * torch.pi) / sl.sum()].sum()
+        if points[d].shape[1] > 4:
+            for points_d in points[d]:
+                sl = torch.norm(points_d[1:] - points_d[:-1], dim=-1)
+                sp = torch.cat([torch.zeros(1, device=device), sl.cumsum(dim=0)])
+                K = torch.zeros_like(points_d)
+                for i in range(3):
+                    x = points_d[:, i]
+                    Tx = torch.gradient(x, spacing=(sp,))[0]
+                    Kx = torch.gradient(Tx, spacing=(sp,))[0]
+                    K[:, i] = Kx
+                k = torch.norm(K, dim=-1)
+
+                # Only penalise curvatures greater than 2-revolutions
+                loss = loss + k[k > (2 * 2 * torch.pi) / sl.sum()].sum()
         losses.append(loss)
 
     return losses
