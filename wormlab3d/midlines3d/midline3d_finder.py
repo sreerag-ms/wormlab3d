@@ -677,7 +677,7 @@ class Midline3DFinder:
         intensities = [torch.stack([f.get_state('intensities')[d] for f in self.frame_batch]) for d in range(D)]
 
         # Generate the outputs
-        masks, detection_masks, points_2d, scores, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed = self.model.forward(
+        masks, detection_masks, points_2d, scores, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed, curvatures = self.model.forward(
             cam_coeffs=cam_coeffs,
             points_3d_base=points_3d_base,
             points_2d_base=points_2d_base,
@@ -711,6 +711,7 @@ class Midline3DFinder:
             sigmas_smoothed=sigmas_smoothed,
             exponents_smoothed=exponents_smoothed,
             intensities_smoothed=intensities_smoothed,
+            curvatures=curvatures
         )
 
         # Take optimisation step
@@ -802,7 +803,8 @@ class Midline3DFinder:
             points_smoothed: torch.Tensor,
             sigmas_smoothed: torch.Tensor,
             exponents_smoothed: torch.Tensor,
-            intensities_smoothed: torch.Tensor
+            intensities_smoothed: torch.Tensor,
+            curvatures: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor, List[torch.Tensor], Dict[str, float]]:
         """
         Calculate the losses.
@@ -834,7 +836,7 @@ class Midline3DFinder:
             'exponents': calculate_exponents_losses(exponents, exponents_smoothed),
             'intensities': calculate_intensities_losses(intensities, intensities_smoothed),
             'smoothness': calculate_smoothness_losses(points, points_smoothed),
-            'curvature': calculate_curvature_losses(points_smoothed),
+            'curvature': calculate_curvature_losses(points_smoothed, curvatures),
             'temporal': calculate_temporal_losses(points, points_prev),
         }
 

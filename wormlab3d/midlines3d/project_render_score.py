@@ -7,6 +7,7 @@ from torch import nn
 from wormlab3d import PREPARED_IMAGE_SIZE
 from wormlab3d.data.model.mf_parameters import RENDER_MODE_GAUSSIANS, RENDER_MODES
 from wormlab3d.midlines3d.dynamic_cameras import DynamicCameras
+from wormlab3d.midlines3d.mf_methods import calculate_scalar_curvature
 
 
 @torch.jit.script
@@ -174,6 +175,7 @@ class ProjectRenderScoreModel(nn.Module):
         List[torch.Tensor],
         List[torch.Tensor],
         List[torch.Tensor],
+        List[torch.Tensor],
         List[torch.Tensor]
     ]:
         """
@@ -189,6 +191,7 @@ class ProjectRenderScoreModel(nn.Module):
         sigmas_smoothed = []
         exponents_smoothed = []
         intensities_smoothed = []
+        curvatures = []
 
         # Run the parameters through the model at each scale to get the outputs
         for d in range(D):
@@ -237,6 +240,13 @@ class ProjectRenderScoreModel(nn.Module):
                 cps = F.conv1d(cp, weight=k, groups=3)
                 points_d = cps.permute(0, 2, 1)
 
+                # Collapse worm where the curvature is too great
+                k = calculate_scalar_curvature(points_d)
+                sl = torch.norm(points_d[:, 1:] - points_d[:, :-1], dim=-1)
+                wl = sl.sum(dim=-1, keepdim=True)
+                kinks = k > (2 * 2 * torch.pi) / wl
+                intensities_d[kinks] = 0.
+
                 # Ensure tapering of rendered worm to avoid holes
                 sigmas_d = _taper_parameter(sigmas_d)
                 intensities_d = _taper_parameter(intensities_d)
@@ -245,6 +255,9 @@ class ProjectRenderScoreModel(nn.Module):
                 sigmas_d = _smooth_parameter(sigmas_d, ks)
                 exponents_d = _smooth_parameter(exponents_d, ks)
                 intensities_d = _smooth_parameter(intensities_d, ks)
+
+            else:
+                k = torch.zeros_like(sigmas_d)
 
             # Project and render
             points_2d_d = self._project_to_2d(cam_coeffs, points_d, points_3d_base, points_2d_base)
@@ -288,6 +301,7 @@ class ProjectRenderScoreModel(nn.Module):
             sigmas_smoothed.append(sigmas_d)
             exponents_smoothed.append(exponents_d)
             intensities_smoothed.append(intensities_d)
+            curvatures.append(k)
 
         # Scores need to feed back up the chain to inform parent points
         for d in range(D - 1, -1, -1):
@@ -327,7 +341,7 @@ class ProjectRenderScoreModel(nn.Module):
         scores = scores[::-1]
         detection_masks = detection_masks[::-1]
 
-        return masks, detection_masks, points_2d, scores, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed
+        return masks, detection_masks, points_2d, scores, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed, curvatures
 
     def _project_to_2d(
             self,

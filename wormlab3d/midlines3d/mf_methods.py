@@ -92,6 +92,56 @@ def generate_residual_targets(
 
 
 @torch.jit.script
+def _calculate_derivative(
+        points: torch.Tensor,
+        spacings: torch.Tensor
+) -> torch.Tensor:
+    """
+    Calculate the derivative using finite differences.
+    https://numpy.org/doc/stable/reference/generated/numpy.gradient.html
+    """
+    # Step sizes are non-homogeneous
+    h = spacings[..., None]
+    hs = h[:, :-1]
+    hd = h[:, 1:]
+    hs2 = hs**2
+    hd2 = hd**2
+
+    # Calculate derivative of interior points using central differences
+    numerator = hs2 * points[:, 2:] \
+                + (hd2 - hs2) * points[:, 1:-1] \
+                - hd2 * points[:, :-2]
+    denominator = hs * hd * (hd + hs)
+    dp_int = numerator / denominator
+
+    # Calculate boundary point derivatives using forward/backward differences
+    dp_s = (points[:, 1] - points[:, 0]) / h[:, 0]
+    dp_d = (points[:, -1] - points[:, -2]) / h[:, -1]
+
+    # Combine to give derivative at every point
+    derivative = torch.cat([dp_s[:, None, :], dp_int, dp_d[:, None, :]], dim=1)
+
+    return derivative
+
+
+@torch.jit.script
+def calculate_scalar_curvature(
+        points: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Calculate the scalar curvature along the body.
+    """
+    if points.shape[1] > 2:
+        sl = torch.norm(points[:, 1:] - points[:, :-1], dim=-1)
+        T = _calculate_derivative(points, sl)
+        K = _calculate_derivative(T, sl)
+        k = torch.norm(K, dim=-1)
+    else:
+        k = torch.zeros((points.shape[0], points.shape[1]), device=points.device)
+    return k
+
+
+@torch.jit.script
 def loss_(m: str, x: torch.Tensor, y: torch.Tensor, reduce: bool = True) -> torch.Tensor:
     if m == 'mse':
         # l = F.mse_loss(x, y, reduction='mean')
@@ -391,6 +441,7 @@ def calculate_smoothness_losses(
 @torch.jit.script
 def calculate_curvature_losses(
         points: List[torch.Tensor],
+        curvatures: List[torch.Tensor],
 ) -> List[torch.Tensor]:
     """
     The points should change smoothly along the body.
@@ -399,22 +450,18 @@ def calculate_curvature_losses(
     device = points[0].device
     losses = []
     for d in range(D):
-        loss = torch.tensor(0., device=device)
+        points_d = points[d]
 
-        if points[d].shape[1] > 4:
-            for points_d in points[d]:
-                sl = torch.norm(points_d[1:] - points_d[:-1], dim=-1)
-                sp = torch.cat([torch.zeros(1, device=device), sl.cumsum(dim=0)])
-                K = torch.zeros_like(points_d)
-                for i in range(3):
-                    x = points_d[:, i]
-                    Tx = torch.gradient(x, spacing=(sp,))[0]
-                    Kx = torch.gradient(Tx, spacing=(sp,))[0]
-                    K[:, i] = Kx
-                k = torch.norm(K, dim=-1)
+        if points_d.shape[1] > 4:
+            sl = torch.norm(points_d[:, 1:] - points_d[:, :-1], dim=-1)
+            wl = sl.sum(dim=-1, keepdim=True)
+            k = curvatures[d]
 
-                # Only penalise curvatures greater than 2-revolutions
-                loss = loss + k[k > (2 * 2 * torch.pi) / sl.sum()].sum()
+            # Only penalise curvatures greater than 2-revolutions
+            kinks = k > (2 * 2 * torch.pi) / wl
+            loss = k[kinks].sum()
+        else:
+            loss = torch.tensor(0., device=device)
         losses.append(loss)
 
     return losses
@@ -444,7 +491,17 @@ def calculate_temporal_losses(
             points_d = torch.cat([points_prev_d, points_d], dim=0)
 
         # Calculate losses to temporal neighbours
-        loss = torch.sum((points_d[1:] - points_d[:-1])**2)
+        loss_points = torch.sum((points_d[1:] - points_d[:-1])**2)
+
+        # Lengths should not change much through time
+        sl = torch.norm(points_d[:, 1:] - points_d[:, :-1], dim=-1)
+        wl = sl.sum(dim=-1)
+        loss_lengths = torch.sum(
+            (torch.log(1 + wl)
+             - torch.log(1 + wl.mean().detach()))**2
+        )
+
+        loss = loss_points + loss_lengths
 
         losses.append(loss)
 
