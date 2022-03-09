@@ -314,8 +314,8 @@ class ProjectRenderScoreModel(nn.Module):
             sum_ = sum_.clamp(min=1e-8)
             blobs_normed = blobs_d / sum_
 
-            # Score the points
-            scores_d = (blobs_normed * masks_target_d.unsqueeze(2)).sum(dim=(3, 4)).mean(dim=1)
+            # Score the points - take lowest score from all projections
+            scores_d = (blobs_normed * masks_target_d.unsqueeze(2)).sum(dim=(3, 4)).amin(dim=1)
             if d > 1:
                 scores_d = _taper_parameter(scores_d)
 
