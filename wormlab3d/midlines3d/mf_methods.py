@@ -125,20 +125,19 @@ def _calculate_derivative(
 
 
 @torch.jit.script
-def calculate_scalar_curvature(
+def calculate_curvature(
         points: torch.Tensor,
 ) -> torch.Tensor:
     """
-    Calculate the scalar curvature along the body.
+    Calculate the vector curvature along the body.
     """
     if points.shape[1] > 2:
         sl = torch.norm(points[:, 1:] - points[:, :-1], dim=-1)
         T = _calculate_derivative(points, sl)
         K = _calculate_derivative(T, sl)
-        k = torch.norm(K, dim=-1)
     else:
-        k = torch.zeros((points.shape[0], points.shape[1]), device=points.device)
-    return k
+        K = torch.zeros_like(points, device=points.device)
+    return K
 
 
 @torch.jit.script
@@ -266,6 +265,42 @@ def calculate_parents_losses(
         else:
             loss = torch.sum((torch.log(1 + dists[:, 0]) - torch.log(1 + dists[:, 1]))**2)
 
+        losses.append(loss)
+
+    return losses
+
+
+@torch.jit.script
+def calculate_parents_losses_curvatures(
+        curvatures: List[torch.Tensor],
+        curvatures_smoothed: List[torch.Tensor],
+) -> List[torch.Tensor]:
+    """
+    The distance between points and their parent should be equal siblings.
+    """
+    D = len(curvatures)
+    losses = [torch.tensor(0., device=curvatures[0].device), ]
+    for d in range(1, D):
+        K_d = curvatures[d]
+        K_p = curvatures[d - 1].detach()
+
+        # X0 (head) point should be close between parent and child
+        X0 = K_d[:, 0]
+        X0_parent = K_p[:, 0]
+        loss_X0 = torch.sum((X0 - X0_parent)**2)
+
+        # T0 (initial tangent) direction should be similar but half the length
+        T0 = K_d[:, 1]
+        T0_parent = K_p[:, 1]
+        loss_T0 = torch.sum((T0 - T0_parent / 2)**2)
+
+        # Curvature values should be close
+        Ks_d = curvatures_smoothed[d]
+        Ks_p = curvatures_smoothed[d - 1].detach()
+        Ks_p = torch.repeat_interleave(Ks_p, repeats=2, dim=1)
+        loss_K = torch.sum((Ks_d - Ks_p / 2)**2)
+
+        loss = loss_X0 + loss_T0 + loss_K
         losses.append(loss)
 
     return losses
@@ -439,12 +474,34 @@ def calculate_smoothness_losses(
 
 
 @torch.jit.script
+def calculate_smoothness_losses_curvatures(
+        curvatures: List[torch.Tensor],
+        curvatures_smoothed: List[torch.Tensor],
+) -> List[torch.Tensor]:
+    """
+    The curvatures should change smoothly along the body.
+    """
+    D = len(curvatures)
+    losses = []
+    for d in range(D):
+        K_d = curvatures[d]
+        if K_d.shape[1] > 4:
+            Ks_d = curvatures_smoothed[d]
+            loss = torch.sum((K_d[:, 2:] - Ks_d[:, 1:-1])**2)
+        else:
+            loss = torch.tensor(0., device=curvatures[0].device)
+        losses.append(loss)
+
+    return losses
+
+
+@torch.jit.script
 def calculate_curvature_losses(
         points: List[torch.Tensor],
         curvatures: List[torch.Tensor],
 ) -> List[torch.Tensor]:
     """
-    The points should change smoothly along the body.
+    The curvatures should not be too large.
     """
     D = len(points)
     device = points[0].device
@@ -452,16 +509,36 @@ def calculate_curvature_losses(
     for d in range(D):
         points_d = points[d]
 
-        if points_d.shape[1] > 4:
-            sl = torch.norm(points_d[:, 1:] - points_d[:, :-1], dim=-1)
-            wl = sl.sum(dim=-1, keepdim=True)
-            k = curvatures[d]
+        if points_d.shape[1] > 2:
+            k = torch.norm(curvatures[d], dim=-1)
+            loss = (k**2).sum()
 
-            # Only penalise curvatures greater than 2-revolutions
-            kinks = k > (2 * 2 * torch.pi) / wl
-            loss = k[kinks].sum()
+        # if points_d.shape[1] > 4:
+        #     sl = torch.norm(points_d[:, 1:] - points_d[:, :-1], dim=-1)
+        #     wl = sl.sum(dim=-1, keepdim=True)
+        #
+        #     # Only penalise curvatures greater than 2-revolutions
+        #     kinks = k > (2 * 2 * torch.pi) / wl
+        #     loss = k[kinks].sum()
         else:
             loss = torch.tensor(0., device=device)
+        losses.append(loss)
+
+    return losses
+
+
+@torch.jit.script
+def calculate_curvature_losses_curvatures(
+        curvatures: List[torch.Tensor],
+) -> List[torch.Tensor]:
+    """
+    The curvatures should not be too large.
+    """
+    D = len(curvatures)
+    losses = []
+    for d in range(D):
+        k = torch.norm(curvatures[d][:, 2:], dim=-1)
+        loss = (k**2).sum()
         losses.append(loss)
 
     return losses
@@ -496,6 +573,46 @@ def calculate_temporal_losses(
         # Lengths should not change much through time
         sl = torch.norm(points_d[:, 1:] - points_d[:, :-1], dim=-1)
         wl = sl.sum(dim=-1)
+        loss_lengths = torch.sum(
+            (torch.log(1 + wl)
+             - torch.log(1 + wl.mean().detach()))**2
+        )
+
+        loss = loss_points + loss_lengths
+
+        losses.append(loss)
+
+    return losses
+
+
+@torch.jit.script
+def calculate_temporal_losses_curvatures(
+        curvatures: List[torch.Tensor],
+        curvatures_prev: Optional[List[torch.Tensor]],
+) -> List[torch.Tensor]:
+    """
+    The curvatures should change smoothly in time.
+    """
+    D = len(curvatures)
+
+    # If there are no other time points available then just return zeros.
+    if curvatures_prev is None and curvatures[0].shape[0] == 1:
+        return [torch.tensor(0., device=curvatures[0].device) for _ in range(D)]
+
+    losses = []
+    for d in range(D):
+        curvatures_d = curvatures[d]
+
+        # Prepend the previous points
+        if curvatures_prev is not None:
+            curvatures_prev_d = curvatures_prev[d].unsqueeze(0)
+            curvatures_d = torch.cat([curvatures_prev_d, curvatures_d], dim=0)
+
+        # Calculate losses to temporal neighbours
+        loss_points = torch.sum((curvatures_d[1:] - curvatures_d[:-1])**2)
+
+        # Lengths should not change much through time
+        wl = torch.norm(curvatures_d[:, 1], dim=-1) * curvatures_d.shape[1]
         loss_lengths = torch.sum(
             (torch.log(1 + wl)
              - torch.log(1 + wl.mean().detach()))**2

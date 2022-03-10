@@ -24,6 +24,10 @@ class MFParameters(Document):
     sigmas_init = FloatField()
     masks_threshold = FloatField()
     render_mode = StringField(choices=RENDER_MODES)
+    curvature_mode = BooleanField()
+    curvature_max = FloatField()
+    length_max = FloatField()
+    length_min = FloatField()
     frame_skip = IntField()
 
     n_steps_init = IntField()

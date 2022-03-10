@@ -7,7 +7,7 @@ from torch import nn
 from wormlab3d import PREPARED_IMAGE_SIZE
 from wormlab3d.data.model.mf_parameters import RENDER_MODE_GAUSSIANS, RENDER_MODES
 from wormlab3d.midlines3d.dynamic_cameras import DynamicCameras
-from wormlab3d.midlines3d.mf_methods import calculate_scalar_curvature
+from wormlab3d.midlines3d.mf_methods import calculate_curvature
 
 
 @torch.jit.script
@@ -101,7 +101,7 @@ def render_points(
 
 
 @torch.jit.script
-def _smooth_parameter(param: torch.Tensor, ks: int) -> torch.Tensor:
+def _smooth_parameter(param: torch.Tensor, ks: int, mode: str = 'avg') -> torch.Tensor:
     """
     Apply 1D average pooling to smooth a parameter vector.
     """
@@ -111,10 +111,26 @@ def _smooth_parameter(param: torch.Tensor, ks: int) -> torch.Tensor:
         param,
         torch.repeat_interleave(param[:, -1].unsqueeze(1), pad_size, dim=1),
     ], dim=1)
-    p_smoothed = p_smoothed[:, None, :]
-    p_smoothed = F.avg_pool1d(p_smoothed, kernel_size=ks, stride=1, padding=0)
 
-    return p_smoothed.squeeze(1)
+    # Average pooling smoothing
+    if mode == 'avg':
+        p_smoothed = p_smoothed[:, None, :]
+        p_smoothed = F.avg_pool1d(p_smoothed, kernel_size=ks, stride=1, padding=0)
+        p_smoothed = p_smoothed.squeeze(1)
+
+    # Smooth with a gaussian kernel
+    elif mode == 'gaussian':
+        k_sig = ks / 5
+        k = make_gaussian_kernel(k_sig, device=param.device)
+        k = torch.stack([k] * 3)[:, None, :]
+        p_smoothed = p_smoothed.permute(0, 2, 1)
+        p_smoothed = F.conv1d(p_smoothed, weight=k, groups=3)
+        p_smoothed = p_smoothed.permute(0, 2, 1)
+
+    else:
+        raise RuntimeError(f'Unknown smoothing mode: "{mode}".')
+
+    return p_smoothed
 
 
 @torch.jit.script
@@ -147,17 +163,24 @@ def _taper_parameter(param: torch.Tensor) -> torch.Tensor:
 class ProjectRenderScoreModel(nn.Module):
     image_size: Final[int]
 
-    def __init__(self, image_size: int = PREPARED_IMAGE_SIZE[0], render_mode: str = RENDER_MODE_GAUSSIANS):
+    def __init__(
+            self,
+            image_size: int = PREPARED_IMAGE_SIZE[0],
+            render_mode: str = RENDER_MODE_GAUSSIANS,
+            curvature_mode: bool = False
+    ):
         super().__init__()
         self.image_size = image_size
         assert render_mode in RENDER_MODES
         self.render_mode = render_mode
+        self.curvature_mode = curvature_mode
         self.cams = torch.jit.script(DynamicCameras())
 
     def forward(
             self,
             cam_coeffs: torch.Tensor,
             points: List[torch.Tensor],
+            curvatures: List[torch.Tensor],
             masks_target: List[torch.Tensor],
             sigmas: List[torch.Tensor],
             exponents: List[torch.Tensor],
@@ -188,14 +211,15 @@ class ProjectRenderScoreModel(nn.Module):
         points_2d = []
         scores = []
         points_smoothed = []
+        curvatures_smoothed = []
         sigmas_smoothed = []
         exponents_smoothed = []
         intensities_smoothed = []
-        curvatures = []
 
         # Run the parameters through the model at each scale to get the outputs
         for d in range(D):
             points_d = points[d]
+            curvatures_d = curvatures[d]
             # masks_target_d = masks_target[d]
             sigmas_d = sigmas[d]
             exponents_d = exponents[d]
@@ -208,44 +232,44 @@ class ProjectRenderScoreModel(nn.Module):
             if depth > 1:
                 ks = int(2 * depth + 1)
 
-                # Distance to parent points fixed as a quarter of the mean segment-length between parents
-                if d > 0:
-                    parents = points_smoothed[d - 1]
-                    x = torch.mean(torch.norm(parents[:, 1:] - parents[:, :-1], dim=-1)) / 4
-                    parents_repeated = torch.repeat_interleave(parents, repeats=2, dim=1)
-                    direction = points_d - parents_repeated
-                    points_anchored = parents_repeated + x * (direction / torch.norm(direction, dim=-1, keepdim=True))
-                    points_d = torch.cat([
-                        points_d[:, 0][:, None, :],
-                        points_anchored[:, 1:-1],
-                        points_d[:, -1][:, None, :]
-                    ], dim=1)
+                # Integrate curvature to form midline points.
+                if self.curvature_mode:
+                    X0 = curvatures_d[:, 0]
+                    T0 = curvatures_d[:, 1]
+                    h = torch.norm(T0, dim=-1)
+                    K = torch.zeros_like(curvatures_d)
+                    K[:, 1:-1] = curvatures_d[:, 2:]
+                    K = _smooth_parameter(K, ks, mode='gaussian')
+                    Kv = (K[:, 1:] + K[:, :-1]) / 2
+                    T = torch.cat([T0[:, None], Kv], dim=1).cumsum(dim=1)
+                    T = T / torch.norm(T, dim=-1, keepdim=True)
+                    Tv = h * (T[:, 1:] + T[:, :-1]) / 2
+                    points_d = torch.cat([X0[:, None], Tv], dim=1).cumsum(dim=1)
+                    curvatures_d = K
 
-                # Smooth the curve points
-                pad_size = int(ks / 2)
-                cp = torch.cat([
-                    torch.repeat_interleave(points_d[:, 0].unsqueeze(1), pad_size, dim=1),
-                    points_d,
-                    torch.repeat_interleave(points_d[:, -1].unsqueeze(1), pad_size, dim=1)
-                ], dim=1)
-                cp = cp.permute(0, 2, 1)
+                else:
+                    # Distance to parent points fixed as a quarter of the mean segment-length between parents.
+                    if d > 0:
+                        parents = points_smoothed[d - 1]
+                        x = torch.mean(torch.norm(parents[:, 1:] - parents[:, :-1], dim=-1)) / 4
+                        parents_repeated = torch.repeat_interleave(parents, repeats=2, dim=1)
+                        direction = points_d - parents_repeated
+                        points_anchored = parents_repeated + x * (
+                                direction / torch.norm(direction, dim=-1, keepdim=True))
+                        points_d = torch.cat([
+                            points_d[:, 0][:, None, :],
+                            points_anchored[:, 1:-1],
+                            points_d[:, -1][:, None, :]
+                        ], dim=1)
+                    points_d = _smooth_parameter(points_d, ks, mode='gaussian')
+                    curvatures_d = calculate_curvature(points_d)
 
-                # Average pooling smoothing
-                # cps = F.avg_pool1d(cp, kernel_size=ks, stride=1, padding=0)
-
-                # Smooth with a gaussian kernel
-                k_sig = ks / 5
-                k = make_gaussian_kernel(k_sig, device=cp.device)
-                k = torch.stack([k] * 3)[:, None, :]
-                cps = F.conv1d(cp, weight=k, groups=3)
-                points_d = cps.permute(0, 2, 1)
-
-                # Collapse worm where the curvature is too great
-                k = calculate_scalar_curvature(points_d)
-                sl = torch.norm(points_d[:, 1:] - points_d[:, :-1], dim=-1)
-                wl = sl.sum(dim=-1, keepdim=True)
-                kinks = k > (2 * 2 * torch.pi) / wl
-                intensities_d[kinks] = 0.
+                    # # Collapse worm where the curvature is too great
+                    # k = calculate_scalar_curvature(points_d)
+                    # sl = torch.norm(points_d[:, 1:] - points_d[:, :-1], dim=-1)
+                    # wl = sl.sum(dim=-1, keepdim=True)
+                    # kinks = k > (2 * 2 * torch.pi) / wl
+                    # intensities_d[kinks] = 0.
 
                 # Ensure tapering of rendered worm to avoid holes
                 sigmas_d = _taper_parameter(sigmas_d)
@@ -257,7 +281,7 @@ class ProjectRenderScoreModel(nn.Module):
                 intensities_d = _smooth_parameter(intensities_d, ks)
 
             else:
-                k = torch.zeros_like(sigmas_d)
+                curvatures_d = torch.zeros_like(points_d)
 
             # Project and render
             points_2d_d = self._project_to_2d(cam_coeffs, points_d, points_3d_base, points_2d_base)
@@ -298,10 +322,10 @@ class ProjectRenderScoreModel(nn.Module):
             masks.append(masks_d)
             points_2d.append(points_2d_d.transpose(1, 2))
             points_smoothed.append(points_d)
+            curvatures_smoothed.append(curvatures_d)
             sigmas_smoothed.append(sigmas_d)
             exponents_smoothed.append(exponents_d)
             intensities_smoothed.append(intensities_d)
-            curvatures.append(k)
 
         # Scores need to feed back up the chain to inform parent points
         for d in range(D - 1, -1, -1):
@@ -341,7 +365,7 @@ class ProjectRenderScoreModel(nn.Module):
         scores = scores[::-1]
         detection_masks = detection_masks[::-1]
 
-        return masks, detection_masks, points_2d, scores, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed, curvatures
+        return masks, detection_masks, points_2d, scores, points_smoothed, curvatures_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed
 
     def _project_to_2d(
             self,

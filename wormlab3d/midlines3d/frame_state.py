@@ -17,6 +17,7 @@ PARAMETER_NAMES = [
     'cam_distortions',
     'cam_shifts',
     'points',
+    'curvatures',
     'sigmas',
     'exponents',
     'intensities',
@@ -94,11 +95,22 @@ class FrameState(nn.Module):
 
         # If we are using a master frame state then just reference those parameters.
         if master_frame_state is not None:
+            if not use_master_points:
+                self._init_points_parameters()
+
+            # Set up points/curvatures buffers
+            else:
+                D = parameters.depth
+                D_min = parameters.depth_min
+                k = 'points' if parameters.curvature_mode else 'curvatures'
+                for i, d in enumerate(range(D_min, D)):
+                    self.register_buffer(f'{k}_{d}', torch.zeros((2**d, 3)))
+
             for k in PARAMETER_NAMES:
-                if k == 'points' and not use_master_points:
-                    self._init_points_parameters()
+                is_buffer = (k == 'points' and parameters.curvature_mode) or (k == 'curvatures' and not parameters.curvature_mode)
+                if k in ['points', 'curvatures'] and (is_buffer or not use_master_points):
                     with torch.no_grad():
-                        self.set_state('points', master_frame_state.get_state('points'))
+                        self.set_state(k, master_frame_state.get_state(k))
                 else:
                     self.register_parameter(k, master_frame_state.get_state(k))
 
@@ -232,12 +244,21 @@ class FrameState(nn.Module):
 
     def _init_points_parameters(self):
         """
-        Initialise the multiscale curve points.
+        Initialise the multiscale curve points and curvatures.
+        """
+        if not self.parameters.curvature_mode:
+            self._init_points_parameters_points_mode()
+        else:
+            self._init_points_parameters_curvature_mode()
+
+    def _init_points_parameters_points_mode(self):
+        """
+        Initialise the multiscale curve points in points mode.
         """
         mp = self.parameters
 
         # Initialise the points perfectly spaced along a line of random length.
-        curve_points = []
+        points = []
         for d in range(mp.depth):
             if d == 0:
                 x = torch.normal(mean=torch.zeros(3), std=1 / (2**(d + 4)))
@@ -253,8 +274,38 @@ class FrameState(nn.Module):
                 ], axis=1)
             if d >= mp.depth_min:
                 x = nn.Parameter(x, requires_grad=True)
-                curve_points.append(x)
-        self.register_parameter('points', curve_points)
+                points.append(x)
+                self.register_buffer(f'curvatures_{d}', torch.zeros_like(x))
+        self.register_parameter('points', points)
+
+    def _init_points_parameters_curvature_mode(self):
+        """
+        Initialise the multiscale curve points and curvatures in curvatures mode.
+        """
+        mp = self.parameters
+
+        # Pick a random head point and tangent direction
+        x0 = torch.normal(mean=torch.zeros(3), std=1 / (2**4))
+        t0 = torch.normal(mean=torch.zeros(3), std=1)
+        t0 = t0 / t0.norm(dim=-1) * mp.length_min
+
+        # Start in a straight line configuration
+        curvatures = []
+        for d in range(mp.depth):
+            if d == 0:
+                x = x0.clone().unsqueeze(0)
+            elif d == 1:
+                x = torch.stack([x0.clone(), t0.clone()])
+            else:
+                N = 2**d
+                K = torch.zeros((N - 2, 3))
+                t0d = t0 / N
+                x = torch.cat([x0.clone()[None, :], t0d[None, :], K], axis=0)
+            if d >= mp.depth_min:
+                x = nn.Parameter(x, requires_grad=True)
+                curvatures.append(x)
+                self.register_buffer(f'points_{d}', torch.zeros_like(x))
+        self.register_parameter('curvatures', curvatures)
 
     def _init_cam_coeffs(self):
         """
@@ -383,10 +434,11 @@ class FrameState(nn.Module):
             return self._buffers[key]
         elif key == 'cam_coeffs':
             return self.get_cam_coeffs()
-        elif key in ['masks_target', 'masks_target_residuals', 'masks_curve', 'points_2d', 'scores']:
-            return [self._buffers[f'{key}_{d}'] for d in range(self.parameters.depth_min, self.parameters.depth)]
         elif hasattr(self, key):
             return getattr(self, key)
+        elif key in ['points', 'curvatures', 'masks_target', 'masks_target_residuals', 'masks_curve', 'points_2d',
+                     'scores']:
+            return [self._buffers[f'{key}_{d}'] for d in range(self.parameters.depth_min, self.parameters.depth)]
         else:
             raise RuntimeError(f'Could not get state for {key}.')
 

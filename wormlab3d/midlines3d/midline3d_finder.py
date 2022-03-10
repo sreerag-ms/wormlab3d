@@ -21,9 +21,10 @@ from wormlab3d.midlines3d.args_finder import ParameterArgs, RuntimeArgs, SourceA
 from wormlab3d.midlines3d.frame_state import FrameState, BUFFER_NAMES, PARAMETER_NAMES, CAM_PARAMETER_NAMES, \
     TRANSIENTS_NAMES
 from wormlab3d.midlines3d.mf_methods import generate_residual_targets, calculate_renders_losses, \
-    calculate_neighbours_losses, calculate_parents_losses, calculate_aunts_losses, calculate_scores_losses, \
-    calculate_sigmas_losses, calculate_intensities_losses, calculate_smoothness_losses, calculate_temporal_losses, \
-    calculate_curvature_losses, calculate_exponents_losses
+    calculate_scores_losses, calculate_sigmas_losses, calculate_intensities_losses, calculate_smoothness_losses, \
+    calculate_exponents_losses, calculate_neighbours_losses, calculate_parents_losses, calculate_aunts_losses, \
+    calculate_curvature_losses, calculate_temporal_losses, calculate_parents_losses_curvatures, \
+    calculate_smoothness_losses_curvatures, calculate_curvature_losses_curvatures, calculate_temporal_losses_curvatures
 from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.nn.detector import ConvergenceDetector
@@ -156,7 +157,8 @@ class Midline3DFinder:
         logger.info(f'Initialising model.')
         model = ProjectRenderScoreModel(
             image_size=PREPARED_IMAGE_SIZE[0],
-            render_mode=self.parameters.render_mode
+            render_mode=self.parameters.render_mode,
+            curvature_mode=self.parameters.curvature_mode,
         )
         model = torch.jit.script(model)
         return model
@@ -289,6 +291,7 @@ class Midline3DFinder:
         """
         logger.info('Initialising optimiser.')
         p = self.parameters
+        points_key = 'curvatures' if p.curvature_mode else 'points'
 
         if p.use_master:
             params = {
@@ -298,20 +301,24 @@ class Midline3DFinder:
             if self.parameters.window_size > 1:
                 point_params = []
                 for i in range(self.parameters.window_size):
-                    point_params.extend(self.frame_batch[i].get_state('points'))
-                params['points'] = point_params
+                    point_params.extend(self.frame_batch[i].get_state(points_key))
+                params[points_key] = point_params
         else:
             params = {
                 k: [fs.get_state(k) for fs in self.frame_batch]
                 for k in PARAMETER_NAMES
             }
+            if p.curvature_mode:
+                del params['points']
+            else:
+                del params['curvatures']
 
         optimiser_cls: Optimizer = getattr(torch.optim, p.algorithm)
         cam_params = [params[f'cam_{k}'] for k in CAM_PARAMETER_NAMES]
 
         params = [
             {'params': cam_params, 'lr': p.lr_cam_coeffs},
-            {'params': params['points'], 'lr': p.lr_points},
+            {'params': params[points_key], 'lr': p.lr_points},
             {'params': params['sigmas'], 'lr': p.lr_sigmas},
             {'params': params['exponents'], 'lr': p.lr_exponents},
             {'params': params['intensities'], 'lr': p.lr_intensities},
@@ -671,17 +678,19 @@ class Midline3DFinder:
         camera_exponents = torch.stack([f.get_state('camera_exponents') for f in self.frame_batch])
         camera_intensities = torch.stack([f.get_state('camera_intensities') for f in self.frame_batch])
         points = [torch.stack([f.get_state('points')[d] for f in self.frame_batch]) for d in range(D)]
+        curvatures = [torch.stack([f.get_state('curvatures')[d] for f in self.frame_batch]) for d in range(D)]
         masks_target = [torch.stack([f.get_state('masks_target')[d] for f in self.frame_batch]) for d in range(D)]
         sigmas = [torch.stack([f.get_state('sigmas')[d] for f in self.frame_batch]) for d in range(D)]
         exponents = [torch.stack([f.get_state('exponents')[d] for f in self.frame_batch]) for d in range(D)]
         intensities = [torch.stack([f.get_state('intensities')[d] for f in self.frame_batch]) for d in range(D)]
 
         # Generate the outputs
-        masks, detection_masks, points_2d, scores, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed, curvatures = self.model.forward(
+        masks, detection_masks, points_2d, scores, points_smoothed, curvatures_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed = self.model.forward(
             cam_coeffs=cam_coeffs,
             points_3d_base=points_3d_base,
             points_2d_base=points_2d_base,
             points=points,
+            curvatures=curvatures,
             masks_target=masks_target,
             sigmas=sigmas,
             exponents=exponents,
@@ -698,6 +707,7 @@ class Midline3DFinder:
         loss, loss_global, losses_depths, stats = self._calculate_losses(
             cam_rotation_preangles=cam_rotation_preangles,
             points=points,
+            curvatures=curvatures,
             masks_target=masks_target_residuals,
             sigmas=sigmas,
             exponents=exponents,
@@ -708,10 +718,10 @@ class Midline3DFinder:
             masks=masks,
             scores=scores,
             points_smoothed=points_smoothed,
+            curvatures_smoothed=curvatures_smoothed,
             sigmas_smoothed=sigmas_smoothed,
             exponents_smoothed=exponents_smoothed,
             intensities_smoothed=intensities_smoothed,
-            curvatures=curvatures
         )
 
         # Take optimisation step
@@ -721,37 +731,72 @@ class Midline3DFinder:
             self.optimiser.zero_grad()
             loss.backward()
 
-            # Weight the point gradients by the relative tapered scores
-            for i, fs in enumerate(self.frame_batch):
-                points = fs.get_state('points')
-                for d in range(D):
-                    tapered_scores = scores[d][i, :, None].detach()
-                    max_score = tapered_scores.amax(keepdim=True)
-                    if max_score > 0:
-                        rel_scores = tapered_scores / max_score
-                        points[d].grad = points[d].grad * rel_scores
-                    else:
-                        points[d].grad.zero_()
+            # # Weight the point gradients by the relative tapered scores
+            # for i, fs in enumerate(self.frame_batch):
+            #     points = fs.get_state('points')
+            #     for d in range(D):
+            #         tapered_scores = scores[d][i, :, None].detach()
+            #         max_score = tapered_scores.amax(keepdim=True)
+            #         if max_score > 0:
+            #             rel_scores = tapered_scores / max_score
+            #             points[d].grad = points[d].grad * rel_scores
+            #         else:
+            #             points[d].grad.zero_()
 
             self.optimiser.step()
 
             with torch.no_grad():
-                # Adjust points to be a quarter of the mean segment-length between parent points
-                for i, fs in enumerate(self.frame_batch):
-                    points = fs.get_state('points')
-                    for d in range(2, D):
-                        points_d = points[d]
-                        parents = points_smoothed[d - 1][i]
-                        x = torch.mean(torch.norm(parents[1:] - parents[:-1], dim=-1)) / 4
-                        parents_repeated = torch.repeat_interleave(parents, repeats=2, dim=0)
-                        direction = points_d - parents_repeated
-                        points_anchored = parents_repeated \
-                                          + x * (direction / torch.norm(direction, dim=-1, keepdim=True))
-                        points[d].data = torch.cat([
-                            points_d[0][None, :],
-                            points_anchored[1:-1],
-                            points_d[-1][None, :]
-                        ], dim=0)
+
+                if p.curvature_mode:
+                    for i, fs in enumerate(self.frame_batch):
+                        curvatures = fs.get_state('curvatures')
+                        for d in range(2, D):
+                            curvatures_d = curvatures[d]
+                            N = curvatures_d.shape[0]
+
+                            # Ensure that the worm does not get too long/short.
+                            T0 = curvatures_d[1]
+                            h = torch.norm(T0, dim=-1)
+                            h_min = p.length_min / N
+                            h_max = p.length_max / N
+                            if h < h_min:
+                                T0 = T0 * h_min / h
+                            elif h > h_max:
+                                T0 = T0 * h_max / h
+
+                            # Ensure curvature doesn't get too large.
+                            h = torch.norm(T0, dim=-1)
+                            wl = h * N
+                            K = curvatures_d[2:]
+                            k = torch.norm(K, dim=-1)
+                            k_max = (p.curvature_max * 2 * torch.pi) / wl
+                            K_clamped = torch.where(
+                                (k > k_max)[:, None],
+                                K * (k / k_max)[:, None],
+                                K
+                            )
+                            curvatures[d].data = torch.cat([
+                                curvatures_d[0][None, :],
+                                T0[None, :],
+                                K_clamped
+                            ], dim=0)
+                else:
+                    # Adjust points to be a quarter of the mean segment-length between parent points.
+                    for i, fs in enumerate(self.frame_batch):
+                        points = fs.get_state('points')
+                        for d in range(2, D):
+                            points_d = points[d]
+                            parents = points_smoothed[d - 1][i]
+                            x = torch.mean(torch.norm(parents[1:] - parents[:-1], dim=-1)) / 4
+                            parents_repeated = torch.repeat_interleave(parents, repeats=2, dim=0)
+                            direction = points_d - parents_repeated
+                            points_anchored = parents_repeated \
+                                              + x * (direction / torch.norm(direction, dim=-1, keepdim=True))
+                            points[d].data = torch.cat([
+                                points_d[0][None, :],
+                                points_anchored[1:-1],
+                                points_d[-1][None, :]
+                            ], dim=0)
 
                 # Clamp the sigmas, exponents and intensities
                 sigs = [*self.master_frame_state.get_state('sigmas'), ]
@@ -776,6 +821,10 @@ class Midline3DFinder:
         self.master_frame_state.set_state('points_2d', [points_2d[d][self.active_idx] for d in range(D)])
         self.master_frame_state.set_state('scores', [scores[d][self.active_idx] for d in range(D)])
         self.master_frame_state.set_stats(stats)
+        if p.curvature_mode:
+            self.master_frame_state.set_state('points', [points_smoothed[d][self.active_idx] for d in range(D)])
+        else:
+            self.master_frame_state.set_state('curvatures', [curvatures_smoothed[d][self.active_idx] for d in range(D)])
 
         # Update batch state
         for i, fs in enumerate(self.frame_batch):
@@ -784,6 +833,10 @@ class Midline3DFinder:
             fs.set_state('points_2d', [points_2d[d][i] for d in range(D)])
             fs.set_state('scores', [scores[d][i] for d in range(D)])
             fs.set_stats(stats)
+            if p.curvature_mode:
+                fs.set_state('points', [points_smoothed[d][i] for d in range(D)])
+            else:
+                fs.set_state('curvatures', [curvatures_smoothed[d][i] for d in range(D)])
 
         return loss, loss_global, losses_depths, stats
 
@@ -791,6 +844,7 @@ class Midline3DFinder:
             self,
             cam_rotation_preangles: torch.Tensor,
             points: torch.Tensor,
+            curvatures: torch.Tensor,
             masks_target: torch.Tensor,
             sigmas: torch.Tensor,
             exponents: torch.Tensor,
@@ -801,10 +855,10 @@ class Midline3DFinder:
             masks: torch.Tensor,
             scores: torch.Tensor,
             points_smoothed: torch.Tensor,
+            curvatures_smoothed: torch.Tensor,
             sigmas_smoothed: torch.Tensor,
             exponents_smoothed: torch.Tensor,
             intensities_smoothed: torch.Tensor,
-            curvatures: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor, List[torch.Tensor], Dict[str, float]]:
         """
         Calculate the losses.
@@ -822,23 +876,36 @@ class Midline3DFinder:
         # Previous points used for temporal losses
         if self.last_frame_state is not None:
             points_prev = self.last_frame_state.get_state('points')
+            curvatures_prev = self.last_frame_state.get_state('curvatures')
         else:
             points_prev = None
+            curvatures_prev = None
 
         # Losses calculated at each depth
         losses = {
             'masks': calculate_renders_losses(masks, masks_target, p.loss_masks_metric, p.loss_masks_multiscale),
-            'neighbours': calculate_neighbours_losses(points),
-            'parents': calculate_parents_losses(points),
-            'aunts': calculate_aunts_losses(points),
             'scores': calculate_scores_losses(scores),
             'sigmas': calculate_sigmas_losses(sigmas, sigmas_smoothed),
             'exponents': calculate_exponents_losses(exponents, exponents_smoothed),
             'intensities': calculate_intensities_losses(intensities, intensities_smoothed),
-            'smoothness': calculate_smoothness_losses(points, points_smoothed),
-            'curvature': calculate_curvature_losses(points_smoothed, curvatures),
-            'temporal': calculate_temporal_losses(points, points_prev),
         }
+
+        if p.curvature_mode:
+            losses = {**losses, **{
+                'parents': calculate_parents_losses_curvatures(curvatures, curvatures_smoothed),
+                'smoothness': calculate_smoothness_losses_curvatures(curvatures, curvatures_smoothed),
+                'curvature': calculate_curvature_losses_curvatures(curvatures),
+                'temporal': calculate_temporal_losses_curvatures(curvatures, curvatures_prev),
+            }}
+        else:
+            losses = {**losses, **{
+                'neighbours': calculate_neighbours_losses(points),
+                'parents': calculate_parents_losses(points),
+                'aunts': calculate_aunts_losses(points),
+                'smoothness': calculate_smoothness_losses(points, points_smoothed),
+                'curvature': calculate_curvature_losses(points_smoothed, curvatures_smoothed),
+                'temporal': calculate_temporal_losses(points, points_prev),
+            }}
 
         # Log the total loss for each type
         for k, losses_k in losses.items():

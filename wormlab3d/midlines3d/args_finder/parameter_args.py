@@ -20,6 +20,10 @@ class ParameterArgs(BaseArgs):
             sigmas_init: float = 0.1,
             masks_threshold: float = 0.4,
             render_mode: str = RENDER_MODE_GAUSSIANS,
+            curvature_mode: bool = False,
+            curvature_max: float = 2.,
+            length_max: float = None,
+            length_min: float = None,
             frame_skip: int = None,
 
             n_steps_init: int = 5000,
@@ -73,6 +77,20 @@ class ParameterArgs(BaseArgs):
         self.sigmas_init = sigmas_init
         self.masks_threshold = masks_threshold
         self.render_mode = render_mode
+
+        self.curvature_mode = curvature_mode
+        self.curvature_max = curvature_max
+        if not curvature_mode:
+            length_max = None
+            length_min = None
+        else:
+            if length_max is None:
+                length_max = 2.
+            if length_min is None:
+                length_min = 0.5
+        self.length_max = length_max
+        self.length_min = length_min
+
         if frame_skip == 1:
             frame_skip = None
         self.frame_skip = frame_skip
@@ -151,6 +169,15 @@ class ParameterArgs(BaseArgs):
                            help='Threshold value to use for binarising the frame images. Default=0.4.')
         group.add_argument('--render-mode', type=str, default=RENDER_MODE_GAUSSIANS, choices=RENDER_MODES,
                            help='How to render the points, either as gaussian blobs (gaussians) or as circles (circles). Default=gaussians.')
+        group.add_argument('--curvature-mode', type=str2bool, default=False,
+                           help='Optimise the curvature rather than the points. Default=False.')
+        group.add_argument('--curvature-max', type=float, default=2.,
+                           help='Maximum allowed curvature in terms of coils/revolutions. '
+                                'Used in curvature-loss for points-mode or as a hard limit when in curvature-mode. Default=2.')
+        group.add_argument('--length-max', type=float,
+                           help='Maximum worm length (only used in curvature mode). Default=2.')
+        group.add_argument('--length-min', type=float,
+                           help='Minimum worm length (only used in curvature mode). Default=0.5.')
         group.add_argument('--frame-skip', type=int,
                            help='Number of frames to skip between optimisations. Interim frames will populate parameters with linear interpolation.')
 

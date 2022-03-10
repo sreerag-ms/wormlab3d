@@ -134,7 +134,7 @@ class TrialState:
                 shape = (T, 3, 5)
             elif k == 'cam_shifts':
                 shape = (T, 3, 1)
-            elif k == 'points':
+            elif k in ['points', 'curvatures']:
                 shape = (T, N, 3)
             elif k == 'points_2d':
                 shape = (T, N, 3, 2)
@@ -186,7 +186,7 @@ class TrialState:
         assert self.start_frame <= frame_num <= self.end_frame, 'Requested frame is not available.'
         for k in BUFFER_NAMES + PARAMETER_NAMES:
             # Collate outputs generated at each depth
-            if k in ['points', 'points_2d', 'sigmas', 'exponents', 'intensities', 'scores', 'masks_target',
+            if k in ['points', 'curvatures', 'points_2d', 'sigmas', 'exponents', 'intensities', 'scores', 'masks_target',
                      'masks_target_residuals', 'masks_curve']:
                 p_ms = frame_state.get_state(k)
 
@@ -249,7 +249,7 @@ class TrialState:
                     v = [v] * (D - D_min)
 
                 # Expand collapsed
-                elif k in ['points', 'points_2d', 'sigmas', 'exponents', 'intensities', 'scores']:
+                elif k in ['points', 'curvatures', 'points_2d', 'sigmas', 'exponents', 'intensities', 'scores']:
                     v = [v[2**d - idx_offset - 1:2**(d + 1) - idx_offset - 1] for d in range(D_min, D)]
 
                 frame_state.set_state(k, v)
