@@ -757,8 +757,8 @@ class Midline3DFinder:
                             # Ensure that the worm does not get too long/short.
                             T0 = curvatures_d[1]
                             h = torch.norm(T0, dim=-1)
-                            h_min = p.length_min / N
-                            h_max = p.length_max / N
+                            h_min = p.length_min / (N-1)
+                            h_max = p.length_max / (N-1)
                             if h < h_min:
                                 T0 = T0 * h_min / h
                             elif h > h_max:
@@ -766,7 +766,7 @@ class Midline3DFinder:
 
                             # Ensure curvature doesn't get too large.
                             h = torch.norm(T0, dim=-1)
-                            wl = h * N
+                            wl = h * (N-1)
                             K = curvatures_d[2:]
                             k = torch.norm(K, dim=-1)
                             k_max = (p.curvature_max * 2 * torch.pi) / wl

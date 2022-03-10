@@ -207,7 +207,7 @@ class FrameState(nn.Module):
         # Initialise the sigmas equally at each level, decreasing with depth
         sigmas = []
         for d in range(mp.depth_min, mp.depth):
-            sigmas_d = torch.ones(2**d) * mp.sigmas_init / (2**d)
+            sigmas_d = torch.ones(2**d) * mp.sigmas_init
             sigmas_d = nn.Parameter(sigmas_d, requires_grad=mp.optimise_sigmas)
             sigmas.append(sigmas_d)
         self.register_parameter('sigmas', sigmas)
@@ -299,7 +299,7 @@ class FrameState(nn.Module):
             else:
                 N = 2**d
                 K = torch.zeros((N - 2, 3))
-                t0d = t0 / N
+                t0d = t0 / (N - 1)
                 x = torch.cat([x0.clone()[None, :], t0d[None, :], K], axis=0)
             if d >= mp.depth_min:
                 x = nn.Parameter(x, requires_grad=True)

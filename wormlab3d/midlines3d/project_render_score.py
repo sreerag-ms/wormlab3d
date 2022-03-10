@@ -271,15 +271,14 @@ class ProjectRenderScoreModel(nn.Module):
                     # kinks = k > (2 * 2 * torch.pi) / wl
                     # intensities_d[kinks] = 0.
 
-                # Ensure tapering of rendered worm to avoid holes
-                sigmas_d = _taper_parameter(sigmas_d)
-                intensities_d = _taper_parameter(intensities_d)
-
                 # Smooth the sigmas, exponents and intensities
                 sigmas_d = _smooth_parameter(sigmas_d, ks)
                 exponents_d = _smooth_parameter(exponents_d, ks)
                 intensities_d = _smooth_parameter(intensities_d, ks)
 
+                # Ensure tapering of rendered worm to avoid holes
+                sigmas_d = _taper_parameter(sigmas_d)
+                intensities_d = _taper_parameter(intensities_d)
             else:
                 curvatures_d = torch.zeros_like(points_d)
 
@@ -386,5 +385,8 @@ class ProjectRenderScoreModel(nn.Module):
         # Re-centre according to 2D base points plus a (100,100) to put it in the centre of the cropped image
         image_centre_pt = torch.ones((bs, 1, 1, 2), dtype=torch.float32, device=device) * self.image_size / 2
         points_2d = points_2d - points_2d_base[:, :, None] + image_centre_pt
+
+        # Ensure points land inside image boundaries otherwise gradient breaks
+        points_2d = points_2d.clamp(min=1., max=self.image_size-1)
 
         return points_2d
