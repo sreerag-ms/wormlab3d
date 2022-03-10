@@ -243,7 +243,7 @@ class ProjectRenderScoreModel(nn.Module):
                     Kv = (K[:, 1:] + K[:, :-1]) / 2
                     T = torch.cat([T0[:, None], Kv], dim=1).cumsum(dim=1)
                     T = T / torch.norm(T, dim=-1, keepdim=True)
-                    Tv = h * (T[:, 1:] + T[:, :-1]) / 2
+                    Tv = h[:, None, None] * (T[:, 1:] + T[:, :-1]) / 2
                     points_d = torch.cat([X0[:, None], Tv], dim=1).cumsum(dim=1)
                     curvatures_d = K
 
