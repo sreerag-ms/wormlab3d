@@ -347,15 +347,17 @@ class ProjectRenderScoreModel(nn.Module):
                 scores_children = torch.amin(scores[-1].reshape((scores_d.shape[0], scores_d.shape[1], 2)), dim=-1)
                 scores_d = torch.amin(torch.stack([scores_d, scores_children]), dim=0)
 
-            if d > 1:
+            if scores_d.shape[1] > 1:
                 # Make new render with blobs scaled by relative scores to get detection masks
-                max_score = scores_d.amax(keepdim=True)
-                if max_score.item() > 0:
-                    rel_scores = scores_d / max_score
-                    sf = rel_scores[:, None, :, None, None]
-                    detection_masks_d = (blobs_d * sf).amax(dim=2)
-                else:
-                    detection_masks_d = masks_d.clone()
+                max_score = scores_d.amax(dim=1, keepdim=True)
+                rel_scores = scores_d / max_score
+                sf = rel_scores[:, None, :, None, None]
+                dmd = (blobs_d * sf).amax(dim=2)
+                detection_masks_d = torch.where(
+                    (max_score > 0)[:, None, None],
+                    dmd,
+                    masks_d.clone()
+                )
             else:
                 detection_masks_d = masks_d.clone()
 

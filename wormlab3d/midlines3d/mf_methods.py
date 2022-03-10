@@ -284,10 +284,10 @@ def calculate_parents_losses_curvatures(
         K_d = curvatures[d]
         K_p = curvatures[d - 1].detach()
 
-        # X0 (head) point should be close between parent and child
-        X0 = K_d[:, 0]
-        X0_parent = K_p[:, 0]
-        loss_X0 = torch.sum((X0 - X0_parent)**2)
+        # # X0 (head) point should be close between parent and child
+        # X0 = K_d[:, 0]
+        # X0_parent = K_p[:, 0]
+        # loss_X0 = torch.sum((X0 - X0_parent)**2)
 
         # T0 (initial tangent) direction should be similar but half the length
         T0 = K_d[:, 1]
@@ -300,7 +300,7 @@ def calculate_parents_losses_curvatures(
         Ks_p = torch.repeat_interleave(Ks_p, repeats=2, dim=1)
         loss_K = torch.sum((Ks_d - Ks_p / 2)**2)
 
-        loss = loss_X0 + loss_T0 + loss_K
+        loss = loss_T0 + loss_K
         losses.append(loss)
 
     return losses
@@ -609,16 +609,7 @@ def calculate_temporal_losses_curvatures(
             curvatures_d = torch.cat([curvatures_prev_d, curvatures_d], dim=0)
 
         # Calculate losses to temporal neighbours
-        loss_points = torch.sum((curvatures_d[1:] - curvatures_d[:-1])**2)
-
-        # Lengths should not change much through time
-        wl = torch.norm(curvatures_d[:, 1], dim=-1) * curvatures_d.shape[1]
-        loss_lengths = torch.sum(
-            (torch.log(1 + wl)
-             - torch.log(1 + wl.mean().detach()))**2
-        )
-
-        loss = loss_points + loss_lengths
+        loss = torch.sum((curvatures_d[1:] - curvatures_d[:-1])**2)
 
         losses.append(loss)
 
