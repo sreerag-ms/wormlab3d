@@ -293,8 +293,7 @@ class ProjectRenderScoreModel(nn.Module):
                             elif hn > h_max:
                                 T0n = T0n * h_max / hn
                             T0[i] = T0n
-                            wli = torch.norm(T0[i]) * (N - 1)
-                            wl[i] = wli
+                            wl[i] = torch.norm(T0[i].clone()) * (N - 1)
 
                             # K can only change 10% in size
                             Kn = K[i - 1] + dK[i]
@@ -323,7 +322,7 @@ class ProjectRenderScoreModel(nn.Module):
 
                             # Ensure curvature doesn't get too large
                             kn = torch.norm(Kn.clone(), dim=-1)
-                            k_max = (self.curvature_max * 2 * torch.pi) / wli
+                            k_max = (self.curvature_max * 2 * torch.pi) / wl[i]
                             Kn = torch.where(
                                 (kn > k_max)[:, None],
                                 Kn * (kn / k_max)[:, None],
