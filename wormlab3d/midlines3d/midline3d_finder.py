@@ -159,6 +159,10 @@ class Midline3DFinder:
             image_size=PREPARED_IMAGE_SIZE[0],
             render_mode=self.parameters.render_mode,
             curvature_mode=self.parameters.curvature_mode,
+            curvature_deltas=self.parameters.curvature_deltas,
+            length_min=self.parameters.length_min,
+            length_max=self.parameters.length_max,
+            curvature_max=self.parameters.curvature_max,
         )
         model = torch.jit.script(model)
         return model
@@ -280,6 +284,13 @@ class Midline3DFinder:
                 use_master_points=i == 0,
                 device=self.device
             )
+
+            # Zero-out the initial curvature-deltas
+            if i > 0 and self.parameters.curvature_mode and self.parameters.curvature_deltas:
+                with torch.no_grad():
+                    for v in fs.get_state('curvatures'):
+                        v.data.zero_()
+
             self.frame_batch.append(fs)
 
         # Last optimised frame state
@@ -749,10 +760,14 @@ class Midline3DFinder:
 
                 if p.curvature_mode:
                     for i, fs in enumerate(self.frame_batch):
+                        if p.curvature_deltas and i != 0:
+                            # Clamping only needed for the master frame in deltas-mode.
+                            break
                         curvatures = fs.get_state('curvatures')
-                        for d in range(2, D):
+                        for d in range(D):
                             curvatures_d = curvatures[d]
                             N = curvatures_d.shape[0]
+                            X0 = curvatures_d[0]
 
                             # Ensure that the worm does not get too long/short.
                             T0 = curvatures_d[1]
@@ -770,15 +785,16 @@ class Midline3DFinder:
                             K = curvatures_d[2:]
                             k = torch.norm(K, dim=-1)
                             k_max = (p.curvature_max * 2 * torch.pi) / wl
-                            K_clamped = torch.where(
+                            K = torch.where(
                                 (k > k_max)[:, None],
                                 K * (k / k_max)[:, None],
                                 K
                             )
+
                             curvatures[d].data = torch.cat([
-                                curvatures_d[0][None, :],
+                                X0[None, :],
                                 T0[None, :],
-                                K_clamped
+                                K
                             ], dim=0)
                 else:
                     # Adjust points to be a quarter of the mean segment-length between parent points.

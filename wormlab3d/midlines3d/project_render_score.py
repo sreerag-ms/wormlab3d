@@ -167,13 +167,21 @@ class ProjectRenderScoreModel(nn.Module):
             self,
             image_size: int = PREPARED_IMAGE_SIZE[0],
             render_mode: str = RENDER_MODE_GAUSSIANS,
-            curvature_mode: bool = False
+            curvature_mode: bool = False,
+            curvature_deltas: bool = False,
+            length_min: float = 0.5,
+            length_max: float = 2,
+            curvature_max: float = 2.,
     ):
         super().__init__()
         self.image_size = image_size
         assert render_mode in RENDER_MODES
         self.render_mode = render_mode
         self.curvature_mode = curvature_mode
+        self.curvature_deltas = curvature_deltas
+        self.length_min = length_min
+        self.length_max = length_max
+        self.curvature_max = curvature_max
         self.cams = torch.jit.script(DynamicCameras())
 
     def forward(
@@ -204,7 +212,9 @@ class ProjectRenderScoreModel(nn.Module):
         """
         Project the 3D points to 2D, render the projected points as blobs on an image and score each point for overlap.
         """
+        eps = 1e-6
         D = len(points)
+        bs = points[0].shape[0]
         blobs = []
         masks = []
         detection_masks = []
@@ -234,15 +244,97 @@ class ProjectRenderScoreModel(nn.Module):
 
                 # Integrate curvature to form midline points.
                 if self.curvature_mode:
-                    X0 = curvatures_d[:, 0]
-                    T0 = curvatures_d[:, 1]
-                    h = torch.norm(T0, dim=-1)
-                    K = torch.zeros_like(curvatures_d)
-                    K[:, 1:-1] = curvatures_d[:, 2:]
+                    if self.curvature_deltas:
+                        h_min = self.length_min / (N - 1)
+                        h_max = self.length_max / (N - 1)
+
+                        dX0 = curvatures_d[:, 0]
+                        X0 = torch.zeros_like(dX0)
+                        X0[0] = dX0[0]
+
+                        dT0 = curvatures_d[:, 1]
+                        T0 = torch.zeros_like(dT0)
+                        T0[0] = dT0[0]
+                        wl = torch.zeros(bs, device=X0.device)
+                        wl[0] = torch.norm(T0[0]) * (N - 1)
+
+                        dK = torch.zeros_like(curvatures_d)
+                        dK[:, 1:-1] = curvatures_d[:, 2:]
+                        K = torch.zeros_like(dK)
+                        K[0] = dK[0]
+
+                        for i in range(1, bs):
+                            # X0 can only move by maximum of 10% of the worm length between frames
+                            max_diff = 0.1 * wl[i - 1]
+                            dX0i = dX0[i]
+                            dX0i_size = torch.norm(dX0i)
+                            if dX0i_size > max_diff:
+                                dX0i = dX0i / dX0i_size * max_diff
+                            X0[i] = X0[i - 1] + dX0i
+
+                            # T0 can only change 5% in size
+                            T0n = T0[i - 1] + dT0[i]
+                            hp = torch.norm(T0[i - 1].clone())
+                            hn = torch.norm(T0n)
+                            if hn / hp > 1.05:
+                                T0n = T0n * hp / hn * 1.05
+                                hn = hp * 1.05
+                            elif hn / hp < 0.95:
+                                T0n = T0n * hp / hn * 0.95
+                                hn = hp * 0.95
+                            if hn < h_min:
+                                T0n = T0n * h_min / hn
+                            elif hn > h_max:
+                                T0n = T0n * h_max / hn
+                            T0[i] = T0n
+                            wli = torch.norm(T0[i]) * (N - 1)
+                            wl[i] = wli
+
+                            # K can only change 10% in size
+                            Kn = K[i - 1] + dK[i]
+                            kp = torch.norm(K[i - 1].clone(), dim=-1)
+                            kn = torch.norm(Kn, dim=-1)
+                            Kn = torch.where(
+                                # Where previous curvature small, take next at the limit
+                                (kp < 0.1)[:, None],
+                                torch.where(
+                                    (kn > 0.1)[:, None],
+                                    Kn / (kn + eps)[:, None] * 0.1,
+                                    Kn
+                                ),
+                                torch.where(
+                                    # Curvature is growing too fast
+                                    (kn / kp > 1.1)[:, None],
+                                    Kn * (kp / (kn + eps))[:, None] * 1.1,
+                                    torch.where(
+                                        # Curvature is shrinking too fast
+                                        (kn / kp < 0.9)[:, None],
+                                        Kn * (kp / (kn + eps))[:, None] * 0.9,
+                                        Kn
+                                    )
+                                )
+                            )
+
+                            # Ensure curvature doesn't get too large
+                            kn = torch.norm(Kn.clone(), dim=-1)
+                            k_max = (self.curvature_max * 2 * torch.pi) / wli
+                            Kn = torch.where(
+                                (kn > k_max)[:, None],
+                                Kn * (kn / k_max)[:, None],
+                                Kn
+                            )
+                            K[i] = Kn
+                    else:
+                        X0 = curvatures_d[:, 0]
+                        T0 = curvatures_d[:, 1]
+                        K = torch.zeros_like(curvatures_d)
+                        K[:, 1:-1] = curvatures_d[:, 2:]
+
                     K = _smooth_parameter(K, ks, mode='gaussian')
                     Kv = (K[:, 1:] + K[:, :-1]) / 2
                     T = torch.cat([T0[:, None], Kv], dim=1).cumsum(dim=1)
                     T = T / torch.norm(T, dim=-1, keepdim=True)
+                    h = torch.norm(T0, dim=-1)
                     Tv = h[:, None, None] * (T[:, 1:] + T[:, :-1]) / 2
                     points_d = torch.cat([X0[:, None], Tv], dim=1).cumsum(dim=1)
                     curvatures_d = K
@@ -389,6 +481,6 @@ class ProjectRenderScoreModel(nn.Module):
         points_2d = points_2d - points_2d_base[:, :, None] + image_centre_pt
 
         # Ensure points land inside image boundaries otherwise gradient breaks
-        points_2d = points_2d.clamp(min=1., max=self.image_size-1)
+        points_2d = points_2d.clamp(min=1., max=self.image_size - 1)
 
         return points_2d

@@ -21,6 +21,7 @@ class ParameterArgs(BaseArgs):
             masks_threshold: float = 0.4,
             render_mode: str = RENDER_MODE_GAUSSIANS,
             curvature_mode: bool = False,
+            curvature_deltas: bool = False,
             curvature_max: float = 2.,
             length_max: float = None,
             length_min: float = None,
@@ -81,6 +82,7 @@ class ParameterArgs(BaseArgs):
         self.curvature_mode = curvature_mode
         self.curvature_max = curvature_max
         if not curvature_mode:
+            curvature_deltas = False
             length_max = None
             length_min = None
         else:
@@ -88,6 +90,7 @@ class ParameterArgs(BaseArgs):
                 length_max = 2.
             if length_min is None:
                 length_min = 0.5
+        self.curvature_deltas = curvature_deltas
         self.length_max = length_max
         self.length_min = length_min
 
@@ -171,6 +174,8 @@ class ParameterArgs(BaseArgs):
                            help='How to render the points, either as gaussian blobs (gaussians) or as circles (circles). Default=gaussians.')
         group.add_argument('--curvature-mode', type=str2bool, default=False,
                            help='Optimise the curvature rather than the points. Default=False.')
+        group.add_argument('--curvature-deltas', type=str2bool, default=False,
+                           help='Use future frame curvatures as delta values. Only applicable in curvature mode .Default=False.')
         group.add_argument('--curvature-max', type=float, default=2.,
                            help='Maximum allowed curvature in terms of coils/revolutions. '
                                 'Used in curvature-loss for points-mode or as a hard limit when in curvature-mode. Default=2.')

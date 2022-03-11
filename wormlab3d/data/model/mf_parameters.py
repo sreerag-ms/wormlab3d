@@ -25,6 +25,7 @@ class MFParameters(Document):
     masks_threshold = FloatField()
     render_mode = StringField(choices=RENDER_MODES)
     curvature_mode = BooleanField()
+    curvature_deltas = BooleanField()
     curvature_max = FloatField()
     length_max = FloatField()
     length_min = FloatField()
