@@ -24,7 +24,8 @@ from wormlab3d.midlines3d.mf_methods import generate_residual_targets, calculate
     calculate_scores_losses, calculate_sigmas_losses, calculate_intensities_losses, calculate_smoothness_losses, \
     calculate_exponents_losses, calculate_neighbours_losses, calculate_parents_losses, calculate_aunts_losses, \
     calculate_curvature_losses, calculate_temporal_losses, calculate_parents_losses_curvatures, \
-    calculate_smoothness_losses_curvatures, calculate_curvature_losses_curvatures, calculate_temporal_losses_curvatures
+    calculate_smoothness_losses_curvatures, calculate_curvature_losses_curvatures, calculate_temporal_losses_curvatures, \
+    calculate_temporal_losses_curvature_deltas
 from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.nn.detector import ConvergenceDetector
@@ -772,8 +773,8 @@ class Midline3DFinder:
                             # Ensure that the worm does not get too long/short.
                             T0 = curvatures_d[1]
                             h = torch.norm(T0, dim=-1)
-                            h_min = p.length_min / (N-1)
-                            h_max = p.length_max / (N-1)
+                            h_min = p.length_min / (N - 1)
+                            h_max = p.length_max / (N - 1)
                             if h < h_min:
                                 T0 = T0 * h_min / h
                             elif h > h_max:
@@ -781,7 +782,7 @@ class Midline3DFinder:
 
                             # Ensure curvature doesn't get too large.
                             h = torch.norm(T0, dim=-1)
-                            wl = h * (N-1)
+                            wl = h * (N - 1)
                             K = curvatures_d[2:]
                             k = torch.norm(K, dim=-1)
                             k_max = (p.curvature_max * 2 * torch.pi) / wl
@@ -911,8 +912,11 @@ class Midline3DFinder:
                 'parents': calculate_parents_losses_curvatures(curvatures, curvatures_smoothed),
                 'smoothness': calculate_smoothness_losses_curvatures(curvatures, curvatures_smoothed),
                 'curvature': calculate_curvature_losses_curvatures(curvatures),
-                'temporal': calculate_temporal_losses_curvatures(curvatures, curvatures_prev),
             }}
+            if p.curvature_deltas:
+                losses['temporal'] = calculate_temporal_losses_curvature_deltas(curvatures, curvatures_prev)
+            else:
+                losses['temporal'] = calculate_temporal_losses_curvatures(curvatures, curvatures_prev)
         else:
             losses = {**losses, **{
                 'neighbours': calculate_neighbours_losses(points),

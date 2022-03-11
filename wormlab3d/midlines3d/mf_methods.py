@@ -617,3 +617,30 @@ def calculate_temporal_losses_curvatures(
         losses.append(loss)
 
     return losses
+
+
+@torch.jit.script
+def calculate_temporal_losses_curvature_deltas(
+        curvatures: List[torch.Tensor],
+        curvatures_prev: Optional[List[torch.Tensor]],
+) -> List[torch.Tensor]:
+    """
+    The curvatures should change smoothly in time.
+    """
+    D = len(curvatures)
+
+    # If there are no other time points available then just return zeros.
+    if curvatures_prev is None:
+        return [torch.tensor(0., device=curvatures[0].device) for _ in range(D)]
+
+    losses = []
+    for d in range(D):
+        curvatures_d = curvatures[d][0]
+        curvatures_prev_d = curvatures_prev[d]
+
+        # Calculate losses to previous curvatures
+        loss = torch.sum((curvatures_d - curvatures_prev_d)**2)
+
+        losses.append(loss)
+
+    return losses
