@@ -325,7 +325,7 @@ class ProjectRenderScoreModel(nn.Module):
                             k_max = (self.curvature_max * 2 * torch.pi) / wl[i]
                             Kn = torch.where(
                                 (kn > k_max)[:, None],
-                                Kn * (kn / k_max)[:, None],
+                                Kn * (k_max / (kn + 1e-6))[:, None],
                                 Kn
                             )
                             K[i] = Kn

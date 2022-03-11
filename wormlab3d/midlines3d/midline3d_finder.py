@@ -788,7 +788,7 @@ class Midline3DFinder:
                             k_max = (p.curvature_max * 2 * torch.pi) / wl
                             K = torch.where(
                                 (k > k_max)[:, None],
-                                K * (k / k_max)[:, None],
+                                K * (k_max / (k + 1e-6))[:, None],
                                 K
                             )
 
