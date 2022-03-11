@@ -247,6 +247,12 @@ class ProjectRenderScoreModel(nn.Module):
                     if self.curvature_deltas:
                         h_min = self.length_min / (N - 1)
                         h_max = self.length_max / (N - 1)
+                        x0_diff_limit = 0.1
+                        h_inc_limit = 1.05
+                        h_dec_limit = 0.95
+                        k_small_limit = 0.1
+                        k_inc_limit = 1.1
+                        k_dec_limit = 0.9
 
                         dX0 = curvatures_d[:, 0]
                         X0 = torch.zeros_like(dX0)
@@ -256,7 +262,7 @@ class ProjectRenderScoreModel(nn.Module):
                         T0 = torch.zeros_like(dT0)
                         T0[0] = dT0[0]
                         wl = torch.zeros(bs, device=X0.device)
-                        wl[0] = torch.norm(T0[0]) * (N - 1)
+                        wl[0] = torch.norm(T0[0].clone()) * (N - 1)
 
                         dK = torch.zeros_like(curvatures_d)
                         dK[:, 1:-1] = curvatures_d[:, 2:]
@@ -265,7 +271,7 @@ class ProjectRenderScoreModel(nn.Module):
 
                         for i in range(1, bs):
                             # X0 can only move by maximum of 10% of the worm length between frames
-                            max_diff = 0.1 * wl[i - 1]
+                            max_diff = x0_diff_limit * wl[i - 1]
                             dX0i = dX0[i]
                             dX0i_size = torch.norm(dX0i)
                             if dX0i_size > max_diff:
@@ -276,12 +282,12 @@ class ProjectRenderScoreModel(nn.Module):
                             T0n = T0[i - 1] + dT0[i]
                             hp = torch.norm(T0[i - 1].clone())
                             hn = torch.norm(T0n)
-                            if hn / hp > 1.05:
-                                T0n = T0n * hp / hn * 1.05
-                                hn = hp * 1.05
-                            elif hn / hp < 0.95:
-                                T0n = T0n * hp / hn * 0.95
-                                hn = hp * 0.95
+                            if hn / hp > h_inc_limit:
+                                T0n = T0n * hp / hn * h_inc_limit
+                                hn = hp * h_inc_limit
+                            elif hn / hp < h_dec_limit:
+                                T0n = T0n * hp / hn * h_dec_limit
+                                hn = hp * h_dec_limit
                             if hn < h_min:
                                 T0n = T0n * h_min / hn
                             elif hn > h_max:
@@ -296,20 +302,20 @@ class ProjectRenderScoreModel(nn.Module):
                             kn = torch.norm(Kn, dim=-1)
                             Kn = torch.where(
                                 # Where previous curvature small, take next at the limit
-                                (kp < 0.1)[:, None],
+                                (kp < k_small_limit)[:, None],
                                 torch.where(
-                                    (kn > 0.1)[:, None],
-                                    Kn / (kn + eps)[:, None] * 0.1,
+                                    (kn > k_small_limit)[:, None],
+                                    Kn / (kn + eps)[:, None] * k_small_limit,
                                     Kn
                                 ),
                                 torch.where(
                                     # Curvature is growing too fast
-                                    (kn / kp > 1.1)[:, None],
-                                    Kn * (kp / (kn + eps))[:, None] * 1.1,
+                                    (kn / kp > k_inc_limit)[:, None],
+                                    Kn * (kp / (kn + eps))[:, None] * k_inc_limit,
                                     torch.where(
                                         # Curvature is shrinking too fast
-                                        (kn / kp < 0.9)[:, None],
-                                        Kn * (kp / (kn + eps))[:, None] * 0.9,
+                                        (kn / kp < k_dec_limit)[:, None],
+                                        Kn * (kp / (kn + eps))[:, None] * k_dec_limit,
                                         Kn
                                     )
                                 )
