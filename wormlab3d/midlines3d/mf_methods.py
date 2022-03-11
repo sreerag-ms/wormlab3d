@@ -78,11 +78,11 @@ def generate_residual_targets(
         # Only allow the target through where there was something detected at this depth or the next
         if d < D - 1:
             dm = torch.amax(torch.stack([detection_masks[d], detection_masks[d + 1]]), dim=0)
-        elif d == D - 1:
+        elif 0 and d == D - 1:
             dm = torch.ones_like(detection_masks[d])  # Let everything through at the deepest level
         else:
             dm = detection_masks[d]
-        target_d[dm < 0.1] = 0
+        target_d[dm < 0.1] *= 0.2
 
         target_d = torch.clamp(target_d, min=0, max=1)
         target_d = target_d.detach()
@@ -375,29 +375,29 @@ def calculate_sigmas_losses(
     losses = []
     for d in range(D):
         sigmas_d = sigmas[d]
-        # sigmas_smoothed_d = sigmas_smoothed[d]
+        sigmas_smoothed_d = sigmas_smoothed[d]
 
         # Smoothness loss
-        # loss = torch.sum((sigmas_d - sigmas_smoothed_d)**2)
+        loss = torch.sum((sigmas_d - sigmas_smoothed_d)**2)
 
         # Penalise too much deviation from the mean
-        # loss += 0.1 * torch.sum((torch.log(1 + sigmas_d) - torch.log(1 + sigmas_d.mean().detach()))**2)
+        loss += 0.1 * torch.sum((torch.log(1 + sigmas_d) - torch.log(1 + sigmas_d.mean().detach()))**2)
 
-        # Sigmas should be equal in the middle section but taper towards the ends
-        if sigmas_d.shape[1] > 2:
-            n = sigmas_d.shape[1]
-            mp = int(n / 2)
-            sd1 = torch.clamp(sigmas_d[:, :mp - 1] - sigmas_d[:, 1:mp], min=0).sum()
-            sd2 = torch.clamp(sigmas_d[:, mp + 1:] - sigmas_d[:, mp:-1], min=0).sum()
-            qp = int(n / 4)
-            middle_section = sigmas_d[:, qp:3 * qp]
-            sd3 = torch.sum(
-                (torch.log(1 + middle_section)
-                 - torch.log(1 + middle_section.mean(dim=1, keepdim=True).detach()))**2
-            )
-            loss = 0.1 * sd1 + 0.1 * sd2 + sd3
-        else:
-            loss = torch.sum((torch.log(1 + sigmas_d) - torch.log(1 + sigmas_d.mean(dim=1, keepdim=True).detach()))**2)
+        # # Sigmas should be equal in the middle section but taper towards the ends
+        # if sigmas_d.shape[1] > 2:
+        #     n = sigmas_d.shape[1]
+        #     mp = int(n / 2)
+        #     sd1 = torch.clamp(sigmas_d[:, :mp - 1] - sigmas_d[:, 1:mp], min=0).sum()
+        #     sd2 = torch.clamp(sigmas_d[:, mp + 1:] - sigmas_d[:, mp:-1], min=0).sum()
+        #     qp = int(n / 4)
+        #     middle_section = sigmas_d[:, qp:3 * qp]
+        #     sd3 = torch.sum(
+        #         (torch.log(1 + middle_section)
+        #          - torch.log(1 + middle_section.mean(dim=1, keepdim=True).detach()))**2
+        #     )
+        #     loss = 0.1 * sd1 + 0.1 * sd2 + sd3
+        # else:
+        #     loss = torch.sum((torch.log(1 + sigmas_d) - torch.log(1 + sigmas_d.mean(dim=1, keepdim=True).detach()))**2)
 
         losses.append(loss)
 
@@ -420,6 +420,9 @@ def calculate_exponents_losses(
 
         # Smoothness loss
         loss = torch.sum((exponents_d - exponents_smoothed_d)**2)
+
+        # Penalise too much deviation from the mean
+        loss += 0.1 * torch.sum((torch.log(1 + exponents_d) - torch.log(1 + exponents_d.mean().detach()))**2)
 
         losses.append(loss)
 
@@ -444,7 +447,7 @@ def calculate_intensities_losses(
         loss = torch.sum((intensities_d - intensities_smoothed_d)**2)
 
         # Penalise too much deviation from the mean
-        # loss += 0.1 * torch.sum((torch.log(1 + intensities_d) - torch.log(1 + intensities_d.mean().detach()))**2)
+        loss += 0.1 * torch.sum((torch.log(1 + intensities_d) - torch.log(1 + intensities_d.mean().detach()))**2)
 
         losses.append(loss)
 
