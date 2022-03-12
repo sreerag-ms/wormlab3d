@@ -816,20 +816,29 @@ class Midline3DFinder:
                             ], dim=0)
 
                 # Clamp the sigmas, exponents and intensities
-                sigs = [*self.master_frame_state.get_state('sigmas'), ]
-                # sigs.extend([*[f.get_state('sigmas') for f in self.frame_batch]])
-                for sigs_i in sigs:
-                    sigs_i.data = sigs_i.clamp(min=3e-2)
+                render_parameters_limits = {
+                    'sigmas': {
+                        'min': 3e-2
+                    },
+                    'exponents': {
+                        'min': 0.5,
+                        'max': 10
+                    },
+                    'intensities': {
+                        'min': 0.1,
+                        'max': 10
+                    }
+                }
 
-                exps = [*self.master_frame_state.get_state('exponents'), ]
-                # exps.extend(*[f.get_state('exponents') for f in self.frame_batch])
-                for exps_i in exps:
-                    exps_i.data = exps_i.clamp(min=0.5, max=10)
+                for sei in ['sigmas', 'exponents', 'intensities']:
+                    params = [*self.master_frame_state.get_state(sei), ]
+                    # params.extend([*[f.get_state(sei) for f in self.frame_batch]])
+                    for v in params:
+                        v.data = v.clamp(**render_parameters_limits[sei])
 
-                ints = [*self.master_frame_state.get_state('intensities'), ]
-                # ints.extend(*[f.get_state('intensities') for f in self.frame_batch])
-                for ints_i in ints:
-                    ints_i.data = ints_i.clamp(min=1e-1, max=10)
+                    # Camera scaling factors should average 1
+                    v = self.master_frame_state.get_state(f'camera_{sei}')
+                    v.data = v / v.mean()
 
         # Update master state
         self.master_frame_state.set_state('masks_curve', [masks[d][self.active_idx] for d in range(D)])
