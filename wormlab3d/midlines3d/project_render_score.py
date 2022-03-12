@@ -284,6 +284,7 @@ class ProjectRenderScoreModel(nn.Module):
                             dl = torch.abs(hn - hp) * (N - 1)
                             if self.dl_limit is not None and dl > self.dl_limit:
                                 T0n = T0[i - 1] + dT0[i] * self.dl_limit / dl
+                                hn = torch.norm(T0n)
                             if hn < h_min:
                                 T0n = T0n * h_min / hn
                             elif hn > h_max:
