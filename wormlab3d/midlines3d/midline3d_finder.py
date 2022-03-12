@@ -164,6 +164,9 @@ class Midline3DFinder:
             length_min=self.parameters.length_min,
             length_max=self.parameters.length_max,
             curvature_max=self.parameters.curvature_max,
+            dX0_limit=self.parameters.dX0_limit,
+            dl_limit=self.parameters.dl_limit,
+            dk_limit=self.parameters.dk_limit,
         )
         model = torch.jit.script(model)
         return model

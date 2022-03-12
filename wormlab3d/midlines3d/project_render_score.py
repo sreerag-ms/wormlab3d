@@ -172,6 +172,9 @@ class ProjectRenderScoreModel(nn.Module):
             length_min: float = 0.5,
             length_max: float = 2,
             curvature_max: float = 2.,
+            dX0_limit: float = None,
+            dl_limit: float = None,
+            dk_limit: float = None,
     ):
         super().__init__()
         self.image_size = image_size
@@ -182,6 +185,9 @@ class ProjectRenderScoreModel(nn.Module):
         self.length_min = length_min
         self.length_max = length_max
         self.curvature_max = curvature_max
+        self.dX0_limit = dX0_limit
+        self.dl_limit = dl_limit
+        self.dk_limit = dk_limit
         self.cams = torch.jit.script(DynamicCameras())
 
     def forward(
@@ -247,12 +253,6 @@ class ProjectRenderScoreModel(nn.Module):
                     if self.curvature_deltas:
                         h_min = self.length_min / (N - 1)
                         h_max = self.length_max / (N - 1)
-                        x0_diff_limit = 0.1
-                        h_inc_limit = 1.05
-                        h_dec_limit = 0.95
-                        k_small_limit = 0.1
-                        k_inc_limit = 1.1
-                        k_dec_limit = 0.9
 
                         dX0 = curvatures_d[:, 0]
                         X0 = torch.zeros_like(dX0)
@@ -270,24 +270,20 @@ class ProjectRenderScoreModel(nn.Module):
                         K[0] = dK[0]
 
                         for i in range(1, bs):
-                            # X0 can only move by maximum of 10% of the worm length between frames
-                            max_diff = x0_diff_limit * wl[i - 1]
+                            # Limit X0 change
                             dX0i = dX0[i]
                             dX0i_size = torch.norm(dX0i)
-                            if dX0i_size > max_diff:
-                                dX0i = dX0i / dX0i_size * max_diff
+                            if self.dX0_limit is not None and dX0i_size > self.dX0_limit:
+                                dX0i = dX0i / dX0i_size * self.dX0_limit
                             X0[i] = X0[i - 1] + dX0i
 
-                            # T0 can only change 5% in size
+                            # Limit length change
                             T0n = T0[i - 1] + dT0[i]
                             hp = torch.norm(T0[i - 1].clone())
                             hn = torch.norm(T0n)
-                            if hn / hp > h_inc_limit:
-                                T0n = T0n * hp / hn * h_inc_limit
-                                hn = hp * h_inc_limit
-                            elif hn / hp < h_dec_limit:
-                                T0n = T0n * hp / hn * h_dec_limit
-                                hn = hp * h_dec_limit
+                            dl = torch.abs(hn - hp) * (N - 1)
+                            if self.dl_limit is not None and dl > self.dl_limit:
+                                T0n = T0[i - 1] + dT0[i] * self.dl_limit / dl
                             if hn < h_min:
                                 T0n = T0n * h_min / hn
                             elif hn > h_max:
@@ -295,37 +291,24 @@ class ProjectRenderScoreModel(nn.Module):
                             T0[i] = T0n
                             wl[i] = torch.norm(T0[i].clone()) * (N - 1)
 
-                            # K can only change 10% in size
+                            # # Limit curvature changes
                             Kn = K[i - 1] + dK[i]
-                            kp = torch.norm(K[i - 1].clone(), dim=-1)
-                            kn = torch.norm(Kn, dim=-1)
-                            Kn = torch.where(
-                                # Where previous curvature small, take next at the limit
-                                (kp < k_small_limit)[:, None],
-                                torch.where(
-                                    (kn > k_small_limit)[:, None],
-                                    Kn / (kn + eps)[:, None] * k_small_limit,
+                            if self.dk_limit is not None:
+                                kp = torch.norm(K[i - 1].clone(), dim=-1)
+                                kn = torch.norm(Kn, dim=-1)
+                                dk = torch.abs(kn - kp)
+                                Kn = torch.where(
+                                    (dk > self.dk_limit)[:, None],
+                                    K[i - 1] + dK[i] * (self.dk_limit / (dk + eps))[:, None],
                                     Kn
-                                ),
-                                torch.where(
-                                    # Curvature is growing too fast
-                                    (kn / kp > k_inc_limit)[:, None],
-                                    Kn * (kp / (kn + eps))[:, None] * k_inc_limit,
-                                    torch.where(
-                                        # Curvature is shrinking too fast
-                                        (kn / kp < k_dec_limit)[:, None],
-                                        Kn * (kp / (kn + eps))[:, None] * k_dec_limit,
-                                        Kn
-                                    )
                                 )
-                            )
 
                             # Ensure curvature doesn't get too large
-                            kn = torch.norm(Kn.clone(), dim=-1)
+                            kn = torch.norm(Kn, dim=-1)
                             k_max = (self.curvature_max * 2 * torch.pi) / wl[i]
                             Kn = torch.where(
                                 (kn > k_max)[:, None],
-                                Kn * (k_max / (kn + 1e-6))[:, None],
+                                Kn * (k_max / (kn + eps))[:, None],
                                 Kn
                             )
                             K[i] = Kn
