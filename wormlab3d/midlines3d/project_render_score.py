@@ -336,7 +336,7 @@ class ProjectRenderScoreModel(nn.Module):
                         K[:, 1:-1] = curvatures_d[:, 2:]
 
                     K = _smooth_parameter(K, ks, mode='gaussian')
-                    Kv = (K[:, 1:] + K[:, :-1]) / 2
+                    Kv = (1 / (N - 1)) * (K[:, 1:] + K[:, :-1]) / 2
                     T = torch.cat([T0[:, None], Kv], dim=1).cumsum(dim=1)
                     T = T / torch.norm(T, dim=-1, keepdim=True)
                     h = torch.norm(T0, dim=-1)
