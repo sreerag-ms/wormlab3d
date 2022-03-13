@@ -441,10 +441,10 @@ class ProjectRenderScoreModel(nn.Module):
                 # Add head and tail booster regions only if no gaps detected
                 head_blobs = blobs_normed[:, :, 0]
                 tail_blobs = blobs_normed[:, :, -1]
-                head_blobs[head_blobs > 0.01] = 2
-                tail_blobs[tail_blobs > 0.01] = 2
-                dmd = dmd + torch.where(rel_scores[:, 0] > 0.1, head_blobs, torch.zeros_like(head_blobs))
-                dmd = dmd + torch.where(rel_scores[:, -1] > 0.1, tail_blobs, torch.zeros_like(tail_blobs))
+                head_blobs[head_blobs > 0.01] = 5
+                tail_blobs[tail_blobs > 0.01] = 5
+                dmd = dmd + torch.where(rel_scores[:, 0][:, None, None, None] > 0.1, head_blobs, torch.zeros_like(head_blobs))
+                dmd = dmd + torch.where(rel_scores[:, -1][:, None, None, None] > 0.1, tail_blobs, torch.zeros_like(tail_blobs))
                 detection_masks_d = dmd
             else:
                 detection_masks_d = masks_d.clone()
