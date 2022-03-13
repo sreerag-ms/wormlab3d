@@ -82,8 +82,7 @@ def generate_residual_targets(
             dm = torch.ones_like(detection_masks[d])  # Let everything through at the deepest level
         else:
             dm = detection_masks[d]
-        target_d[dm < 0.1] *= 0.2
-
+        target_d = target_d * dm
         target_d = torch.clamp(target_d, min=0, max=1)
         target_d = target_d.detach()
         targets.append(target_d)

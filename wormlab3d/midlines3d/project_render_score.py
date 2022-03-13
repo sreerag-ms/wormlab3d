@@ -412,15 +412,17 @@ class ProjectRenderScoreModel(nn.Module):
             blobs_d = blobs[d]
             masks_d = masks[d]
             masks_target_d = masks_target[d]
+            N = blobs_d.shape[2]
 
             # Normalise blobs
-            sum_ = blobs_d.amax(dim=(2, 3), keepdim=True)
+            sum_ = blobs_d.amax(dim=(3, 4), keepdim=True)
             sum_ = sum_.clamp(min=1e-8)
             blobs_normed = blobs_d / sum_
 
-            # Score the points - take lowest score from all projections
+            # Score the points - look at projections in each view and check how well each blob matches against the lowest intensity image
             scores_d = (blobs_normed * masks_target_d.unsqueeze(2)).sum(dim=(3, 4)).amin(dim=1)
-            if d > 1:
+            max_score = scores_d.amax(dim=1, keepdim=True)
+            if N > 2:
                 scores_d = _taper_parameter(scores_d)
 
             # Parent points can only score the minimum of their child points
@@ -430,15 +432,20 @@ class ProjectRenderScoreModel(nn.Module):
 
             if scores_d.shape[1] > 1:
                 # Make new render with blobs scaled by relative scores to get detection masks
-                max_score = scores_d.amax(dim=1, keepdim=True)
-                rel_scores = scores_d / max_score
+                rel_scores = torch.where(max_score > 0, scores_d / max_score, torch.ones_like(scores_d))
                 sf = rel_scores[:, None, :, None, None]
-                dmd = (blobs_d * sf).amax(dim=2)
-                detection_masks_d = torch.where(
-                    (max_score > 0)[:, None, None],
-                    dmd,
-                    masks_d.clone()
-                )
+                dmd = (blobs_normed * sf).amax(dim=2)
+                dmd[dmd > 0.1] = 1
+                dmd[dmd < 0.1] = 0.2
+
+                # Add head and tail booster regions only if no gaps detected
+                head_blobs = blobs_normed[:, :, 0]
+                tail_blobs = blobs_normed[:, :, -1]
+                head_blobs[head_blobs > 0.01] = 2
+                tail_blobs[tail_blobs > 0.01] = 2
+                dmd = dmd + torch.where(rel_scores[:, 0] > 0.1, head_blobs, torch.zeros_like(head_blobs))
+                dmd = dmd + torch.where(rel_scores[:, -1] > 0.1, tail_blobs, torch.zeros_like(tail_blobs))
+                detection_masks_d = dmd
             else:
                 detection_masks_d = masks_d.clone()
 
