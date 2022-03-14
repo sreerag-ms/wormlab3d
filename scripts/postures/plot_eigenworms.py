@@ -14,13 +14,15 @@ from wormlab3d.postures.cpca import load_cpca_from_file
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.postures.plot_utils import plot_natural_frame_3d
+from wormlab3d.toolkit.plot_utils import tex_mode
 from wormlab3d.toolkit.util import print_args
 from wormlab3d.trajectories.cache import get_trajectory
 
-plot_n_components = 5
+
+plot_n_components = 10
 show_plots = True
 save_plots = True
-img_extension = 'png'
+img_extension = 'svg'
 eigenworm_length = 1
 eigenworm_scale = 64
 cmap = cm.get_cmap(MIDLINE_CMAP_DEFAULT)
@@ -113,6 +115,88 @@ def _plot_eigenworms(
     plt.close(fig)
 
 
+def _plot_eigenworms_basic(
+        eigenworms: Eigenworms,
+        filename: str
+):
+    plot_config = {
+        0: {
+            'azim': -118,
+            'elev': 15,
+            'zoom': 0.8,
+            'arrow_scale': 0.1,
+        },
+        1: {
+            'azim': -30,
+            'elev': -165,
+            'zoom': 0.8,
+            'arrow_scale': 0.1,
+        },
+        2: {
+            'azim': -60,
+            'elev': -160,
+            'zoom': 0.6,
+            'arrow_scale': 0.08,
+        },
+        3: {
+            'azim': -160,
+            'elev': 30,
+            'zoom': 1,
+            'arrow_scale': 0.12,
+        },
+        4: {
+            'azim': -20,
+            'elev': -165,
+            'zoom': 1,
+            'arrow_scale': 0.12,
+        }
+    }
+
+    default_plot_options = {
+        'arrow_opts': {
+            'linewidth': 2
+        },
+        'midline_opts': {
+            's': 30
+        }
+    }
+
+    for i in range(plot_n_components):
+        if i not in plot_config:
+            continue
+
+        component = eigenworms.components[i]
+        NF = NaturalFrame(component * eigenworm_scale, length=eigenworm_length)
+
+        # 3D plot of eigenworm
+        fig = plot_natural_frame_3d(
+            NF,
+            show_frame_arrows=True,
+            n_frame_arrows=16,
+            show_pca_arrows=False,
+            **plot_config[i],
+            **default_plot_options
+        )
+        ax = fig.gca()
+        ax.set_xticks([])
+        ax.set_xticklabels([])
+        ax.set_yticks([])
+        ax.set_yticklabels([])
+        ax.set_zticks([])
+        ax.set_zticklabels([])
+        ax.grid(False)
+
+        if save_plots:
+            path = LOGS_PATH / f'{START_TIMESTAMP}_eigenworms_c={i}_{filename}.{img_extension}'
+            logger.info(f'Saving plot to {path}.')
+            plt.savefig(path)
+
+        if show_plots:
+            plt.show()
+
+        plt.close(fig)
+
+
 def _plot_eigenvalues(
         eigenworms: Eigenworms,
         title: str,
@@ -133,6 +217,49 @@ def _plot_eigenvalues(
         path = LOGS_PATH / f'{START_TIMESTAMP}_eigenvalues_{filename}.{img_extension}'
         logger.info(f'Saving plot to {path}.')
         plt.savefig(path)
+
+    if show_plots:
+        plt.show()
+
+    plt.close(fig)
+
+
+def _plot_eigenvalues_basic(
+        eigenworms: Eigenworms,
+        filename: str
+):
+    vr = np.cumsum([0, *eigenworms.explained_variance_ratio[:plot_n_components]])
+    xs = np.arange(len(vr))
+
+    NPs = []
+    for i in range(plot_n_components):
+        component = eigenworms.components[i]
+        NF = NaturalFrame(component * eigenworm_scale, length=eigenworm_length)
+        NPs.append(NF.non_planarity())
+
+    fig, ax = plt.subplots(1, figsize=(4, 4))
+    ax.grid()
+    ax.scatter(xs[1:], vr[1:], zorder=10, s=100)
+    ax.plot(xs, vr, zorder=5, alpha=0.5, linestyle=':')
+    ax.set_xlim(0, N + 0.5)
+    ax.set_ylim(0, 1)
+    ax.set_xlabel('Component')
+    ax.set_ylabel('Cumulative variance')
+    ax.hlines(y=0.95, xmin=-1, xmax=8, color='red', linewidth=2, zorder=9)
+    ax.vlines(x=8, ymin=-1, ymax=0.95, color='red', linewidth=2, zorder=9)
+    ax.text(-1.3, 0.93, '0.95', color='red')
+
+    ax2 = ax.twinx()
+    ax2.set_ylabel('Non-planarity', rotation=270, labelpad=15)
+    ax2.scatter(xs[1:], NPs, zorder=8, s=80, alpha=0.7, color='orange', marker='x')
+    ax2.plot(xs[1:], NPs, zorder=4, alpha=0.3, color='orange', linestyle='--')
+
+    fig.tight_layout()
+
+    if save_plots:
+        path = LOGS_PATH / f'{START_TIMESTAMP}_eigenvalues_basic_{filename}.{img_extension}'
+        logger.info(f'Saving plot to {path}.')
+        plt.savefig(path, transparent=True)
 
     if show_plots:
         plt.show()
@@ -231,7 +358,7 @@ def main():
             regenerate=False
         )
         dataset = Dataset.objects.get(id=args.dataset)
-        X_full = dataset.X_all
+        # X_full = dataset.X_all
 
         title = f'Dataset {dataset.id}.'
         filename = f'ds={dataset.id}'
@@ -267,10 +394,12 @@ def main():
     title += f'\nNum worms={ew.n_samples}. Num points={ew.n_features}.'
     filename += f'_M={ew.n_samples}_N={ew.n_features}'
 
-    _plot_eigenworms(ew, title, filename)
-    _plot_eigenvalues(ew, title, filename)
-    if X_full is not None:
-        _plot_reconstruction(ew, X_full, 500, title, filename)
+    _plot_eigenworms_basic(ew, filename)
+    _plot_eigenvalues_basic(ew, filename)
+    # _plot_eigenworms(ew, title, filename)
+    # _plot_eigenvalues(ew, title, filename)
+    # if X_full is not None:
+    #     _plot_reconstruction(ew, X_full, 500, title, filename)
 
 
 if __name__ == '__main__':
