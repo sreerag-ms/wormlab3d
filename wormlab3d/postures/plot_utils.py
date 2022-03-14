@@ -16,12 +16,14 @@ def plot_natural_frame_3d(
         NF: NaturalFrame,
         azim: float = -60.,
         elev: float = 30.,
+        midline_opts: dict = None,
         show_frame_arrows: bool = True,
         n_frame_arrows: int = 30,
         arrow_opts: dict = None,
         arrow_scale: float = 0.1,
         show_pca_arrows: bool = True,
         ax: Axes = None,
+        zoom: float = 1.
 ) -> Union[Figure, Axes]:
     # Set up frame
     F = FrameNumpy(x=NF.X_pos.T)
@@ -39,11 +41,18 @@ def plot_natural_frame_3d(
     # cla(ax)
 
     # Add frame arrows and midline
-    # if show_frame_arrows:
+    if midline_opts is None:
+        midline_opts = {}
     if arrow_opts is None:
         arrow_opts = {}
     arrow_opts = {**{'alpha': 0.3}, **arrow_opts}
-    fa = FrameArtist(F, n_arrows=n_frame_arrows, arrow_opts=arrow_opts, arrow_scale=arrow_scale)
+    fa = FrameArtist(
+        F,
+        midline_opts=midline_opts,
+        n_arrows=n_frame_arrows,
+        arrow_opts=arrow_opts,
+        arrow_scale=arrow_scale
+    )
     if show_frame_arrows:
         fa.add_component_vectors(ax)
     fa.add_midline(ax)
@@ -81,7 +90,7 @@ def plot_natural_frame_3d(
             )
 
     # Fix axes range
-    mins, maxs = F.get_bounding_box()
+    mins, maxs = F.get_bounding_box(zoom=zoom)
     ax.set_xlim(mins[0], maxs[0])
     ax.set_ylim(mins[1], maxs[1])
     ax.set_zlim(mins[2], maxs[2])
