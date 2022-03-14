@@ -319,13 +319,24 @@ class ProjectRenderScoreModel(nn.Module):
                         K = torch.zeros_like(curvatures_d)
                         K[:, 1:-1] = curvatures_d[:, 2:]
 
-                    K = _smooth_parameter(K, ks, mode='gaussian')
-                    Kv = (1 / (N - 1)) * (K[:, 1:] + K[:, :-1]) / 2
-                    T = torch.cat([T0[:, None], Kv], dim=1).cumsum(dim=1)
-                    T = T / torch.norm(T, dim=-1, keepdim=True)
+                    # Build curve from middle-out
+                    ks_K = int(2 * (depth - 1) + 1)
+                    K_front = _smooth_parameter(K[:, :int(N / 2)], ks_K, mode='gaussian')
+                    K_back = _smooth_parameter(K[:, int(N / 2):], ks_K, mode='gaussian')
+                    Kv_front = (1 / (N / 2 - 1)) * (K_front[:, 1:] + K_front[:, :-1]) / 2
+                    Kv_back = (1 / (N / 2 - 1)) * (K_back[:, 1:] + K_back[:, :-1]) / 2
+                    T_front = torch.cat([T0[:, None], Kv_front.flip(dims=(1,))], dim=1).cumsum(dim=1)
+                    T_back = torch.cat([-T0[:, None], Kv_back], dim=1).cumsum(dim=1)
+                    T_front = T_front / torch.norm(T_front, dim=-1, keepdim=True)
+                    T_back = T_back / torch.norm(T_back, dim=-1, keepdim=True)
                     h = torch.norm(T0, dim=-1)
-                    Tv = h[:, None, None] * (T[:, 1:] + T[:, :-1]) / 2
-                    points_d = torch.cat([X0[:, None], Tv], dim=1).cumsum(dim=1)
+                    Tv_front = h[:, None, None] * (T_front[:, 1:] + T_front[:, :-1]) / 2
+                    Tv_back = h[:, None, None] * (T_back[:, 1:] + T_back[:, :-1]) / 2
+                    X0_front = X0 + T0 / 2
+                    X0_back = X0 - T0 / 2
+                    points_d_front = torch.cat([X0_front[:, None], Tv_front], dim=1).cumsum(dim=1)
+                    points_d_back = torch.cat([X0_back[:, None], Tv_back], dim=1).cumsum(dim=1)
+                    points_d = torch.cat([points_d_front.flip(dims=(1,)), points_d_back], dim=1)
                     curvatures_d = K
 
                 else:
@@ -441,10 +452,13 @@ class ProjectRenderScoreModel(nn.Module):
                 # Add head and tail booster regions only if no gaps detected
                 head_blobs = blobs_normed[:, :, 0]
                 tail_blobs = blobs_normed[:, :, -1]
-                head_blobs[head_blobs > 0.01] = 5
-                tail_blobs[tail_blobs > 0.01] = 5
-                dmd = dmd + torch.where(rel_scores[:, 0][:, None, None, None] > 0.1, head_blobs, torch.zeros_like(head_blobs))
-                dmd = dmd + torch.where(rel_scores[:, -1][:, None, None, None] > 0.1, tail_blobs, torch.zeros_like(tail_blobs))
+                head_blobs[head_blobs > 0.01] = 1
+                tail_blobs[tail_blobs > 0.01] = 1
+                dmd = dmd + torch.where(rel_scores[:, 0][:, None, None, None] > 0.1, head_blobs,
+                                        torch.zeros_like(head_blobs))
+                dmd = dmd + torch.where(rel_scores[:, -1][:, None, None, None] > 0.1, tail_blobs,
+                                        torch.zeros_like(tail_blobs))
+                dmd = dmd.clamp(max=1.)
                 detection_masks_d = dmd
             else:
                 detection_masks_d = masks_d.clone()
