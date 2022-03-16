@@ -770,36 +770,24 @@ class Midline3DFinder:
                         curvatures = fs.get_state('curvatures')
                         for d in range(D):
                             curvatures_d = curvatures[d]
-                            N = curvatures_d.shape[0]
-                            X0 = curvatures_d[0]
 
                             # Ensure that the worm does not get too long/short.
-                            T0 = curvatures_d[1]
-                            h = torch.norm(T0, dim=-1)
-                            h_min = p.length_min / (N - 1)
-                            h_max = p.length_max / (N - 1)
-                            if h < h_min:
-                                T0 = T0 * h_min / h
-                            elif h > h_max:
-                                T0 = T0 * h_max / h
+                            l = curvatures_d[2, 2].clamp(
+                                min=p.length_min,
+                                max=p.length_max
+                            )
+                            curvatures[d].data[2, 2] = l
 
                             # Ensure curvature doesn't get too large.
-                            h = torch.norm(T0, dim=-1)
-                            wl = h * (N - 1)
-                            K = curvatures_d[2:]
+                            K = curvatures_d[2:, :2]
                             k = torch.norm(K, dim=-1)
-                            k_max = (p.curvature_max * 2 * torch.pi) / wl
+                            k_max = p.curvature_max * 2 * torch.pi
                             K = torch.where(
                                 (k > k_max)[:, None],
                                 K * (k_max / (k + 1e-6))[:, None],
                                 K
                             )
-
-                            curvatures[d].data = torch.cat([
-                                X0[None, :],
-                                T0[None, :],
-                                K
-                            ], dim=0)
+                            curvatures[d].data[2:, :2] = K
                 else:
                     # Adjust points to be a quarter of the mean segment-length between parent points.
                     for i, fs in enumerate(self.frame_batch):
@@ -852,6 +840,8 @@ class Midline3DFinder:
         self.master_frame_state.set_stats(stats)
         if p.curvature_mode:
             self.master_frame_state.set_state('points', [points_smoothed[d][self.active_idx] for d in range(D)])
+            self.master_frame_state.set_state('curvatures_smoothed',
+                                              [curvatures_smoothed[d][self.active_idx] for d in range(D)])
         else:
             self.master_frame_state.set_state('curvatures', [curvatures_smoothed[d][self.active_idx] for d in range(D)])
 
@@ -864,6 +854,7 @@ class Midline3DFinder:
             fs.set_stats(stats)
             if p.curvature_mode:
                 fs.set_state('points', [points_smoothed[d][i] for d in range(D)])
+                fs.set_state('curvatures_smoothed', [curvatures_smoothed[d][i] for d in range(D)])
             else:
                 fs.set_state('curvatures', [curvatures_smoothed[d][i] for d in range(D)])
 
@@ -1102,6 +1093,8 @@ class Midline3DFinder:
             self._plot_2d(frame_state, skipped)
             if self.parameters.window_size > 1:
                 self._plot_2d_batch()
+            if self.parameters.curvature_mode:
+                self._plot_curvatures()
             self._plot_point_stats(frame_state, skipped)
 
     def _plot_3d(self, frame_state: FrameState, skipped: bool = False):
@@ -1125,6 +1118,7 @@ class Midline3DFinder:
         points = frame_state.get_state('points')
         sigmas = frame_state.get_state('sigmas')
         scores = frame_state.get_state('scores')
+        curvatures = frame_state.get_state('curvatures')
 
         for i in range(n_rows):
             for j in range(n_cols):
@@ -1132,7 +1126,10 @@ class Midline3DFinder:
                     break
                 ax = fig.add_subplot(gs[i, j], projection='3d')
                 ax.view_init(azim=self.plot_3d_azim)
-                ax.set_title(f'd={d + self.parameters.depth_min}')
+                title = f'd={d + self.parameters.depth_min}'
+                if self.parameters.curvature_mode:
+                    title += f', l={curvatures[d][2, 2]:.2f}'
+                ax.set_title(title)
                 # cla(ax)
 
                 # Scatter vertices
@@ -1399,6 +1396,67 @@ class Midline3DFinder:
 
         fig.tight_layout()
         self._save_plot(fig, 'point_stats', frame_state)
+
+    def _plot_curvatures(self):
+        """
+        Plot the curvatures.
+        """
+        D = self.parameters.depth
+        D_min = self.parameters.depth_min
+        cmap = plt.get_cmap('jet')
+
+        fig, axes = plt.subplots(3, D - D_min, figsize=((D - D_min) * 6 + 2, 10), squeeze=False)
+        fig.suptitle(self._plot_title(self.master_frame_state))
+
+        colours = [cmap(i) for i in np.linspace(0, 1, len(self.frame_batch))]
+        positions = [
+            np.linspace(0, 1, 2**d)[1:-1]
+            for d in range(D)
+        ]
+        k_axes = {d: axes[0, i] for i, d in enumerate(range(D_min, D))}
+        m1_axes = {d: axes[1, i] for i, d in enumerate(range(D_min, D))}
+        m2_axes = {d: axes[2, i] for i, d in enumerate(range(D_min, D))}
+
+        for i, frame_state in enumerate(self.frame_batch):
+            curvatures = frame_state.get_state('curvatures_smoothed')
+            plot_args = {
+                'label': f'frame={frame_state.frame_num}',
+                'color': colours[i],
+                'alpha': 0.5
+            }
+            scatter_args = {'color': colours[i], 'alpha': 0.8, 's': 10}
+
+            for j, d in enumerate(range(D_min, D)):
+                K = to_numpy(curvatures[j][2:, :2])
+
+                # Curvature magnitude
+                k = np.linalg.norm(K, axis=-1)
+                k_ax = k_axes[d]
+                if i == 0:
+                    k_ax.set_title(f'd={d}')
+                    k_ax.set_ylabel('$|\kappa|=|m_1|+|m_2|$')
+                k_ax.plot(positions[d], k, **plot_args)
+                k_ax.scatter(x=positions[d], y=k, **scatter_args)
+                k_ax.legend()
+
+                # m1
+                m1 = K[:, 0]
+                m1_ax = m1_axes[d]
+                if i == 0:
+                    m1_ax.set_ylabel('$m_1$')
+                m1_ax.plot(positions[d], m1, **plot_args)
+                m1_ax.scatter(x=positions[d], y=m1, **scatter_args)
+
+                # m2
+                m2 = K[:, 0]
+                m2_ax = m2_axes[d]
+                if i == 0:
+                    m2_ax.set_ylabel('$m_1$')
+                m2_ax.plot(positions[d], m2, **plot_args)
+                m2_ax.scatter(x=positions[d], y=m2, **scatter_args)
+
+        fig.tight_layout()
+        self._save_plot(fig, 'curvatures', frame_state)
 
     def _plot_title(self, frame_state: FrameState, skipped: bool = False) -> str:
         title = f'Trial: {self.trial.id}. {self.trial.date:%Y%m%d}. ' \

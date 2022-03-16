@@ -5,6 +5,24 @@ import torch.nn.functional as F
 
 
 @torch.jit.script
+def normalise(X: torch.Tensor) -> torch.Tensor:
+    return X / X.norm(dim=-1, keepdim=True, p=2)
+
+
+@torch.jit.script
+def an_orthonormal(X: torch.Tensor) -> torch.Tensor:
+    bs = X.shape[0]
+    device = X.device
+    Y = torch.stack([
+        X[:, 1],
+        -X[:, 0],
+        torch.zeros(bs, device=device)
+    ], dim=-1)
+    Y = normalise(Y)
+    return Y
+
+
+@torch.jit.script
 def avg_pool_2d(x: torch.Tensor, oob_grad_val: float = 0., mode: str = 'constant') -> torch.Tensor:
     """
     Average pooling with overlap and boundary values.
@@ -130,13 +148,104 @@ def calculate_curvature(
     """
     Calculate the vector curvature along the body.
     """
-    if points.shape[1] > 2:
-        sl = torch.norm(points[:, 1:] - points[:, :-1], dim=-1)
-        T = _calculate_derivative(points, sl)
-        K = _calculate_derivative(T, sl)
+    N = points.shape[1]
+    if N > 2:
+        q = torch.norm(points[:, 1:] - points[:, :-1], dim=-1)
+        T = _calculate_derivative(points, q)
+        T_norm = torch.norm(T, dim=-1, keepdim=True)
+        T = T / T_norm
+        du = torch.ones_like(q) * q.sum(dim=-1, keepdim=True) / (N - 1)
+        K = _calculate_derivative(T, du)
+        K = K / T_norm
     else:
         K = torch.zeros_like(points, device=points.device)
     return K
+
+
+@torch.jit.script
+def _update_frame(
+        m1: torch.Tensor,
+        m2: torch.Tensor,
+        M1: torch.Tensor,
+        M2: torch.Tensor,
+        T: torch.Tensor,
+        h: torch.Tensor,
+        idx: int,
+        direction: int,
+):
+    """
+    Update the orthonormal frame (T/M1/M2) from idx moving either forwards or backwards along the curve.
+    """
+    k1 = m1[:, idx][:, None]
+    k2 = m2[:, idx][:, None]
+
+    if direction == 1:
+        idx_prev = idx - 1
+        idx_next = idx
+        ss = 1
+    else:
+        idx_prev = idx
+        idx_next = idx - 1
+        ss = -1
+
+    dTds = k1 * M1[:, idx_prev].clone() + k2 * M2[:, idx_prev].clone()
+    dM1ds = -k1 * T[:, idx_prev].clone()
+    dM2ds = -k2 * T[:, idx_prev].clone()
+
+    T_tilde = T[:, idx_prev].clone() + ss * h * dTds
+    M1_tilde = M1[:, idx_prev].clone() + ss * h * dM1ds
+    M2_tilde = M2[:, idx_prev].clone() + ss * h * dM2ds
+
+    T[:, idx_next] = normalise(T_tilde)
+    M1[:, idx_next] = normalise(M1_tilde)
+    M2[:, idx_next] = normalise(M2_tilde)
+
+
+@torch.jit.script
+def integrate_curvature(X0: torch.Tensor, T0: torch.Tensor, l: torch.Tensor, K: torch.Tensor) -> torch.Tensor:
+    """
+    Starting from midpoint X0 with tangent T0, integrate the curvature to produce a curve of length l.
+    """
+    bs = X0.shape[0]
+    N = K.shape[1]
+    N2 = int(N / 2)
+    device = X0.device
+    shape = (bs, N, 3)
+
+    # Outputs
+    X = torch.zeros(shape, device=device)
+    T = torch.zeros(shape, device=device)
+    M1 = torch.zeros(shape, device=device)
+    M2 = torch.zeros(shape, device=device)
+
+    # Step size to build a curve of length l
+    h = (l / (N - 1))[:, None]
+
+    # Curvature is in units assuming length 1
+    m1 = K[:, :, 0] / l[:, None]
+    m2 = K[:, :, 1] / l[:, None]
+
+    # Initial values
+    T0 = normalise(T0)
+    X[:, N2 - 1] = X0 - T0 * h / 2
+    X[:, N2] = X0 + T0 * h / 2
+    T[:, N2 - 1] = T0
+    M1[:, N2 - 1] = an_orthonormal(T0)
+    M2[:, N2 - 1] = torch.cross(T[:, N2 - 1].clone(), M1[:, N2 - 1].clone())
+
+    # Calculate orthonormal frame from the middle-out
+    for i in range(N2, N):
+        _update_frame(m1, m2, M1, M2, T, h, i, 1)
+    for i in range(N2 - 1, 0, -1):
+        _update_frame(m1, m2, M1, M2, T, h, i, -1)
+
+    # Calculate curve coordinates
+    for i in range(N2, -1, -1):
+        X[:, i] = X[:, i + 1] - h * T[:, i]
+    for i in range(N2 + 1, N):
+        X[:, i] = X[:, i - 1] + h * T[:, i - 1]
+
+    return X
 
 
 @torch.jit.script
@@ -489,7 +598,7 @@ def calculate_smoothness_losses_curvatures(
         K_d = curvatures[d]
         if K_d.shape[1] > 4:
             Ks_d = curvatures_smoothed[d]
-            loss = torch.sum((K_d[:, 2:] - Ks_d[:, 1:-1])**2)
+            loss = torch.sum((K_d[:, 2:, :2] - Ks_d[:, 1:-1])**2)
         else:
             loss = torch.tensor(0., device=curvatures[0].device)
         losses.append(loss)

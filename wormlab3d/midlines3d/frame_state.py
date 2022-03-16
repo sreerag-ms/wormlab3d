@@ -8,7 +8,7 @@ from torchvision.transforms.functional import gaussian_blur
 
 from wormlab3d import CAMERA_IDXS, PREPARED_IMAGE_SIZE
 from wormlab3d.data.model import Cameras, MFParameters, Frame
-from wormlab3d.midlines3d.mf_methods import make_rotation_matrix
+from wormlab3d.midlines3d.mf_methods import make_rotation_matrix, normalise
 
 PARAMETER_NAMES = [
     'cam_intrinsics',
@@ -49,6 +49,7 @@ TRANSIENTS_NAMES = [
     'cam_coeffs_db',
     'points_3d_base',
     'points_2d_base',
+    'curvatures_smoothed',
 ]
 
 BINARY_DATA_KEYS = []
@@ -105,9 +106,11 @@ class FrameState(nn.Module):
                 k = 'points' if parameters.curvature_mode else 'curvatures'
                 for i, d in enumerate(range(D_min, D)):
                     self.register_buffer(f'{k}_{d}', torch.zeros((2**d, 3)))
+                    self.register_buffer(f'curvatures_smoothed_{d}', torch.zeros((2**d, 2)))
 
             for k in PARAMETER_NAMES:
-                is_buffer = (k == 'points' and parameters.curvature_mode) or (k == 'curvatures' and not parameters.curvature_mode)
+                is_buffer = (k == 'points' and parameters.curvature_mode) \
+                            or (k == 'curvatures' and not parameters.curvature_mode)
                 if k in ['points', 'curvatures'] and (is_buffer or not use_master_points):
                     with torch.no_grad():
                         self.set_state(k, master_frame_state.get_state(k))
@@ -287,7 +290,7 @@ class FrameState(nn.Module):
         # Pick a random head point and tangent direction
         x0 = torch.normal(mean=torch.zeros(3), std=1 / (2**4))
         t0 = torch.normal(mean=torch.zeros(3), std=1)
-        t0 = t0 / t0.norm(dim=-1) * mp.length_min
+        t0 = normalise(t0)
 
         # Start in a straight line configuration
         curvatures = []
@@ -299,12 +302,14 @@ class FrameState(nn.Module):
             else:
                 N = 2**d
                 K = torch.zeros((N - 2, 3))
+                K[0, 2] = mp.length_min
                 t0d = t0 / (N - 1)
                 x = torch.cat([x0.clone()[None, :], t0d[None, :], K], axis=0)
             if d >= mp.depth_min:
                 x = nn.Parameter(x, requires_grad=True)
                 curvatures.append(x)
                 self.register_buffer(f'points_{d}', torch.zeros_like(x))
+                self.register_buffer(f'curvatures_smoothed_{d}', torch.zeros((2**d, 2)))
         self.register_parameter('curvatures', curvatures)
 
     def _init_cam_coeffs(self):
@@ -436,8 +441,9 @@ class FrameState(nn.Module):
             return self.get_cam_coeffs()
         elif hasattr(self, key):
             return getattr(self, key)
-        elif key in ['points', 'curvatures', 'masks_target', 'masks_target_residuals', 'masks_curve', 'points_2d',
-                     'scores']:
+        elif key in ['points', 'curvatures', 'curvatures_smoothed', 'masks_target', 'masks_target_residuals',
+                     'masks_curve',
+                     'points_2d', 'scores']:
             return [self._buffers[f'{key}_{d}'] for d in range(self.parameters.depth_min, self.parameters.depth)]
         else:
             raise RuntimeError(f'Could not get state for {key}.')
