@@ -267,7 +267,7 @@ class ProjectRenderScoreModel(nn.Module):
                         l = torch.zeros_like(dl)
                         l[0] = dl[0]
 
-                        dK = torch.zeros(bs, N, 2)
+                        dK = torch.zeros(bs, N, 2, device=device)
                         dK[:, 1:-1] = curvatures_d[:, 2:, :2]
                         K = torch.zeros_like(dK)
                         K[0] = dK[0]
