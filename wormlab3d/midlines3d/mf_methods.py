@@ -222,8 +222,10 @@ def integrate_curvature(X0: torch.Tensor, T0: torch.Tensor, l: torch.Tensor, K: 
     h = (l / (N - 1))[:, None]
 
     # Curvature is in units assuming length 1
-    m1 = K[:, :, 0] / l[:, None]
-    m2 = K[:, :, 1] / l[:, None]
+    # m1 = K[:, :, 0] / l[:, None]
+    # m2 = K[:, :, 1] / l[:, None]
+    m1 = K[:, :, 0] / h
+    m2 = K[:, :, 1] / h
 
     # Initial values
     T0 = normalise(T0)

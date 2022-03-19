@@ -781,7 +781,7 @@ class Midline3DFinder:
                             # Ensure curvature doesn't get too large.
                             K = curvatures_d[2:, :2]
                             k = torch.norm(K, dim=-1)
-                            k_max = p.curvature_max * 2 * torch.pi
+                            k_max = p.curvature_max * 2 * torch.pi / (K.shape[0] + 2 - 1)
                             K = torch.where(
                                 (k > k_max)[:, None],
                                 K * (k_max / (k + 1e-6))[:, None],
@@ -1427,7 +1427,7 @@ class Midline3DFinder:
             scatter_args = {'color': colours[i], 'alpha': 0.8, 's': 10}
 
             for j, d in enumerate(range(D_min, D)):
-                K = to_numpy(curvatures[j][2:, :2])
+                K = to_numpy(curvatures[j][2:, :2]) * (2**d - 1)
 
                 # Curvature magnitude
                 k = np.linalg.norm(K, axis=-1)
@@ -1448,7 +1448,7 @@ class Midline3DFinder:
                 m1_ax.scatter(x=positions[d], y=m1, **scatter_args)
 
                 # m2
-                m2 = K[:, 0]
+                m2 = K[:, 1]
                 m2_ax = m2_axes[d]
                 if i == 0:
                     m2_ax.set_ylabel('$m_1$')

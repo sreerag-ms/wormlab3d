@@ -292,9 +292,10 @@ class ProjectRenderScoreModel(nn.Module):
                                 kp = torch.norm(K[i - 1].clone(), dim=-1)
                                 kn = torch.norm(Kn, dim=-1)
                                 dk = torch.abs(kn - kp)
+                                dk_lim = self.dk_limit / (N - 1)
                                 Kn = torch.where(
-                                    (dk > self.dk_limit)[:, None],
-                                    K[i - 1] + dK[i] * (self.dk_limit / (dk + eps))[:, None],
+                                    (dk > dk_lim)[:, None],
+                                    K[i - 1] + dK[i] * (dk_lim / (dk + eps))[:, None],
                                     Kn
                                 )
                             K[i] = Kn
@@ -313,7 +314,7 @@ class ProjectRenderScoreModel(nn.Module):
 
                     # Ensure curvature doesn't get too large
                     k = torch.norm(K, dim=-1)
-                    k_max = self.curvature_max * 2 * torch.pi
+                    k_max = self.curvature_max * 2 * torch.pi / (N - 1)
                     K = torch.where(
                         (k > k_max)[..., None],
                         K * (k_max / (k + eps))[..., None],
