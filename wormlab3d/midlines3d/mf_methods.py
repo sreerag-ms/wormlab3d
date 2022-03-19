@@ -648,7 +648,7 @@ def calculate_curvature_losses_curvatures(
     D = len(curvatures)
     losses = []
     for d in range(D):
-        k = torch.norm(curvatures[d][:, 2:], dim=-1)
+        k = torch.norm(curvatures[d][:, 2:, :2], dim=-1)
         loss = (k**2).sum()
         losses.append(loss)
 
