@@ -574,30 +574,29 @@ class Midline3DFinder:
                 mfs.frame_num = next_frame.frame_num
                 mfs.copy_state(next_frame)
 
-                if p.window_size > 1:
-                    # Update first frame in batch to be the same as the master frame
-                    self.frame_batch[0].copy_state(mfs)
-                    self.frame_batch[0].frame_num = mfs.frame_num
+                # Update first frame in batch to be the same as the master frame
+                self.frame_batch[0].copy_state(mfs)
+                self.frame_batch[0].frame_num = mfs.frame_num
 
-                    for j in range(1, p.window_size):
-                        prev_frame = self.frame_batch[j - 1]
-                        curr_frame = self.frame_batch[j]
+                for j in range(1, p.window_size):
+                    prev_frame = self.frame_batch[j - 1]
+                    curr_frame = self.frame_batch[j]
 
-                        # Try to find a frame with sufficiently different images
-                        diff_frame = self.trial.find_next_frame_with_different_images(
-                            prev_frame.frame_num,
-                            threshold=self.parameters.window_image_diff_threshold
-                        )
-                        next_frame = self.trial_state.init_frame_state(
-                            frame_num=diff_frame.frame_num,
-                            trainable=True,
-                            load=False,
-                            prev_frame_state=curr_frame,
-                            device=self.device
-                        )
+                    # Try to find a frame with sufficiently different images
+                    diff_frame = self.trial.find_next_frame_with_different_images(
+                        prev_frame.frame_num,
+                        threshold=self.parameters.window_image_diff_threshold
+                    )
+                    next_frame = self.trial_state.init_frame_state(
+                        frame_num=diff_frame.frame_num,
+                        trainable=True,
+                        load=False,
+                        prev_frame_state=curr_frame,
+                        device=self.device
+                    )
 
-                        curr_frame.copy_state(next_frame)
-                        curr_frame.frame_num = next_frame.frame_num
+                    curr_frame.copy_state(next_frame)
+                    curr_frame.frame_num = next_frame.frame_num
 
             # for j in range(p.window_size):
             #     curr_frame = self.frame_batch[j]
