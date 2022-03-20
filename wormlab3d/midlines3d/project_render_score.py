@@ -348,20 +348,20 @@ class ProjectRenderScoreModel(nn.Module):
                     # Sigmas should be equal in the middle section but taper towards the ends
                     min_sigma = 0.05
                     sigma_d = sigmas_d[:, 0][:, None]
-                    slopes = (sigma_d - min_sigma) / N4 * torch.arange(N4)[None, :] + min_sigma
+                    slopes = (sigma_d - min_sigma) / N4 * torch.arange(N4, device=device)[None, :] + min_sigma
                     sigmas_d = torch.cat([
                         slopes,
-                        torch.ones(bs, 2 * N4) * sigma_d,
+                        torch.ones(bs, 2 * N4, device=device) * sigma_d,
                         slopes.flip(dims=(1,))
                     ], dim=1)
 
                     # Intensities should be equal in the middle section but taper towards the ends
-                    min_int = 0.1
+                    min_int = 0.4
                     int_d = intensities_d[:, 0][:, None]
-                    slopes = (int_d - min_int) / N4 * torch.arange(N4)[None, :] + min_int
+                    slopes = (int_d - min_int) / N4 * torch.arange(N4, device=device)[None, :] + min_int
                     intensities_d = torch.cat([
                         slopes,
-                        torch.ones(bs, 2 * N4) * int_d,
+                        torch.ones(bs, 2 * N4, device=device) * int_d,
                         slopes.flip(dims=(1,))
                     ], dim=1)
 
@@ -456,8 +456,8 @@ class ProjectRenderScoreModel(nn.Module):
                 dmd[dmd < 0.1] = 0.2
 
                 # Add head and tail booster regions only if no gaps detected
-                head_blobs = blobs_normed[:, :, 0]
-                tail_blobs = blobs_normed[:, :, -1]
+                head_blobs = blobs_normed[:, :, 0].clone()
+                tail_blobs = blobs_normed[:, :, -1].clone()
                 head_blobs[head_blobs > 0.01] = 1
                 tail_blobs[tail_blobs > 0.01] = 1
                 dmd = dmd + torch.where(rel_scores[:, 0][:, None, None, None] > 0.1, head_blobs,
