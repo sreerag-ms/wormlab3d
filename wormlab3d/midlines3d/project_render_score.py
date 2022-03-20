@@ -342,14 +342,41 @@ class ProjectRenderScoreModel(nn.Module):
                     points_d = _smooth_parameter(points_d, ks, mode='gaussian')
                     curvatures_d = calculate_curvature(points_d)
 
-                # Smooth the sigmas, exponents and intensities
-                sigmas_d = _smooth_parameter(sigmas_d, ks)
-                exponents_d = _smooth_parameter(exponents_d, ks)
-                intensities_d = _smooth_parameter(intensities_d, ks)
+                if 1:
+                    N4 = int(N / 4)
 
-                # Ensure tapering of rendered worm to avoid holes
-                sigmas_d = _taper_parameter(sigmas_d)
-                intensities_d = _taper_parameter(intensities_d)
+                    # Sigmas should be equal in the middle section but taper towards the ends
+                    min_sigma = 0.05
+                    sigma_d = sigmas_d[:, 0][:, None]
+                    slopes = (sigma_d - min_sigma) / N4 * torch.arange(N4)[None, :] + min_sigma
+                    sigmas_d = torch.cat([
+                        slopes,
+                        torch.ones(bs, 2 * N4) * sigma_d,
+                        slopes.flip(dims=(1,))
+                    ], dim=1)
+
+                    # Intensities should be equal in the middle section but taper towards the ends
+                    min_int = 0.1
+                    int_d = intensities_d[:, 0][:, None]
+                    slopes = (int_d - min_int) / N4 * torch.arange(N4)[None, :] + min_int
+                    intensities_d = torch.cat([
+                        slopes,
+                        torch.ones(bs, 2 * N4) * int_d,
+                        slopes.flip(dims=(1,))
+                    ], dim=1)
+
+                    # Make exponents equal everywhere
+                    exponents_d = torch.ones_like(exponents_d) * exponents_d.mean(dim=1, keepdim=True)
+
+                else:
+                    # Smooth the sigmas, exponents and intensities
+                    sigmas_d = _smooth_parameter(sigmas_d, ks)
+                    exponents_d = _smooth_parameter(exponents_d, ks)
+                    intensities_d = _smooth_parameter(intensities_d, ks)
+
+                    # Ensure tapering of rendered worm to avoid holes
+                    sigmas_d = _taper_parameter(sigmas_d)
+                    intensities_d = _taper_parameter(intensities_d)
             else:
                 curvatures_d = torch.zeros_like(points_d)
 
