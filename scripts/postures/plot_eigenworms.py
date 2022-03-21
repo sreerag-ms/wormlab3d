@@ -14,14 +14,12 @@ from wormlab3d.postures.cpca import load_cpca_from_file
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.postures.plot_utils import plot_natural_frame_3d
-from wormlab3d.toolkit.plot_utils import tex_mode
 from wormlab3d.toolkit.util import print_args
 from wormlab3d.trajectories.cache import get_trajectory
 
-
 plot_n_components = 10
 show_plots = True
-save_plots = True
+save_plots = False
 img_extension = 'svg'
 eigenworm_length = 1
 eigenworm_scale = 64
@@ -241,8 +239,9 @@ def _plot_eigenvalues_basic(
     ax.grid()
     ax.scatter(xs[1:], vr[1:], zorder=10, s=100)
     ax.plot(xs, vr, zorder=5, alpha=0.5, linestyle=':')
-    ax.set_xlim(0, N + 0.5)
+    ax.set_xlim(0, plot_n_components + 0.5)
     ax.set_ylim(0, 1)
+    ax.set_xticks([2, 4, 6, 8, 10])
     ax.set_xlabel('Component')
     ax.set_ylabel('Cumulative variance')
     ax.hlines(y=0.95, xmin=-1, xmax=8, color='red', linewidth=2, zorder=9)
@@ -394,7 +393,7 @@ def main():
     title += f'\nNum worms={ew.n_samples}. Num points={ew.n_features}.'
     filename += f'_M={ew.n_samples}_N={ew.n_features}'
 
-    _plot_eigenworms_basic(ew, filename)
+    # _plot_eigenworms_basic(ew, filename)
     _plot_eigenvalues_basic(ew, filename)
     # _plot_eigenworms(ew, title, filename)
     # _plot_eigenvalues(ew, title, filename)
