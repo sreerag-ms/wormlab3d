@@ -26,7 +26,7 @@ from wormlab3d.trajectories.pca import generate_or_load_pca_cache
 
 show_plots = False
 save_plots = True
-img_extension = 'png'
+img_extension = 'svg'
 
 
 def parse_args() -> Namespace:
@@ -41,6 +41,8 @@ def parse_args() -> Namespace:
                         default='0,1', help='Comma delimited list of component idxs to plot.')
     parser.add_argument('--start-frame', type=int, help='Frame number to start from.')
     parser.add_argument('--end-frame', type=int, help='Frame number to end at.')
+    parser.add_argument('--n-clusters', type=int, default=10,
+                        help='Number of clusters to use.')
     args = parser.parse_args()
     assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
 
@@ -51,23 +53,30 @@ def parse_args() -> Namespace:
 
 def _reorder_distance_correlations(
         distances: np.ndarray,
-        clusters: np.ndarray
+        clusters: np.ndarray,
+        order_by_size: bool = False
 ) -> Tuple[np.ndarray, List[Rectangle], np.ndarray]:
     """
     Reorder the distance correlations.
     """
-    block_idx = 0
-    cluster_nums = np.unique(clusters)
+    cluster_nums, counts = np.unique(clusters, return_counts=True)
+    sorted_idxs = np.argsort(counts)[::-1]
+    sorted_cluster_nums = cluster_nums[sorted_idxs]
     reordered_distances = np.zeros_like(distances)
     all_idxs = []
     squares = []
-    for cluster_num in cluster_nums:
+    block_idx = 0
+    for i in range(len(cluster_nums)):
+        if order_by_size:
+            cluster_num = sorted_cluster_nums[i]
+        else:
+            cluster_num = cluster_nums[i]
         idxs = (clusters == cluster_num).nonzero()[0]
         cluster_size = len(idxs)
         reordered_distances[block_idx:(block_idx + cluster_size)] = distances[idxs].copy()
         all_idxs.append(idxs)
         sqr = Rectangle((block_idx - 0.5, block_idx - 0.5), cluster_size, cluster_size,
-                        linewidth=1, edgecolor='r', linestyle='--', facecolor='none')
+                        linewidth=0.5, edgecolor='r', linestyle='--', facecolor='none')
         squares.append(sqr)
         block_idx += cluster_size
 
@@ -119,7 +128,7 @@ def cluster_postures(
     )
 
     # Fetch clusters
-    L, _ = get_posture_clusters(
+    L, meta = get_posture_clusters(
         reconstruction_id=reconstruction.id,
         use_eigenworms=use_ews,
         eigenworms_id=args.eigenworms,
@@ -184,7 +193,7 @@ def cluster_postures(
 
     if save_plots:
         path = LOGS_PATH / f'{START_TIMESTAMP}_clusters' \
-                           f'_{"ew" if use_ews else "nf"}' \
+                           f'_{"ew-" + meta["eigenworms_id"] if use_ews else "nf"}' \
                            f'_l={linkage_method}' \
                            f'_c={min_clusters}-{max_clusters}' \
                            f'_r={reconstruction.id}' \
@@ -192,6 +201,70 @@ def cluster_postures(
                            f'.{img_extension}'
         logger.info(f'Saving plot to {path}.')
         plt.savefig(path)
+
+    if show_plots:
+        plt.show()
+
+
+def cluster_postures_basic(
+        use_ews: bool = True,
+        linkage_method: str = 'ward',
+):
+    """
+    Plot a single clustered posture matrices.
+    """
+    args = parse_args()
+    reconstruction = Reconstruction.objects.get(id=args.reconstruction)
+
+    # Fetch distances
+    distances, _ = get_posture_distances(
+        reconstruction_id=reconstruction.id,
+        use_eigenworms=use_ews,
+        eigenworms_id=args.eigenworms,
+        eigenworms_n_components=args.n_components,
+        start_frame=args.start_frame,
+        end_frame=args.end_frame,
+        return_squareform=True,
+        rebuild_cache=False
+    )
+
+    # Fetch clusters
+    L, meta = get_posture_clusters(
+        reconstruction_id=reconstruction.id,
+        use_eigenworms=use_ews,
+        eigenworms_id=args.eigenworms,
+        eigenworms_n_components=args.n_components,
+        start_frame=args.start_frame,
+        end_frame=args.end_frame,
+        linkage_method=linkage_method,
+        rebuild_cache=False
+    )
+
+    # Do clustering
+    logger.info(f'Clustering into {args.n_clusters} clusters.')
+    clusters = fcluster(L, args.n_clusters, criterion='maxclust')
+    reordered_distances, squares, all_idxs = _reorder_distance_correlations(distances, clusters, order_by_size=True)
+
+    # Plot reordered distances
+    fig, ax = plt.subplots(1, figsize=(2, 2))
+    ax.matshow(np.log(1+reordered_distances/reordered_distances.mean()), cmap=plt.cm.Blues)
+
+    # Show clusters on plot
+    for sqr in squares:
+        ax.add_patch(sqr)
+    ax.axis('off')
+    fig.tight_layout()
+
+    if save_plots:
+        path = LOGS_PATH / f'{START_TIMESTAMP}_clusters' \
+                           f'_{"ew-" + meta["eigenworms_id"] if use_ews else "nf"}' \
+                           f'_l={linkage_method}' \
+                           f'_c={args.n_clusters}' \
+                           f'_r={reconstruction.id}' \
+                           f'_f={args.start_frame}-{args.end_frame}' \
+                           f'.{img_extension}'
+        logger.info(f'Saving plot to {path}.')
+        plt.savefig(path, transparent=True)
 
     if show_plots:
         plt.show()
@@ -287,7 +360,9 @@ if __name__ == '__main__':
     # tsne_postures(embedding_dim=2, nonp_threshold=0.3)
     # tsne_postures(embedding_dim=3, nonp_threshold=0.3)
 
-    cluster_postures(use_ews=True, linkage_method='ward', min_clusters=3, max_clusters=14)
+    # cluster_postures(use_ews=True, linkage_method='ward', min_clusters=6, max_clusters=6)
     # for ews in [True, False]:
     #     for l_method in ['single', 'complete', 'average', 'weighted', 'centroid', 'median', 'ward']:
     #         cluster_postures(use_ews=ews, linkage_method=l_method)
+
+    cluster_postures_basic(use_ews=False, linkage_method='ward')
