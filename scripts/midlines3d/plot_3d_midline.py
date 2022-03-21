@@ -4,10 +4,13 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
+
 from simple_worm.frame import FrameNumpy
 from simple_worm.plot3d import cla, FrameArtist
 from wormlab3d import logger, CAMERA_IDXS, LOGS_PATH, START_TIMESTAMP
 from wormlab3d.data.model import Trial, Midline3D
+from wormlab3d.postures.natural_frame import NaturalFrame
+from wormlab3d.postures.plot_utils import plot_natural_frame_3d
 from wormlab3d.toolkit.plot_utils import equal_aspect_ratio
 from wormlab3d.toolkit.util import parse_target_arguments
 
@@ -79,9 +82,45 @@ def plot_3d(midline: Midline3D):
     fig.tight_layout()
 
     if save_plots:
-        save_path = LOGS_PATH / f'{START_TIMESTAMP}_trial={trial.id}_frame={frame.frame_num}_midline={midline.id}_3D.{img_extension}'
+        save_path = LOGS_PATH / f'{START_TIMESTAMP}' \
+                                f'_trial={trial.id}' \
+                                f'_frame={frame.frame_num}' \
+                                f'_midline={midline.id}' \
+                                f'_3D.{img_extension}'
         logger.info(f'Saving plot to {save_path}.')
         plt.savefig(save_path)
+
+    if show_plots:
+        plt.show()
+
+
+def plot_3d_with_pca(midline: Midline3D):
+    """
+    3D plot of a midline with pca arrows.
+    """
+    frame = midline.frame
+    trial = frame.trial
+    NF = NaturalFrame(midline.X)
+
+    fig = plt.figure(figsize=(4, 4))
+    ax = fig.add_subplot(projection='3d', azim=-110, elev=40)  # azim=-60, elev=30)
+    ax = plot_natural_frame_3d(
+        NF,
+        ax=ax,
+        show_frame_arrows=False,
+        show_pca_arrows=True,
+        show_pca_arrow_labels=False,
+    )
+    ax.axis('off')
+
+    if save_plots:
+        save_path = LOGS_PATH / f'{START_TIMESTAMP}' \
+                                f'_trial={trial.id}' \
+                                f'_frame={frame.frame_num}' \
+                                f'_midline={midline.id}' \
+                                f'_3D_pca.{img_extension}'
+        logger.info(f'Saving plot to {save_path}.')
+        plt.savefig(save_path, transparent=True)
 
     if show_plots:
         plt.show()
@@ -117,7 +156,11 @@ def plot_reprojections(midline: Midline3D):
     fig.tight_layout()
 
     if save_plots:
-        save_path = LOGS_PATH / f'{START_TIMESTAMP}_trial={trial.id}_frame={frame.frame_num}_midline={midline.id}_2D.{img_extension}'
+        save_path = LOGS_PATH / f'{START_TIMESTAMP}' \
+                                f'_trial={trial.id}' \
+                                f'_frame={frame.frame_num}' \
+                                f'_midline={midline.id}' \
+                                f'_2D.{img_extension}'
         logger.info(f'Saving plot to {save_path}.')
         plt.savefig(save_path)
 
@@ -169,7 +212,11 @@ def plot_reprojection_singles(midline: Midline3D):
         img = Image.fromarray(img, 'RGB')
 
         if save_plots:
-            save_path = LOGS_PATH / f'{START_TIMESTAMP}_trial={trial.id}_frame={frame.frame_num}_midline={midline.id}_2D_c={c}.png'
+            save_path = LOGS_PATH / f'{START_TIMESTAMP}' \
+                                    f'_trial={trial.id}' \
+                                    f'_frame={frame.frame_num}' \
+                                    f'_midline={midline.id}' \
+                                    f'_2D_c={c}.png'
             logger.info(f'Saving image to {save_path}.')
             img.save(save_path)
 
@@ -181,6 +228,7 @@ if __name__ == '__main__':
     # from wormlab3d.toolkit.plot_utils import interactive_plots
     # interactive_plots()
     mid = get_midline()
-    plot_3d(mid)
+    # plot_3d(mid)
+    plot_3d_with_pca(mid)
     # plot_reprojections(mid)
     # plot_reprojection_singles(mid)
