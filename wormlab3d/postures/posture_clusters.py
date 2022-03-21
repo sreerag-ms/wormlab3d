@@ -12,12 +12,15 @@ from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.postures.posture_distances import get_posture_distances
 
 
-def _calculate_linkage(distances: np.ndarray, linkage_method: str) -> np.ndarray:
+def _calculate_linkage(distances: np.ndarray, linkage_method: str, optimise_ordering: bool = False) -> np.ndarray:
     """
     Calculate linkage matrix.
     """
+    logger.info('Calculating linkage.')
     L = linkage(distances, linkage_method)
-    L = optimal_leaf_ordering(L, distances)
+    if optimise_ordering:
+        logger.info('Optimising leaf ordering.')
+        L = optimal_leaf_ordering(L, distances)
     return L
 
 
@@ -127,8 +130,7 @@ def generate_or_load_clusters_cache(
         )
 
         # Generate the clusters cache
-        logger.info('Calculating linkage.')
-        L_data = _calculate_linkage(distances, linkage_method)
+        L_data = _calculate_linkage(distances, linkage_method, optimise_ordering=False)
         L = np.memmap(path_L, dtype=np.float32, mode='w+', shape=L_data.shape)
         L[:] = L_data
 
@@ -140,5 +142,9 @@ def generate_or_load_clusters_cache(
         meta = {'shape': L.shape, }
         with open(path_meta, 'w') as f:
             json.dump(meta, f)
+
+    # Add eigenworms id to meta if used
+    if use_eigenworms:
+        meta['eigenworms_id'] = ew.id
 
     return L, meta
