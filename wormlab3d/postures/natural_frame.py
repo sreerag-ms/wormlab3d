@@ -102,11 +102,14 @@ class NaturalFrame:
         spacing = (q[:-1] + q[1:]) / 2
         locs = np.cumsum(spacing)
 
-        # Tangent is gradient of curve
-        self.T = np.gradient(self.X_pos, locs, axis=0, edge_order=1)
+        # Tangent is normalised gradient of curve
+        T = np.gradient(self.X_pos, locs, axis=0, edge_order=1)
+        T_norm = norm(T, axis=-1, keepdims=True)
+        self.T = T / T_norm
 
         # Curvature is gradient of tangent
-        self.K = np.gradient(self.T, locs, axis=0, edge_order=1)
+        K = np.gradient(self.T, 1 / (self.N - 1), axis=0, edge_order=1)
+        self.K = K / T_norm
 
     def _calculate_pca(self):
         """
