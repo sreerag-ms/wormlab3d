@@ -4,9 +4,12 @@ from argparse import Namespace
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.collections import LineCollection
+from matplotlib.gridspec import GridSpec
 from scipy.stats import gaussian_kde
 
 from simple_worm.frame import FrameSequenceNumpy
+from simple_worm.plot3d import generate_interactive_scatter_clip
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d import logger
 from wormlab3d.data.model import Reconstruction
@@ -21,7 +24,7 @@ from wormlab3d.trajectories.util import calculate_speeds, calculate_rotation_mat
 
 show_plots = True
 save_plots = True
-img_extension = 'png'
+img_extension = 'svg'
 
 
 def parse_args() -> Namespace:
@@ -154,6 +157,181 @@ def traces():
         plt.show()
 
 
+def traces_condensed(x_label: str = 'time'):
+    args = parse_args()
+    ew = generate_or_load_eigenworms(
+        eigenworms_id=args.eigenworms,
+        reconstruction_id=args.reconstruction,
+        n_components=args.n_components,
+        regenerate=False
+    )
+
+    common_args = {
+        'reconstruction_id': args.reconstruction,
+        'start_frame': args.start_frame,
+        'end_frame': args.end_frame,
+        'smoothing_window': 25
+    }
+
+    regions = {
+        'forwards_1': {
+            'start': 13700,
+            'end': 14135,
+            'y1': 0.,
+            'y2': 0.008,
+            'color': 'green'
+        },
+        'reversal': {
+            'start': 14135,
+            'end': 14185,
+            'y1': -0.008,
+            'y2': 0.008,
+            'color': 'skyblue'
+        },
+        'backwards': {
+            'start': 14185,
+            'end': 14375,
+            'y1': -0.008,
+            'y2': 0.,
+            'color': 'red'
+        },
+        'reorientation': {
+            'start': 14375,
+            'end': 14550,
+            'y1': -0.008,
+            'y2': 0.008,
+            'color': 'violet'
+        },
+        'forwards_2': {
+            'start': 14550,
+            'end': 14750,
+            'y1': 0.,
+            'y2': 0.008,
+            'color': 'green'
+        },
+    }
+
+    reconstruction = Reconstruction.objects.get(id=args.reconstruction)
+    X, meta = get_trajectory(**common_args)
+    N = len(X)
+    if x_label == 'time':
+        ts = np.linspace(0, N / reconstruction.trial.fps, N)
+    else:
+        ts = np.arange(N) + args.start_frame
+
+    # Speed
+    logger.info('Calculating speeds.')
+    speeds = calculate_speeds(X, signed=True)
+
+    # Planarity
+    logger.info('Fetching planarities.')
+    pcas, meta = generate_or_load_pca_cache(**common_args, window_size=1)
+    r = pcas.explained_variance_ratio.T
+    nonp = r[2] / np.sqrt(r[1] * r[0])
+
+    # Eigenworms embeddings
+    Z, meta = get_trajectory(**common_args, natural_frame=True, rebuild_cache=False)
+    X_ew = ew.transform(np.array(Z))
+
+    # Plot
+    # fig, axes = plt.subplots(2, figsize=(12, 8), sharex=True)
+    fig = plt.figure(figsize=(12, 8))
+    gs = GridSpec(nrows=3, ncols=1)
+
+    # Speeds
+    ax = fig.add_subplot(gs[0:2, 0])  # axes[0]
+
+    for k, region in regions.items():
+        if x_label == 'time':
+            idxs = region['start'] - args.start_frame, region['end'] - args.start_frame
+            x_r = [ts[idxs[0]], ts[idxs[1]]]
+        else:
+            x_r = [region['start'], region['end']]
+        ax.fill_between(
+            x=x_r,
+            y1=region['y1'],
+            y2=region['y2'],
+            color=region['color'],
+            alpha=0.2,
+            linewidth=0
+        )
+
+    ax.axhline(y=0, color='darkgrey')
+    ax.plot(ts, speeds)
+    ax.set_ylabel('Speed (mm/s)')
+    # ax.grid()
+
+    # Planarities
+    ax2 = ax.twinx()
+    ax2.plot(ts, nonp, color='orange', alpha=0.6, linestyle='--')
+    ax2.set_ylabel('Non-planarity', rotation=270, labelpad=15)
+    ax2.axhline(y=0, color='darkgrey')
+
+    # Eigenworms - absolute values
+    prop_cycle = plt.rcParams['axes.prop_cycle']
+    default_colours = prop_cycle.by_key()['color']
+    component_colours = [default_colours[i] for i in range(len(args.plot_components))]
+
+    ax = fig.add_subplot(gs[2, 0])  # axes[1]
+    for i in args.plot_components:
+        for j, (k, region) in enumerate(regions.items()):
+            idxs = region['start'] - args.start_frame, region['end'] - args.start_frame + 1
+            if x_label == 'time':
+                x_r = ts[idxs[0]:idxs[1]]
+            else:
+                x_r = np.arange(region['start'], region['end'] + 1)
+
+            if k in ['forwards_1', 'forwards_2', 'backwards', 'reversal']:
+                if i in [0, 1]:
+                    alpha = 0.8
+                    linewidth = 2
+                    add_label = k == 'forwards_1'
+                else:
+                    alpha = 0.25
+                    linewidth = 1
+                    add_label = False
+            elif k == 'reorientation':
+                if i in [0, 1]:
+                    alpha = 0.25
+                    linewidth = 1
+                    add_label = False
+                else:
+                    alpha = 0.8
+                    linewidth = 2
+                    add_label = True
+            ax.plot(
+                x_r,
+                np.abs(X_ew[idxs[0]:idxs[1], i]),
+                color=component_colours[i],
+                label=f'$\lambda_{i + 1}$' if add_label else None,
+                alpha=alpha,
+                linewidth=linewidth
+            )
+
+        # ax.plot(ts, np.abs(X_ew[:, i]), label=i, alpha=0.7)
+    ax.set_ylabel('$|\lambda|$')
+    ax.legend()
+    # ax.grid()
+
+    if x_label == 'time':
+        ax.set_xlabel('Time (s)')
+    else:
+        ax.set_xlabel('Frame #')
+
+    fig.tight_layout()
+
+    if save_plots:
+        path = LOGS_PATH / f'{START_TIMESTAMP}_traces_condensed_' \
+                           f'r={reconstruction.id}_' \
+                           f'f={args.start_frame}-{args.end_frame}_' \
+                           f'nc={",".join([str(c) for c in args.plot_components])}.{img_extension}'
+        logger.info(f'Saving plot to {path}.')
+        plt.savefig(path)
+
+    if show_plots:
+        plt.show()
+
+
 def heatmap():
     args = parse_args()
     ew = generate_or_load_eigenworms(
@@ -244,6 +422,100 @@ def heatmap():
         plt.show()
 
 
+def heatmap_basic():
+    args = parse_args()
+    ew = generate_or_load_eigenworms(
+        eigenworms_id=args.eigenworms,
+        reconstruction_id=args.reconstruction,
+        n_components=args.n_components,
+        regenerate=False
+    )
+    n_mesh_points = 100
+
+    common_args = {
+        'reconstruction_id': args.reconstruction,
+        # 'start_frame': args.start_frame,
+        # 'end_frame': args.end_frame,
+        'smoothing_window': 25,
+        'natural_frame': True,
+        'rebuild_cache': False,
+    }
+    reconstruction = Reconstruction.objects.get(id=args.reconstruction)
+
+    # Eigenworms embeddings for entire clip
+    logger.info('Fetching eigenworms embeddings for entire clip.')
+    Z_all, meta = get_trajectory(**common_args)
+    X_ew_all = ew.transform(np.array(Z_all))
+
+    # Eigenworms embeddings just for requested frames
+    logger.info('Fetching eigenworms embeddings for requested frames.')
+    Z_traj, meta = get_trajectory(**common_args, start_frame=args.start_frame, end_frame=args.end_frame)
+    X_ew_traj = ew.transform(np.array(Z_traj))
+
+    # Construct colours
+    colours = np.linspace(0, 1, len(X_ew_traj))
+    cmap = plt.get_cmap('winter_r')
+
+    # Interpolate data to make a surface
+    def make_surface(x_, y_):
+        xmin, xmax, ymin, ymax = min(x_), max(x_), min(y_), max(y_)
+        X, Y = np.mgrid[xmin:xmax:complex(n_mesh_points), ymin:ymax:complex(n_mesh_points)]
+        positions = np.vstack([X.ravel(), Y.ravel()])
+        values = np.vstack([x_, y_])
+        kernel = gaussian_kde(values)
+        Z = np.reshape(kernel(positions).T, X.shape)
+        return Z, xmin, xmax, ymin, ymax
+
+    def plot_heatmap(ax, c, x_all_, y_all_, x_traj_, y_traj_):
+        Z, x_min, x_max, y_min, y_max = make_surface(x_all_, y_all_)
+        ax.set_ylabel(f'Re($\lambda_{c}$)')
+        ax.set_xlabel(f'Im($\lambda_{c}$)')
+
+        # Add the heatmap
+        ax.imshow(np.rot90(Z), cmap=plt.get_cmap('YlOrRd'), extent=[x_min, x_max, y_min, y_max])
+
+        # Overlay the trajectory
+        X = np.stack([x_traj_, y_traj_], axis=1)
+        points = X[:, None, :]
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
+        lc = LineCollection(segments, array=colours, cmap=cmap, alpha=colours)
+        ax.add_collection(lc)
+
+        ax.set_xlim([x_min, x_max])
+        ax.set_ylim([y_min, y_max])
+        ax.set_yticks([])
+        ax.set_xticks([])
+
+    # Plot
+    fig, axes = plt.subplots(1, 2, figsize=(4, 2))
+
+    # RE(c1) vs IMAG(c1)
+    logger.info('Plotting RE(c1) vs IMAG(c1).')
+    x_all = np.real(X_ew_all[:, 0])
+    y_all = np.imag(X_ew_all[:, 0])
+    x_traj = np.real(X_ew_traj[:, 0])
+    y_traj = np.imag(X_ew_traj[:, 0])
+    plot_heatmap(axes[0], 1, x_all, y_all, x_traj, y_traj)
+
+    # RE(c2) vs IMAG(c2)
+    logger.info('Plotting RE(c2) vs IMAG(c2).')
+    x_all = np.real(X_ew_all[:, 1])
+    y_all = np.imag(X_ew_all[:, 1])
+    x_traj = np.real(X_ew_traj[:, 1])
+    y_traj = np.imag(X_ew_traj[:, 1])
+    plot_heatmap(axes[1], 2, x_all, y_all, x_traj, y_traj)
+
+    fig.tight_layout()
+
+    if save_plots:
+        path = LOGS_PATH / f'{START_TIMESTAMP}_heatmap_basic_r={reconstruction.id}_f={args.start_frame}-{args.end_frame}.{img_extension}'
+        logger.info(f'Saving plot to {path}.')
+        plt.savefig(path, transparent=True)
+
+    if show_plots:
+        plt.show()
+
+
 def animate():
     args = parse_args()
     ew = generate_or_load_eigenworms(
@@ -303,9 +575,11 @@ def animate():
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
-    from simple_worm.plot3d import interactive, generate_interactive_scatter_clip
-
-    interactive()
+    # from simple_worm.plot3d import interactive
+    # interactive()
     # traces()
+    # traces_condensed(x_label='frames')
     # heatmap()
-    animate()
+    heatmap_basic()
+    # animate()
+#
