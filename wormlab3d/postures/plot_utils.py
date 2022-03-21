@@ -22,6 +22,7 @@ def plot_natural_frame_3d(
         arrow_opts: dict = None,
         arrow_scale: float = 0.1,
         show_pca_arrows: bool = True,
+        show_pca_arrow_labels: bool = True,
         ax: Axes = None,
         zoom: float = 1.
 ) -> Union[Figure, Axes]:
@@ -69,25 +70,26 @@ def plot_natural_frame_3d(
                 origin=origin,
                 vec=vec,
                 color=fa.arrow_colours[f'e{i}'],
-                mutation_scale=25,
+                mutation_scale=20,
                 arrowstyle='->',
                 linewidth=3,
                 alpha=0.9
             )
             ax.add_artist(arrow)
 
-            origin = origin - vec / np.linalg.norm(vec) * 0.15
-            ax.text(
-                origin[0],
-                origin[1],
-                origin[2],
-                f'$v_{i}$',
-                color=fa.arrow_colours[f'e{i}'],
-                fontsize=40,
-                zorder=10,
-                horizontalalignment='center',
-                verticalalignment='center',
-            )
+            if show_pca_arrow_labels:
+                origin = origin - vec / np.linalg.norm(vec) * 0.15
+                ax.text(
+                    origin[0],
+                    origin[1],
+                    origin[2],
+                    f'$v_{i}$',
+                    color=fa.arrow_colours[f'e{i}'],
+                    fontsize=40,
+                    zorder=10,
+                    horizontalalignment='center',
+                    verticalalignment='center',
+                )
 
     # Fix axes range
     mins, maxs = F.get_bounding_box(zoom=zoom)
