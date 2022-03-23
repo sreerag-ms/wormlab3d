@@ -23,7 +23,7 @@ from wormlab3d.trajectories.util import calculate_speeds, calculate_rotation_mat
 # tex_mode()
 
 show_plots = True
-save_plots = True
+save_plots = False
 img_extension = 'svg'
 
 
@@ -47,7 +47,7 @@ def parse_args() -> Namespace:
     return args
 
 
-def traces():
+def traces(x_label: str = 'time'):
     args = parse_args()
     ew = generate_or_load_eigenworms(
         eigenworms_id=args.eigenworms,
@@ -66,7 +66,10 @@ def traces():
     reconstruction = Reconstruction.objects.get(id=args.reconstruction)
     X, meta = get_trajectory(**common_args)
     N = len(X)
-    ts = np.linspace(0, N / reconstruction.trial.fps, N)
+    if x_label == 'time':
+        ts = np.linspace(0, N / reconstruction.trial.fps, N)
+    else:
+        ts = np.arange(N) + (args.start_frame if args.start_frame is not None else 0)
 
     # Speed
     logger.info('Calculating speeds.')
@@ -136,7 +139,10 @@ def traces():
     ax.legend()
     ax.grid()
 
-    ax.set_xlabel('Time (s)')
+    if x_label == 'time':
+        ax.set_xlabel('Time (s)')
+    else:
+        ax.set_xlabel('Frame #')
 
     title = f'Trial={reconstruction.trial.id}. Reconstruction={reconstruction.id}.'
     if args.start_frame is not None:
@@ -217,7 +223,7 @@ def traces_condensed(x_label: str = 'time'):
     if x_label == 'time':
         ts = np.linspace(0, N / reconstruction.trial.fps, N)
     else:
-        ts = np.arange(N) + args.start_frame
+        ts = np.arange(N) + (args.start_frame if args.start_frame is not None else 0)
 
     # Speed
     logger.info('Calculating speeds.')
@@ -575,11 +581,10 @@ def animate():
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
-    # from simple_worm.plot3d import interactive
-    # interactive()
-    # traces()
+    from simple_worm.plot3d import interactive
+    interactive()
+    traces(x_label='frames')
     # traces_condensed(x_label='frames')
     # heatmap()
-    heatmap_basic()
+    # heatmap_basic()
     # animate()
-#
