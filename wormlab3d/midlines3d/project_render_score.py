@@ -178,6 +178,7 @@ class ProjectRenderScoreModel(nn.Module):
             dX0_limit: float = None,
             dl_limit: float = None,
             dk_limit: float = None,
+            dpsi_limit: float = None,
     ):
         super().__init__()
         self.image_size = image_size
@@ -191,6 +192,7 @@ class ProjectRenderScoreModel(nn.Module):
         self.dX0_limit = dX0_limit
         self.dl_limit = dl_limit
         self.dk_limit = dk_limit
+        self.dpsi_limit = dpsi_limit
         self.cams = torch.jit.script(DynamicCameras())
 
     def forward(
@@ -271,6 +273,10 @@ class ProjectRenderScoreModel(nn.Module):
                         dK[:, 1:-1] = curvatures_d[:, 2:, :2]
                         K = torch.zeros_like(dK)
                         K[0] = dK[0]
+                        k = torch.zeros(bs, N, device=device)
+                        k[0] = torch.norm(K[0].clone(), dim=-1)
+                        psi = torch.zeros(bs, N, device=device)
+                        psi[0] = torch.atan2(K[0, :, 0].clone(), K[0, :, 1].clone() + eps)
 
                         for i in range(1, bs):
                             # Limit X0 change
@@ -286,19 +292,24 @@ class ProjectRenderScoreModel(nn.Module):
                             # Limit length change
                             l[i] = l[i - 1] + dl[i].clamp(min=-self.dl_limit, max=self.dl_limit)
 
-                            # Limit curvature changes
-                            Kn = K[i - 1] + dK[i]
+                            # Limit curvature magnitude changes
+                            dk = dK[i, :, 0].clone()
                             if self.dk_limit is not None:
-                                kp = torch.norm(K[i - 1].clone(), dim=-1)
-                                kn = torch.norm(Kn, dim=-1)
-                                dk = torch.abs(kn - kp)
                                 dk_lim = self.dk_limit / (N - 1)
-                                Kn = torch.where(
-                                    (dk > dk_lim)[:, None],
-                                    K[i - 1] + dK[i] * (dk_lim / (dk + eps))[:, None],
-                                    Kn
-                                )
-                            K[i] = Kn
+                                dk = dk.clamp(min=-dk_lim, max=dk_lim)
+                            k[i] = k[i - 1].clone() + dk
+
+                            # Limit curvature angle changes
+                            dpsi = dK[i, :, 1].clone()
+                            if self.dpsi_limit is not None:
+                                dpsi = dpsi.clamp(min=-self.dpsi_limit, max=self.dpsi_limit)
+                            psi[i] = psi[i - 1].clone() + dpsi
+
+                            # Calculate new curvature
+                            K[i] = torch.stack([
+                                k[i] * torch.sin(psi[i]),
+                                k[i] * torch.cos(psi[i])
+                            ], dim=-1)
                     else:
                         X0 = curvatures_d[:, 0]
                         T0 = curvatures_d[:, 1]

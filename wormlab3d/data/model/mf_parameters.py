@@ -33,6 +33,7 @@ class MFParameters(Document):
     dX0_limit = FloatField()
     dl_limit = FloatField()
     dk_limit = FloatField()
+    dpsi_limit = FloatField()
 
     frame_skip = IntField()
     n_steps_init = IntField()

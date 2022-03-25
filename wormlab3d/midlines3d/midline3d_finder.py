@@ -167,6 +167,7 @@ class Midline3DFinder:
             dX0_limit=self.parameters.dX0_limit,
             dl_limit=self.parameters.dl_limit,
             dk_limit=self.parameters.dk_limit,
+            dpsi_limit=self.parameters.dpsi_limit,
         )
         model = torch.jit.script(model)
         return model
@@ -1404,17 +1405,20 @@ class Midline3DFinder:
         D_min = self.parameters.depth_min
         cmap = plt.get_cmap('jet')
 
-        fig, axes = plt.subplots(3, D - D_min, figsize=((D - D_min) * 6 + 2, 10), squeeze=False)
+        fig, axes = plt.subplots(6, D - D_min, figsize=((D - D_min) * 6 + 2, 10), squeeze=False)
         fig.suptitle(self._plot_title(self.master_frame_state))
 
         colours = [cmap(i) for i in np.linspace(0, 1, len(self.frame_batch))]
         positions = [
-            np.linspace(0, 1, 2**d)[1:-1]
+            np.linspace(0, 1, 2**d + 2)[1:-1]
             for d in range(D)
         ]
         k_axes = {d: axes[0, i] for i, d in enumerate(range(D_min, D))}
-        m1_axes = {d: axes[1, i] for i, d in enumerate(range(D_min, D))}
-        m2_axes = {d: axes[2, i] for i, d in enumerate(range(D_min, D))}
+        psi_axes = {d: axes[1, i] for i, d in enumerate(range(D_min, D))}
+        m1_axes = {d: axes[2, i] for i, d in enumerate(range(D_min, D))}
+        m2_axes = {d: axes[3, i] for i, d in enumerate(range(D_min, D))}
+        dk_axes = {d: axes[4, i] for i, d in enumerate(range(D_min, D))}
+        dpsi_axes = {d: axes[5, i] for i, d in enumerate(range(D_min, D))}
 
         for i, frame_state in enumerate(self.frame_batch):
             curvatures = frame_state.get_state('curvatures_smoothed')
@@ -1426,17 +1430,27 @@ class Midline3DFinder:
             scatter_args = {'color': colours[i], 'alpha': 0.8, 's': 10}
 
             for j, d in enumerate(range(D_min, D)):
-                K = to_numpy(curvatures[j][2:, :2]) * (2**d - 1)
+                K = to_numpy(curvatures[j]) * (2**d - 1)
 
                 # Curvature magnitude
                 k = np.linalg.norm(K, axis=-1)
                 k_ax = k_axes[d]
                 if i == 0:
                     k_ax.set_title(f'd={d}')
-                    k_ax.set_ylabel('$|\kappa|=|m_1|+|m_2|$')
+                    k_ax.set_ylabel('$|\kappa|=|m_1+m_2|$')
                 k_ax.plot(positions[d], k, **plot_args)
                 k_ax.scatter(x=positions[d], y=k, **scatter_args)
                 k_ax.legend()
+
+                # Curvature angles
+                psi = np.arctan2(K[..., 0], K[..., 1])
+                psi_ax = psi_axes[d]
+                if i == 0:
+                    psi_ax.set_title(f'd={d}')
+                    psi_ax.set_ylabel('$\\angle\kappa$')
+                psi_ax.plot(positions[d], psi, **plot_args)
+                psi_ax.scatter(x=positions[d], y=psi, **scatter_args)
+                psi_ax.legend()
 
                 # m1
                 m1 = K[:, 0]
@@ -1453,6 +1467,29 @@ class Midline3DFinder:
                     m2_ax.set_ylabel('$m_1$')
                 m2_ax.plot(positions[d], m2, **plot_args)
                 m2_ax.scatter(x=positions[d], y=m2, **scatter_args)
+
+                # deltas
+                if i > 0:
+                    curvatures_prev = self.frame_batch[i - 1].get_state('curvatures_smoothed')
+                    Kp = to_numpy(curvatures_prev[j]) * (2**d - 1)
+
+                    # delta curvature magnitudes
+                    k_prev = np.linalg.norm(Kp, axis=-1)
+                    dk = np.abs(k - k_prev)
+                    dk_ax = dk_axes[d]
+                    if i == 1:
+                        dk_ax.set_ylabel('$\delta\kappa$')
+                    dk_ax.plot(positions[d], dk, **plot_args)
+                    dk_ax.scatter(x=positions[d], y=dk, **scatter_args)
+
+                    # delta curvature angles
+                    psi_prev = np.arctan2(Kp[..., 0], Kp[..., 1])
+                    dpsi = np.abs(psi - psi_prev)
+                    dpsi_ax = dpsi_axes[d]
+                    if i == 1:
+                        dpsi_ax.set_ylabel('$\delta\psi$')
+                    dpsi_ax.plot(positions[d], dpsi, **plot_args)
+                    dpsi_ax.scatter(x=positions[d], y=dpsi, **scatter_args)
 
         fig.tight_layout()
         self._save_plot(fig, 'curvatures', frame_state)

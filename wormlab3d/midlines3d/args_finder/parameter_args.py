@@ -29,6 +29,7 @@ class ParameterArgs(BaseArgs):
             dX0_limit: float = None,
             dl_limit: float = None,
             dk_limit: float = None,
+            dpsi_limit: float = None,
 
             frame_skip: int = None,
             n_steps_init: int = 5000,
@@ -101,6 +102,7 @@ class ParameterArgs(BaseArgs):
         self.dX0_limit = dX0_limit
         self.dl_limit = dl_limit
         self.dk_limit = dk_limit
+        self.dpsi_limit = dpsi_limit
 
         if frame_skip == 1:
             frame_skip = None
@@ -197,7 +199,9 @@ class ParameterArgs(BaseArgs):
         group.add_argument('--dl-limit', type=float,
                            help='Maximum allowable change in length between batched frames (only used in curvature mode). Default=None.')
         group.add_argument('--dk-limit', type=float,
-                           help='Maximum allowable change in scalar curvature between batched frames (only used in curvature mode). Default=None.')
+                           help='Maximum allowable change in scalar curvature between batched frames (only used in delta-curvatures mode). Default=None.')
+        group.add_argument('--dpsi-limit', type=float,
+                           help='Maximum allowable change in curvature angle between batched frames (only used in delta-curvatures mode). Default=None.')
 
         group.add_argument('--frame-skip', type=int,
                            help='Number of frames to skip between optimisations. Interim frames will populate parameters with linear interpolation.')
