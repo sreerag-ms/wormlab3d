@@ -307,8 +307,8 @@ class ProjectRenderScoreModel(nn.Module):
 
                             # Calculate new curvature
                             K[i] = torch.stack([
-                                k[i] * torch.sin(psi[i]),
-                                k[i] * torch.cos(psi[i])
+                                k[i].clone() * torch.sin(psi[i].clone()),
+                                k[i].clone() * torch.cos(psi[i].clone())
                             ], dim=-1)
                     else:
                         X0 = curvatures_d[:, 0]
