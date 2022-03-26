@@ -25,7 +25,7 @@ from wormlab3d.midlines3d.mf_methods import generate_residual_targets, calculate
     calculate_exponents_losses, calculate_neighbours_losses, calculate_parents_losses, calculate_aunts_losses, \
     calculate_curvature_losses, calculate_temporal_losses, calculate_parents_losses_curvatures, \
     calculate_smoothness_losses_curvatures, calculate_curvature_losses_curvatures, calculate_temporal_losses_curvatures, \
-    calculate_temporal_losses_curvature_deltas
+    calculate_temporal_losses_curvature_deltas, calculate_curvature_losses_curvature_deltas
 from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.nn.detector import ConvergenceDetector
@@ -914,12 +914,13 @@ class Midline3DFinder:
             losses = {**losses, **{
                 'parents': calculate_parents_losses_curvatures(curvatures, curvatures_smoothed),
                 'smoothness': calculate_smoothness_losses_curvatures(curvatures, curvatures_smoothed),
-                'curvature': calculate_curvature_losses_curvatures(curvatures),
             }}
             if p.curvature_deltas:
                 losses['temporal'] = calculate_temporal_losses_curvature_deltas(curvatures, curvatures_prev)
+                losses['curvatures'] = calculate_curvature_losses_curvature_deltas(curvatures)
             else:
                 losses['temporal'] = calculate_temporal_losses_curvatures(curvatures, curvatures_prev)
+                losses['curvature'] = calculate_curvature_losses_curvatures(curvatures)
         else:
             losses = {**losses, **{
                 'neighbours': calculate_neighbours_losses(points),

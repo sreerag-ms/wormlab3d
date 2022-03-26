@@ -663,6 +663,28 @@ def calculate_curvature_losses_curvatures(
 
 
 @torch.jit.script
+def calculate_curvature_losses_curvature_deltas(
+        curvatures: List[torch.Tensor],
+) -> List[torch.Tensor]:
+    """
+    The curvatures should not be too large.
+    """
+    D = len(curvatures)
+    losses = []
+    for d in range(D):
+        k0 = torch.norm(curvatures[d][0, 2:, :2], dim=-1)
+        loss0 = (k0**2).sum()
+
+        # Deltas
+        dKs = curvatures[d][1:, 2:, :2]
+        loss_dK = (dKs**2).sum()
+
+        losses.append(loss0 + loss_dK)
+
+    return losses
+
+
+@torch.jit.script
 def calculate_temporal_losses(
         points: List[torch.Tensor],
         points_prev: Optional[List[torch.Tensor]],
