@@ -917,7 +917,7 @@ class Midline3DFinder:
             }}
             if p.curvature_deltas:
                 losses['temporal'] = calculate_temporal_losses_curvature_deltas(curvatures, curvatures_prev)
-                losses['curvatures'] = calculate_curvature_losses_curvature_deltas(curvatures)
+                losses['curvature'] = calculate_curvature_losses_curvature_deltas(curvatures)
             else:
                 losses['temporal'] = calculate_temporal_losses_curvatures(curvatures, curvatures_prev)
                 losses['curvature'] = calculate_curvature_losses_curvatures(curvatures)
