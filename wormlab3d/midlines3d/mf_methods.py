@@ -251,6 +251,83 @@ def integrate_curvature(X0: torch.Tensor, T0: torch.Tensor, l: torch.Tensor, K: 
 
 
 @torch.jit.script
+def integrate_curvature_combined(X0: torch.Tensor, T0: torch.Tensor, l: torch.Tensor, K: torch.Tensor) -> torch.Tensor:
+    """
+    Starting from midpoint X0 with tangent T0, integrate the curvature to produce a curve of length l.
+    Same as above but update frame included in loops, kept for posterity.
+    """
+    bs = X0.shape[0]
+    N = K.shape[1]
+    N2 = int(N / 2)
+    device = X0.device
+    shape = (bs, N, 3)
+
+    # Outputs
+    X = torch.zeros(shape, device=device)
+    T = torch.zeros(shape, device=device)
+    M1 = torch.zeros(shape, device=device)
+    M2 = torch.zeros(shape, device=device)
+
+    # Step size to build a curve of length l
+    h = (l / (N - 1))[:, None]
+
+    # Curvature is in units assuming length 1
+    # m1 = K[:, :, 0] / l[:, None]
+    # m2 = K[:, :, 1] / l[:, None]
+    m1 = K[:, :, 0] / h
+    m2 = K[:, :, 1] / h
+
+    # Initial values
+    T0 = normalise(T0)
+    X[:, N2 - 1] = X0 - T0 * h / 2
+    X[:, N2] = X0 + T0 * h / 2
+    T[:, N2 - 1] = T0
+    M1[:, N2 - 1] = an_orthonormal(T0)
+    M2[:, N2 - 1] = torch.cross(T[:, N2 - 1].clone(), M1[:, N2 - 1].clone())
+
+    # Calculate orthonormal frame from the middle-out
+    for i in range(N2, N):
+        k1 = m1[:, i][:, None]
+        k2 = m2[:, i][:, None]
+
+        dTds = k1 * M1[:, i - 1].clone() + k2 * M2[:, i - 1].clone()
+        dM1ds = -k1 * T[:, i - 1].clone()
+        dM2ds = -k2 * T[:, i - 1].clone()
+
+        T_tilde = T[:, i - 1].clone() + h * dTds
+        M1_tilde = M1[:, i - 1].clone() + h * dM1ds
+        M2_tilde = M2[:, i - 1].clone() + h * dM2ds
+
+        T[:, i] = normalise(T_tilde)
+        M1[:, i] = normalise(M1_tilde)
+        M2[:, i] = normalise(M2_tilde)
+
+    for i in range(N2 - 1, 0, -1):
+        k1 = m1[:, i][:, None]
+        k2 = m2[:, i][:, None]
+
+        dTds = k1 * M1[:, i].clone() + k2 * M2[:, i].clone()
+        dM1ds = -k1 * T[:, i].clone()
+        dM2ds = -k2 * T[:, i].clone()
+
+        T_tilde = T[:, i].clone() - h * dTds
+        M1_tilde = M1[:, i].clone() - h * dM1ds
+        M2_tilde = M2[:, i].clone() - h * dM2ds
+
+        T[:, i - 1] = normalise(T_tilde)
+        M1[:, i - 1] = normalise(M1_tilde)
+        M2[:, i - 1] = normalise(M2_tilde)
+
+    # Calculate curve coordinates
+    for i in range(N2, -1, -1):
+        X[:, i] = X[:, i + 1] - h * T[:, i]
+    for i in range(N2 + 1, N):
+        X[:, i] = X[:, i - 1] + h * T[:, i - 1]
+
+    return X
+
+
+@torch.jit.script
 def loss_(m: str, x: torch.Tensor, y: torch.Tensor, reduce: bool = True) -> torch.Tensor:
     if m == 'mse':
         # l = F.mse_loss(x, y, reduction='mean')
