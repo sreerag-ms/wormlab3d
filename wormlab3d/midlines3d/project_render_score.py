@@ -381,7 +381,7 @@ class ProjectRenderScoreModel(nn.Module):
                 ], dim=1)
 
                 # Make exponents equal everywhere
-                exponents_d = torch.ones(bs, N) * exponents_d[:, None]
+                exponents_d = torch.ones(bs, N, device=device) * exponents_d[:, None]
 
                 # Intensities should be equal in the middle section but taper towards the ends
                 min_int = 0.4

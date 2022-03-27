@@ -258,9 +258,10 @@ class TrialState:
                     v = [v] * (D - D_min)
 
                 # Expand collapsed
-                elif k in ['points', 'points_2d', 'sigmas', 'exponents', 'intensities',
-                           'scores'] + CURVATURE_PARAMETER_NAMES:
+                elif k in ['curvatures', 'points', 'points_2d', 'scores']:
                     v = [v[2**d - idx_offset - 1:2**(d + 1) - idx_offset - 1] for d in range(D_min, D)]
+                elif k in ['X0', 'T0', 'length', 'sigmas', 'exponents', 'intensities']:
+                    v = [v[i] for i in range(D - D_min)]
 
                 frame_state.set_state(k, v)
 

@@ -1426,7 +1426,8 @@ class Midline3DFinder:
         D_min = self.parameters.depth_min
         cmap = plt.get_cmap('jet')
 
-        fig, axes = plt.subplots(6, D - D_min, figsize=((D - D_min) * 6 + 2, 10), squeeze=False)
+        n_rows = 6 if self.parameters.curvature_deltas else 4
+        fig, axes = plt.subplots(n_rows, D - D_min, figsize=((D - D_min) * 6 + 2, 10), squeeze=False)
         fig.suptitle(self._plot_title(self.master_frame_state))
 
         colours = [cmap(i) for i in np.linspace(0, 1, len(self.frame_batch))]
@@ -1438,8 +1439,9 @@ class Midline3DFinder:
         psi_axes = {d: axes[1, i] for i, d in enumerate(range(D_min, D))}
         m1_axes = {d: axes[2, i] for i, d in enumerate(range(D_min, D))}
         m2_axes = {d: axes[3, i] for i, d in enumerate(range(D_min, D))}
-        dk_axes = {d: axes[4, i] for i, d in enumerate(range(D_min, D))}
-        dpsi_axes = {d: axes[5, i] for i, d in enumerate(range(D_min, D))}
+        if self.parameters.curvature_deltas:
+            dk_axes = {d: axes[4, i] for i, d in enumerate(range(D_min, D))}
+            dpsi_axes = {d: axes[5, i] for i, d in enumerate(range(D_min, D))}
 
         for i, frame_state in enumerate(self.frame_batch):
             curvatures = frame_state.get_state('curvatures_smoothed')
