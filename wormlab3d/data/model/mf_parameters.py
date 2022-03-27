@@ -30,6 +30,8 @@ class MFParameters(Document):
     curvature_max = FloatField()
     length_min = FloatField()
     length_max = FloatField()
+    length_init = FloatField()
+    length_warmup_steps = IntField()
     dX0_limit = FloatField()
     dl_limit = FloatField()
     dk_limit = FloatField()
