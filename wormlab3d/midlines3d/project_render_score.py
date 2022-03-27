@@ -198,8 +198,13 @@ class ProjectRenderScoreModel(nn.Module):
     def forward(
             self,
             cam_coeffs: torch.Tensor,
-            points: List[torch.Tensor],
+            points_3d_base: torch.Tensor,
+            points_2d_base: torch.Tensor,
+            X0: List[torch.Tensor],
+            T0: List[torch.Tensor],
+            length: List[torch.Tensor],
             curvatures: List[torch.Tensor],
+            points: List[torch.Tensor],
             masks_target: List[torch.Tensor],
             sigmas: List[torch.Tensor],
             exponents: List[torch.Tensor],
@@ -207,8 +212,6 @@ class ProjectRenderScoreModel(nn.Module):
             camera_sigmas: torch.Tensor,
             camera_exponents: torch.Tensor,
             camera_intensities: torch.Tensor,
-            points_3d_base: torch.Tensor,
-            points_2d_base: torch.Tensor,
             length_warmup: bool
     ) -> Tuple[
         List[torch.Tensor],
@@ -242,8 +245,6 @@ class ProjectRenderScoreModel(nn.Module):
         # Run the parameters through the model at each scale to get the outputs
         for d in range(D):
             points_d = points[d]
-            curvatures_d = curvatures[d]
-            # masks_target_d = masks_target[d]
             sigmas_d = sigmas[d]
             exponents_d = exponents[d]
             intensities_d = intensities[d]
@@ -258,26 +259,28 @@ class ProjectRenderScoreModel(nn.Module):
                 # Integrate curvature to form midline points.
                 if self.curvature_mode:
                     if self.curvature_deltas:
-                        dX0 = curvatures_d[:, 0]
-                        X0 = torch.zeros_like(dX0)
-                        X0[0] = dX0[0]
+                        dX0 = X0[d]
+                        X0_d = torch.zeros_like(dX0)
+                        X0_d[0] = dX0[0]
 
-                        dT0 = curvatures_d[:, 1]
-                        T0 = torch.zeros_like(dT0)
-                        T0[0] = normalise(dT0[0])
+                        dT0 = T0[d]
+                        T0_d = torch.zeros_like(dT0)
+                        T0_d[0] = normalise(dT0[0])
 
-                        dl = curvatures_d[:, 2, 2]
-                        l = torch.zeros_like(dl)
-                        l[0] = dl[0]
+                        dl = length[d]
+                        length_d = torch.zeros_like(dl)
+                        length_d[0] = dl[0]
 
-                        dK = torch.zeros(bs, N, 2, device=device)
-                        dK[:, 1:-1] = curvatures_d[:, 2:, :2]
-                        K = torch.zeros_like(dK)
-                        K[0] = dK[0]
+                        dK = curvatures[d]
+                        curvatures_d = torch.zeros_like(dK)
+                        curvatures_d[0] = dK[0]
                         k = torch.zeros(bs, N, device=device)
-                        k[0] = torch.norm(K[0].clone(), dim=-1)
+                        k[0] = torch.norm(curvatures_d[0].clone(), dim=-1)
                         psi = torch.zeros(bs, N, device=device)
-                        psi[0] = torch.atan2(K[0, :, 0].clone(), K[0, :, 1].clone() + eps)
+                        psi[0] = torch.atan2(
+                            curvatures_d[0, :, 0].clone(),
+                            curvatures_d[0, :, 1].clone() + eps
+                        )
 
                         for i in range(1, bs):
                             # Limit X0 change
@@ -285,16 +288,16 @@ class ProjectRenderScoreModel(nn.Module):
                             dX0i_size = torch.norm(dX0i)
                             if self.dX0_limit is not None and dX0i_size > self.dX0_limit:
                                 dX0i = dX0i / dX0i_size * self.dX0_limit
-                            X0[i] = X0[i - 1] + dX0i
+                            X0_d[i] = X0_d[i - 1] + dX0i
 
                             # T0 always has length 1
-                            T0[i] = normalise(T0[i - 1] + dT0[i])
+                            T0_d[i] = normalise(T0_d[i - 1] + dT0[i])
 
                             # Limit length change
                             if length_warmup:
-                                l[i] = l[i - 1]
+                                length_d[i] = length_d[i - 1]
                             else:
-                                l[i] = l[i - 1] + dl[i].clamp(min=-self.dl_limit, max=self.dl_limit)
+                                length_d[i] = length_d[i - 1] + dl[i].clamp(min=-self.dl_limit, max=self.dl_limit)
 
                             # Limit curvature magnitude changes
                             dk = dK[i, :, 0].clone()
@@ -310,36 +313,34 @@ class ProjectRenderScoreModel(nn.Module):
                             psi[i] = psi[i - 1].clone() + dpsi
 
                             # Calculate new curvature
-                            K[i] = torch.stack([
+                            curvatures_d[i] = torch.stack([
                                 k[i].clone() * torch.sin(psi[i].clone()),
                                 k[i].clone() * torch.cos(psi[i].clone())
                             ], dim=-1)
                     else:
-                        X0 = curvatures_d[:, 0]
-                        T0 = curvatures_d[:, 1]
-                        l = curvatures_d[:, 2, 2]
-                        K = torch.zeros((bs, N, 2), device=device)
-                        K[:, 1:-1] = curvatures_d[:, 2:, :2]
+                        X0_d = X0[d]
+                        T0_d = T0[d]
+                        length_d = length[d]
+                        curvatures_d = curvatures[d]
 
                     # Ensure that the worm does not get too long/short.
                     if not length_warmup:
-                        l = l.clamp(min=self.length_min, max=self.length_max)
+                        length_d = length_d.clamp(min=self.length_min, max=self.length_max)
 
                     # Smooth the curvatures
-                    K = _smooth_parameter(K, ks, mode='gaussian')
+                    curvatures_d = _smooth_parameter(curvatures_d, ks, mode='gaussian')
 
                     # Ensure curvature doesn't get too large
-                    k = torch.norm(K, dim=-1)
+                    k = torch.norm(curvatures_d, dim=-1)
                     k_max = self.curvature_max * 2 * torch.pi / (N - 1)
-                    K = torch.where(
+                    curvatures_d = torch.where(
                         (k > k_max)[..., None],
-                        K * (k_max / (k + eps))[..., None],
-                        K
+                        curvatures_d * (k_max / (k + eps))[..., None],
+                        curvatures_d
                     )
-                    curvatures_d = K
 
                     # Integrate the curvature to get the midline coordinates
-                    points_d = integrate_curvature(X0, T0, l, K)
+                    points_d = integrate_curvature(X0_d, T0_d, length_d, curvatures_d)
 
                 else:
                     # Distance to parent points fixed as a quarter of the mean segment-length between parents.
@@ -358,41 +359,32 @@ class ProjectRenderScoreModel(nn.Module):
                     points_d = _smooth_parameter(points_d, ks, mode='gaussian')
                     curvatures_d = calculate_curvature(points_d)
 
-                if 1:
-                    N4 = int(N / 4)
+                # Prepare sigmas, exponents and intensities
+                N4 = int(N / 4)
 
-                    # Sigmas should be equal in the middle section but taper towards the ends
-                    min_sigma = 0.05
-                    sigma_d = sigmas_d[:, 0][:, None]
-                    slopes = (sigma_d - min_sigma) / N4 * torch.arange(N4, device=device)[None, :] + min_sigma
-                    sigmas_d = torch.cat([
-                        slopes,
-                        torch.ones(bs, 2 * N4, device=device) * sigma_d,
-                        slopes.flip(dims=(1,))
-                    ], dim=1)
+                # Sigmas should be equal in the middle section but taper towards the ends
+                min_sigma = 0.03
+                sigma_d = sigmas_d[:, None]
+                slopes = (sigma_d - min_sigma) / N4 * torch.arange(N4, device=device)[None, :] + min_sigma
+                sigmas_d = torch.cat([
+                    slopes,
+                    torch.ones(bs, 2 * N4, device=device) * sigma_d,
+                    slopes.flip(dims=(1,))
+                ], dim=1)
 
-                    # Intensities should be equal in the middle section but taper towards the ends
-                    min_int = 0.4
-                    int_d = intensities_d[:, 0][:, None]
-                    slopes = (int_d - min_int) / N4 * torch.arange(N4, device=device)[None, :] + min_int
-                    intensities_d = torch.cat([
-                        slopes,
-                        torch.ones(bs, 2 * N4, device=device) * int_d,
-                        slopes.flip(dims=(1,))
-                    ], dim=1)
+                # Make exponents equal everywhere
+                exponents_d = torch.ones(bs, N) * exponents_d[:, None]
 
-                    # Make exponents equal everywhere
-                    exponents_d = torch.ones_like(exponents_d) * exponents_d.mean(dim=1, keepdim=True)
+                # Intensities should be equal in the middle section but taper towards the ends
+                min_int = 0.4
+                int_d = intensities_d[:, None]
+                slopes = (int_d - min_int) / N4 * torch.arange(N4, device=device)[None, :] + min_int
+                intensities_d = torch.cat([
+                    slopes,
+                    torch.ones(bs, 2 * N4, device=device) * int_d,
+                    slopes.flip(dims=(1,))
+                ], dim=1)
 
-                else:
-                    # Smooth the sigmas, exponents and intensities
-                    sigmas_d = _smooth_parameter(sigmas_d, ks)
-                    exponents_d = _smooth_parameter(exponents_d, ks)
-                    intensities_d = _smooth_parameter(intensities_d, ks)
-
-                    # Ensure tapering of rendered worm to avoid holes
-                    sigmas_d = _taper_parameter(sigmas_d)
-                    intensities_d = _taper_parameter(intensities_d)
             else:
                 curvatures_d = torch.zeros_like(points_d)
 
@@ -469,7 +461,8 @@ class ProjectRenderScoreModel(nn.Module):
         scores = scores[::-1]
         detection_masks = detection_masks[::-1]
 
-        return masks, detection_masks, points_2d, scores, points_smoothed, curvatures_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed
+        return masks, detection_masks, points_2d, scores, curvatures_smoothed, points_smoothed, \
+               sigmas_smoothed, exponents_smoothed, intensities_smoothed
 
     def _project_to_2d(
             self,

@@ -459,38 +459,32 @@ def calculate_parents_losses(
 
 @torch.jit.script
 def calculate_parents_losses_curvatures(
+        X0: List[torch.Tensor],
+        T0: List[torch.Tensor],
+        length: List[torch.Tensor],
         curvatures: List[torch.Tensor],
         curvatures_smoothed: List[torch.Tensor],
 ) -> List[torch.Tensor]:
     """
-    The distance between points and their parent should be equal siblings.
+    The curvatures between child and parent should be close.
     """
-    D = len(curvatures)
+    D = len(X0)
     losses = [torch.tensor(0., device=curvatures[0].device), ]
     for d in range(1, D):
-        K_d = curvatures[d]
-        K_p = curvatures[d - 1].detach()
-
         # X0 (midpoint) should be close between parent and child
-        X0 = K_d[:, 0]
-        X0_parent = K_p[:, 0]
-        loss_X0 = torch.sum((X0 - X0_parent)**2)
+        loss_X0 = torch.sum((X0[d] - X0[d-1].detach())**2)
 
         # T0 (initial tangent) direction should be similar
-        T0 = K_d[:, 1]
-        T0_parent = K_p[:, 1]
-        loss_T0 = torch.sum((T0 - T0_parent)**2)
+        loss_T0 = torch.sum((T0[d] - T0[d-1].detach())**2)
 
         # Lengths should be similar
-        l = K_d[:, 2, 2]
-        l_parent = K_p[:, 2, 2]
-        loss_l = torch.sum((l - l_parent)**2)
+        loss_l = torch.sum((length[d] - length[d-1].detach())**2)
 
         # Curvature values should be close
         Ks_d = curvatures_smoothed[d]
         Ks_p = curvatures_smoothed[d - 1].detach()
         Ks_p = torch.repeat_interleave(Ks_p, repeats=2, dim=1)
-        loss_K = torch.sum((Ks_d - Ks_p / 2)**2)
+        loss_K = torch.sum((Ks_d - Ks_p)**2)
 
         loss = loss_X0 + loss_T0 + loss_l + loss_K
         losses.append(loss)
@@ -556,97 +550,6 @@ def calculate_scores_losses(
 
 
 @torch.jit.script
-def calculate_sigmas_losses(
-        sigmas: List[torch.Tensor],
-        sigmas_smoothed: List[torch.Tensor],
-) -> List[torch.Tensor]:
-    """
-    The sigmas should be smooth along the body and not vary too much.
-    """
-    D = len(sigmas)
-    losses = []
-    for d in range(D):
-        sigmas_d = sigmas[d]
-        sigmas_smoothed_d = sigmas_smoothed[d]
-
-        # Smoothness loss
-        loss = torch.sum((sigmas_d - sigmas_smoothed_d)**2)
-
-        # Penalise too much deviation from the mean
-        loss += 0.1 * torch.sum((torch.log(1 + sigmas_d) - torch.log(1 + sigmas_d.mean().detach()))**2)
-
-        # # Sigmas should be equal in the middle section but taper towards the ends
-        # if sigmas_d.shape[1] > 2:
-        #     n = sigmas_d.shape[1]
-        #     mp = int(n / 2)
-        #     sd1 = torch.clamp(sigmas_d[:, :mp - 1] - sigmas_d[:, 1:mp], min=0).sum()
-        #     sd2 = torch.clamp(sigmas_d[:, mp + 1:] - sigmas_d[:, mp:-1], min=0).sum()
-        #     qp = int(n / 4)
-        #     middle_section = sigmas_d[:, qp:3 * qp]
-        #     sd3 = torch.sum(
-        #         (torch.log(1 + middle_section)
-        #          - torch.log(1 + middle_section.mean(dim=1, keepdim=True).detach()))**2
-        #     )
-        #     loss = 0.1 * sd1 + 0.1 * sd2 + sd3
-        # else:
-        #     loss = torch.sum((torch.log(1 + sigmas_d) - torch.log(1 + sigmas_d.mean(dim=1, keepdim=True).detach()))**2)
-
-        losses.append(loss)
-
-    return losses
-
-
-@torch.jit.script
-def calculate_exponents_losses(
-        exponents: List[torch.Tensor],
-        exponents_smoothed: List[torch.Tensor],
-) -> List[torch.Tensor]:
-    """
-    The exponents should be smooth along the body and not vary too much.
-    """
-    D = len(exponents)
-    losses = []
-    for d in range(D):
-        exponents_d = exponents[d]
-        exponents_smoothed_d = exponents_smoothed[d]
-
-        # Smoothness loss
-        loss = torch.sum((exponents_d - exponents_smoothed_d)**2)
-
-        # Penalise too much deviation from the mean
-        loss += 0.1 * torch.sum((torch.log(1 + exponents_d) - torch.log(1 + exponents_d.mean().detach()))**2)
-
-        losses.append(loss)
-
-    return losses
-
-
-@torch.jit.script
-def calculate_intensities_losses(
-        intensities: List[torch.Tensor],
-        intensities_smoothed: List[torch.Tensor],
-) -> List[torch.Tensor]:
-    """
-    The intensities should be smooth along the body and not vary too much.
-    """
-    D = len(intensities)
-    losses = []
-    for d in range(D):
-        intensities_d = intensities[d]
-        intensities_smoothed_d = intensities_smoothed[d]
-
-        # Smoothness loss
-        loss = torch.sum((intensities_d - intensities_smoothed_d)**2)
-
-        # Penalise too much deviation from the mean
-        loss += 0.1 * torch.sum((torch.log(1 + intensities_d) - torch.log(1 + intensities_d.mean().detach()))**2)
-
-        losses.append(loss)
-
-    return losses
-
-
-@torch.jit.script
 def calculate_smoothness_losses(
         points: List[torch.Tensor],
         points_smoothed: List[torch.Tensor],
@@ -682,7 +585,7 @@ def calculate_smoothness_losses_curvatures(
         K_d = curvatures[d]
         if K_d.shape[1] > 4:
             Ks_d = curvatures_smoothed[d]
-            loss = torch.sum((K_d[:, 2:, :2] - Ks_d[:, 1:-1])**2)
+            loss = torch.sum((K_d - Ks_d)**2)
         else:
             loss = torch.tensor(0., device=curvatures[0].device)
         losses.append(loss)
@@ -732,8 +635,7 @@ def calculate_curvature_losses_curvatures(
     D = len(curvatures)
     losses = []
     for d in range(D):
-        k = torch.norm(curvatures[d][:, 2:, :2], dim=-1)
-        loss = (k**2).sum()
+        loss = (curvatures[d]**2).sum()
         losses.append(loss)
 
     return losses
@@ -749,12 +651,17 @@ def calculate_curvature_losses_curvature_deltas(
     D = len(curvatures)
     losses = []
     for d in range(D):
-        k0 = torch.norm(curvatures[d][0, 2:, :2], dim=-1)
-        loss0 = (k0**2).sum()
+        K_d = curvatures[d]
 
-        # Deltas
-        dKs = curvatures[d][1:, 2:, :2]
-        loss_dK = (dKs**2).sum()
+        # Regularise the curvature of main curve
+        loss0 = (K_d[0]**2).sum()
+
+        # Regularise the deltas
+        if K_d.shape[0] > 1:
+            dKs = K_d[1:]
+            loss_dK = (dKs**2).sum()
+        else:
+            loss_dK = torch.tensor(0., device=K_d.device)
 
         losses.append(loss0 + loss_dK)
 
@@ -804,7 +711,13 @@ def calculate_temporal_losses(
 
 @torch.jit.script
 def calculate_temporal_losses_curvatures(
+        X0: List[torch.Tensor],
+        T0: List[torch.Tensor],
+        length: List[torch.Tensor],
         curvatures: List[torch.Tensor],
+        X0_prev: Optional[List[torch.Tensor]],
+        T0_prev: Optional[List[torch.Tensor]],
+        length_prev: Optional[List[torch.Tensor]],
         curvatures_prev: Optional[List[torch.Tensor]],
 ) -> List[torch.Tensor]:
     """
@@ -813,21 +726,40 @@ def calculate_temporal_losses_curvatures(
     D = len(curvatures)
 
     # If there are no other time points available then just return zeros.
-    if curvatures_prev is None and curvatures[0].shape[0] == 1:
-        return [torch.tensor(0., device=curvatures[0].device) for _ in range(D)]
+    if X0_prev is None and len(X0[0]) == 1:
+        return [torch.tensor(0., device=X0[0].device) for _ in range(D)]
 
     losses = []
     for d in range(D):
+        # X0 (midpoint) should be close
+        X0_d = X0[d]
+        if X0_prev is not None:
+            X0_prev_d = X0_prev[d].unsqueeze(0).detach()
+            X0_d = torch.cat([X0_prev_d, X0_d], dim=0)
+        loss_X0 = torch.sum((X0_d[1:] - X0_d[:-1])**2)
+
+        # T0 (initial tangent) direction should be similar
+        T0_d = T0[d]
+        if T0_prev is not None:
+            T0_prev_d = T0_prev[d].unsqueeze(0).detach()
+            T0_d = torch.cat([T0_prev_d, T0_d], dim=0)
+        loss_T0 = torch.sum((T0_d[1:] - T0_d[:-1])**2)
+
+        # Lengths should be similar
+        length_d = length[d]
+        if length_prev is not None:
+            length_prev_d = length_prev[d].unsqueeze(0).detach()
+            length_d = torch.cat([length_prev_d, length_d], dim=0)
+        loss_l = torch.sum((length_d[1:] - length_d[:-1])**2)
+
+        # Curvature values should be close
         curvatures_d = curvatures[d]
-
-        # Prepend the previous points
         if curvatures_prev is not None:
-            curvatures_prev_d = curvatures_prev[d].unsqueeze(0)
+            curvatures_prev_d = curvatures_prev[d].unsqueeze(0).detach()
             curvatures_d = torch.cat([curvatures_prev_d, curvatures_d], dim=0)
+        loss_K = torch.sum((curvatures_d[1:] - curvatures_d[:-1])**2)
 
-        # Calculate losses to temporal neighbours
-        loss = torch.sum((curvatures_d[1:] - curvatures_d[:-1])**2)
-
+        loss = loss_X0 + loss_T0 + loss_l + loss_K
         losses.append(loss)
 
     return losses
@@ -835,26 +767,54 @@ def calculate_temporal_losses_curvatures(
 
 @torch.jit.script
 def calculate_temporal_losses_curvature_deltas(
+        X0: List[torch.Tensor],
+        T0: List[torch.Tensor],
+        length: List[torch.Tensor],
         curvatures: List[torch.Tensor],
+        X0_prev: Optional[List[torch.Tensor]],
+        T0_prev: Optional[List[torch.Tensor]],
+        length_prev: Optional[List[torch.Tensor]],
         curvatures_prev: Optional[List[torch.Tensor]],
 ) -> List[torch.Tensor]:
     """
-    The curvatures should change smoothly in time.
+    The curve should change smoothly in time.
     """
-    D = len(curvatures)
+    D = len(X0)
 
-    # If there are no other time points available then just return zeros.
-    if curvatures_prev is None:
-        return [torch.tensor(0., device=curvatures[0].device) for _ in range(D)]
+    # Calculate the temporal losses as usual between previous curve and main curve.
+    losses = calculate_temporal_losses_curvatures(
+        [X0[d][0].unsqueeze(0) for d in range(D)],
+        [T0[d][0].unsqueeze(0) for d in range(D)],
+        [length[d][0].unsqueeze(0) for d in range(D)],
+        [curvatures[d][0].unsqueeze(0) for d in range(D)],
+        X0_prev,
+        T0_prev,
+        length_prev,
+        curvatures_prev,
+    )
 
-    losses = []
+    # If there are no deltas available then just return zeros.
+    if len(X0[0]) == 1:
+        return losses
+
     for d in range(D):
-        curvatures_d = curvatures[d][0]
-        curvatures_prev_d = curvatures_prev[d]
+        # dX0 (midpoint) changes
+        dX0 = X0[d][1:]
+        loss_dX0 = torch.sum(dX0**2)
 
-        # Calculate losses to previous curvatures
-        loss = torch.sum((curvatures_d - curvatures_prev_d)**2)
+        # dT0 (initial tangent) changes
+        dT0 = T0[d][1:]
+        loss_dT0 = torch.sum(dT0**2)
 
+        # dT0 (initial tangent) changes
+        dl = length[d][1:]
+        loss_dl = torch.sum(dl**2)
+
+        # Curvature deltas
+        dK = curvatures[d][1:]
+        loss_dK = torch.sum(dK**2)
+
+        loss = loss_dX0 + loss_dT0 + loss_dl + loss_dK
         losses.append(loss)
 
     return losses

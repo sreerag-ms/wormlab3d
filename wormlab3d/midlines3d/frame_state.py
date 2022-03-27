@@ -16,14 +16,24 @@ PARAMETER_NAMES = [
     'cam_translations',
     'cam_distortions',
     'cam_shifts',
-    'points',
+    'X0',
+    'T0',
+    'length',
     'curvatures',
+    'points',
     'sigmas',
     'exponents',
     'intensities',
     'camera_sigmas',
     'camera_exponents',
     'camera_intensities',
+]
+
+CURVATURE_PARAMETER_NAMES = [
+    'X0',
+    'T0',
+    'length',
+    'curvatures',
 ]
 
 CAM_PARAMETER_NAMES = [
@@ -41,7 +51,6 @@ BUFFER_NAMES = [
     'points_2d',
     'masks_curve',
     'scores',
-    'curve_lengths'
 ]
 
 TRANSIENTS_NAMES = [
@@ -50,6 +59,9 @@ TRANSIENTS_NAMES = [
     'points_3d_base',
     'points_2d_base',
     'curvatures_smoothed',
+    'sigmas_smoothed',
+    'exponents_smoothed',
+    'intensities_smoothed',
 ]
 
 BINARY_DATA_KEYS = []
@@ -103,15 +115,17 @@ class FrameState(nn.Module):
             else:
                 D = parameters.depth
                 D_min = parameters.depth_min
-                k = 'points' if parameters.curvature_mode else 'curvatures'
-                for i, d in enumerate(range(D_min, D)):
-                    self.register_buffer(f'{k}_{d}', torch.zeros((2**d, 3)))
+                ks = ['points', ] if parameters.curvature_mode else CURVATURE_PARAMETER_NAMES
+                for k in ks:
+                    for d in range(D_min, D):
+                        self.register_buffer(f'{k}_{d}', torch.zeros((2**d, 3)))
+                for d in range(D_min, D):
                     self.register_buffer(f'curvatures_smoothed_{d}', torch.zeros((2**d, 2)))
 
             for k in PARAMETER_NAMES:
                 is_buffer = (k == 'points' and parameters.curvature_mode) \
-                            or (k == 'curvatures' and not parameters.curvature_mode)
-                if k in ['points', 'curvatures'] and (is_buffer or not use_master_points):
+                            or (k in CURVATURE_PARAMETER_NAMES and not parameters.curvature_mode)
+                if k in ['points', ] + CURVATURE_PARAMETER_NAMES and (is_buffer or not use_master_points):
                     with torch.no_grad():
                         self.set_state(k, master_frame_state.get_state(k))
                 else:
@@ -131,7 +145,7 @@ class FrameState(nn.Module):
             with torch.no_grad():
                 for k in PARAMETER_NAMES:
                     self.set_state(k, prev_frame_state.get_state(k))
-                for k in ['masks_curve', 'points_2d', 'curve_lengths', 'scores']:
+                for k in ['masks_curve', 'points_2d', 'scores']:
                     self.set_state(k, prev_frame_state.get_state(k))
 
     def _init_images(self):
@@ -207,27 +221,24 @@ class FrameState(nn.Module):
         mp = self.parameters
         self._init_points_parameters()
 
-        # Initialise the sigmas equally at each level, decreasing with depth
+        # Initialise the sigmas
         sigmas = []
         for d in range(mp.depth_min, mp.depth):
-            sigmas_d = torch.ones(2**d) * mp.sigmas_init
-            sigmas_d = nn.Parameter(sigmas_d, requires_grad=mp.optimise_sigmas)
+            sigmas_d = nn.Parameter(torch.tensor(mp.sigmas_init), requires_grad=mp.optimise_sigmas)
             sigmas.append(sigmas_d)
         self.register_parameter('sigmas', sigmas)
 
         # Initialise the exponents all to 1
         exponents = []
         for d in range(mp.depth_min, mp.depth):
-            exponents_d = torch.ones(2**d)
-            exponents_d = nn.Parameter(exponents_d, requires_grad=mp.optimise_exponents)
+            exponents_d = nn.Parameter(torch.tensor(1.), requires_grad=mp.optimise_exponents)
             exponents.append(exponents_d)
         self.register_parameter('exponents', exponents)
 
         # Initialise the intensities all to 1
         intensities = []
         for d in range(mp.depth_min, mp.depth):
-            intensities_d = torch.ones(2**d)
-            intensities_d = nn.Parameter(intensities_d, requires_grad=mp.optimise_intensities)
+            intensities_d = nn.Parameter(torch.tensor(1.), requires_grad=mp.optimise_intensities)
             intensities.append(intensities_d)
         self.register_parameter('intensities', intensities)
 
@@ -278,7 +289,11 @@ class FrameState(nn.Module):
             if d >= mp.depth_min:
                 x = nn.Parameter(x, requires_grad=True)
                 points.append(x)
-                self.register_buffer(f'curvatures_{d}', torch.zeros_like(x))
+                self.register_buffer(f'X0_{d}', torch.zeros(3))
+                self.register_buffer(f'T0_{d}', torch.tensor([1., 0., 0.]))
+                self.register_buffer(f'length_{d}', torch.tensor(1.))
+                self.register_buffer(f'curvatures_{d}', torch.zeros(2**d, 2))
+
         self.register_parameter('points', points)
 
     def _init_points_parameters_curvature_mode(self):
@@ -287,29 +302,31 @@ class FrameState(nn.Module):
         """
         mp = self.parameters
 
-        # Pick a random head point and tangent direction
-        x0 = torch.normal(mean=torch.zeros(3), std=1 / (2**4))
-        t0 = torch.normal(mean=torch.zeros(3), std=1)
-        t0 = normalise(t0)
+        # Pick a random midpoint near the centre
+        X0 = torch.normal(mean=torch.zeros(3), std=1 / (2**4))
+        X0s = [nn.Parameter(X0, requires_grad=True) for _ in range(mp.depth - mp.depth_min)]
+
+        # Pick a random tangent direction
+        T0 = torch.normal(mean=torch.zeros(3), std=1)
+        T0 = normalise(T0)
+        T0s = [nn.Parameter(T0, requires_grad=True) for _ in range(mp.depth - mp.depth_min)]
+
+        # Init lengths
+        l = torch.tensor(mp.length_init)
+        lengths = [nn.Parameter(l, requires_grad=True) for _ in range(mp.depth - mp.depth_min)]
 
         # Start in a straight line configuration
         curvatures = []
-        for d in range(mp.depth):
-            if d == 0:
-                x = x0.clone().unsqueeze(0)
-            elif d == 1:
-                x = torch.stack([x0.clone(), t0.clone()])
-            else:
-                N = 2**d
-                K = torch.zeros((N - 2, 3))
-                K[0, 2] = mp.length_init
-                t0d = t0 / (N - 1)
-                x = torch.cat([x0.clone()[None, :], t0d[None, :], K], axis=0)
-            if d >= mp.depth_min:
-                x = nn.Parameter(x, requires_grad=True)
-                curvatures.append(x)
-                self.register_buffer(f'points_{d}', torch.zeros_like(x))
-                self.register_buffer(f'curvatures_smoothed_{d}', torch.zeros((2**d, 2)))
+        for d in range(mp.depth_min, mp.depth):
+            N = 2**d
+            K = nn.Parameter(torch.zeros(N, 2), requires_grad=True)
+            curvatures.append(K)
+            self.register_buffer(f'points_{d}', torch.zeros(N, 3))
+            self.register_buffer(f'curvatures_smoothed_{d}', torch.zeros((N, 2)))
+
+        self.register_parameter('X0', X0s)
+        self.register_parameter('T0', T0s)
+        self.register_parameter('length', lengths)
         self.register_parameter('curvatures', curvatures)
 
     def _init_cam_coeffs(self):
@@ -407,9 +424,9 @@ class FrameState(nn.Module):
             self.register_buffer(f'masks_curve_{d}', torch.zeros_like(mt[i]))
             self.register_buffer(f'masks_target_residuals_{d}', torch.zeros_like(mt[i]))
             self.register_buffer(f'scores_{d}', torch.zeros(2**d))
-
-        # Curve lengths
-        self.register_buffer('curve_lengths', torch.zeros(D - D_min))
+            self.register_buffer(f'sigmas_smoothed_{d}', torch.zeros(2**d))
+            self.register_buffer(f'exponents_smoothed_{d}', torch.zeros(2**d))
+            self.register_buffer(f'intensities_smoothed_{d}', torch.zeros(2**d))
 
     def register_parameter(
             self,
@@ -441,9 +458,9 @@ class FrameState(nn.Module):
             return self.get_cam_coeffs()
         elif hasattr(self, key):
             return getattr(self, key)
-        elif key in ['points', 'curvatures', 'curvatures_smoothed', 'masks_target', 'masks_target_residuals',
-                     'masks_curve',
-                     'points_2d', 'scores']:
+        elif key in ['points', 'curvatures_smoothed', 'sigmas_smoothed', 'exponents_smoothed', 'intensities_smoothed',
+                     'masks_target', 'masks_target_residuals', 'masks_curve', 'points_2d',
+                     'scores'] + CURVATURE_PARAMETER_NAMES:
             return [self._buffers[f'{key}_{d}'] for d in range(self.parameters.depth_min, self.parameters.depth)]
         else:
             raise RuntimeError(f'Could not get state for {key}.')

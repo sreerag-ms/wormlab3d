@@ -9,7 +9,8 @@ import torch
 from wormlab3d import PREPARED_IMAGE_SIZE, DATA_PATH
 from wormlab3d import logger
 from wormlab3d.data.model import MFParameters, MFCheckpoint, Reconstruction, Trial
-from wormlab3d.midlines3d.frame_state import FrameState, BUFFER_NAMES, PARAMETER_NAMES, BINARY_DATA_KEYS
+from wormlab3d.midlines3d.frame_state import FrameState, BUFFER_NAMES, PARAMETER_NAMES, BINARY_DATA_KEYS, \
+    CURVATURE_PARAMETER_NAMES
 from wormlab3d.toolkit.util import to_numpy
 
 TRIAL_STATES_PATH = DATA_PATH / 'MF_outputs'
@@ -134,13 +135,17 @@ class TrialState:
                 shape = (T, 3, 5)
             elif k == 'cam_shifts':
                 shape = (T, 3, 1)
-            elif k in ['points', 'curvatures']:
+            elif k in ['X0', 'T0']:
+                shape = (T, D, 3)
+            elif k == 'curvatures':
+                shape = (T, N, 2)
+            elif k == 'points':
                 shape = (T, N, 3)
             elif k == 'points_2d':
                 shape = (T, N, 3, 2)
-            elif k == 'curve_lengths':
+            elif k in ['length', 'sigmas', 'exponents', 'intensities']:
                 shape = (T, D)
-            elif k in ['sigmas', 'exponents', 'intensities', 'scores']:
+            elif k == 'scores':
                 shape = (T, N)
             elif k in ['camera_sigmas', 'camera_exponents', 'camera_intensities']:
                 shape = (T, 3)
@@ -186,13 +191,17 @@ class TrialState:
         assert self.start_frame <= frame_num <= self.end_frame, 'Requested frame is not available.'
         for k in BUFFER_NAMES + PARAMETER_NAMES:
             # Collate outputs generated at each depth
-            if k in ['points', 'curvatures', 'points_2d', 'sigmas', 'exponents', 'intensities', 'scores', 'masks_target',
-                     'masks_target_residuals', 'masks_curve']:
+            if k in ['points', 'points_2d', 'sigmas', 'exponents', 'intensities', 'scores', 'masks_target',
+                     'masks_target_residuals', 'masks_curve'] + CURVATURE_PARAMETER_NAMES:
                 p_ms = frame_state.get_state(k)
 
                 # Only store the deepest target and output masks
                 if k in ['masks_target', 'masks_target_residuals', 'masks_curve']:
                     p = to_numpy(p_ms[-1])
+
+                # Stack parameters which do not change across depths
+                elif k in ['X0', 'T0', 'length', 'sigmas', 'exponents', 'intensities']:
+                    p = np.array([to_numpy(p) for p in p_ms])
 
                 # Vectorise everything else
                 else:
@@ -249,7 +258,8 @@ class TrialState:
                     v = [v] * (D - D_min)
 
                 # Expand collapsed
-                elif k in ['points', 'curvatures', 'points_2d', 'sigmas', 'exponents', 'intensities', 'scores']:
+                elif k in ['points', 'points_2d', 'sigmas', 'exponents', 'intensities',
+                           'scores'] + CURVATURE_PARAMETER_NAMES:
                     v = [v[2**d - idx_offset - 1:2**(d + 1) - idx_offset - 1] for d in range(D_min, D)]
 
                 frame_state.set_state(k, v)
