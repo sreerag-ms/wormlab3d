@@ -209,6 +209,7 @@ class ProjectRenderScoreModel(nn.Module):
             camera_intensities: torch.Tensor,
             points_3d_base: torch.Tensor,
             points_2d_base: torch.Tensor,
+            length_warmup: bool
     ) -> Tuple[
         List[torch.Tensor],
         List[torch.Tensor],
@@ -290,7 +291,10 @@ class ProjectRenderScoreModel(nn.Module):
                             T0[i] = normalise(T0[i - 1] + dT0[i])
 
                             # Limit length change
-                            l[i] = l[i - 1] + dl[i].clamp(min=-self.dl_limit, max=self.dl_limit)
+                            if length_warmup:
+                                l[i] = l[i - 1]
+                            else:
+                                l[i] = l[i - 1] + dl[i].clamp(min=-self.dl_limit, max=self.dl_limit)
 
                             # Limit curvature magnitude changes
                             dk = dK[i, :, 0].clone()
@@ -318,7 +322,8 @@ class ProjectRenderScoreModel(nn.Module):
                         K[:, 1:-1] = curvatures_d[:, 2:, :2]
 
                     # Ensure that the worm does not get too long/short.
-                    l = l.clamp(min=self.length_min, max=self.length_max)
+                    if not length_warmup:
+                        l = l.clamp(min=self.length_min, max=self.length_max)
 
                     # Smooth the curvatures
                     K = _smooth_parameter(K, ks, mode='gaussian')
@@ -404,27 +409,6 @@ class ProjectRenderScoreModel(nn.Module):
                 self.image_size,
                 self.render_mode
             )
-
-            # # Normalise blobs
-            # sum_ = blobs_d.amax(dim=(2, 3), keepdim=True)
-            # sum_ = sum_.clamp(min=1e-8)
-            # blobs_normed = blobs_d / sum_
-            #
-            # # Score the points
-            # scores_d = (blobs_normed * masks_target_d.unsqueeze(2)).sum(dim=(3, 4)).mean(dim=1)
-            # if d > 1:
-            #     scores_d = self._taper_parameter(scores_d)
-            #
-            #     # Make new render with blobs scaled by relative scores to get detection masks
-            #     max_score = scores_d.amax(keepdim=True)
-            #     if max_score.item() > 0:
-            #         rel_scores = scores_d / max_score
-            #         sf = rel_scores[:, None, :, None, None]
-            #         detection_masks_d = (blobs_d * sf).amax(dim=2)
-            #     else:
-            #         detection_masks_d = masks_d.clone()
-            # else:
-            #     detection_masks_d = masks_d.clone()
 
             blobs.append(blobs_d)
             masks.append(masks_d)

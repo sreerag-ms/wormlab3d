@@ -26,6 +26,8 @@ class ParameterArgs(BaseArgs):
             curvature_max: float = 2.,
             length_min: float = None,
             length_max: float = None,
+            length_init: float = None,
+            length_warmup_steps: int = None,
             dX0_limit: float = None,
             dl_limit: float = None,
             dk_limit: float = None,
@@ -91,14 +93,22 @@ class ParameterArgs(BaseArgs):
             curvature_deltas = False
             length_min = None
             length_max = None
+            length_init = None
+            length_warmup_steps = None
         else:
             if length_min is None:
                 length_min = 0.5
             if length_max is None:
                 length_max = 2.
+            if length_init is None:
+                length_init = 0.2
+            if length_warmup_steps is None:
+                length_warmup_steps = 100
         self.curvature_deltas = curvature_deltas
         self.length_min = length_min
         self.length_max = length_max
+        self.length_init = length_init
+        self.length_warmup_steps = length_warmup_steps
         self.dX0_limit = dX0_limit
         self.dl_limit = dl_limit
         self.dk_limit = dk_limit
@@ -194,6 +204,10 @@ class ParameterArgs(BaseArgs):
                            help='Minimum worm length (only used in curvature mode). Default=0.5.')
         group.add_argument('--length-max', type=float,
                            help='Maximum worm length (only used in curvature mode). Default=2.')
+        group.add_argument('--length-init', type=float,
+                           help='Initial worm length (only used in curvature mode). Default=0.2.')
+        group.add_argument('--length-warmup-steps', type=int,
+                           help='Number of initial steps to linearly grow worm length from length_init to length_min (only used in curvature mode). Default=100.')
         group.add_argument('--dX0-limit', type=float,
                            help='Maximum allowable change in X0 between batched frames (only used in curvature mode). Default=None.')
         group.add_argument('--dl-limit', type=float,

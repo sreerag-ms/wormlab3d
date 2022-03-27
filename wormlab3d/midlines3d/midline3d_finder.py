@@ -713,6 +713,7 @@ class Midline3DFinder:
             camera_sigmas=camera_sigmas,
             camera_exponents=camera_exponents,
             camera_intensities=camera_intensities,
+            length_warmup=self.checkpoint.step < p.length_warmup_steps,
         )
 
         # Generate targets with added residuals
@@ -745,91 +746,8 @@ class Midline3DFinder:
         else:
             self.optimiser.zero_grad()
             loss.backward()
-
-            # # Weight the point gradients by the relative tapered scores
-            # for i, fs in enumerate(self.frame_batch):
-            #     points = fs.get_state('points')
-            #     for d in range(D):
-            #         tapered_scores = scores[d][i, :, None].detach()
-            #         max_score = tapered_scores.amax(keepdim=True)
-            #         if max_score > 0:
-            #             rel_scores = tapered_scores / max_score
-            #             points[d].grad = points[d].grad * rel_scores
-            #         else:
-            #             points[d].grad.zero_()
-
             self.optimiser.step()
-
-            with torch.no_grad():
-
-                if p.curvature_mode:
-                    for i, fs in enumerate(self.frame_batch):
-                        if p.curvature_deltas and i != 0:
-                            # Clamping only needed for the master frame in deltas-mode.
-                            break
-                        curvatures = fs.get_state('curvatures')
-                        for d in range(D):
-                            curvatures_d = curvatures[d]
-
-                            # Ensure that the worm does not get too long/short.
-                            l = curvatures_d[2, 2].clamp(
-                                min=p.length_min,
-                                max=p.length_max
-                            )
-                            curvatures[d].data[2, 2] = l
-
-                            # Ensure curvature doesn't get too large.
-                            K = curvatures_d[2:, :2]
-                            k = torch.norm(K, dim=-1)
-                            k_max = p.curvature_max * 2 * torch.pi / (K.shape[0] + 2 - 1)
-                            K = torch.where(
-                                (k > k_max)[:, None],
-                                K * (k_max / (k + 1e-6))[:, None],
-                                K
-                            )
-                            curvatures[d].data[2:, :2] = K
-                else:
-                    # Adjust points to be a quarter of the mean segment-length between parent points.
-                    for i, fs in enumerate(self.frame_batch):
-                        points = fs.get_state('points')
-                        for d in range(2, D):
-                            points_d = points[d]
-                            parents = points_smoothed[d - 1][i]
-                            x = torch.mean(torch.norm(parents[1:] - parents[:-1], dim=-1)) / 4
-                            parents_repeated = torch.repeat_interleave(parents, repeats=2, dim=0)
-                            direction = points_d - parents_repeated
-                            points_anchored = parents_repeated \
-                                              + x * (direction / torch.norm(direction, dim=-1, keepdim=True))
-                            points[d].data = torch.cat([
-                                points_d[0][None, :],
-                                points_anchored[1:-1],
-                                points_d[-1][None, :]
-                            ], dim=0)
-
-                # Clamp the sigmas, exponents and intensities
-                render_parameters_limits = {
-                    'sigmas': {
-                        'min': 3e-2
-                    },
-                    'exponents': {
-                        'min': 0.5,
-                        'max': 10
-                    },
-                    'intensities': {
-                        'min': 0.1,
-                        'max': 10
-                    }
-                }
-
-                for sei in ['sigmas', 'exponents', 'intensities']:
-                    params = [*self.master_frame_state.get_state(sei), ]
-                    # params.extend([*[f.get_state(sei) for f in self.frame_batch]])
-                    for v in params:
-                        v.data = v.clamp(**render_parameters_limits[sei])
-
-                    # Camera scaling factors should average 1
-                    v = self.master_frame_state.get_state(f'camera_{sei}')
-                    v.data = v / v.mean()
+            self._clamp_parameters(points_smoothed)
 
         # Update master state
         self.master_frame_state.set_state('masks_curve', [masks[d][self.active_idx] for d in range(D)])
@@ -1008,6 +926,91 @@ class Midline3DFinder:
         stats['loss/total'] = loss.item()
 
         return loss, loss_global, losses_depths, stats
+
+    def _clamp_parameters(self, points_smoothed: torch.Tensor):
+        """
+        Ensure all the parameters fall within the constraints.
+        """
+        p = self.parameters
+        D = p.depth - p.depth_min
+
+        with torch.no_grad():
+
+            if p.curvature_mode:
+                for i, fs in enumerate(self.frame_batch):
+                    if p.curvature_deltas and i != 0:
+                        # Clamping only needed for the master frame in deltas-mode.
+                        break
+                    curvatures = fs.get_state('curvatures')
+                    for d in range(D):
+                        curvatures_d = curvatures[d]
+
+                        # Ensure that the worm does not get too long/short.
+                        if self.checkpoint.step > p.length_warmup_steps:
+                            l = curvatures_d[2, 2].clamp(
+                                min=p.length_min,
+                                max=p.length_max
+                            )
+                        else:
+                            # In length warmup phase, linearly grow the length from length_init to length_min
+                            l = torch.tensor(
+                                p.length_init
+                                + (p.length_min - p.length_init) * self.checkpoint.step / p.length_warmup_steps,
+                                device=self.device
+                            )
+                        curvatures[d].data[2, 2] = l
+
+                        # Ensure curvature doesn't get too large.
+                        K = curvatures_d[2:, :2]
+                        k = torch.norm(K, dim=-1)
+                        k_max = p.curvature_max * 2 * torch.pi / (K.shape[0] + 2 - 1)
+                        K = torch.where(
+                            (k > k_max)[:, None],
+                            K * (k_max / (k + 1e-6))[:, None],
+                            K
+                        )
+                        curvatures[d].data[2:, :2] = K
+            else:
+                # Adjust points to be a quarter of the mean segment-length between parent points.
+                for i, fs in enumerate(self.frame_batch):
+                    points = fs.get_state('points')
+                    for d in range(2, D):
+                        points_d = points[d]
+                        parents = points_smoothed[d - 1][i]
+                        x = torch.mean(torch.norm(parents[1:] - parents[:-1], dim=-1)) / 4
+                        parents_repeated = torch.repeat_interleave(parents, repeats=2, dim=0)
+                        direction = points_d - parents_repeated
+                        points_anchored = parents_repeated \
+                                          + x * (direction / torch.norm(direction, dim=-1, keepdim=True))
+                        points[d].data = torch.cat([
+                            points_d[0][None, :],
+                            points_anchored[1:-1],
+                            points_d[-1][None, :]
+                        ], dim=0)
+
+            # Clamp the sigmas, exponents and intensities
+            render_parameters_limits = {
+                'sigmas': {
+                    'min': 3e-2
+                },
+                'exponents': {
+                    'min': 0.5,
+                    'max': 10
+                },
+                'intensities': {
+                    'min': 0.1,
+                    'max': 10
+                }
+            }
+
+            for sei in ['sigmas', 'exponents', 'intensities']:
+                params = [*self.master_frame_state.get_state(sei), ]
+                for v in params:
+                    v.data = v.clamp(**render_parameters_limits[sei])
+
+                # Camera scaling factors should average 1
+                v = self.master_frame_state.get_state(f'camera_{sei}')
+                v.data = v / v.mean()
 
     def _log_progress(self, step: int, final_step: int, loss: float, stats: dict):
         """

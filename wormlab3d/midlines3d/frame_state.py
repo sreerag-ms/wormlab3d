@@ -302,7 +302,7 @@ class FrameState(nn.Module):
             else:
                 N = 2**d
                 K = torch.zeros((N - 2, 3))
-                K[0, 2] = mp.length_min
+                K[0, 2] = mp.length_init
                 t0d = t0 / (N - 1)
                 x = torch.cat([x0.clone()[None, :], t0d[None, :], K], axis=0)
             if d >= mp.depth_min:
