@@ -59,9 +59,6 @@ class ParameterArgs(BaseArgs):
             loss_parents: float = 0.,
             loss_aunts: float = 1.,
             loss_scores: float = 0.,
-            loss_sigmas: float = 1.,
-            loss_exponents: float = 1.,
-            loss_intensities: float = 1.,
             loss_smoothness: float = 1.,
             loss_curvature: float = 1.,
             loss_temporal: float = 0.,
@@ -148,9 +145,6 @@ class ParameterArgs(BaseArgs):
         self.loss_parents = loss_parents
         self.loss_aunts = loss_aunts
         self.loss_scores = loss_scores
-        self.loss_sigmas = loss_sigmas
-        self.loss_exponents = loss_exponents
-        self.loss_intensities = loss_intensities
         self.loss_smoothness = loss_smoothness
         self.loss_curvature = loss_curvature
         self.loss_temporal = loss_temporal
@@ -180,7 +174,7 @@ class ParameterArgs(BaseArgs):
                            help='Depth of multi-scale curves to use. Default=5 (=1,2,4,8,16).')
         group.add_argument('--depth-min', type=int, default=0,
                            help='Minimum depth of multi-scale curves to use. Default=0.')
-        group.add_argument('--window-size', type=int, default=9,
+        group.add_argument('--window-size', type=int, default=1,
                            help='Sliding window size.')
         group.add_argument('--window-image-diff-threshold', type=float, default=3e3,
                            help='Minimum image difference threshold between subsequent frames in the window.')
@@ -266,12 +260,6 @@ class ParameterArgs(BaseArgs):
                            help='Weighting for regularising the distances between children and aunts.')
         group.add_argument('--loss-scores', type=float, default=0.,
                            help='Regularisation weight for rewarding large projection scores.')
-        group.add_argument('--loss-sigmas', type=float, default=1.,
-                           help='Regularisation weight for penalising rendering sigma variance.')
-        group.add_argument('--loss-exponents', type=float, default=1.,
-                           help='Regularisation weight for penalising rendering exponents variance.')
-        group.add_argument('--loss-intensities', type=float, default=1.,
-                           help='Regularisation weight for penalising rendering intensity variance.')
         group.add_argument('--loss-smoothness', type=float, default=1.,
                            help='Regularisation weight for penalising curve non-smoothness.')
         group.add_argument('--loss-curvature', type=float, default=1.,

@@ -63,12 +63,15 @@ class MFParameters(Document):
     loss_parents = FloatField()
     loss_aunts = FloatField()
     loss_scores = FloatField()
-    loss_sigmas = FloatField()
-    loss_exponents = FloatField()
-    loss_intensities = FloatField()
     loss_smoothness = FloatField()
     loss_curvature = FloatField()
     loss_temporal = FloatField()
+
+    # --- Deprecated
+    loss_sigmas = FloatField()
+    loss_exponents = FloatField()
+    loss_intensities = FloatField()
+    # ---
 
     algorithm = StringField(choices=OPTIMISER_ALGORITHMS)
 

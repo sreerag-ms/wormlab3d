@@ -37,10 +37,11 @@ img_extension = 'png'
 PRINT_KEYS = [
     'loss/masks',
     # 'loss/parents',
-    'loss/smoothness',
     'loss/curvature',
+    'loss/smoothness',
     'loss/temporal',
-    'loss/global',
+    # 'loss/global',
+    'loss/scores'
 ]
 
 
@@ -315,19 +316,22 @@ class Midline3DFinder:
                 for k in PARAMETER_NAMES
             }
             if self.parameters.window_size > 1:
-                point_params = []
                 for points_key in points_keys:
                     for i in range(self.parameters.window_size):
-                        point_params.extend(self.frame_batch[i].get_state(points_key))
-                params['points'] = point_params
+                        params[points_key].extend(self.frame_batch[i].get_state(points_key))
         else:
             params = {
                 k: [fs.get_state(k) for fs in self.frame_batch]
                 for k in PARAMETER_NAMES
             }
-            if p.curvature_mode:
-                del params['points']
-                params['points'] = sum([params[ck] for ck in CURVATURE_PARAMETER_NAMES])
+
+        # Merge the curvature parameters into a single parameter group
+        if p.curvature_mode:
+            del params['points']
+            point_params = []
+            for ck in CURVATURE_PARAMETER_NAMES:
+                point_params.extend(params[ck])
+            params['points'] = point_params
 
         optimiser_cls: Optimizer = getattr(torch.optim, p.algorithm)
         cam_params = [params[f'cam_{k}'] for k in CAM_PARAMETER_NAMES]
@@ -947,7 +951,6 @@ class Midline3DFinder:
         D = p.depth - p.depth_min
 
         with torch.no_grad():
-
             if p.curvature_mode:
                 for i, fs in enumerate(self.frame_batch):
                     if p.curvature_deltas and i != 0:

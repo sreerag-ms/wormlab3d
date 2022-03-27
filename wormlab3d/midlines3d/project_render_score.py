@@ -189,6 +189,14 @@ class ProjectRenderScoreModel(nn.Module):
         self.length_min = length_min
         self.length_max = length_max
         self.curvature_max = curvature_max
+
+        # The limits don't matter when not in delta-mode, but they need to be not-None for jit.
+        if not curvature_deltas:
+            dX0_limit = 0.
+            dl_limit = 0.
+            dk_limit = 0.
+            dpsi_limit = 0.
+
         self.dX0_limit = dX0_limit
         self.dl_limit = dl_limit
         self.dk_limit = dk_limit
