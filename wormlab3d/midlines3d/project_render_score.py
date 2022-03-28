@@ -371,8 +371,8 @@ class ProjectRenderScoreModel(nn.Module):
                 N4 = int(N / 4)
 
                 # Sigmas should be equal in the middle section but taper towards the ends
-                min_sigma = 0.03
-                sigma_d = sigmas_d[:, None]
+                min_sigma = 0.05
+                sigma_d = sigmas_d[:, None].clamp(min=min_sigma)
                 slopes = (sigma_d - min_sigma) / N4 * torch.arange(N4, device=device)[None, :] + min_sigma
                 sigmas_d = torch.cat([
                     slopes,
