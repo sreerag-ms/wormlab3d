@@ -24,6 +24,7 @@ class RuntimeArgs(BaseArgs):
             plot_intensities: bool = True,
             plot_scores: bool = True,
             save_plots: bool = True,
+            seed: int = None,
             **kwargs
     ):
         self.resume = resume
@@ -43,6 +44,13 @@ class RuntimeArgs(BaseArgs):
         self.plot_intensities = plot_intensities
         self.plot_scores = plot_scores
         self.save_plots = save_plots
+
+        # Generate a random seed if one was not provided.
+        if seed is None:
+            import os
+            rand = os.urandom(4)
+            seed = int.from_bytes(rand, byteorder='big')
+        self.seed = seed
 
     @classmethod
     def add_args(cls, parser: ArgumentParser):
@@ -88,3 +96,5 @@ class RuntimeArgs(BaseArgs):
                            help='Plot scores.')
         group.add_argument('--save-plots', type=str2bool, default=True,
                            help='Save plot images to disk. Default = True.')
+        group.add_argument('--seed', type=int,
+                           help='Set a random seed.')

@@ -1,4 +1,5 @@
 import os
+import random
 from pathlib import Path
 from typing import Tuple, Union, Dict, List
 
@@ -60,6 +61,9 @@ class Midline3DFinder:
         self.source_args = source_args
         self.parameter_args = parameter_args
 
+        # Set random seed
+        self._set_seed()
+
         # Initialise the parameters and model
         self.parameters: MFParameters = self._init_parameters()
         self.model = self._init_model()
@@ -112,6 +116,21 @@ class Midline3DFinder:
         """
         if key in PARAMETER_NAMES + BUFFER_NAMES + TRANSIENTS_NAMES:
             return [fs.get_state(key) for fs in self.frame_batch]
+
+    def _set_seed(self):
+        """
+        Set the random seed everywhere.
+        """
+        seed = self.runtime_args.seed
+        logger.info(f'Setting random seed = {seed}.')
+        random.seed(seed)
+        os.environ['PYTHONHASHSEED'] = str(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+
+        # Can uncomment these for full deterministic output:
+        # torch.backends.cudnn.deterministic = True
+        # torch.backends.cudnn.benchmark = False
 
     def _init_parameters(self) -> MFParameters:
         """
