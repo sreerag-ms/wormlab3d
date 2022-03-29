@@ -602,7 +602,7 @@ class Manager:
         weights_cumulative_norm = torch.tensor(0., dtype=torch.float32, device=self.device)
         for _, norm in norms.items():
             weights_cumulative_norm += norm
-        assert not is_bad(weights_cumulative_norm)
+        assert not is_bad(weights_cumulative_norm), 'Bad parameters!'
         self.tb_logger.add_scalar('batch/train/w_norm', weights_cumulative_norm.item(), self.checkpoint.step)
 
         # Increment global step counter

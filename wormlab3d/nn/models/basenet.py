@@ -35,8 +35,11 @@ class BaseNet(nn.Module, ABC):
     def calc_norms(self, p: int = 2) -> float:
         p_norms = {}
         for name, m in self.named_modules():
-            if isinstance(m, nn.Conv1d) or isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear):
-                p_norms[name] = m.weight.norm(p)
+            if hasattr(m, 'parameters'):
+                p_norm_m = 0
+                for i, param in enumerate(m.parameters()):
+                    p_norm_m += param.norm(p)
+                p_norms[name] = p_norm_m
         return p_norms
 
     def forward(self, x):
