@@ -393,7 +393,6 @@ class Manager:
 
             # Load the network and optimiser parameter states
             # path = f'{self.get_logs_path(prev_checkpoint)}/checkpoints/{prev_checkpoint.id}.chkpt'
-            # prev_checkpoint.parameters_file
             path = ROOT_PATH / prev_checkpoint.parameters_file
             state = torch.load(path, map_location=self.device)
             self.net.load_state_dict(self._fix_state(state['model_state_dict']), strict=False)
@@ -449,7 +448,8 @@ class Manager:
             'model_state_dict': self.net.state_dict(),
             'optimiser_state_dict': self.optimiser.state_dict(),
         }, path)
-        self.checkpoint.parameters_file = path[len(ROOT_PATH) + 1:]
+        self.checkpoint.parameters_file = str(path.relative_to(ROOT_PATH))
+        self.checkpoint.save()
         logger.info(f'Saved parameters to "{self.checkpoint.parameters_file}".')
 
         # Replace the current checkpoint-buffer with a clone of the just-saved checkpoint
