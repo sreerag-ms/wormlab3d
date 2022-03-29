@@ -13,7 +13,7 @@ class LSTMNet(BaseNet):
             output_shape: tuple,
             layers_config: Tuple[int],
             dropout_prob: float = 0.,
-            build_model: bool=True,
+            build_model: bool = True,
     ):
         super().__init__(input_shape, output_shape)
 
@@ -26,7 +26,8 @@ class LSTMNet(BaseNet):
 
     @property
     def id(self) -> str:
-        return f'LSTMNet/{",".join(map(str, self.layers_config))}_d={self.dropout_prob}'
+        lc = ','.join([str(l) for l in self.layers_config])
+        return f'LSTMNet/{lc}_d={self.dropout_prob}'
 
     def _build_model(self):
         """
@@ -62,8 +63,11 @@ class LSTMNet(BaseNet):
             h_t.append(torch.zeros(bs, n, dtype=torch.float32, device=device))
             c_t.append(torch.zeros(bs, n, dtype=torch.float32, device=device))
 
+        # The outputs are all predictions so concatenate with the first data point so it lines up.
+        outputs = [X[..., 0], ]
+
         # Process the input and generate the predictions
-        outputs = []
+        output = torch.zeros(bs, Nc, dtype=torch.float32, device=device)
         for t in range(T - 1):
             if t < T_data:
                 X_t = X[..., t]
@@ -75,8 +79,6 @@ class LSTMNet(BaseNet):
                 input_t = h_t[i]
             output = self.output_layer(input_t)
             outputs.append(output)
-
-        # The outputs are all predictions so concatenate with the first data point so it lines up.
-        outputs = torch.stack([X[..., 0], *outputs], dim=2)
+        outputs = torch.stack(outputs, dim=2)
 
         return outputs

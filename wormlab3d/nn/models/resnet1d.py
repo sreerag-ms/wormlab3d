@@ -30,10 +30,15 @@ class OutputLayer1d(OutputLayer):
 
 class ResNet1d(ResNet):
     @property
-    def id(self):
+    def id(self) -> str:
         bottleneck_variety = 'A' if not self.use_bottlenecks else 'B'
-        return 'ResNet1D/{}i_{}_sc-{}_{}_d={}'.format(self.n_init_channels, ','.join(map(str, self.block_config)),
-                                                      self.shortcut_type, bottleneck_variety, self.dropout_prob)
+        bc = ','.join([str(b) for b in self.block_config])
+        return f'ResNet1D/' \
+               f'{self.n_init_channels}i' \
+               f'_{bc}' \
+               f'_sc-{self.shortcut_type}' \
+               f'_{bottleneck_variety}' \
+               f'_d={self.dropout_prob}'
 
     def _build_model(self):
         # First convolution layer
@@ -141,5 +146,5 @@ class _ZeroPadChannels1d(_ZeroPadChannels):
 
     def forward(self, x):
         batch_size, _, spatial_size_1 = x.shape
-        zeros = Variable(torch.zeros([batch_size, self.pad_size, spatial_size_1], device=x.device))
+        zeros = torch.zeros([batch_size, self.pad_size, spatial_size_1], device=x.device)
         return torch.cat([x, zeros], 1)

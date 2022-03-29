@@ -129,7 +129,7 @@ class _ResLayer(nn.Module):
         x_in = self.shortcut(x)
         x = self.bn1(x)
         x = self.conv1(x)
-        if self.dropout:
+        if self.dropout is not None:
             x = self.dropout(x)
         x = self.bn2(x)
         x = self.relu(x)
@@ -185,11 +185,10 @@ class _ResBottleneckLayer(nn.Module):
 class _Shortcut(nn.Module):
     def __init__(self, n_channels_in, n_channels_out, downsample, shortcut_type):
         super(_Shortcut, self).__init__()
-        self.shortcut = lambda x: x
+        self.shortcut = nn.Sequential()
 
         # when number of channels changes we need to project input to new size
         if n_channels_in != n_channels_out:
-            self.shortcut = nn.Sequential()
             if shortcut_type == 'conv':
                 stride = 2 if downsample else 1
                 self.shortcut.add_module('bn', nn.BatchNorm2d(n_channels_in))

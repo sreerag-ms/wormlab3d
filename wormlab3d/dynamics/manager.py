@@ -22,6 +22,9 @@ from wormlab3d.toolkit.util import is_bad, to_numpy
 from wormlab3d.trajectories.cache import get_trajectory
 
 
+# torch.autograd.set_detect_anomaly(True)
+
+
 class Manager(BaseManager):
     runtime_args: DynamicsRuntimeArgs
     dataset_args: DynamicsDatasetArgs
@@ -215,8 +218,8 @@ class Manager(BaseManager):
             X0_duration=self.dataset_args.X0_duration,
             build_model=True
         )
-        full_net = torch.jit.script(full_net)
         logger.info(f'Instantiated full network with {full_net.get_n_params() / 1e6:.4f}M parameters.')
+        full_net = torch.jit.script(full_net)
         # logger.debug(f'----------- Network --------------\n\n{full_net}\n\n')
 
         return full_net, net_params
