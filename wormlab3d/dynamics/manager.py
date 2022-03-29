@@ -6,6 +6,7 @@ from typing import Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import torch.nn.functional as F
 from matplotlib.figure import Figure
 from torch import nn
 from torch.utils.data import DataLoader
@@ -248,11 +249,16 @@ class Manager(BaseManager):
         """
         stats = {}
 
-        # Calculate dynamics prediction losses between input samples X and output samples Y
+        # Calculate dynamics prediction losses between input samples X and output samples Y.
         loss_dyn = torch.sum((X.unsqueeze(1) - Y)**2, dim=(2, 3))
 
-        # Weight the errors by the latent class vector Z
-        loss_com = Z * loss_dyn
+        # Weight the errors by the latent class vector Z, allowing some error to flow back to all models.
+        Z_sm = F.softmax(Z)
+        loss_com = (0.1 + Z_sm * 0.9) * loss_dyn
+
+        # Add a classification loss based on which was the best predicting model
+        targets = loss_dyn.argmin(dim=-1)
+        loss_pred = F.cross_entropy(Z, targets, reduction='mean')
 
         # Log losses
         for i in range(self.net_args.n_classes):
@@ -260,9 +266,10 @@ class Manager(BaseManager):
             stats[f'loss_com/{i}'] = loss_com[:, i].mean()
         stats[f'loss_dyn/mean'] = loss_dyn.mean()
         stats[f'loss_dyn/var'] = loss_dyn.var()
+        stats[f'loss_pred'] = loss_pred
 
         # Sum losses over the classes and take the batch mean.
-        loss = loss_com.sum(dim=-1).mean()
+        loss = loss_com.sum(dim=-1).mean() + loss_pred
         stats['loss'] = loss.item()
         stats['loss/var'] = loss_com.var(dim=-1).mean()
 
@@ -315,8 +322,9 @@ class Manager(BaseManager):
 
         X = data
         Y, Z = outputs
-        y_min = float(min(X.amin(), Y.amin()))
-        y_max = float(max(X.amax(), Y.amax()))
+        Z_sm = F.softmax(Z)
+        # y_min = float(min(X.amin(), Y.amin()))
+        # y_max = float(max(X.amax(), Y.amax()))
 
         fig, axes = plt.subplots(
             nrows=n_rows,
@@ -327,7 +335,7 @@ class Manager(BaseManager):
         for i, idx in enumerate(idxs):
             Xi = to_numpy(X[idx])
             Yi = to_numpy(Y[idx])
-            Zi = to_numpy(Z[idx])
+            Zi = to_numpy(Z_sm[idx])
             alphas = [0.3 + Zi[i] * 7 / 10 for i in range(Nc)]
 
             # Plot classification as bar chart
@@ -361,15 +369,15 @@ class Manager(BaseManager):
             # Plot data and dynamics outputs
             for j in range(n_components * 2):
                 ax = axes[j + 1, i]
-                ax.plot(ts, Xi[j], alpha=0.8, color='black', zorder=100)
+                ax.plot(ts, Xi[j], alpha=0.8, color='black', linewidth=2, linestyle='--', zorder=100)
                 for k in range(Nc):
                     ax.plot(ts, Yi[k, j], alpha=alphas[k], color=colours[k])
-                ax.set_ylim(bottom=y_min, top=y_max)
+                # ax.set_ylim(bottom=y_min, top=y_max)
 
                 if i == 0:
                     ax.set_ylabel(f'${"Re" if j % 2 == 0 else "Im"}(\lambda_{int(j / 2)})$')
-                else:
-                    ax.set_yticklabels([])
+                # else:
+                #     ax.set_yticklabels([])
 
                 if j == n_components * 2 - 1:
                     ax.set_xlabel('Frame')

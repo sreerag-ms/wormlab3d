@@ -26,9 +26,9 @@ class DatasetEigentracesLoader(DatasetTorch):
 
     def __len__(self) -> int:
         """
-        Rough approximation, allowing for 50% overlap.
+        Rough approximation, allowing for lots of overlap.
         """
-        return int(self.ds.get_size(self.train_or_test) / self.ds_args.sample_duration * 2)
+        return int(self.ds.get_size(self.train_or_test) / self.ds_args.sample_duration * 50)
 
     def __getitem__(self, index: int) -> Tuple[torch.Tensor, ObjectId, torch.Tensor]:
         """

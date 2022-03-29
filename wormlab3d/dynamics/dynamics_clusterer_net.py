@@ -41,7 +41,7 @@ class DynamicsClustererNet(BaseNet):
 
         # Classify/cluster
         Z = self.classifier_net.forward(X)
-        Z = F.softmax(Z, dim=-1)
+        # Z = F.softmax(Z, dim=-1)
 
         # Simulate
         X0 = X[..., :self.X0_duration]
