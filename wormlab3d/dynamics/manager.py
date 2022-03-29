@@ -264,7 +264,7 @@ class Manager(BaseManager):
         # Sum losses over the classes and take the batch mean.
         loss = loss_com.sum(dim=-1).mean()
         stats['loss'] = loss.item()
-        stats['loss/var'] = loss.var()
+        stats['loss/var'] = loss_com.var(dim=-1).mean()
 
         # Store the full losses as class variables for use in plotting
         self.loss_dyn = loss_dyn
