@@ -253,7 +253,7 @@ class Manager(BaseManager):
         loss_dyn = torch.sum((X.unsqueeze(1) - Y)**2, dim=(2, 3))
 
         # Weight the errors by the latent class vector Z, allowing some error to flow back to all models.
-        Z_sm = F.softmax(Z)
+        Z_sm = F.softmax(Z, dim=-1)
         loss_com = (0.1 + Z_sm * 0.9) * loss_dyn
 
         # Add a classification loss based on which was the best predicting model
@@ -322,7 +322,7 @@ class Manager(BaseManager):
 
         X = data
         Y, Z = outputs
-        Z_sm = F.softmax(Z)
+        Z_sm = F.softmax(Z, dim=-1)
         # y_min = float(min(X.amin(), Y.amin()))
         # y_max = float(max(X.amax(), Y.amax()))
 
