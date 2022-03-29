@@ -143,13 +143,13 @@ def fetch_eigenworms(
         if n_components is not None:
             filters['n_components'] = n_components
 
-        matching_eigenworms = Eigenworms.objects(**filters).order_by('-updated')
+        matching_eigenworms = Eigenworms.objects(**filters).order_by('-n_components')
         if matching_eigenworms.count() == 0:
             logger.warning(f'Found no eigenworms for parameters {filters}.')
         else:
             logger.info(
                 f'Found {matching_eigenworms.count()} matching eigenworms. '
-                f'Using most recent.'
+                f'Using one with most components.'
             )
             eigenworms = matching_eigenworms[0]
 

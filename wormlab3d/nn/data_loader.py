@@ -8,6 +8,7 @@ from torchvision import transforms
 
 from wormlab3d import logger
 from wormlab3d.data.model import Dataset
+from wormlab3d.data.model.dataset import DatasetEigentraces, DATASET_TYPE_EIGENTRACES
 from wormlab3d.nn.args import DatasetArgs
 
 
@@ -70,7 +71,7 @@ def make_data_loader(
         dataset_loader: DatasetLoader,
         ds_args: DatasetArgs,
         batch_size: int,
-        collate_fn: callable = None
+        collate_fn: callable = None,
 ) -> DataLoader:
     """
     Instantiate a torch data loader.
@@ -98,7 +99,10 @@ def load_dataset(dataset_args: DatasetArgs) -> Dataset:
         ds = Dataset.objects.get(id=dataset_args.dataset_id)
     else:
         # Otherwise, try to find one matching the same parameters
-        datasets = Dataset.find_from_args(dataset_args)
+        if dataset_args.dataset_type == DATASET_TYPE_EIGENTRACES:
+            datasets = DatasetEigentraces.find_from_args(dataset_args)
+        else:
+            datasets = Dataset.find_from_args(dataset_args)
         if datasets.count() > 0:
             ds = datasets[0]
             logger.info(f'Found {datasets.count()} suitable datasets in database, using most recent.')

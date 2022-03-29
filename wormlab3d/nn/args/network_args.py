@@ -5,7 +5,8 @@ from wormlab3d.data.model.network_parameters import *
 from wormlab3d.nn.args.base_args import BaseArgs
 from wormlab3d.toolkit.util import str2bool
 
-NETWORK_TYPES = ['densenet', 'fcnet', 'resnet', 'resnet1d', 'pyramidnet', 'aenet', 'nunet', 'rdn', 'red', 'rotae']
+NETWORK_TYPES = ['densenet', 'fcnet', 'resnet', 'resnet1d', 'pyramidnet', 'aenet', 'nunet', 'rdn', 'red', 'rotae',
+                 'lstm', 'dynamics_clusterer']
 
 
 class NetworkArgs(BaseArgs):
@@ -61,22 +62,12 @@ class NetworkArgs(BaseArgs):
             NetworkArgs._add_nunet_args(subparsers.add_parser('nunet'), prefix)
             NetworkArgs._add_rdn_args(subparsers.add_parser('rdn'), prefix)
             NetworkArgs._add_red_args(subparsers.add_parser('red'), prefix)
+            NetworkArgs._add_lstm_args(subparsers.add_parser('lstm'), prefix)
 
         return group
 
     @staticmethod
     def _add_fcnet_args(parser: Namespace, prefix: str = None):
-        """
-        Fully-connected network parameters.
-        """
-        parser.add_argument(f'--{prefix}layers-config', type=lambda s: [int(item) for item in s.split(',')],
-                            default='100,100',
-                            help='Comma delimited list of layer sizes.')
-        parser.add_argument(f'--{prefix}dropout-prob', type=float, default=0.2,
-                            help='Dropout probability.')
-
-    @staticmethod
-    def _parse_fcnet_params(parser, prefix: str = None):
         """
         Fully-connected network parameters.
         """
@@ -230,6 +221,17 @@ class NetworkArgs(BaseArgs):
                             help='Apply batch normalisation after convolution and activation.')
 
     @staticmethod
+    def _add_lstm_args(parser: Namespace, prefix: str = None):
+        """
+        LSTM network parameters.
+        """
+        parser.add_argument(f'--{prefix}layers-config', type=lambda s: [int(item) for item in s.split(',')],
+                            default='64,32',
+                            help='Comma delimited list of hidden dimensions to use for each layer.')
+        parser.add_argument(f'--{prefix}dropout-prob', type=float, default=0.2,
+                            help='Dropout probability.')
+
+    @staticmethod
     def extract_hyperparameter_args(args: Namespace) -> dict:
         """
         Create a NetworkParameters instance from command-line arguments.
@@ -324,6 +326,13 @@ class NetworkArgs(BaseArgs):
                 'batch_norm': args.batch_norm,
                 'dropout_prob': args.dropout_prob,
             }
+
+        elif args.base_net == 'lstm':
+            hyperparameters = {
+                'layers_config': args.layers_config,
+                'dropout_prob': args.dropout_prob,
+            }
+
         return hyperparameters
 
     @classmethod

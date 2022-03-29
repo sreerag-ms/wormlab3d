@@ -9,8 +9,9 @@ class RuntimeArgs(BaseArgs):
             self,
             resume: bool = True,
             resume_from: str = 'latest',
-            gpu_only: bool = False,
             cpu_only: bool = False,
+            gpu_only: bool = False,
+            gpu_id: int = None,
             batch_size: int = 32,
             n_epochs: int = 300,
             checkpoint_every_n_epochs: int = 1,
@@ -24,8 +25,9 @@ class RuntimeArgs(BaseArgs):
         assert not (cpu_only and gpu_only), 'Invalid combination: gpu_only AND cpu_only!'
         self.resume = resume
         self.resume_from = resume_from
-        self.gpu_only = gpu_only
         self.cpu_only = cpu_only
+        self.gpu_only = gpu_only
+        self.gpu_id = gpu_id
         self.batch_size = batch_size
         self.n_epochs = n_epochs
         self.checkpoint_every_n_epochs = checkpoint_every_n_epochs
@@ -49,10 +51,12 @@ class RuntimeArgs(BaseArgs):
         resume_parser.set_defaults(resume=False)
         group.add_argument('--resume-from', type=str, default='latest',
                            help='Resume from a specific checkpoint id, or "latest" or "best". Default="latest".')
-        group.add_argument('--gpu-only', action='store_true',
-                           help='Abort if no gpus are detected.')
         group.add_argument('--cpu-only', action='store_true',
                            help='Only run on CPU. Otherwise will use GPU if available.')
+        group.add_argument('--gpu-only', action='store_true',
+                           help='Abort if no gpus are detected.')
+        group.add_argument('--gpu-id', type=int,
+                           help='GPU id to use if using GPUs.')
         group.add_argument('--batch-size', type=int, default=32,
                            help='Batch size to use for training and testing')
         group.add_argument('--n-epochs', type=int, default=300,

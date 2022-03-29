@@ -3,11 +3,14 @@ from abc import abstractmethod
 from typing import Union
 
 from mongoengine import *
+
+from wormlab3d.dynamics.dynamics_clusterer_net import DynamicsClustererNet
 from wormlab3d.midlines3d.rotae_net import RotAENet
 from wormlab3d.nn.models.aenet import AENet
 from wormlab3d.nn.models.basenet import BaseNet
 from wormlab3d.nn.models.densenet import DenseNet
 from wormlab3d.nn.models.fcnet import FCNet
+from wormlab3d.nn.models.lstm import LSTMNet
 from wormlab3d.nn.models.msrdn import MSRDN
 from wormlab3d.nn.models.nunet import NuNet
 from wormlab3d.nn.models.pyramidnet import PyramidNet
@@ -16,7 +19,8 @@ from wormlab3d.nn.models.rednet import RedNet
 from wormlab3d.nn.models.resnet import ResNet, RES_SHORTCUT_OPTIONS
 from wormlab3d.nn.models.resnet1d import ResNet1d
 
-NETWORK_TYPES = ['densenet', 'fcnet', 'resnet', 'resnet1d', 'pyramidnet', 'aenet', 'nunet', 'rdn', 'red', 'rotae']
+NETWORK_TYPES = ['densenet', 'fcnet', 'resnet', 'resnet1d', 'pyramidnet', 'aenet', 'nunet', 'rdn', 'red', 'rotae',
+                 'lstm', 'dynamics_clusterer']
 
 
 class NetworkParameters(Document):
@@ -233,6 +237,19 @@ class NetworkParametersRED(NetworkParameters):
         return RedNet(**model_params)
 
 
+class NetworkParametersLSTMNet(NetworkParameters):
+    layers_config = ListField(IntField(), required=True)
+
+    def instantiate_network(self, build_model: bool = True) -> FCNet:
+        return LSTMNet(
+            input_shape=self.input_shape,
+            output_shape=self.output_shape,
+            layers_config=self.layers_config,
+            dropout_prob=self.dropout_prob,
+            build_model=build_model
+        )
+
+
 class NetworkParametersRotAE(NetworkParameters):
     c2d_net = ReferenceField(NetworkParameters, required=True)
     c3d_net = ReferenceField(NetworkParameters, required=True)
@@ -241,4 +258,13 @@ class NetworkParametersRotAE(NetworkParameters):
     d3d_net = ReferenceField(NetworkParameters)
 
     def instantiate_network(self, build_model: bool = True) -> RotAENet:
+        pass
+
+
+class NetworkParametersDynamicsClusterer(NetworkParameters):
+    classifier_net = ReferenceField(NetworkParameters, required=True)
+    dynamics_net = ReferenceField(NetworkParameters, required=True)
+    n_classes = IntField(required=True)
+
+    def instantiate_network(self, build_model: bool = True) -> DynamicsClustererNet:
         pass

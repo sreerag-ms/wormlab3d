@@ -18,7 +18,7 @@ from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from wormlab3d import logger, LOGS_PATH, ROOT_PATH
+from wormlab3d import logger, LOGS_PATH, ROOT_PATH, START_TIMESTAMP
 from wormlab3d.data.model.checkpoint import Checkpoint
 from wormlab3d.data.model.network_parameters import *
 from wormlab3d.nn.args import DatasetArgs, NetworkArgs, OptimiserArgs, RuntimeArgs
@@ -28,7 +28,6 @@ from wormlab3d.nn.wrapped_data_parallel import WrappedDataParallel
 from wormlab3d.toolkit.util import to_dict, is_bad
 
 LOG_EVERY_N_BATCHES = 1
-START_TIMESTAMP = time.strftime('%Y%m%d_%H%M')
 
 
 class Manager:
@@ -82,12 +81,12 @@ class Manager:
     def get_logs_path(checkpoint: Checkpoint) -> str:
         if checkpoint.parameters_file is not None:
             pos = checkpoint.parameters_file.find('checkpoints')
-            pth = ROOT_PATH + '/' + checkpoint.parameters_file[:pos-1]
+            pth = ROOT_PATH / checkpoint.parameters_file[:pos - 1]
             return pth
 
         return LOGS_PATH \
-               + f'/{checkpoint.dataset.created:%Y%m%d_%H:%M}_{checkpoint.dataset.id}' \
-               + f'/{checkpoint.network_params.created:%Y%m%d_%H:%M}_{checkpoint.network_params.id}'
+               / f'{checkpoint.dataset.created:%Y%m%d_%H:%M}_{checkpoint.dataset.id}' \
+               / f'{checkpoint.network_params.created:%Y%m%d_%H:%M}_{checkpoint.network_params.id}'
 
     def _init_dataset(self):
         """
@@ -132,7 +131,8 @@ class Manager:
             net_args: NetworkArgs = None,
             input_shape: tuple = None,
             output_shape: tuple = None,
-            prefix: str = None
+            prefix: str = None,
+            build_model: bool = True
     ) -> Tuple[BaseNet, NetworkParameters]:
         """
         Build the network using the given parameters, defaulting to the instance attributes if not provided.
@@ -194,6 +194,8 @@ class Manager:
                 net_params = NetworkParametersRDN(**params)
             elif net_args.base_net == 'red':
                 net_params = NetworkParametersRED(**params)
+            elif net_args.base_net == 'lstm':
+                net_params = NetworkParametersLSTMNet(**params)
             else:
                 raise ValueError(f'Unrecognised base net: {net_args.base_net}')
 
@@ -202,9 +204,10 @@ class Manager:
             logger.info(f'Saved {prefix}net parameters to database (id={net_params.id})')
 
         # Instantiate the network
-        net = net_params.instantiate_network()
-        logger.info(f'Instantiated {prefix}network with {net.get_n_params() / 1e6:.4f}M parameters.')
-        logger.debug(f'----------- {prefix}Network --------------\n\n{net}\n\n')
+        net = net_params.instantiate_network(build_model=build_model)
+        if build_model:
+            logger.info(f'Instantiated {prefix}network with {net.get_n_params() / 1e6:.4f}M parameters.')
+            logger.debug(f'----------- {prefix}Network --------------\n\n{net}\n\n')
 
         return net, net_params
 
@@ -285,17 +288,19 @@ class Manager:
         else:
             cpu_or_gpu = None
 
-        if cpu_or_gpu == 'cpu':
+        if cpu_or_gpu == 'cpu' or not torch.cuda.is_available():
             device = torch.device('cpu')
+        elif self.runtime_args.gpu_id is not None:
+            device = torch.device(f'cuda:{self.runtime_args.gpu_id}')
         else:
-            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        n_gpus = torch.cuda.device_count()
+            device = torch.device('cuda')
         if device.type == 'cuda':
-            if n_gpus > 1:
+            n_gpus = torch.cuda.device_count()
+            if n_gpus > 1 and self.runtime_args.gpu_id is None:
                 logger.info(f'Using {n_gpus} GPUs!')
                 self.net = WrappedDataParallel(self.net)
             else:
-                logger.info('Using GPU')
+                logger.info('Using GPU.')
             cudnn.benchmark = True  # optimises code for constant input sizes
 
             # Move modules to the gpu
@@ -305,7 +310,7 @@ class Manager:
         else:
             if cpu_or_gpu == 'gpu':
                 raise RuntimeError('GPU requested but not available. Aborting.')
-            logger.info('Using CPU')
+            logger.info('Using CPU.')
 
         return device
 
@@ -389,7 +394,7 @@ class Manager:
             # Load the network and optimiser parameter states
             # path = f'{self.get_logs_path(prev_checkpoint)}/checkpoints/{prev_checkpoint.id}.chkpt'
             # prev_checkpoint.parameters_file
-            path = ROOT_PATH + '/' + prev_checkpoint.parameters_file
+            path = ROOT_PATH / prev_checkpoint.parameters_file
             state = torch.load(path, map_location=self.device)
             self.net.load_state_dict(self._fix_state(state['model_state_dict']), strict=False)
             if self.optimiser_args.algorithm != prev_checkpoint.optimiser_args['algorithm']:
@@ -421,7 +426,7 @@ class Manager:
 
     def _init_tb_logger(self):
         """Initialise the tensorboard writer."""
-        self.tb_logger = SummaryWriter(self.logs_path + '/events/' + START_TIMESTAMP, flush_secs=5)
+        self.tb_logger = SummaryWriter(self.logs_path / 'events' / START_TIMESTAMP, flush_secs=5)
 
     def configure_paths(self, renew_logs: bool = False):
         """Create the directories."""
@@ -429,9 +434,9 @@ class Manager:
             logger.warning('Removing previous log files...')
             shutil.rmtree(self.logs_path, ignore_errors=True)
         os.makedirs(self.logs_path, exist_ok=True)
-        os.makedirs(self.logs_path + '/checkpoints', exist_ok=True)
-        os.makedirs(self.logs_path + '/events', exist_ok=True)
-        os.makedirs(self.logs_path + '/plots', exist_ok=True)
+        os.makedirs(self.logs_path / 'checkpoints', exist_ok=True)
+        os.makedirs(self.logs_path / 'events', exist_ok=True)
+        os.makedirs(self.logs_path / 'plots', exist_ok=True)
 
     def save_checkpoint(self):
         """
@@ -439,7 +444,7 @@ class Manager:
         """
         logger.info('Saving model checkpoint...')
         self.checkpoint.save()
-        path = f'{self.logs_path}/checkpoints/{self.checkpoint.id}.chkpt'
+        path = self.logs_path / 'checkpoints' / f'{self.checkpoint.id}.chkpt'
         torch.save({
             'model_state_dict': self.net.state_dict(),
             'optimiser_state_dict': self.optimiser.state_dict(),
@@ -454,6 +459,7 @@ class Manager:
         """
         Log the graph to tensorboard.
         """
+        logger.info('Logging computation graph to tensorboard.')
         with torch.no_grad():
             dummy_input = torch.rand((self.train_loader.batch_size,) + tuple(self.net_params.input_shape))
             dummy_input = dummy_input.to(self.device)
@@ -468,6 +474,7 @@ class Manager:
         """
         self.configure_paths()
         self._init_tb_logger()
+        logger.info(f'Logs path: {self.logs_path}.')
         starting_epoch = self.checkpoint.epoch + 1
         final_epoch = starting_epoch + n_epochs - 1
 
@@ -569,7 +576,7 @@ class Manager:
         # End-of-epoch plots
         self._make_plots(data, batch_outputs, train_or_test='train', end_of_epoch=True)
 
-    def _train_batch(self, data) -> Tuple[torch.Tensor, torch.Tensor, Dict]:
+    def _train_batch(self, data: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, Dict]:
         """
         Train on a single batch of data.
         """
@@ -588,7 +595,7 @@ class Manager:
         # Log losses
         self.tb_logger.add_scalar('batch/train/total_loss', loss, self.checkpoint.step)
         for key, val in stats.items():
-            self.tb_logger.add_scalar(f'batch/train/{key}', val, self.checkpoint.step)
+            self.tb_logger.add_scalar(f'batch/train/{key}', float(val), self.checkpoint.step)
 
         # Calculate L2 loss
         norms = self.net.calc_norms()
@@ -610,7 +617,7 @@ class Manager:
         """
         if not len(self.test_loader):
             raise RuntimeError('No test data available, cannot test!')
-        logger.info('Testing')
+        logger.info('Testing.')
         self.net.eval()
         cumulative_loss = 0.
         cumulative_stats = {k: 0. for k in self.metric_keys}

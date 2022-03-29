@@ -8,9 +8,8 @@ import numpy as np
 from bson import ObjectId
 from mongoengine import *
 
-from wormlab3d import logger, CAMERA_IDXS, DATASETS_MIDLINES3D_PATH
+from wormlab3d import logger, CAMERA_IDXS, DATASETS_MIDLINES3D_PATH, DATASETS_EIGENTRACES_PATH
 from wormlab3d.data.model import Cameras
-from wormlab3d.data.model.eigenworms import Eigenworms
 from wormlab3d.data.model.experiment import STRAIN_CHOICES, SEX_CHOICES, AGE_CHOICES
 from wormlab3d.data.model.midline2d import Midline2D
 from wormlab3d.data.model.midline3d import M3D_SOURCES
@@ -26,10 +25,12 @@ DATA_TYPES = ['xyz', 'xyz_inv', 'bishop', 'cpca']
 DATASET_TYPE_2D_MIDLINE = '2d_midline'
 DATASET_TYPE_3D_MIDLINE = '3d_midline'
 DATASET_TYPE_SEGMENTATION_MASKS = 'segmentation_masks'
+DATASET_TYPE_EIGENTRACES = 'eigentraces'
 DATASET_TYPES = {
     DATASET_TYPE_2D_MIDLINE: '2D Midline',
     DATASET_TYPE_3D_MIDLINE: '3D Midline',
-    DATASET_TYPE_SEGMENTATION_MASKS: 'Segmentation Masks'
+    DATASET_TYPE_SEGMENTATION_MASKS: 'Segmentation Masks',
+    DATASET_TYPE_EIGENTRACES: 'eigentraces'
 }
 
 
@@ -104,36 +105,55 @@ class Dataset(Document):
 
     @staticmethod
     def from_args(args: DatasetArgs) -> 'Dataset':
-        common_args = dict(
-            train_test_split_target=args.train_test_split,
-            restrict_users=args.restrict_users,
-            restrict_strains=args.restrict_strains,
-            restrict_sexes=args.restrict_sexes,
-            restrict_ages=args.restrict_ages,
-            restrict_tags=args.restrict_tags,
-            restrict_concs=args.restrict_concs,
-            centre_3d_max_error=args.centre_3d_max_error,
-            exclude_experiments=args.exclude_experiments,
-            include_experiments=args.include_experiments,
-            exclude_trials=args.exclude_trials,
-            include_trials=args.include_trials,
-            min_trial_quality=args.min_trial_quality,
-        )
-
-        if args.dataset_type == DATASET_TYPE_2D_MIDLINE:
-            DS = DatasetMidline2D(**common_args)
-        elif args.dataset_type == DATASET_TYPE_SEGMENTATION_MASKS:
-            DS = DatasetSegmentationMasks(**common_args)
-        elif args.dataset_type == DATASET_TYPE_3D_MIDLINE:
-            DS = DatasetMidline3D(
-                n_worm_points=args.n_worm_points,
-                restrict_sources=args.restrict_sources,
-                min_reconstruction_frames=args.min_reconstruction_frames,
-                mf_depth=args.mf_depth,
-                **common_args
+        if args.dataset_type == DATASET_TYPE_EIGENTRACES:
+            DS = DatasetEigentraces(
+                train_test_split_target=args.train_test_split,
+                reconstruction=args.reconstruction,
+                dataset_m3d=args.dataset_m3d,
+                eigenworms=args.eigenworms,
+                n_components=args.n_components,
+                smoothing_window=args.smoothing_window
             )
         else:
-            raise RuntimeError(f'Unrecognised dataset_type={args.dataset_type}.')
+            common_args = dict(
+                train_test_split_target=args.train_test_split,
+                restrict_users=args.restrict_users,
+                restrict_strains=args.restrict_strains,
+                restrict_sexes=args.restrict_sexes,
+                restrict_ages=args.restrict_ages,
+                restrict_tags=args.restrict_tags,
+                restrict_concs=args.restrict_concs,
+                centre_3d_max_error=args.centre_3d_max_error,
+                exclude_experiments=args.exclude_experiments,
+                include_experiments=args.include_experiments,
+                exclude_trials=args.exclude_trials,
+                include_trials=args.include_trials,
+                min_trial_quality=args.min_trial_quality,
+            )
+
+            if args.dataset_type == DATASET_TYPE_2D_MIDLINE:
+                DS = DatasetMidline2D(**common_args)
+            elif args.dataset_type == DATASET_TYPE_SEGMENTATION_MASKS:
+                DS = DatasetSegmentationMasks(**common_args)
+            elif args.dataset_type == DATASET_TYPE_3D_MIDLINE:
+                DS = DatasetMidline3D(
+                    n_worm_points=args.n_worm_points,
+                    restrict_sources=args.restrict_sources,
+                    min_reconstruction_frames=args.min_reconstruction_frames,
+                    mf_depth=args.mf_depth,
+                    **common_args
+                )
+            elif args.dataset_type == DATASET_TYPE_EIGENTRACES:
+                DS = DatasetEigentraces(
+                    train_test_split_target=args.train_test_split,
+                    reconstruction=args.reconstruction,
+                    dataset_m3d=args.dataset_m3d,
+                    eigenworms=args.eigenworms,
+                    n_components=args.n_components,
+                    smoothing_window=args.smoothing_window
+                )
+            else:
+                raise RuntimeError(f'Unrecognised dataset_type={args.dataset_type}.')
 
         return DS
 
@@ -223,9 +243,9 @@ class Dataset(Document):
         arange = (amax - amin)
         return mean, arange
 
-    @property
-    def eigenworms(self) -> List[Eigenworms]:
-        return Eigenworms.objects(dataset=self).order_by('-updated')
+    # @property  todo: check if this is used anywhere and rename so it doesn't clash with DatasetEigentraces
+    # def eigenworms(self) -> List[Eigenworms]:
+    #     return Eigenworms.objects(dataset=self).order_by('-updated')
 
 
 class DatasetMidline2D(Dataset):
@@ -466,3 +486,139 @@ class DatasetMidline3D(Dataset):
     @property
     def n_reconstructions(self):
         return len(self.reconstructions)
+
+
+class DatasetEigentraces(Dataset):
+    dataset_m3d = ReferenceField('DatasetMidline3D')
+    reconstruction = ReferenceField('Reconstruction')
+    eigenworms = ReferenceField('Eigenworms', required=True)
+    n_components = IntField(required=True)
+    smoothing_window = IntField(required=True)
+    n_sequences = IntField(required=True)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.dataset_type = DATASET_TYPE_EIGENTRACES
+        self.X_train: List[np.ndarray] = None
+        self.X_test: List[np.ndarray] = None
+        self.metas = None
+
+    @queryset_manager
+    def find_from_args(doc_cls, queryset, args: DatasetArgs):
+        return queryset.filter(
+            dataset_type=DATASET_TYPE_EIGENTRACES,
+            train_test_split_target=args.train_test_split,
+            dataset_m3d=args.dataset_m3d,
+            reconstruction=args.reconstruction,
+            eigenworms=args.eigenworms,
+            n_components=args.n_components,
+            smoothing_window=args.smoothing_window,
+        )
+
+    @property
+    def data_path(self) -> Path:
+        dest = DATASETS_EIGENTRACES_PATH / f'{self.id}.npz'
+        return dest
+
+    @property
+    def metas_path(self) -> Path:
+        dest = DATASETS_EIGENTRACES_PATH / f'{self.id}.meta.json'
+        return dest
+
+    @property
+    def X_all(self) -> np.ndarray:
+        return np.concatenate([self.X_train, self.X_test])
+
+    def set_data(self, train: List[np.ndarray], test: List[np.ndarray] = None, metas: Dict[str, List[int]] = None):
+        """
+        Convenience method for setting the train and test data and automatically generating some stats.
+        """
+        if test is None:
+            test = np.zeros((0, *train.shape[1:]))
+        self.X_train = train
+        self.X_test = test
+        assert len(train) == len(test), 'Different number of train and test sequences!'
+        self.n_sequences = len(train)
+        self.size_train = sum([len(x) for x in train])
+        self.size_test = sum([len(x) for x in test])
+        self.size_all = self.size_train + self.size_test
+        if self.size_all > 0:
+            self.train_test_split_actual = self.size_train / self.size_all
+        self.metas = metas
+
+    def __getattribute__(self, k):
+        if k not in ['X_train', 'X_test', 'metas']:
+            return super().__getattribute__(k)
+
+        # Check if the variable has been defined or loaded already
+        v = super().__getattribute__(k)
+        if v is not None:
+            return v
+
+        if k == 'metas':
+            # Check for metadata first
+            try:
+                with open(self.metas_path, 'r') as f:
+                    metas = json.load(f)
+                    setattr(self, k, metas)
+                    return metas
+            except Exception:
+                return None
+
+        # If not then try to load it from the filesystem
+        try:
+            X = []
+            data = np.load(self.data_path)
+            for i in range(self.n_sequences):
+                X.append(data[f'{k}_{i:06d}'])
+            setattr(self, k, X)
+            return X
+        except Exception:
+            return None
+
+    def validate(self, clean=True):
+        super().validate(clean=clean)
+
+        # Validate the data
+        if self.reconstruction is None and self.dataset_m3d is None:
+            raise ValidationError('One of reconstruction or dataset_m3d must be defined.')
+        if self.reconstruction is not None and self.dataset_m3d is not None:
+            raise ValidationError('Both reconstruction and dataset_m3d cannot be defined.')
+        if self.X_train is None:
+            raise ValidationError('X_train not set.')
+        if type(self.X_train) != list:
+            raise ValidationError('X_train is not a list.')
+        for X in self.X_train:
+            if type(X) != np.ndarray:
+                raise ValidationError('One of the Xs in X_train is not a numpy array.')
+        if self.X_test is None:
+            raise ValidationError('X_test not set.')
+        if type(self.X_test) != list:
+            raise ValidationError('X_test is not a list.')
+        for X in self.X_test:
+            if type(X) != np.ndarray:
+                raise ValidationError('One of the Xs in X_test is not a numpy array.')
+
+    def save(self, *args, **kwargs):
+        res = super().save(*args, **kwargs)
+
+        # Store the metas and data on the hard drive
+        os.makedirs(self.data_path.parent, exist_ok=True)
+
+        # Metas
+        with open(self.metas_path, 'w') as f:
+            json.dump(self.metas, f, indent=2, separators=(',', ': '))
+
+        # Data
+        arrays = {}
+        for k in ['train', 'test']:
+            X = getattr(self, f'X_{k}')
+            for i in range(self.n_sequences):
+                arrays[f'X_{k}_{i:06d}'] = X[i]
+
+        np.savez_compressed(
+            self.data_path,
+            **arrays
+        )
+
+        return res
