@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Tuple
 
 import numpy as np
+import torch
 import torch.nn as nn
 
 
@@ -26,9 +27,11 @@ class BaseNet(nn.Module, ABC):
                 nn.init.xavier_uniform_(m.weight)
                 nn.init.constant_(m.bias, 0)
 
+    @torch.jit.ignore
     def get_n_params(self) -> int:
         return sum([p.data.nelement() for p in self.parameters()])
 
+    @torch.jit.ignore
     def calc_norms(self, p: int = 2) -> float:
         p_norms = {}
         for name, m in self.named_modules():

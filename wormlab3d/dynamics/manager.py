@@ -218,8 +218,8 @@ class Manager(BaseManager):
             X0_duration=self.dataset_args.X0_duration,
             build_model=True
         )
-        logger.info(f'Instantiated full network with {full_net.get_n_params() / 1e6:.4f}M parameters.')
         full_net = torch.jit.script(full_net)
+        logger.info(f'Instantiated full network with {full_net.get_n_params() / 1e6:.4f}M parameters.')
         # logger.debug(f'----------- Network --------------\n\n{full_net}\n\n')
 
         return full_net, net_params
