@@ -233,7 +233,7 @@ class Manager(BaseManager):
         # Checkpoint every n epochs
         if self.runtime_args.cluster_every_n_epochs > 0 \
                 and self.checkpoint.epoch > 0 \
-                and self.checkpoint.epoch % self.runtime_args.checkpoint_every_n_epochs == 0:
+                and self.checkpoint.epoch % self.runtime_args.cluster_every_n_epochs == 0:
             self._cluster()
 
     def _process_batch(self, data: torch.Tensor) \
