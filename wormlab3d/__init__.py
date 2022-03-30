@@ -82,7 +82,7 @@ APP_PORT = os.getenv('APP_PORT')
 
 cwd = Path.cwd()
 dir_name = os.path.dirname(sys.argv[0]).replace(str(cwd), '').lstrip('/')
-SCRIPT_PATH = cwd / dir_name
+SCRIPT_PATH = (cwd / dir_name).resolve()
 LOGS_PATH = ROOT_PATH / 'logs' / SCRIPT_PATH.relative_to(ROOT_PATH) / Path(sys.argv[0]).stem
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 WRITE_LOG_FILES = os.getenv('WRITE_LOG_FILES', False)
