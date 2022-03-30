@@ -13,13 +13,13 @@ class DynamicsClustererNet(BaseNet):
             input_shape: Tuple[int],
             output_shape: Tuple[int],
             classifier_net: BaseNet,
-            dynamics_nets: nn.ModuleList,
+            dynamics_net: BaseNet,
             X0_duration: int,
             build_model: bool = True,
     ):
         super().__init__(input_shape, output_shape)
         self.classifier_net = classifier_net
-        self.dynamics_nets = dynamics_nets
+        self.dynamics_net = dynamics_net
         self.X0_duration = X0_duration
         if build_model:
             self._build_model()
@@ -27,8 +27,7 @@ class DynamicsClustererNet(BaseNet):
 
     def _build_model(self):
         self.classifier_net._build_model()
-        for dn in self.dynamics_nets:
-            dn._build_model()
+        self.dynamics_net._build_model()
 
     def forward(
             self,
@@ -45,10 +44,6 @@ class DynamicsClustererNet(BaseNet):
 
         # Simulate
         X0 = X[..., :self.X0_duration]
-        Ys = []
-        for dn in self.dynamics_nets:
-            Yi = dn.forward(X0)
-            Ys.append(Yi)
-        Y = torch.stack(Ys, dim=1)
+        Y = self.dynamics_net.forward(X0, Z)
 
         return Y, Z

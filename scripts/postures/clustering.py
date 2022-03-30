@@ -1,13 +1,10 @@
 import os
 from argparse import ArgumentParser
 from argparse import Namespace
-from typing import List, Tuple
 
 import matplotlib.gridspec as gridspec
 import numpy as np
 from matplotlib import pyplot as plt
-from matplotlib.axes import Axes
-from matplotlib.patches import Rectangle
 from scipy.cluster.hierarchy import fcluster
 from sklearn.manifold import TSNE
 
@@ -17,7 +14,7 @@ from wormlab3d.data.model import Reconstruction
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.postures.posture_clusters import get_posture_clusters
 from wormlab3d.postures.posture_distances import get_posture_distances
-from wormlab3d.toolkit.plot_utils import fancy_dendrogram
+from wormlab3d.toolkit.plot_utils import fancy_dendrogram, plot_reordered_distances, reorder_distance_correlations
 from wormlab3d.toolkit.util import print_args
 from wormlab3d.trajectories.cache import get_trajectory
 from wormlab3d.trajectories.pca import generate_or_load_pca_cache
@@ -49,58 +46,6 @@ def parse_args() -> Namespace:
     print_args(args)
 
     return args
-
-
-def _reorder_distance_correlations(
-        distances: np.ndarray,
-        clusters: np.ndarray,
-        order_by_size: bool = False
-) -> Tuple[np.ndarray, List[Rectangle], np.ndarray]:
-    """
-    Reorder the distance correlations.
-    """
-    cluster_nums, counts = np.unique(clusters, return_counts=True)
-    sorted_idxs = np.argsort(counts)[::-1]
-    sorted_cluster_nums = cluster_nums[sorted_idxs]
-    reordered_distances = np.zeros_like(distances)
-    all_idxs = []
-    squares = []
-    block_idx = 0
-    for i in range(len(cluster_nums)):
-        if order_by_size:
-            cluster_num = sorted_cluster_nums[i]
-        else:
-            cluster_num = cluster_nums[i]
-        idxs = (clusters == cluster_num).nonzero()[0]
-        cluster_size = len(idxs)
-        reordered_distances[block_idx:(block_idx + cluster_size)] = distances[idxs].copy()
-        all_idxs.append(idxs)
-        sqr = Rectangle((block_idx - 0.5, block_idx - 0.5), cluster_size, cluster_size,
-                        linewidth=0.5, edgecolor='r', linestyle='--', facecolor='none')
-        squares.append(sqr)
-        block_idx += cluster_size
-
-    # Reorder columns
-    all_idxs = np.concatenate(all_idxs)
-    reordered_distances[:, :] = reordered_distances[:, all_idxs]
-
-    return reordered_distances, squares, all_idxs
-
-
-def _plot_reordered_distances(ax: Axes, distances: np.ndarray, clusters: np.ndarray):
-    """
-    Reorder and plot the distances.
-    """
-    cluster_nums = np.unique(clusters)
-    reordered_distances, squares, all_idxs = _reorder_distance_correlations(distances, clusters)
-
-    # Plot reordered distances
-    ax.matshow(reordered_distances, cmap=plt.cm.Blues)
-    ax.set_title(f'Number of clusters = {len(cluster_nums)}.')
-
-    # Show clusters on plot
-    for sqr in squares:
-        ax.add_patch(sqr)
 
 
 def cluster_postures(
@@ -179,7 +124,7 @@ def cluster_postures(
             logger.info(f'Clustering into {n_clusters} clusters.')
             clusters = fcluster(L, n_clusters, criterion='maxclust')
             ax = plt.subplot(gs[row_idx + 1, col_idx])
-            _plot_reordered_distances(ax, distances, clusters)
+            plot_reordered_distances(ax, distances, clusters)
             ax.axis('off')
             cluster_idx += 1
 
@@ -243,11 +188,11 @@ def cluster_postures_basic(
     # Do clustering
     logger.info(f'Clustering into {args.n_clusters} clusters.')
     clusters = fcluster(L, args.n_clusters, criterion='maxclust')
-    reordered_distances, squares, all_idxs = _reorder_distance_correlations(distances, clusters, order_by_size=True)
+    reordered_distances, squares, all_idxs = reorder_distance_correlations(distances, clusters, order_by_size=True)
 
     # Plot reordered distances
     fig, ax = plt.subplots(1, figsize=(2, 2))
-    ax.matshow(np.log(1+reordered_distances/reordered_distances.mean()), cmap=plt.cm.Blues)
+    ax.matshow(np.log(1 + reordered_distances / reordered_distances.mean()), cmap=plt.cm.Blues)
 
     # Show clusters on plot
     for sqr in squares:

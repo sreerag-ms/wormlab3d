@@ -264,7 +264,7 @@ class NetworkParametersRotAE(NetworkParameters):
 class NetworkParametersDynamicsClusterer(NetworkParameters):
     classifier_net = ReferenceField(NetworkParameters, required=True)
     dynamics_net = ReferenceField(NetworkParameters, required=True)
-    n_classes = IntField(required=True)
+    latent_size = IntField(required=True)
 
     def instantiate_network(self, build_model: bool = True) -> DynamicsClustererNet:
         pass

@@ -19,6 +19,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from wormlab3d import logger, LOGS_PATH, ROOT_PATH, START_TIMESTAMP
+from wormlab3d.data.model import Dataset
 from wormlab3d.data.model.checkpoint import Checkpoint
 from wormlab3d.data.model.network_parameters import *
 from wormlab3d.nn.args import DatasetArgs, NetworkArgs, OptimiserArgs, RuntimeArgs
@@ -88,7 +89,7 @@ class Manager:
                / f'{checkpoint.dataset.created:%Y%m%d_%H:%M}_{checkpoint.dataset.id}' \
                / f'{checkpoint.network_params.created:%Y%m%d_%H:%M}_{checkpoint.network_params.id}'
 
-    def _init_dataset(self):
+    def _init_dataset(self) -> Dataset:
         """
         Load or create the dataset.
         """
@@ -108,7 +109,7 @@ class Manager:
         return ds
 
     @abstractmethod
-    def _generate_dataset(self):
+    def _generate_dataset(self) -> Dataset:
         pass
 
     def _init_data_loaders(self) -> Tuple[DataLoader, DataLoader]:
@@ -468,7 +469,7 @@ class Manager:
             self.tb_logger.add_graph(self.net, [dummy_input, ], verbose=False)
             self.tb_logger.flush()
 
-    def train(self, n_epochs):
+    def train(self, n_epochs: int):
         """
         Train the network for a number of epochs.
         """
@@ -526,7 +527,7 @@ class Manager:
                     and (epoch + 1) % self.runtime_args.checkpoint_every_n_epochs == 0:
                 self.save_checkpoint()
 
-    def _train_epoch(self, final_epoch):
+    def _train_epoch(self, final_epoch: int):
         """
         Train for a single epoch
         """

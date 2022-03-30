@@ -7,13 +7,13 @@ from wormlab3d.toolkit.util import str2bool
 class DynamicsNetworkArgs(NetworkArgs):
     def __init__(
             self,
-            n_classes: int,
+            latent_size: int,
             args_classifier: NetworkArgs,
             args_dynamics: NetworkArgs,
             **kwargs
     ):
         super().__init__(base_net='dynamics_clusterer', **kwargs)
-        self.n_classes = n_classes
+        self.latent_size = latent_size
         self.args_classifier = args_classifier
         self.args_dynamics = args_dynamics
 
@@ -28,8 +28,8 @@ class DynamicsNetworkArgs(NetworkArgs):
                            help='Load a network by its database id.')
         group.add_argument('--load-net', type=str2bool, default=True,
                            help='Try to load an existing network if available matching the given parameters.')
-        group.add_argument('--n-classes', type=int, default=4,
-                           help='Number of classes.')
+        group.add_argument('--latent-size', type=int, default=4,
+                           help='Latent encoding dimension.')
 
         subparsers = parser.add_subparsers(title='Networks', dest='networks',
                                            help='Define the different networks: classifier and dynamics.')
@@ -62,5 +62,5 @@ class DynamicsNetworkArgs(NetworkArgs):
             hyperparameters=hyperparameters,
             args_classifier=net_args['classifier'],
             args_dynamics=net_args['dynamics'],
-            n_classes=args.n_classes
+            latent_size=args.latent_size
         )

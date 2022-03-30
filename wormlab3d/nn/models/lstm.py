@@ -33,11 +33,11 @@ class LSTMNet(BaseNet):
         """
         Configure the model with layers of LSTM cells feeding into a linear layer.
         """
-        n_features, _ = self.input_shape
+        n_features, latent_size = self.input_shape
 
         # Configure LSTM cells
         cells = nn.ModuleList()
-        input_size = n_features
+        input_size = n_features + latent_size
         for i, n in enumerate(self.layers_config):
             cell = nn.LSTMCell(input_size=input_size, hidden_size=n, bias=True)
             input_size = n
@@ -47,10 +47,11 @@ class LSTMNet(BaseNet):
         # Configure linear output layer
         self.output_layer = nn.Linear(input_size, n_features)
 
-    def forward(self, X: torch.Tensor) -> torch.Tensor:
+    def forward(self, X: torch.Tensor, Z: torch.Tensor) -> torch.Tensor:
         """
         Run the input data through the LSTM network and continue using the network outputs
-        as new inputs until the required output size is reached.
+        as new inputs until the required output size is reached. Context Z is provided along
+        with the input at each time step.
         """
         bs, Nc, T_data = X.shape
         device = X.device
@@ -71,9 +72,9 @@ class LSTMNet(BaseNet):
         for t in range(T - 1):
             if t < T_data:
                 X_t = X[..., t]
-                input_t = X_t
+                input_t = torch.cat([X_t, Z], dim=1)
             else:
-                input_t = output
+                input_t = torch.cat([output, Z], dim=1)
             for i, cell in enumerate(self.cells):
                 h_t[i], c_t[i] = cell(input_t, (h_t[i], c_t[i]))
                 input_t = h_t[i]

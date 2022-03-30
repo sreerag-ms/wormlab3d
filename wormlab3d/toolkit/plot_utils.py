@@ -1,4 +1,5 @@
 from typing import List
+from typing import Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,6 +9,7 @@ from matplotlib.axes import Axes
 from matplotlib.backend_bases import Event
 from matplotlib.collections import PathCollection
 from matplotlib.image import AxesImage
+from matplotlib.patches import Rectangle
 from matplotlib.widgets import Slider
 from scipy.cluster.hierarchy import dendrogram
 
@@ -315,3 +317,55 @@ def fancy_dendrogram(ax: Axes, *args, **kwargs) -> dict:
             plt.axhline(y=max_d, c='k', linestyle='--')
 
     return ddata
+
+
+def reorder_distance_correlations(
+        distances: np.ndarray,
+        clusters: np.ndarray,
+        order_by_size: bool = False
+) -> Tuple[np.ndarray, List[Rectangle], np.ndarray]:
+    """
+    Reorder the distance correlations.
+    """
+    cluster_nums, counts = np.unique(clusters, return_counts=True)
+    sorted_idxs = np.argsort(counts)[::-1]
+    sorted_cluster_nums = cluster_nums[sorted_idxs]
+    reordered_distances = np.zeros_like(distances)
+    all_idxs = []
+    squares = []
+    block_idx = 0
+    for i in range(len(cluster_nums)):
+        if order_by_size:
+            cluster_num = sorted_cluster_nums[i]
+        else:
+            cluster_num = cluster_nums[i]
+        idxs = (clusters == cluster_num).nonzero()[0]
+        cluster_size = len(idxs)
+        reordered_distances[block_idx:(block_idx + cluster_size)] = distances[idxs].copy()
+        all_idxs.append(idxs)
+        sqr = Rectangle((block_idx - 0.5, block_idx - 0.5), cluster_size, cluster_size,
+                        linewidth=0.5, edgecolor='r', linestyle='--', facecolor='none')
+        squares.append(sqr)
+        block_idx += cluster_size
+
+    # Reorder columns
+    all_idxs = np.concatenate(all_idxs)
+    reordered_distances[:, :] = reordered_distances[:, all_idxs]
+
+    return reordered_distances, squares, all_idxs
+
+
+def plot_reordered_distances(ax: Axes, distances: np.ndarray, clusters: np.ndarray):
+    """
+    Reorder and plot a distances matrix.
+    """
+    cluster_nums = np.unique(clusters)
+    reordered_distances, squares, all_idxs = reorder_distance_correlations(distances, clusters)
+
+    # Plot reordered distances
+    ax.matshow(reordered_distances, cmap=plt.cm.Blues)
+    ax.set_title(f'Number of clusters = {len(cluster_nums)}.')
+
+    # Show clusters on plot
+    for sqr in squares:
+        ax.add_patch(sqr)

@@ -67,6 +67,7 @@ class OutputLayer(nn.Module):
         self.linear = nn.Linear(n_channels_in, int(np.prod(output_shape)))
 
     def forward(self, x):
+        bs = x.shape[0]
         x = self.bn(x)
         x = self.relu(x)
         x = self.pool(x)
@@ -74,5 +75,5 @@ class OutputLayer(nn.Module):
         x = self.linear(x)
         # todo: used to be *self.output_shape but that breaks jit.
         # todo: this change might break other things though..!
-        x = x.reshape(x.shape[0], self.output_shape[0])
+        x = x.reshape(bs, self.output_shape[0])
         return x
