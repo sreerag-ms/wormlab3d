@@ -47,6 +47,9 @@ class LSTMNet(BaseNet):
         # Configure linear output layer
         self.output_layer = nn.Linear(input_size, n_features)
 
+        # Dropout between LSTM layers
+        self.dropout = nn.Dropout(self.dropout_prob, inplace=True)
+
     def forward(self, X: torch.Tensor, Z: torch.Tensor) -> torch.Tensor:
         """
         Run the input data through the LSTM network and continue using the network outputs
@@ -77,7 +80,10 @@ class LSTMNet(BaseNet):
                 input_t = torch.cat([output, Z], dim=1)
             for i, cell in enumerate(self.cells):
                 h_t[i], c_t[i] = cell(input_t, (h_t[i], c_t[i]))
-                input_t = h_t[i]
+                if i < len(self.cells) - 1:
+                    input_t = self.dropout(h_t[i])
+                else:
+                    input_t = h_t[i]
             output = self.output_layer(input_t)
             outputs.append(output)
         outputs = torch.stack(outputs, dim=2)
