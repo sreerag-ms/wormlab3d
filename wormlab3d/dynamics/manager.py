@@ -256,9 +256,11 @@ class Manager(BaseManager):
         Z_sm = F.softmax(Z, dim=-1)
         loss_com = (0.1 + Z_sm * 0.9) * loss_dyn
 
-        # Add a classification loss based on which was the best predicting model
-        targets = loss_dyn.argmin(dim=-1)
-        loss_pred = F.cross_entropy(Z, targets, reduction='mean')
+        # Add a classification loss to predict the accuracy distribution across the models
+        # targets = loss_dyn.argmin(dim=-1)
+        # loss_pred = F.cross_entropy(Z, targets, reduction='mean')
+        targets = 1 - F.softmax(loss_dyn, dim=-1)
+        loss_pred = F.kl_div(Z_sm, targets, reduction='batchmean')
 
         # Log losses
         for i in range(self.net_args.n_classes):
