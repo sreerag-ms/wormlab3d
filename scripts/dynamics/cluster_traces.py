@@ -133,11 +133,12 @@ def make_cluster_plots():
     X[:, 1::2] = X2[..., 1]
     logger.info(f'Trajectory trace shape: {X.shape}.')
 
-    # Standardize data
-    X_mean = X.mean(axis=0)
-    X -= X_mean
-    X_std = X.std(axis=0)
-    X /= X_std
+    # Standardize data if required
+    if dataset_args.standardise:
+        X_mean = X.mean(axis=0)
+        X -= X_mean
+        X_std = X.std(axis=0)
+        X /= X_std
 
     # Slide along sequence with 3/4 overlap collecting all the data into batches.
     start = 0
@@ -180,7 +181,7 @@ def _plot_cluster_trace(
         args: Namespace,
         common_args: dict,
         checkpoint: Checkpoint,
-        L,
+        L: np.ndarray,
 ):
     reconstruction = Reconstruction.objects.get(id=args.reconstruction)
     X_traj, meta = get_trajectory(**common_args)
@@ -251,6 +252,7 @@ def _plot_cluster_trace(
     if save_plots:
         path = LOGS_PATH / f'{START_TIMESTAMP}_cluster_traces' \
                            f'_cp={checkpoint.id}' \
+                           f'_d={args.args.distance_metric}' \
                            f'_l={args.linkage_method}' \
                            f'_c={args.min_clusters}-{args.max_clusters}' \
                            f'_r={reconstruction.id}' \
@@ -316,7 +318,7 @@ def _plot_matrices(
     if save_plots:
         path = LOGS_PATH / f'{START_TIMESTAMP}_distances' \
                            f'_cp={checkpoint.id}' \
-                           f'_l={args.linkage_method}' \
+                           f'_d={args.args.distance_metric}' \
                            f'_c={args.min_clusters}-{args.max_clusters}' \
                            f'_r={args.reconstruction}' \
                            f'_f={args.start_frame}-{args.end_frame}' \
