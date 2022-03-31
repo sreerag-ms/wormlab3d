@@ -112,7 +112,8 @@ class Dataset(Document):
                 dataset_m3d=args.dataset_m3d,
                 eigenworms=args.eigenworms,
                 n_components=args.n_components,
-                smoothing_window=args.smoothing_window
+                smoothing_window=args.smoothing_window,
+                standardise=args.standardise
             )
         else:
             common_args = dict(
@@ -494,6 +495,7 @@ class DatasetEigentraces(Dataset):
     eigenworms = ReferenceField('Eigenworms', required=True)
     n_components = IntField(required=True)
     smoothing_window = IntField(required=True)
+    standardise = BooleanField(default=True)
     n_sequences = IntField(required=True)
 
     def __init__(self, *args, **kwargs):
@@ -513,6 +515,7 @@ class DatasetEigentraces(Dataset):
             eigenworms=args.eigenworms,
             n_components=args.n_components,
             smoothing_window=args.smoothing_window,
+            standardise=args.standardise,
         )
 
     @property

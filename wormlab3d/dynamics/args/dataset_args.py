@@ -19,6 +19,7 @@ class DynamicsDatasetArgs(BaseArgs):
             eigenworms: str = None,
             n_components: int = 10,
             smoothing_window: int = 25,
+            standardise: bool = True,
 
             sample_duration: int = 100,
             X0_duration: int = 10,
@@ -41,6 +42,7 @@ class DynamicsDatasetArgs(BaseArgs):
         self.eigenworms = eigenworms
         self.n_components = n_components
         self.smoothing_window = smoothing_window
+        self.standardise = standardise
 
         self.sample_duration = sample_duration
         self.X0_duration = X0_duration
@@ -70,6 +72,8 @@ class DynamicsDatasetArgs(BaseArgs):
                            help='Number of eigenworm components to use. Default=10.')
         group.add_argument('--smoothing-window', type=int, default=25,
                            help='Number of frames to smooth the data by. Default=25.')
+        group.add_argument('--standardise', type=str2bool, default=True,
+                           help='Standardise the component traces (subtract means and divide by stds).')
 
         group.add_argument('--sample-duration', type=int, default=100,
                            help='Number of frames to use per sample. Default=100.')
@@ -85,6 +89,7 @@ class DynamicsDatasetArgs(BaseArgs):
             f'Eigenworms={self.eigenworms}.',
             f'Num components={self.n_components}.',
             f'Smoothing window={self.smoothing_window}.',
+            f'Standardise={self.standardise}.',
             f'Sample duration={self.sample_duration}.',
             f'X0 duration={self.X0_duration}.',
         ]

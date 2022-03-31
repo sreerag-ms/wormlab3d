@@ -123,10 +123,11 @@ class Manager(BaseManager):
             logger.info(f'Trajectory trace shape: {X.shape}.')
 
             # Standardize data
-            X_mean = X[0:T_train, :].mean(axis=0)
-            X -= X_mean
-            X_std = X[0:T_train, :].std(axis=0)
-            X /= X_std
+            if args.standardise:
+                X_mean = X[0:T_train, :].mean(axis=0)
+                X -= X_mean
+                X_std = X[0:T_train, :].std(axis=0)
+                X /= X_std
 
             # Split
             X_train.append(X[:T_train])
