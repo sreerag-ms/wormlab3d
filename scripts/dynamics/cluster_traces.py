@@ -92,7 +92,10 @@ def make_cluster_plots():
         resume_from=checkpoint.id,
         cpu_only=True
     )
-    dataset_args = DynamicsDatasetArgs(**checkpoint.dataset_args)
+    dataset_args = DynamicsDatasetArgs(**{
+        **checkpoint.dataset_args,
+        **{'load_dataset': True, 'dataset_id': checkpoint.dataset.id}
+    })
     net_args = DynamicsNetworkArgs(
         load=True,
         net_id=checkpoint.network_params.id,
@@ -252,7 +255,7 @@ def _plot_cluster_trace(
     if save_plots:
         path = LOGS_PATH / f'{START_TIMESTAMP}_cluster_traces' \
                            f'_cp={checkpoint.id}' \
-                           f'_d={args.args.distance_metric}' \
+                           f'_d={args.distance_metric}' \
                            f'_l={args.linkage_method}' \
                            f'_c={args.min_clusters}-{args.max_clusters}' \
                            f'_r={reconstruction.id}' \
@@ -318,7 +321,7 @@ def _plot_matrices(
     if save_plots:
         path = LOGS_PATH / f'{START_TIMESTAMP}_distances' \
                            f'_cp={checkpoint.id}' \
-                           f'_d={args.args.distance_metric}' \
+                           f'_d={args.distance_metric}' \
                            f'_c={args.min_clusters}-{args.max_clusters}' \
                            f'_r={args.reconstruction}' \
                            f'_f={args.start_frame}-{args.end_frame}' \
