@@ -13,6 +13,7 @@ from sklearn.decomposition import PCA
 from simple_worm.frame import FrameSequenceNumpy
 from simple_worm.plot3d import FrameArtist, Arrow3D
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
+from wormlab3d.data.model import Dataset, Reconstruction
 from wormlab3d.toolkit.plot_utils import tex_mode, equal_aspect_ratio
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
@@ -22,7 +23,7 @@ animate = True
 show_plots = False
 save_plots = True
 img_extension = 'png'
-fps = 25
+fps_anim = 25
 playback_speed = 10
 n_revolutions = 0.5
 
@@ -37,8 +38,10 @@ tex_mode()
 
 def get_trajectory(args: Namespace):
     X_slice = get_trajectory_from_args(args)
+    trajectory_point = args.trajectory_point
     args.trajectory_point = None
     X_full = get_trajectory_from_args(args)
+    args.trajectory_point = trajectory_point
     return X_full, X_slice
 
 
@@ -168,7 +171,7 @@ def plot_manoeuvre_3d(
             update,
             frames=frame_nums,
             blit=True,
-            interval=1 / fps
+            interval=1 / fps_anim
         )
 
     if save_plots:
@@ -186,7 +189,7 @@ def plot_manoeuvre_3d(
             )
             save_path = path + '.mp4'
             logger.info(f'Saving animation to {save_path}.')
-            ani.save(save_path, writer='ffmpeg', fps=fps, metadata=metadata)
+            ani.save(save_path, writer='ffmpeg', fps=fps_anim, metadata=metadata)
         else:
             save_path = path + f'.{img_extension}'
             logger.info(f'Saving plot to {save_path}.')
@@ -218,6 +221,8 @@ def get_manoeuvres(
         prev_end_idx = reversal_props['left_bases'][i]
         prev_start_idx = max(0, prev_end_idx - window_size)
         X_prev = X_slice[prev_start_idx:prev_end_idx]
+        if X_prev.shape[0] < 10:
+            continue
         pca_prev = PCA(svd_solver='full', copy=True, n_components=3)
         pca_prev.fit(X_prev)
 
@@ -225,8 +230,15 @@ def get_manoeuvres(
         next_start_idx = reversal_props['right_bases'][i] - 1
         next_end_idx = next_start_idx + window_size
         X_next = X_slice[next_start_idx:next_end_idx]
+        if X_next.shape[0] < 10:
+            continue
         pca_next = PCA(svd_solver='full', copy=True, n_components=3)
         pca_next.fit(X_next)
+
+        # Calculate the angle between planes
+        n1 = pca_prev.components_[2]
+        n2 = pca_next.components_[2]
+        angle = calculate_angle(n1, n2)
 
         manoeuvres.append({
             'centre_idx': reversal_centre_idx,
@@ -236,10 +248,20 @@ def get_manoeuvres(
             'X_next': X_next,
             'pca_prev': pca_prev,
             'pca_next': pca_next,
-            'reversal_duration': reversal_props['widths'][i]
+            'reversal_duration': reversal_props['widths'][i],
+            'angle': angle
         })
 
     return manoeuvres
+
+
+def get_forward_durations(
+        X_full: np.ndarray,
+        min_forward_frames: int = 25,
+) -> np.ndarray:
+    signed_speeds = calculate_speeds(X_full, signed=True)
+    _, forward_props = find_peaks(signed_speeds > 0, width=min_forward_frames)
+    return forward_props['widths']
 
 
 def plot_all_manoeuvres():
@@ -312,9 +334,7 @@ def plot_angles_and_durations():
     angles = []
     durations = []
     for i, m in enumerate(manoeuvres):
-        n1 = m['pca_prev'].components_[2]
-        n2 = m['pca_next'].components_[2]
-        angles.append(calculate_angle(n1, n2))
+        angles.append(m['angle'])
         durations.append(m['reversal_duration'] / 25)
 
     fig, axes = plt.subplots(3, figsize=(6, 6))
@@ -381,9 +401,7 @@ def plot_angles_and_durations_varying_parameters():
             angles = []
             durations = []
             for i, m in enumerate(manoeuvres):
-                n1 = m['pca_prev'].components_[0]
-                n2 = m['pca_next'].components_[0]
-                angles.append(calculate_angle(n1, n2))
+                angles.append(m['angle'])
                 durations.append(m['reversal_duration'] / 25)
 
             ax = axes[row_idx, col_idx]
@@ -459,6 +477,127 @@ def plot_manoeuvre_rate():
         plt.show()
 
 
+def plot_dataset_distributions():
+    """
+    Plot the distributions for a dataset.
+    """
+    args = get_args()
+
+    # Get dataset
+    assert args.dataset is not None
+    ds = Dataset.objects.get(id=args.dataset)
+
+    # Unset trial and midline source args
+    args.trial = None
+    args.midline3d_source = None
+    args.midline3d_source_file = None
+
+    angles = {}
+    durations_fwd = {}
+    durations_bck = {}
+    angles_all = []
+    durations_fwd_all = []
+    durations_bck_all = []
+
+    # Loop over reconstructions
+    for r_ref in ds.reconstructions:
+        reconstruction = Reconstruction.objects.get(id=r_ref.id)
+        args.reconstruction = reconstruction.id
+        fps = reconstruction.trial.fps
+
+        X_full, X_slice = get_trajectory(args)
+        manoeuvres = get_manoeuvres(
+            X_full,
+            X_slice,
+            min_reversal_frames=args.min_reversal_frames,
+            window_size=args.manoeuvre_window
+        )
+
+        # Loop over manoeuvres
+        durations_fwd_r = get_forward_durations(X_full, min_forward_frames=args.min_forward_frames) / fps
+        angles_r = []
+        durations_bck_r = []
+        for i, m in enumerate(manoeuvres):
+            angles_r.append(m['angle'])
+            durations_bck_r.append(m['reversal_duration'] / fps)
+
+        # Collate
+        c = reconstruction.trial.experiment.concentration
+        if c not in angles:
+            angles[c] = []
+        if c not in durations_fwd:
+            durations_fwd[c] = []
+        if c not in durations_bck:
+            durations_bck[c] = []
+        angles[c].extend(angles_r)
+        durations_fwd[c].extend(durations_fwd_r)
+        durations_bck[c].extend(durations_bck_r)
+        angles_all.extend(angles_r)
+        durations_fwd_all.extend(durations_fwd_r)
+        durations_bck_all.extend(durations_bck_r)
+
+    # Sort by concentration
+    angles = {k: v for k, v in sorted(list(angles.items()))}
+    durations_fwd = {k: v for k, v in sorted(list(durations_fwd.items()))}
+    durations_bck = {k: v for k, v in sorted(list(durations_bck.items()))}
+    concs = [c for c, _ in angles.items()]
+
+    # Set up plots
+    n_rows = 1 + len(angles)
+    fig, axes = plt.subplots(n_rows, 3, figsize=(14, n_rows * 3))
+    fig.suptitle(f'Min reversal frames={args.min_reversal_frames}. ')
+
+    # First row shows the collated results
+    ax = axes[0, 0]
+    ax.hist(angles_all, bins=50, density=False, facecolor='green', alpha=0.75)
+    ax.set_ylabel('Count')
+    ax.set_xlabel('Angle')
+
+    ax = axes[0, 1]
+    ax.hist(durations_fwd_all, bins=50, density=False, facecolor='green', alpha=0.75)
+    ax.set_ylabel('Count')
+    ax.set_xlabel('Forward duration (s)')
+
+    ax = axes[0, 2]
+    ax.hist(durations_bck_all, bins=50, density=False, facecolor='green', alpha=0.75)
+    ax.set_ylabel('Count')
+    ax.set_xlabel('Backward duration (s)')
+
+    for i, c in enumerate(concs):
+        ax = axes[i + 1, 0]
+        ax.set_title(f'Concentration = {c}')
+        ax.hist(angles[c], bins=50, density=False, facecolor='green', alpha=0.75)
+        ax.set_ylabel('Count')
+        ax.set_xlabel('Angle')
+
+        ax = axes[i + 1, 1]
+        ax.set_title(f'Concentration = {c}')
+        ax.hist(durations_fwd[c], bins=50, density=False, facecolor='green', alpha=0.75)
+        ax.set_ylabel('Count')
+        ax.set_xlabel('Forward duration (s)')
+
+        ax = axes[i + 1, 2]
+        ax.set_title(f'Concentration = {c}')
+        ax.hist(durations_bck[c], bins=50, density=False, facecolor='green', alpha=0.75)
+        ax.set_ylabel('Count')
+        ax.set_xlabel('Backward duration (s)')
+
+    fig.tight_layout()
+
+    if save_plots:
+        fn = START_TIMESTAMP \
+             + f'_durations_and_angles' \
+               f'_ds={args.dataset}' \
+               f'_rev={args.min_reversal_frames}' \
+               f'_fwd={args.min_forward_frames}'
+        save_path = LOGS_PATH / (fn + f'.{img_extension}')
+        logger.info(f'Saving plot to {save_path}.')
+        plt.savefig(save_path)
+
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
@@ -467,4 +606,5 @@ if __name__ == '__main__':
     # plot_all_manoeuvres()
     # plot_angles_and_durations()
     # plot_angles_and_durations_varying_parameters()
-    plot_manoeuvre_rate()
+    # plot_manoeuvre_rate()
+    plot_dataset_distributions()
