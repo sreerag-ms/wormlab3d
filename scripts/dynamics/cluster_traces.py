@@ -143,6 +143,29 @@ def make_cluster_plots():
         X_std = X.std(axis=0)
         X /= X_std
 
+    # Include nonplanarity
+    if dataset_args.include_np:
+        logger.info('Fetching planarities.')
+        pcas, meta = generate_or_load_pca_cache(**common_args, window_size=1)
+        r = pcas.explained_variance_ratio.T
+        nonp = r[2] / np.sqrt(r[1] * r[0])
+
+        # Nonplanarity goes from [0,1] so standardise with data-independent scaling to [-1,1]
+        if dataset_args.standardise:
+            nonp = nonp * 2 - 1
+        X = np.concatenate([nonp[:, None], X], axis=1)
+
+    # Include speed
+    if dataset_args.include_speed:
+        logger.info('Calculating speeds.')
+        X_traj, meta = get_trajectory(**common_args)
+        speeds = calculate_speeds(X_traj, signed=True)
+
+        # Standardise with data-independent scaling factor of 100
+        if dataset_args.standardise:
+            speeds *= 100
+        X = np.concatenate([speeds[:, None], X], axis=1)
+
     # Slide along sequence with 3/4 overlap collecting all the data into batches.
     start = 0
     ws = manager.dataset_args.sample_duration

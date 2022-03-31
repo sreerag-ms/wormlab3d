@@ -112,8 +112,10 @@ class Dataset(Document):
                 dataset_m3d=args.dataset_m3d,
                 eigenworms=args.eigenworms,
                 n_components=args.n_components,
+                include_speed=args.include_speed,
+                include_np=args.include_np,
                 smoothing_window=args.smoothing_window,
-                standardise=args.standardise
+                standardise=args.standardise,
             )
         else:
             common_args = dict(
@@ -143,15 +145,6 @@ class Dataset(Document):
                     min_reconstruction_frames=args.min_reconstruction_frames,
                     mf_depth=args.mf_depth,
                     **common_args
-                )
-            elif args.dataset_type == DATASET_TYPE_EIGENTRACES:
-                DS = DatasetEigentraces(
-                    train_test_split_target=args.train_test_split,
-                    reconstruction=args.reconstruction,
-                    dataset_m3d=args.dataset_m3d,
-                    eigenworms=args.eigenworms,
-                    n_components=args.n_components,
-                    smoothing_window=args.smoothing_window
                 )
             else:
                 raise RuntimeError(f'Unrecognised dataset_type={args.dataset_type}.')
@@ -494,6 +487,8 @@ class DatasetEigentraces(Dataset):
     reconstruction = ReferenceField('Reconstruction')
     eigenworms = ReferenceField('Eigenworms', required=True)
     n_components = IntField(required=True)
+    include_speed = BooleanField(default=False)
+    include_np = BooleanField(default=False)
     smoothing_window = IntField(required=True)
     standardise = BooleanField(default=True)
     n_sequences = IntField(required=True)
@@ -514,6 +509,8 @@ class DatasetEigentraces(Dataset):
             reconstruction=args.reconstruction,
             eigenworms=args.eigenworms,
             n_components=args.n_components,
+            include_speed=args.include_speed,
+            include_np=args.include_np,
             smoothing_window=args.smoothing_window,
             standardise=args.standardise,
         )

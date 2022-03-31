@@ -23,6 +23,8 @@ from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.toolkit.plot_utils import fancy_dendrogram, plot_reordered_distances
 from wormlab3d.toolkit.util import is_bad, to_numpy
 from wormlab3d.trajectories.cache import get_trajectory
+from wormlab3d.trajectories.pca import generate_or_load_pca_cache
+from wormlab3d.trajectories.util import calculate_speeds
 
 
 # torch.autograd.set_detect_anomaly(True)
@@ -46,16 +48,16 @@ class Manager(BaseManager):
     @property
     def input_shape(self) -> Tuple[int]:
         """
-        Number of components * 2 (real and imaginary) x Sample duration.
+        Number of components * 2 (real and imaginary) + 1 (if include speed) + 1 (if include np) x Sample duration.
         """
-        return self.dataset_args.n_components * 2, self.dataset_args.sample_duration
+        return self.dataset_args.n_features, self.dataset_args.sample_duration
 
     @property
     def output_shape(self) -> Tuple[int]:
         """
-        Number of components * 2 (real and imaginary) x Sample duration.
+        Number of components * 2 (real and imaginary) + 1 (if include speed) + 1 (if include np) x Sample duration.
         """
-        return self.dataset_args.n_components * 2, self.dataset_args.sample_duration
+        return self.dataset_args.n_features, self.dataset_args.sample_duration
 
     def _init_dataset(self) -> DatasetEigentraces:
         """
@@ -96,14 +98,13 @@ class Manager(BaseManager):
         X_test = []
         for reconstruction_id in reconstruction_ids:
             logger.info(f'Generating eigentrace for reconstruction = {reconstruction_id}.')
+            common_args = {
+                'reconstruction_id': args.reconstruction,
+                'smoothing_window': args.smoothing_window,
+            }
 
             # Get natural frame trajectory
-            Z, meta = get_trajectory(
-                reconstruction_id=reconstruction_id,
-                smoothing_window=args.smoothing_window,
-                natural_frame=True,
-                rebuild_cache=False
-            )
+            Z, meta = get_trajectory(**common_args, natural_frame=True)
 
             # Convert to eigenworms
             X = self.ew.transform(np.array(Z))
@@ -129,6 +130,29 @@ class Manager(BaseManager):
                 X_std = X[0:T_train, :].std(axis=0)
                 X /= X_std
 
+            # Include nonplanarity
+            if args.include_np:
+                logger.info('Fetching planarities.')
+                pcas, meta = generate_or_load_pca_cache(**common_args, window_size=1)
+                r = pcas.explained_variance_ratio.T
+                nonp = r[2] / np.sqrt(r[1] * r[0])
+
+                # Nonplanarity goes from [0,1] so standardise with data-independent scaling to [-1,1]
+                if args.standardise:
+                    nonp = nonp * 2 - 1
+                X = np.concatenate([nonp[:, None], X], axis=1)
+
+            # Include speed
+            if args.include_speed:
+                logger.info('Calculating speeds.')
+                X_traj, meta = get_trajectory(**common_args)
+                speeds = calculate_speeds(X_traj, signed=True)
+
+                # Standardise with data-independent scaling factor of 100
+                if args.standardise:
+                    speeds *= 100
+                X = np.concatenate([speeds[:, None], X], axis=1)
+
             # Split
             X_train.append(X[:T_train])
             X_test.append(X[T_train:])
@@ -153,7 +177,7 @@ class Manager(BaseManager):
         Initialise the network which consists of 2 subnetworks.
         """
         latent_size = self.net_args.latent_size
-        sample_shape = (self.dataset_args.n_components * 2, self.dataset_args.sample_duration)
+        sample_shape = (self.dataset_args.n_features, self.dataset_args.sample_duration)
         latent_shape = (latent_size,)
         output_shape = (latent_size,) + sample_shape
 
@@ -166,10 +190,10 @@ class Manager(BaseManager):
             build_model=False
         )
 
-        # Initialise the dynamics networks - 1 per class
+        # Initialise the dynamics network
         dynamics_net, dynamics_net_params = super()._init_network(
             net_args=self.net_args.args_dynamics,
-            input_shape=(self.dataset_args.n_components * 2, latent_size),
+            input_shape=(self.dataset_args.n_features, latent_size),
             output_shape=sample_shape,
             prefix='dynamics',
             build_model=False
@@ -395,7 +419,7 @@ class Manager(BaseManager):
         """
         bs = self.runtime_args.batch_size
         n_components = self.dataset_args.n_components
-        n_rows = n_components * 2
+        n_rows = self.dataset_args.n_features
         n_examples = min(self.runtime_args.plot_n_examples, bs)
         idxs = np.random.choice(bs, n_examples, replace=False)
         ts = np.arange(self.dataset_args.sample_duration)
@@ -412,12 +436,33 @@ class Manager(BaseManager):
         for i, idx in enumerate(idxs):
             Xi = to_numpy(X[idx])
             Yi = to_numpy(Y[idx])
+            row_idx = 0
+
+            # Plot speed
+            if self.dataset_args.include_speed:
+                ax = axes[row_idx, i]
+                ax.plot(ts, Xi[row_idx], alpha=0.8, color='black', linewidth=2, linestyle='--', zorder=100)
+                ax.plot(ts, Yi[row_idx], alpha=0.8, color='blue')
+                if i == 0:
+                    ax.set_ylabel('Speed')
+                ax.set_xticklabels([])
+                row_idx += 1
+
+            # Plot nonplanarity
+            if self.dataset_args.include_np:
+                ax = axes[row_idx, i]
+                ax.plot(ts, Xi[row_idx], alpha=0.8, color='black', linewidth=2, linestyle='--', zorder=100)
+                ax.plot(ts, Yi[row_idx], alpha=0.8, color='red')
+                if i == 0:
+                    ax.set_ylabel('Nonplanarity')
+                ax.set_xticklabels([])
+                row_idx += 1
 
             # Plot data and dynamics outputs
             for j in range(n_components * 2):
-                ax = axes[j, i]
-                ax.plot(ts, Xi[j], alpha=0.8, color='black', linewidth=2, linestyle='--', zorder=100)
-                ax.plot(ts, Yi[j], alpha=0.8, color='green')
+                ax = axes[row_idx + j, i]
+                ax.plot(ts, Xi[row_idx + j], alpha=0.8, color='black', linewidth=2, linestyle='--', zorder=100)
+                ax.plot(ts, Yi[row_idx + j], alpha=0.8, color='green')
 
                 if i == 0:
                     ax.set_ylabel(f'${"Re" if j % 2 == 0 else "Im"}(\lambda_{int(j / 2)})$')

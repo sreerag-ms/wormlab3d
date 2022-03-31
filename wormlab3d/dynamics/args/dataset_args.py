@@ -18,6 +18,8 @@ class DynamicsDatasetArgs(BaseArgs):
             reconstruction: str = None,
             eigenworms: str = None,
             n_components: int = 10,
+            include_speed: bool = False,
+            include_np: bool = False,
             smoothing_window: int = 25,
             standardise: bool = True,
 
@@ -41,11 +43,17 @@ class DynamicsDatasetArgs(BaseArgs):
         self.reconstruction = reconstruction
         self.eigenworms = eigenworms
         self.n_components = n_components
+        self.include_speed = include_speed
+        self.include_np = include_np
         self.smoothing_window = smoothing_window
         self.standardise = standardise
 
         self.sample_duration = sample_duration
         self.X0_duration = X0_duration
+
+    @property
+    def n_features(self) -> int:
+        return self.n_components * 2 + int(self.include_speed) + int(self.include_np)
 
     @classmethod
     def add_args(cls, parser: ArgumentParser) -> _ArgumentGroup:
@@ -70,10 +78,14 @@ class DynamicsDatasetArgs(BaseArgs):
                            help='Eigenworms id.')
         group.add_argument('--n-components', type=int, default=10,
                            help='Number of eigenworm components to use. Default=10.')
+        group.add_argument('--include-speed', type=str2bool, default=False,
+                           help='Include the speed.')
+        group.add_argument('--include-np', type=str2bool, default=False,
+                           help='Include the nonplanarity.')
         group.add_argument('--smoothing-window', type=int, default=25,
                            help='Number of frames to smooth the data by. Default=25.')
         group.add_argument('--standardise', type=str2bool, default=True,
-                           help='Standardise the component traces (subtract means and divide by stds).')
+                           help='Standardise the features (subtract means and divide by stds).')
 
         group.add_argument('--sample-duration', type=int, default=100,
                            help='Number of frames to use per sample. Default=100.')
@@ -88,6 +100,8 @@ class DynamicsDatasetArgs(BaseArgs):
             f'Reconstruction={self.reconstruction}.',
             f'Eigenworms={self.eigenworms}.',
             f'Num components={self.n_components}.',
+            f'Include speed={self.include_speed}.',
+            f'Include nonplanarity={self.include_np}.',
             f'Smoothing window={self.smoothing_window}.',
             f'Standardise={self.standardise}.',
             f'Sample duration={self.sample_duration}.',
