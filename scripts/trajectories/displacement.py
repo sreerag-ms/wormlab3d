@@ -51,7 +51,10 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
         elif k == 'delta_range':
             fn += f'_dr={args.min_delta}-{args.max_delta}'
         elif k == 'delta_step':
-            fn += f'_ds={args.delta_step}'
+            if args.delta_step < 0:
+                fn += f'_ds={args.delta_step:.2f}'
+            else:
+                fn += f'_ds={int(args.delta_step)}'
         elif k == 'u':
             fn += f'_u={args.trajectory_point}'
         elif k == 'projection':
@@ -103,7 +106,7 @@ def displacement_over_time():
 def displacement_violin_plot():
     args = get_args()
     trajectory = get_trajectory_from_args(args)
-    deltas = np.arange(args.min_delta, args.max_delta, step=args.delta_step)
+    deltas = np.arange(args.min_delta, args.max_delta, step=int(args.delta_step))
     delta_ts = deltas / 25
 
     d = calculate_displacements_parallel(trajectory, deltas, aggregation=args.aggregation)
@@ -111,7 +114,7 @@ def displacement_violin_plot():
     fig = plt.figure(figsize=(14, 10))
     ax = fig.add_subplot()
 
-    parts = plt.violinplot(d.values(), delta_ts, widths=args.delta_step / 25, showmeans=True, showmedians=True)
+    parts = plt.violinplot(d.values(), delta_ts, widths=int(args.delta_step) / 25, showmeans=True, showmedians=True)
     parts['cmedians'].set_color('green')
     parts['cmedians'].set_alpha(0.7)
     parts['cmedians'].set_linestyle(':')
@@ -137,7 +140,19 @@ def displacement_violin_plot():
 
 def displacement_violin_plots_across_dataset_concentrations():
     args = get_args()
-    deltas = np.arange(args.min_delta, args.max_delta, step=args.delta_step)
+
+    # Use exponentially-spaced deltas
+    if args.delta_step < 0:
+        delta = args.min_delta
+        deltas = []
+        while delta < args.max_delta:
+            deltas.append(delta)
+            delta = delta**(-args.delta_step)
+        deltas = np.array(deltas).astype(np.int64)
+
+    # Use equally-spaced deltas
+    else:
+        deltas = np.arange(args.min_delta, args.max_delta, step=int(args.delta_step))
     delta_ts = deltas / 25
 
     # Get dataset
@@ -184,7 +199,12 @@ def displacement_violin_plots_across_dataset_concentrations():
     fig, axes = plt.subplots(n_rows, figsize=(14, n_rows * 3), sharex=False, sharey=True)
 
     def _violinplot(ax_, vals_):
-        parts = ax_.violinplot(vals_, delta_ts, widths=args.delta_step / 25, showmeans=True, showmedians=True)
+        if args.delta_step < 0:
+            parts = ax_.violinplot(vals_, widths=1, showmeans=True, showmedians=True)
+            ax_.set_xticks(np.arange(1, len(delta_ts) + 1))
+            ax_.set_xticklabels(delta_ts)
+        else:
+            parts = ax_.violinplot(vals_, delta_ts, widths=args.delta_step / 25, showmeans=True, showmedians=True)
         parts['cmedians'].set_color('green')
         parts['cmedians'].set_alpha(0.7)
         parts['cmedians'].set_linestyle(':')

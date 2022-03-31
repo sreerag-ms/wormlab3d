@@ -50,7 +50,7 @@ def get_args(
                             help='Time lag sizes.')
         parser.add_argument('--min-delta', type=int, default=1, help='Minimum time lag.')
         parser.add_argument('--max-delta', type=int, default=10000, help='Maximum time lag.')
-        parser.add_argument('--delta-step', type=int, default=1, help='Step between deltas.')
+        parser.add_argument('--delta-step', type=float, default=1, help='Step between deltas. -ve=exponential steps.')
         parser.add_argument('--aggregation', type=str, choices=DISPLACEMENT_AGGREGATION_OPTIONS,
                             default=DISPLACEMENT_AGGREGATION_SQUARED_SUM,
                             help='Displacements can be taken as L2 norms or as the squared sum of components.')
