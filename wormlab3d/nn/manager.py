@@ -83,7 +83,7 @@ class Manager:
         if checkpoint.parameters_file is not None:
             pos = checkpoint.parameters_file.find('checkpoints')
             pth = ROOT_PATH / checkpoint.parameters_file[:pos - 1]
-            return pth
+            return pth.resolve()
 
         return LOGS_PATH \
                / f'{checkpoint.dataset.created:%Y%m%d_%H:%M}_{checkpoint.dataset.id}' \
@@ -393,8 +393,7 @@ class Manager:
             checkpoint.runtime_args = to_dict(self.runtime_args)
 
             # Load the network and optimiser parameter states
-            # path = f'{self.get_logs_path(prev_checkpoint)}/checkpoints/{prev_checkpoint.id}.chkpt'
-            path = ROOT_PATH / prev_checkpoint.parameters_file
+            path = (ROOT_PATH / prev_checkpoint.parameters_file).resolve()
             state = torch.load(path, map_location=self.device)
             self.net.load_state_dict(self._fix_state(state['model_state_dict']), strict=False)
             if self.optimiser_args.algorithm != prev_checkpoint.optimiser_args['algorithm']:
