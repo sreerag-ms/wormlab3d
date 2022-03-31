@@ -289,7 +289,6 @@ def generate_cluster_video():
         n = res['frame_num']
         if i > 0 and i % 100 == 0:
             logger.info(f'Rendering frame {i}/{reconstruction.n_frames}.')
-            break
 
         # Check we don't miss any frames
         if i == 0:
