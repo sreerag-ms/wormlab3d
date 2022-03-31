@@ -213,6 +213,7 @@ def _plot_cluster_trace(
     X_traj, meta = get_trajectory(**common_args)
     N = len(X_traj)
     ts = np.linspace(0, N / reconstruction.trial.fps, N)
+    ws = checkpoint.dataset_args['sample_duration']
 
     # Speed
     logger.info('Calculating speeds.')
@@ -259,7 +260,7 @@ def _plot_cluster_trace(
             zs = np.argwhere(clusters == cluster_idx)[:, 0]
             xs = []
             for z in zs:
-                xs.extend(np.arange(z * args.step, (z + 1) * args.step))
+                xs.extend(np.arange(z * args.step, (z + 1) * args.step) + int((ws - args.step) / 2))
             ys = np.ones_like(xs) * y_locs[j]
             ax.scatter(ts[xs], ys, label=cluster_idx, color=colours[j])
 
