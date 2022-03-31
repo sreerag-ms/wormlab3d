@@ -322,6 +322,7 @@ def _plot_matrices(
         path = LOGS_PATH / f'{START_TIMESTAMP}_distances' \
                            f'_cp={checkpoint.id}' \
                            f'_d={args.distance_metric}' \
+                           f'_l={args.linkage_method}' \
                            f'_c={args.min_clusters}-{args.max_clusters}' \
                            f'_r={args.reconstruction}' \
                            f'_f={args.start_frame}-{args.end_frame}' \
