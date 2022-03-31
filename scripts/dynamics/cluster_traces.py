@@ -4,20 +4,16 @@ from argparse import Namespace
 
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
-from fastcluster import linkage
 from matplotlib import gridspec
-from scipy.cluster.hierarchy import fcluster, cophenet
-from scipy.spatial.distance import squareform, pdist
+from scipy.cluster.hierarchy import fcluster
+from scipy.spatial.distance import squareform
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d import logger
-from wormlab3d.data.model import Reconstruction, Checkpoint
-from wormlab3d.dynamics.args import DynamicsNetworkArgs, DynamicsRuntimeArgs, DynamicsDatasetArgs, DynamicsOptimiserArgs
-from wormlab3d.dynamics.manager import Manager
-from wormlab3d.nn.args import NetworkArgs
+from wormlab3d.data.model import Reconstruction
+from wormlab3d.dynamics.clusterer import DynamicsClusterer
 from wormlab3d.toolkit.plot_utils import fancy_dendrogram, plot_reordered_distances
-from wormlab3d.toolkit.util import print_args, to_numpy, str2bool
+from wormlab3d.toolkit.util import print_args, str2bool
 from wormlab3d.trajectories.cache import get_trajectory
 from wormlab3d.trajectories.pca import generate_or_load_pca_cache
 from wormlab3d.trajectories.util import calculate_speeds
@@ -55,165 +51,49 @@ def parse_args() -> Namespace:
     return args
 
 
-def find_best_linkage_settings(X):
-    # Find best linkage method using cophenetic correlation coefficient
-    linkage_methods = ['single', 'complete', 'average', 'centroid', 'median', 'ward', 'weighted']
-    metrics = ['canberra', 'cityblock', 'euclidean', 'hamming', 'matching', 'sqeuclidean', 'seuclidean', 'cosine',
-               'correlation']
-    best_score = 0
-    best_method = 'average'
-    best_metric = 'euclidean'
-    for method in linkage_methods:
-        for metric in metrics:
-            try:
-                Z = linkage(X, method, metric)
-                c, coph_dists = cophenet(Z, pdist(X, metric))
-            except Exception:
-                continue
-            print('Method = {}. Metric = {}. Score = {}'.format(method, metric, c))
-            if c > best_score:
-                best_score = c
-                best_method = method
-                best_metric = metric
-    print('Best combination: Method = {}. Metric = {}. Score = {}'.format(best_method, best_metric, best_score))
-    return best_method, best_metric
-
-
 def make_cluster_plots():
     """
     Generate some cluster plots.
     """
     args = parse_args()
 
-    # Load the checkpoint
-    checkpoint = Checkpoint.objects.get(id=args.checkpoint)
-    runtime_args = DynamicsRuntimeArgs(
-        resume=True,
-        resume_from=checkpoint.id,
-        cpu_only=True
-    )
-    dataset_args = DynamicsDatasetArgs(**{
-        **checkpoint.dataset_args,
-        **{'load_dataset': True, 'dataset_id': checkpoint.dataset.id}
-    })
-    net_args = DynamicsNetworkArgs(
-        load=True,
-        net_id=checkpoint.network_params.id,
-        latent_size=checkpoint.network_params.latent_size,
-        args_classifier=NetworkArgs(net_id=checkpoint.network_params.classifier_net.id),
-        args_dynamics=NetworkArgs(net_id=checkpoint.network_params.dynamics_net.id)
-    )
-    optimiser_args = DynamicsOptimiserArgs(**checkpoint.optimiser_args)
-
-    # Construct manager
-    manager = Manager(
-        runtime_args=runtime_args,
-        dataset_args=dataset_args,
-        net_args=net_args,
-        optimiser_args=optimiser_args,
+    DC = DynamicsClusterer(
+        checkpoint_id=args.checkpoint,
+        reconstruction_id=args.reconstruction,
+        start_frame=args.start_frame,
+        end_frame=args.end_frame,
+        step=args.step
     )
 
-    common_args = {
-        'reconstruction_id': args.reconstruction,
-        'start_frame': args.start_frame,
-        'end_frame': args.end_frame,
-        'smoothing_window': dataset_args.smoothing_window,
-    }
-
-    # Get natural frame trajectory
-    X_nf, meta = get_trajectory(**common_args, natural_frame=True)
-
-    # Convert to eigenworms
-    X = manager.ew.transform(np.array(X_nf))
-
-    # Restrict to the components we need
-    X = X[:, :dataset_args.n_components]
-
-    # Stack real and imaginary
-    X2 = np.stack([np.real(X), np.imag(X)], axis=-1)
-    X = np.zeros((len(X), dataset_args.n_components * 2))
-    X[:, ::2] = X2[..., 0]
-    X[:, 1::2] = X2[..., 1]
-    logger.info(f'Trajectory trace shape: {X.shape}.')
-
-    # Standardize data if required
-    if dataset_args.standardise:
-        X_mean = X.mean(axis=0)
-        X -= X_mean
-        X_std = X.std(axis=0)
-        X /= X_std
-
-    # Include nonplanarity
-    if dataset_args.include_np:
-        logger.info('Fetching planarities.')
-        pcas, meta = generate_or_load_pca_cache(**common_args, window_size=1)
-        r = pcas.explained_variance_ratio.T
-        nonp = r[2] / np.sqrt(r[1] * r[0])
-
-        # Nonplanarity goes from [0,1] so standardise with data-independent scaling to [-1,1]
-        if dataset_args.standardise:
-            nonp = nonp * 2 - 1
-        X = np.concatenate([nonp[:, None], X], axis=1)
-
-    # Include speed
-    if dataset_args.include_speed:
-        logger.info('Calculating speeds.')
-        X_traj, meta = get_trajectory(**common_args)
-        speeds = calculate_speeds(X_traj, signed=True)
-
-        # Standardise with data-independent scaling factor of 100
-        if dataset_args.standardise:
-            speeds *= 100
-        X = np.concatenate([speeds[:, None], X], axis=1)
-
-    # Slide along sequence with 3/4 overlap collecting all the data into batches.
-    start = 0
-    ws = manager.dataset_args.sample_duration
-    Xs = []
-    while start + ws < len(X):
-        Xs.append(torch.from_numpy(X[start:start + ws].T))
-        start += args.step
-    Xs = torch.stack(Xs).to(torch.float32).to(manager.device)
-    batches = Xs.split(manager.runtime_args.batch_size)
-    logger.info(f'{len(batches)} batches generated from reconstruction.')
-
-    # Run the batches through the classifier network to get the latent encodings.
-    logger.info(f'Generating encodings.')
-    manager.net.eval()
-    Zs = []
-    for batch in batches:
-        Z = manager.net.classifier_net.forward(batch)
-        Zs.append(Z)
-    Zs = to_numpy(torch.cat(Zs, dim=0))
-
-    # Calculate pairwise distances
-    # find_best_linkage_settings(Zs)
-    logger.info(f'Calculating pairwise distances using metric "{args.distance_metric}".')
-    distances = pdist(Zs, args.distance_metric)
-    distances = distances
-
-    # Calculate linkage
-    logger.info(f'Calculating linkage using method "{args.linkage_method}".')
-    L = linkage(distances, args.linkage_method)
+    L, distances = DC.cluster(
+        distance_metric=args.distance_metric,
+        linkage_method=args.linkage_method,
+    )
 
     if args.plot_traces:
-        _plot_cluster_trace(args, common_args, checkpoint, L)
+        _plot_cluster_trace(args, DC, L)
 
     if args.plot_matrices:
-        _plot_matrices(args, checkpoint, L, squareform(distances))
+        _plot_matrices(args, DC, L, squareform(distances))
 
 
 def _plot_cluster_trace(
         args: Namespace,
-        common_args: dict,
-        checkpoint: Checkpoint,
+        DC: DynamicsClusterer,
         L: np.ndarray,
 ):
+    common_args = {
+        'reconstruction_id': args.reconstruction,
+        'start_frame': args.start_frame,
+        'end_frame': args.end_frame,
+        'smoothing_window': DC.dataset_args.smoothing_window,
+    }
+
     reconstruction = Reconstruction.objects.get(id=args.reconstruction)
     X_traj, meta = get_trajectory(**common_args)
     N = len(X_traj)
     ts = np.linspace(0, N / reconstruction.trial.fps, N)
-    ws = checkpoint.dataset_args['sample_duration']
+    ws = DC.dataset_args.sample_duration
 
     # Speed
     logger.info('Calculating speeds.')
@@ -269,7 +149,7 @@ def _plot_cluster_trace(
 
     ax.set_xlabel('Time (s)')
 
-    title = f'Trial={reconstruction.trial.id}. Reconstruction={reconstruction.id}. Checkpoint={checkpoint.id}.'
+    title = f'Trial={reconstruction.trial.id}. Reconstruction={reconstruction.id}. Checkpoint={DC.checkpoint.id}.'
     if args.start_frame is not None:
         title += f'\nFrames={args.start_frame}-{args.end_frame}'
     title += f'\nLinkage method: {args.linkage_method}. Distance metric: {args.distance_metric}.'
@@ -278,7 +158,7 @@ def _plot_cluster_trace(
 
     if save_plots:
         path = LOGS_PATH / f'{START_TIMESTAMP}_cluster_traces' \
-                           f'_cp={checkpoint.id}' \
+                           f'_cp={DC.checkpoint.id}' \
                            f'_d={args.distance_metric}' \
                            f'_l={args.linkage_method}' \
                            f'_c={args.min_clusters}-{args.max_clusters}' \
@@ -294,7 +174,7 @@ def _plot_cluster_trace(
 
 def _plot_matrices(
         args: Namespace,
-        checkpoint: Checkpoint,
+        DC: DynamicsClusterer,
         L: np.ndarray,
         distances_sf: np.ndarray
 ):
@@ -344,7 +224,7 @@ def _plot_matrices(
 
     if save_plots:
         path = LOGS_PATH / f'{START_TIMESTAMP}_distances' \
-                           f'_cp={checkpoint.id}' \
+                           f'_cp={DC.checkpoint.id}' \
                            f'_d={args.distance_metric}' \
                            f'_l={args.linkage_method}' \
                            f'_c={args.min_clusters}-{args.max_clusters}' \

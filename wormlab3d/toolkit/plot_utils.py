@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Callable
 from typing import Tuple
 
 import matplotlib.pyplot as plt
@@ -8,6 +8,7 @@ from matplotlib import cm
 from matplotlib.axes import Axes
 from matplotlib.backend_bases import Event
 from matplotlib.collections import PathCollection
+from matplotlib.figure import Figure
 from matplotlib.image import AxesImage
 from matplotlib.patches import Rectangle
 from matplotlib.widgets import Slider
@@ -369,3 +370,58 @@ def plot_reordered_distances(ax: Axes, distances: np.ndarray, clusters: np.ndarr
     # Show clusters on plot
     for sqr in squares:
         ax.add_patch(sqr)
+
+
+def make_3d_posture_plot_for_animation(
+        X_full: np.ndarray,
+        width: int,
+        height: int,
+        show_axis: bool = True,
+        show_ticks: bool = True,
+) -> Tuple[Figure, Callable]:
+    """
+    Build a 3D posture plot.
+    Returns an update function to call which updates the worm.
+    """
+
+    # Get axis size limits and trajectory points
+    X_centred = X_full - X_full.mean(axis=1, keepdims=True)
+    size_limit = max(X_centred.max(axis=(0, 1)) - X_centred.min(axis=(0, 1))) * 1.
+    traj_points = X_full.mean(axis=1)
+
+    # Create figure
+    fig = plt.figure(figsize=(int(width / 2 / 100), int(height * 2 / 3 / 100)))
+    ax = fig.add_subplot(projection='3d')
+
+    # Add worm
+    FS = FrameSequenceNumpy(x=X_full.transpose(0, 2, 1))
+    fa = FrameArtist(F=FS[0])
+    fa.add_midline(ax)
+
+    # Setup axis
+    if not show_axis:
+        ax.axis('off')
+    if not show_ticks:
+        ax.grid(False)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_zticks([])
+
+    def centre_axis(frame_idx: int):
+        cp = traj_points[frame_idx]
+        for i, axis in enumerate('xyz'):
+            getattr(ax, f'set_{axis}lim')([cp[i] - size_limit / 2, cp[i] + size_limit / 2])
+
+    def update(frame_idx: int):
+        # Update the worm
+        fa.update(FS[frame_idx])
+
+        # Update the axis limits
+        centre_axis(frame_idx)
+
+        # Redraw the canvas
+        fig.canvas.draw()
+
+    fig.tight_layout()
+
+    return fig, update

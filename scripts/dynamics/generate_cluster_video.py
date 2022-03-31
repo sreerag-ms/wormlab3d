@@ -10,11 +10,10 @@ from scipy.cluster.hierarchy import fcluster
 
 from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT
 from wormlab3d import logger, PREPARED_IMAGE_SIZE, PREPARED_IMAGES_PATH, LOGS_PATH, START_TIMESTAMP
-from wormlab3d.data.model import Frame, Reconstruction, Eigenworms
+from wormlab3d.data.model import Frame, Reconstruction
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF, Midline3D
+from wormlab3d.dynamics.clusterer import DynamicsClusterer
 from wormlab3d.midlines3d.trial_state import TrialState
-from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
-from wormlab3d.postures.posture_clusters import get_posture_clusters
 from wormlab3d.toolkit.plot_utils import tex_mode, make_3d_posture_plot_for_animation
 from wormlab3d.toolkit.util import print_args
 from wormlab3d.trajectories.cache import get_trajectory
@@ -28,18 +27,22 @@ cmap = plt.get_cmap(MIDLINE_CMAP_DEFAULT)
 
 
 def parse_args() -> Namespace:
-    parser = ArgumentParser(description='Wormlab3D script to generate a postures video.')
-    parser.add_argument('--reconstruction', type=str, help='Reconstruction by id.')
-    parser.add_argument('--eigenworms', type=str, help='Eigenworms by id.')
-    parser.add_argument('--n-components', type=int, default=20, help='Number of eigenworms to use (basis dimension).')
+    parser = ArgumentParser(description='Wormlab3D script to generate a cluster video.')
+    parser.add_argument('--checkpoint', type=str,
+                        help='Eigenworms by id.')
+    parser.add_argument('--reconstruction', type=str,
+                        help='Reconstruction by id.')
     parser.add_argument('--plot-components', type=lambda s: [int(item) for item in s.split(',')],
                         default='0,1', help='Comma delimited list of component idxs to plot.')
+    parser.add_argument('--distance-metric', type=str, help='Distance metric.')
+    parser.add_argument('--linkage-method', type=str, help='Linkage method to use.')
+    parser.add_argument('--n-clusters', type=int, help='Number of clusters to plot.')
+    parser.add_argument('--step', type=int, help='Window step size.')
     parser.add_argument('--x-label', type=str, default='time', help='Label x-axis with time or frame number.')
-    parser.add_argument('--smoothing-window', type=int, default=25, help='Smoothing window.')
-    parser.add_argument('--linkage-method', type=str, default='ward', help='Clustering linkage method.')
-    parser.add_argument('--n-clusters', type=int, default=5, help='Number of clusters to show on cluster trace.')
+
     args = parser.parse_args()
     assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
+    assert args.step > 0, 'Step size must be > 0.'
 
     print_args(args)
 
@@ -49,16 +52,28 @@ def parse_args() -> Namespace:
 def _make_traces_plot(
         args: Namespace,
         reconstruction: Reconstruction,
-        ew: Eigenworms,
-        use_ews: bool = True
 ):
     """
     Build a traces plot.
     Returns an update function to call which updates the axis.
     """
+
+    # Instantiate clusterer and calculate clusters.
+    DC = DynamicsClusterer(
+        checkpoint_id=args.checkpoint,
+        reconstruction_id=args.reconstruction,
+        step=args.step
+    )
+    L, distances = DC.cluster(
+        distance_metric=args.distance_metric,
+        linkage_method=args.linkage_method,
+    )
+    ws = DC.dataset_args.sample_duration
+
+    # Load trajectory
     common_args = {
         'reconstruction_id': reconstruction.id,
-        'smoothing_window': args.smoothing_window
+        'smoothing_window': DC.dataset_args.smoothing_window
     }
     X, meta = get_trajectory(**common_args)
     N = len(X)
@@ -68,16 +83,6 @@ def _make_traces_plot(
     else:
         ts = np.arange(N) + reconstruction.start_frame
         t_range = 5 * reconstruction.trial.fps
-
-    # Clusters
-    L, _ = get_posture_clusters(
-        reconstruction_id=reconstruction.id,
-        use_eigenworms=use_ews,
-        eigenworms_id=ew.id,
-        eigenworms_n_components=args.n_components,
-        linkage_method=args.linkage_method,
-        rebuild_cache=False
-    )
 
     # Speed
     logger.info('Calculating speeds.')
@@ -91,7 +96,7 @@ def _make_traces_plot(
 
     # Eigenworms embeddings
     Z, meta = get_trajectory(**common_args, natural_frame=True)
-    X_ew = ew.transform(np.array(Z))
+    X_ew = DC.manager.ew.transform(np.array(Z))
 
     # Plot
     fig, axes = plt.subplots(3, figsize=(int(width / 2 / 100), int(height / 100)), sharex=True)
@@ -133,7 +138,10 @@ def _make_traces_plot(
     ax4.set_ylabel('Cluster index')
     for j in range(args.n_clusters):
         cluster_idx = sorted_idxs[j] + 1
-        xs = np.argwhere(clusters == cluster_idx)[:, 0]
+        zs = np.argwhere(clusters == cluster_idx)[:, 0]
+        xs = []
+        for z in zs:
+            xs.extend(np.arange(z * args.step, (z + 1) * args.step) + int((ws - args.step) / 2))
         ys = np.ones_like(xs) * y_locs[j]
         ax4.scatter(ts[xs], ys, label=cluster_idx)
     ax4_marker = ax4.axvline(x=0, color='red')
@@ -197,7 +205,7 @@ def _generate_annotated_images(image_triplet: np.ndarray, points_2d: np.ndarray,
     return np.concatenate(images).transpose(1, 0, 2)
 
 
-def generate_posture_video():
+def generate_cluster_video():
     """
     Generate a posture video showing a 3D midline reconstruction with camera images
     with overlaid 2D midline reprojections alongside eigenworm and cluster traces.
@@ -205,20 +213,13 @@ def generate_posture_video():
     args = parse_args()
     reconstruction = Reconstruction.objects.get(id=args.reconstruction)
 
-    # Resolve which eigenworms to use
-    ew = generate_or_load_eigenworms(
-        eigenworms_id=args.eigenworms,
-        reconstruction_id=args.reconstruction,
-        n_components=args.n_components,
-    )
-
     # Build output path
     path = LOGS_PATH / f'{START_TIMESTAMP}' \
                        f'_r={reconstruction.id}' \
-                       f'_ew={ew.id}' \
-                       f'_ec={",".join([str(c) for c in args.plot_components])}' \
-                       f'_sw={args.smoothing_window}' \
-                       f'_c={args.linkage_method}_{args.n_clusters}' \
+                       f'_cp={args.checkpoint}' \
+                       f'_d={args.distance_metric}' \
+                       f'_l={args.linkage_method}' \
+                       f'_n={args.n_clusters}' \
                        f'_x={args.x_label}.mp4'
 
     if reconstruction.source == M3D_SOURCE_MF:
@@ -244,7 +245,7 @@ def generate_posture_video():
 
     # Build plots
     # fig_clusters, update_plot_clusters = _make_cluster_block(args, reconstruction, ew)
-    fig_traces, update_plot_traces = _make_traces_plot(args, reconstruction, ew)
+    fig_traces, update_plot_traces = _make_traces_plot(args, reconstruction)
     fig_3d, update_plot_3d = make_3d_posture_plot_for_animation(X_full=X_full, width=width, height=height)
 
     # Fetch the images
@@ -288,6 +289,7 @@ def generate_posture_video():
         n = res['frame_num']
         if i > 0 and i % 100 == 0:
             logger.info(f'Rendering frame {i}/{reconstruction.n_frames}.')
+            break
 
         # Check we don't miss any frames
         if i == 0:
@@ -346,4 +348,4 @@ def generate_posture_video():
 
 if __name__ == '__main__':
     os.makedirs(LOGS_PATH, exist_ok=True)
-    generate_posture_video()
+    generate_cluster_video()
