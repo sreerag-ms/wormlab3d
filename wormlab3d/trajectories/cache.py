@@ -28,6 +28,7 @@ def get_trajectory(
         prune_slowest_ratio: float = None,
         projection: str = None,
         trajectory_point: float = None,
+        tracking_only: bool = False,
         natural_frame: bool = False,
         rebuild_cache: bool = False
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
@@ -42,6 +43,7 @@ def get_trajectory(
         start_frame=start_frame,
         end_frame=end_frame,
         depth=depth,
+        tracking_only=tracking_only,
         natural_frame=natural_frame,
         rebuild_cache=rebuild_cache
     )
@@ -114,6 +116,7 @@ def get_trajectory_from_args(args: Namespace, return_meta: bool = False) -> Unio
         prune_slowest_ratio=args.prune_slowest_ratio,
         projection=args.projection,
         trajectory_point=args.trajectory_point,
+        tracking_only=args.tracking_only,
         rebuild_cache=args.rebuild_cache
     )
 
@@ -291,20 +294,27 @@ def generate_or_load_trajectory_cache(
         start_frame: int = None,
         end_frame: int = None,
         depth: int = -1,
+        tracking_only: bool = False,
         natural_frame: bool = False,
         rebuild_cache: bool = False
 ) -> Tuple[np.ndarray, dict]:
     """
     Try to load an existing trajectory cache or generate it otherwise.
     """
-    reconstruction = fetch_reconstruction(reconstruction_id, trial_id, midline_source, midline_source_file)
+    if tracking_only:
+        reconstruction = None
+        if natural_frame:
+            raise RuntimeError('Cannot evaluate natural frame from tracking data.')
+    else:
+        reconstruction = fetch_reconstruction(reconstruction_id, trial_id, midline_source, midline_source_file)
 
     # Get trial
     trial: Trial
     if reconstruction is None:
-        if natural_frame:
-            raise RuntimeError('No matching reconstruction found, cannot evaluate natural frame.')
-        logger.warning('No matching reconstruction found, using tracking data.')
+        if not tracking_only:
+            if natural_frame:
+                raise RuntimeError('No matching reconstruction found, cannot evaluate natural frame.')
+            logger.warning('No matching reconstruction found, using tracking data.')
         assert trial_id is not None
         trial = Trial.objects.get(id=trial_id)
     else:
@@ -357,9 +367,10 @@ def generate_or_load_trajectory_cache(
 
     elif reconstruction is None:
         # If no reconstruction construct a trajectory from the tracking data
-        centres_3d, timestamps = trial.get_tracking_data(fixed=True)
+        centres_3d, timestamps = trial.get_tracking_data(fixed=True, prune_missing=True)
         X_full = centres_3d[:, None, :]
         meta = {'shape': X_full.shape, 'type': 'tracking-only'}
+        logger.info(f'Loaded tracking data from database.')
 
     elif reconstruction.source == M3D_SOURCE_MF:
         X_full, meta = _fetch_mf_trajectory(reconstruction, start_frame, end_frame, depth)

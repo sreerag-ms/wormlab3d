@@ -20,6 +20,7 @@ def get_args(
     parser = ArgumentParser(description='Wormlab3D trajectory script.')
 
     # Source arguments
+    parser.add_argument('--dataset', type=str, help='Dataset id.', required=False)
     parser.add_argument('--reconstruction', type=str, help='Reconstruction id.', required=False)
     parser.add_argument('--trial', type=int, help='Trial id.', required=False)
     parser.add_argument('--midline3d-source', type=str, default=M3D_SOURCE_RECONST, choices=M3D_SOURCES,
@@ -67,6 +68,8 @@ def get_args(
 
     # Manoeuvre arguments
     if include_manoeuvre_options:
+        parser.add_argument('--min-forward-frames', type=int, default=25,
+                            help='Minimum number of forward frames before counting a forward locomotion section.')
         parser.add_argument('--min-reversal-frames', type=int, default=25,
                             help='Minimum number of reversal frames to use to identify a manoeuvre.')
         parser.add_argument('--manoeuvre-window', type=int, default=500,
@@ -78,8 +81,8 @@ def get_args(
     if include_trajectory_options and args.trajectory_point is not None:
         assert args.trajectory_point == -1 or 0 <= args.trajectory_point <= 1, 'trajectory-point must be -1 for centre of mass or between 0 and 1.'
 
-    # Reconstruction id or trial id is always required
-    assert (args.reconstruction is not None or args.trial is not None) \
-           and not (args.reconstruction is not None and args.trial is not None), 'Specify just one of reconstruction OR trial.'
+    # Dataset, reconstruction id or trial id is always required
+    assert sum([getattr(args, k) is not None for k in ['dataset', 'reconstruction', 'trial']]) == 1, \
+        'Specify just one of reconstruction OR trial.'
 
     return args

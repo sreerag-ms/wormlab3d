@@ -162,7 +162,7 @@ class Trial(Document):
 
         return self.triplet_reader
 
-    def get_tracking_data(self, fixed: bool) -> Tuple[np.ndarray, np.ndarray]:
+    def get_tracking_data(self, fixed: bool, prune_missing: bool = False) -> Tuple[np.ndarray, np.ndarray]:
         """
         Fetch the 3D tracking data.
         """
@@ -183,8 +183,12 @@ class Trial(Document):
         for res in cursor:
             if 'p3d' in res and res['p3d'] is not None:
                 pt = res['p3d']['point_3d']
-            else:
+            elif not prune_missing:
                 pt = np.array([None, None, None])
+            elif len(centres_3d) == 0:
+                continue
+            else:
+                break
             centres_3d.append(pt)
             timestamps.append(frame_time)
             frame_time += 1 / self.fps
