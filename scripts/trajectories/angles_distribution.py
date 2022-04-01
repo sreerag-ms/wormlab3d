@@ -5,15 +5,11 @@ from typing import List
 import matplotlib.pyplot as plt
 import numpy as np
 
-from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
+from wormlab3d import logger, LOGS_PATH, START_TIMESTAMP
 from wormlab3d.data.model import Dataset, Reconstruction
+from wormlab3d.trajectories.angles import calculate_trajectory_angles_parallel
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
-from wormlab3d.trajectories.displacement import calculate_displacements, plot_displacement_histograms, \
-    calculate_displacement_projections, plot_displacement_projections_histograms, plot_squared_displacements_over_time, \
-    calculate_transitions_and_dwells_multiple_deltas, calculate_displacements_parallel, DISPLACEMENT_AGGREGATION_L2
-
-# tex_mode()
 
 show_plots = True
 save_plots = True
@@ -63,82 +59,7 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
     return LOGS_PATH / (fn + '.' + img_extension)
 
 
-def displacement():
-    args = get_args()
-    trajectory = get_trajectory_from_args(args)
-    displacements = calculate_displacements(trajectory, args.deltas, args.aggregation)
-    plot_displacement_histograms(displacements)
-    if save_plots:
-        plt.savefig(
-            make_filename('histograms', args, excludes=['delta_range', 'delta_step'])
-        )
-    if show_plots:
-        plt.show()
-
-
-def displacement_projections():
-    args = get_args()
-    trajectory = get_trajectory_from_args(args)
-    displacements = calculate_displacement_projections(trajectory, args.deltas)
-    plot_displacement_projections_histograms(displacements)
-    if save_plots:
-        plt.savefig(
-            make_filename('histograms_projections', args, excludes=['projection', 'delta_range', 'delta_step'])
-        )
-    if show_plots:
-        plt.show()
-
-
-def displacement_over_time():
-    args = get_args()
-    trajectory = get_trajectory_from_args(args)
-    displacements = calculate_displacements(trajectory, args.deltas, args.aggregation)
-    dwells = calculate_transitions_and_dwells_multiple_deltas(displacements)
-    plot_squared_displacements_over_time(displacements, dwells)
-    if save_plots:
-        plt.savefig(
-            make_filename('traces', args, excludes=['delta_range', 'delta_step'])
-        )
-    if show_plots:
-        plt.show()
-
-
-def displacement_violin_plot():
-    args = get_args()
-    trajectory = get_trajectory_from_args(args)
-    deltas = np.arange(args.min_delta, args.max_delta, step=int(args.delta_step))
-    delta_ts = deltas / 25
-
-    d = calculate_displacements_parallel(trajectory, deltas, aggregation=args.aggregation)
-
-    fig = plt.figure(figsize=(14, 10))
-    ax = fig.add_subplot()
-
-    parts = plt.violinplot(d.values(), delta_ts, widths=int(args.delta_step) / 25, showmeans=True, showmedians=True)
-    parts['cmedians'].set_color('green')
-    parts['cmedians'].set_alpha(0.7)
-    parts['cmedians'].set_linestyle(':')
-    parts['cmeans'].set_color('red')
-    parts['cmeans'].set_alpha(0.7)
-    parts['cmeans'].set_linestyle('--')
-
-    if args.aggregation == DISPLACEMENT_AGGREGATION_L2:
-        ax.set_ylabel('$d=|x(t)-x(t+\Delta)|$')
-    else:
-        ax.set_ylabel('$d=(x(t)-x(t+\Delta))^2$')
-    ax.set_xlabel('$\Delta s$')
-    ax.set_title(f'Displacement vs Delta (time window). Trial {args.trial}.')
-    fig.tight_layout()
-
-    if save_plots:
-        plt.savefig(
-            make_filename('violin', args, excludes=['deltas'])
-        )
-    if show_plots:
-        plt.show()
-
-
-def displacement_violin_plots_across_dataset_concentrations():
+def plot_angle_distributions_dataset():
     args = get_args()
 
     # Use exponentially-spaced deltas
@@ -171,9 +92,9 @@ def displacement_violin_plots_across_dataset_concentrations():
         reconstructions[r.trial.id] = r.id
 
     # Calculate the displacements for all trials
-    displacements = {}
+    angles = {}
     for trial in ds.include_trials:
-        logger.info(f'Calculating displacements for trial={trial.id}.')
+        logger.info(f'Calculating angles for trial={trial.id}.')
         if trial.id in reconstructions:
             args.reconstruction = reconstructions[trial.id]
             args.trial = None
@@ -185,44 +106,50 @@ def displacement_violin_plots_across_dataset_concentrations():
 
         # Calculate displacements for trial
         trajectory = get_trajectory_from_args(args)
-        d = calculate_displacements_parallel(trajectory, deltas, aggregation=args.aggregation)
-        # d = calculate_displacements(trajectory, deltas, aggregation=args.aggregation)
+        d = calculate_trajectory_angles_parallel(trajectory, deltas)
+        # d = calculate_trajectory_angles(trajectory, deltas)
         c = trial.experiment.concentration
-        if c not in displacements:
-            displacements[c] = []
-        displacements[c].append(d)
+        if c not in angles:
+            angles[c] = []
+        angles[c].append(d)
 
     # Sort by concentration
-    displacements = {k: v for k, v in sorted(list(displacements.items()))}
+    angles = {k: v for k, v in sorted(list(angles.items()))}
 
     # Set up plots
-    n_rows = 1 + len(displacements)
+    n_rows = 1 + len(angles)
     fig, axes = plt.subplots(n_rows, figsize=(14, n_rows * 3), sharex=False, sharey=True)
 
     def _violinplot(ax_, vals_):
+        pos = []
+        vvals = []
+        for ii, v in enumerate(vals_):
+            if len(v) > 0:
+                pos.append(delta_ts[ii])
+                vvals.append(v)
+        if len(vvals) == 0:
+            logger.warning('No data available to make violin plot!')
+            return
         if args.delta_step < 0:
-            parts = ax_.violinplot(vals_, widths=1, showmeans=True, showmedians=True)
-            ax_.set_xticks(np.arange(1, len(delta_ts) + 1))
-            ax_.set_xticklabels(delta_ts)
+            parts = ax_.violinplot(vvals, widths=1, showmeans=True, showmedians=True)
+            ax_.set_xticks(np.arange(1, len(pos) + 1))
+            ax_.set_xticklabels(pos)
         else:
-            parts = ax_.violinplot(vals_, delta_ts, widths=args.delta_step / 25, showmeans=True, showmedians=True)
+            parts = ax_.violinplot(vvals, pos, widths=args.delta_step / 25, showmeans=True, showmedians=True)
         parts['cmedians'].set_color('green')
         parts['cmedians'].set_alpha(0.7)
         parts['cmedians'].set_linestyle(':')
         parts['cmeans'].set_color('red')
         parts['cmeans'].set_alpha(0.7)
         parts['cmeans'].set_linestyle('--')
-        if args.aggregation == DISPLACEMENT_AGGREGATION_L2:
-            ax_.set_ylabel('$d=|x(t)-x(t+\Delta)|$')
-        else:
-            ax_.set_ylabel('$d=(x(t)-x(t+\Delta))^2$')
+        ax_.set_ylabel('$\\theta=\measuredangle\left(x_t-x_{t+\Delta}, x_t-x_{t+\Delta})\\right)$')
         ax_.set_xlabel('$\Delta s$')
 
     n_trials_total = 0
     all_vals = {}
 
     # Aggregate results at each concentration
-    for i, (c, ds_c) in enumerate(displacements.items()):
+    for i, (c, ds_c) in enumerate(angles.items()):
         ax = axes[i + 1]
         n_trials = len(ds_c)
         n_trials_total += n_trials
@@ -258,8 +185,4 @@ def displacement_violin_plots_across_dataset_concentrations():
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
-    # displacement()
-    # displacement_projections()
-    # displacement_over_time()
-    # displacement_violin_plot()
-    displacement_violin_plots_across_dataset_concentrations()
+    plot_angle_distributions_dataset()

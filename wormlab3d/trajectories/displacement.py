@@ -83,7 +83,7 @@ def calculate_displacement_projections(
         deltas = [deltas]
 
     for delta in deltas:
-        logger.info(f'Calculating angles for delta = {delta}.')
+        logger.info(f'Calculating displacement for delta = {delta}.')
         N = len(trajectory) - 2 * delta
         displacements = np.zeros((N, 3))
         for i in range(N):

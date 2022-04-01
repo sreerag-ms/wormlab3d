@@ -15,9 +15,10 @@ from simple_worm.plot3d import FrameArtist, Arrow3D
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.data.model import Dataset, Reconstruction
 from wormlab3d.toolkit.plot_utils import tex_mode, equal_aspect_ratio
+from wormlab3d.trajectories.angles import calculate_angle
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
-from wormlab3d.trajectories.util import calculate_speeds, calculate_angle
+from wormlab3d.trajectories.util import calculate_speeds
 
 animate = True
 show_plots = False

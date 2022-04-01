@@ -9,7 +9,7 @@ TRAJECTORY_CACHE_PATH = DATA_PATH / 'trajectory_cache'
 SMOOTHING_WINDOW_TYPES = ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']
 
 
-def smooth_trajectory(X: np.ndarray, window_len: int=5, window_type: str='flat') -> np.ndarray:
+def smooth_trajectory(X: np.ndarray, window_len: int = 5, window_type: str = 'flat') -> np.ndarray:
     """
     Smooth the trajectory data using a window with requested size.
     Adapted from https://scipy-cookbook.readthedocs.io/items/SignalSmooth.html
@@ -186,27 +186,6 @@ def fetch_annotations(trial_id: str, frame_nums: List[int] = None) -> Tuple[List
     return tags, frame_idxs
 
 
-def calculate_angle(v1: np.ndarray, v2: np.ndarray) -> float:
-    """
-    Calculate the signed angle between two vectors.
-    """
-    if len(v1) == 2:
-        angle = np.arctan2(np.cross(v1, v2), np.dot(v1, v2))
-    elif len(v1) == 3:
-        abs_val = np.linalg.norm(v1) * np.linalg.norm(v2)
-        try:
-            cos = np.dot(v1, v2) / abs_val
-            angle = np.arccos(cos)
-            if np.isnan(angle):
-                angle = 0
-        except Exception:
-            angle = 0
-    else:
-        raise ValueError('Vectors of the wrong dimension!')
-
-    return angle
-
-
 def calculate_rotation_matrix(v1: np.ndarray, v2: np.ndarray) -> np.ndarray:
     """
     Calculate the rotation matrix between two vectors.
@@ -214,7 +193,7 @@ def calculate_rotation_matrix(v1: np.ndarray, v2: np.ndarray) -> np.ndarray:
     assert len(v1) == 3 and len(v2) == 3, 'Only 3D vectors supported!'
     a = v1 / np.linalg.norm(v1)
     b = v2 / np.linalg.norm(v2)
-    v = np.cross(a,b)
+    v = np.cross(a, b)
     s = np.linalg.norm(v)
     c = np.dot(a, b)
     vx = np.array([
@@ -222,7 +201,7 @@ def calculate_rotation_matrix(v1: np.ndarray, v2: np.ndarray) -> np.ndarray:
         [v[2], 0, -v[0]],
         [-v[1], v[0], 0],
     ])
-    R = np.eye(3) + vx + np.dot(vx, vx) * (1-c) / s**2
+    R = np.eye(3) + vx + np.dot(vx, vx) * (1 - c) / s**2
     return R
 
 

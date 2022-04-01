@@ -6,12 +6,12 @@ from typing import List, Dict, Union
 import matplotlib.animation as manimation
 import matplotlib.pyplot as plt
 import numpy as np
-from wormlab3d.trajectory.util import generate_or_load_trajectory_cache
 
 from simple_worm.plot3d import interactive
 from wormlab3d import logger, LOGS_PATH, START_TIMESTAMP
 from wormlab3d.toolkit.util import build_target_arguments_parser, str2bool
-from wormlab3d.trajectories.util import calculate_angle
+from wormlab3d.trajectories.angles import calculate_angle
+from wormlab3d.trajectories.cache import get_trajectory_from_args
 
 plt.rcParams.update({
     'text.usetex': True,
@@ -24,32 +24,6 @@ show_plots = False
 save_plots = False
 show_animation = True
 save_animation = True
-
-
-def get_trajectory(args: Namespace) -> np.ndarray:
-    """
-    Load the full 3D trajectory and then only take a slice at the required point.
-    """
-    X, meta = generate_or_load_trajectory_cache(
-        args.trial,
-        args.midline3d_source,
-        args.midline3d_source_file,
-        args.rebuild_cache
-    )
-    N = X.shape[1]
-    u = round(args.trajectory_point * N)
-    assert 0 <= u <= N
-    X = X[:, u]
-
-    if args.projection is not None:
-        if args.projection == 'xy':
-            X = np.delete(X, 2, 1)
-        elif args.projection == 'yz':
-            X = np.delete(X, 0, 1)
-        elif args.projection == 'zx':
-            X = np.delete(X, 1, 1)
-
-    return X
 
 
 def evaluate(trajectory: np.ndarray, deltas: Union[int, List[int]]) -> Union[np.ndarray, Dict[int, np.ndarray]]:
@@ -153,7 +127,7 @@ def animate_results(args: Namespace):
             # Get trajectory data for the different body coordinates
             results[p][u] = {}
             args.trajectory_point = u
-            trajectory = get_trajectory(args)
+            trajectory = get_trajectory_from_args(args)
 
             # Calculate the angles for all deltas
             with Pool(processes=N_WORKERS) as pool:
@@ -262,7 +236,7 @@ def tumble_roll():
             for projection in ['xy', 'yz', 'zx']:
                 args.deltas = deltas
                 args.projection = projection
-                trajectory = get_trajectory(args)
+                trajectory = get_trajectory_from_args(args)
                 res = evaluate(trajectory, args.deltas)
                 plot_results(res, args)
 
