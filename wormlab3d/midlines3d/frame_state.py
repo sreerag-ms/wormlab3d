@@ -147,6 +147,7 @@ class FrameState(nn.Module):
                     self.set_state(k, prev_frame_state.get_state(k))
                 for k in ['masks_curve', 'points_2d', 'scores']:
                     self.set_state(k, prev_frame_state.get_state(k))
+                self.stats = prev_frame_state.stats
 
     def _init_images(self):
         """
