@@ -6,14 +6,12 @@ from typing import Dict, Any
 import numpy as np
 import torch
 
-from wormlab3d import PREPARED_IMAGE_SIZE, DATA_PATH
+from wormlab3d import PREPARED_IMAGE_SIZE, MF_DATA_PATH
 from wormlab3d import logger
 from wormlab3d.data.model import MFParameters, MFCheckpoint, Reconstruction, Trial
 from wormlab3d.midlines3d.frame_state import FrameState, BUFFER_NAMES, PARAMETER_NAMES, BINARY_DATA_KEYS, \
-    CURVATURE_PARAMETER_NAMES
+    CURVATURE_PARAMETER_NAMES, TRANSIENTS_NAMES
 from wormlab3d.toolkit.util import to_numpy
-
-TRIAL_STATES_PATH = DATA_PATH / 'MF_outputs'
 
 
 class TrialState:
@@ -59,7 +57,7 @@ class TrialState:
 
     @property
     def path(self) -> Path:
-        return TRIAL_STATES_PATH / f'trial_{self.trial.id}' / str(self.reconstruction.id)
+        return MF_DATA_PATH / f'trial_{self.trial.id}' / str(self.reconstruction.id)
 
     def _load_state(self, read_only: bool = True) -> bool:
         """
@@ -68,7 +66,7 @@ class TrialState:
 
         # Check for metadata first
         path_meta = self.path / 'metadata.json'
-        if not os.path.exists(path_meta):
+        if not path_meta.exists():
             return False
         try:
             with open(path_meta, 'r') as f:
@@ -275,7 +273,18 @@ class TrialState:
         """
         Return a slice of data for a given buffer/parameter key.
         """
-        assert k in BUFFER_NAMES + PARAMETER_NAMES
+        assert k in BUFFER_NAMES + PARAMETER_NAMES + TRANSIENTS_NAMES
+        if k in TRANSIENTS_NAMES:
+            if k == 'points_3d_base':
+                centres_3d, _ = self.trial.get_tracking_data(
+                    fixed=True,
+                    start_frame=start_frame,
+                    end_frame=end_frame
+                )
+                return centres_3d
+            else:
+                raise RuntimeError(f'Transient key = {k} not yet supported!')
+
         state = self.states[k]
 
         if start_frame is None and end_frame is None:

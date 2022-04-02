@@ -91,28 +91,20 @@ def get_cameras_parameters(_id: str):
     }
 
 
-@bp_api.route('/reconstruction/<string:_id>/point-stats', methods=['GET'])
-def get_point_stats(_id: str):
+@bp_api.route('/reconstruction/<string:_id>/render-stats', methods=['GET'])
+def get_render_stats(_id: str):
     reconstruction = Reconstruction.objects.get(id=_id)
-    D = reconstruction.mf_parameters.depth
-    frame_num = request.args.get('frame_num', type=int)
     ts = TrialState(reconstruction=reconstruction)
 
-    vals_flat = {
-        k: ts.get(k)[frame_num]
-        for k in ['sigmas', 'intensities', 'scores']
-    }
-    vals = {
-        k: {}
-        for k in ['xs', 'sigmas', 'intensities', 'scores']
-    }
-
-    for d in range(D):
-        from_idx = sum([2**d2 for d2 in range(d)])
-        to_idx = from_idx + 2**d
-        vals['xs'][d] = np.linspace(0, 1, 2**d + 2)[1:-1].tolist()
-        for k in ['sigmas', 'intensities', 'scores']:
-            vals[k][d] = vals_flat[k][from_idx:to_idx].tolist()
+    vals = {}
+    for k in ['sigmas', 'exponents', 'intensities']:
+        vals[k] = {'points': {}, 'sfs': {}}
+        ps = ts.get(k)
+        for i, d in enumerate(range(ts.parameters.depth_min, ts.parameters.depth)):
+            vals[k]['points'][d] = ps[:, i].tolist()
+        sfs = ts.get(f'camera_{k}')
+        for i in range(3):
+            vals[k]['sfs'][i] = sfs[:, i].tolist()
 
     return {
         'timestamps': _get_timestamps(reconstruction),
@@ -130,9 +122,12 @@ def get_posture(_id):
 
     if reconstruction.source == M3D_SOURCE_MF:
         D = request.args.get('depth', type=int)
+        D_min = reconstruction.mf_parameters.depth_min
+        idx_offset = 2**D_min - 1
         ts = TrialState(reconstruction=reconstruction)
-        from_idx = sum([2**d2 for d2 in range(D)])
+        from_idx = sum([2**d2 for d2 in range(D)]) - idx_offset
         to_idx = from_idx + 2**D
+        d_idx = D - D_min
 
         # Get 3D posture
         all_points = ts.get('points')[frame_num]
@@ -142,9 +137,16 @@ def get_posture(_id):
         all_projections = ts.get('points_2d')[frame_num]  # (N, 3, 2)
         points_2d = np.round(all_projections[from_idx:to_idx]).astype(np.int32)
 
-        # Get sigmas
-        all_sigmas = ts.get('sigmas')[frame_num]
-        sigmas = all_sigmas[from_idx:to_idx]
+        # Get body sigma
+        N4 = int(2**D / 4)
+        sigma = ts.get('sigmas')[frame_num][d_idx]
+        min_sigma = 0.04
+        slopes = (sigma - min_sigma) / N4 * np.arange(N4) + min_sigma
+        sigmas = np.concatenate([
+            slopes,
+            np.ones(2 * N4) * sigma,
+            slopes[::-1]
+        ])
 
         # Get masks
         masks_target = ts.get('masks_target')[frame_num]
@@ -170,6 +172,18 @@ def get_posture(_id):
 
             img_str = base64img(z, image_mode='RGB')
             masks.append(img_str)
+
+        # Fetch curvatures
+        K = ts.get('curvatures')[frame_num] * (2**D - 1)
+        m1 = K[..., 0]
+        m2 = K[..., 1]
+        curvatures = {
+            'k': np.linalg.norm(K, axis=-1).tolist(),
+            'psi': np.arctan2(m1, m2).tolist(),
+            'm1': m1.tolist(),
+            'm2': m2.tolist(),
+            'xs': np.linspace(0, 1, 2**D + 2)[1:-1].tolist()
+        }
     else:
         m3d = Midline3D.objects.get(
             frame=frame,
@@ -189,9 +203,13 @@ def get_posture(_id):
         # Prepare images
         images = _generate_annotated_images(frame, points_2d, colours)
 
+        # No curvatures (for now)
+        curvatures = []
+
     response = {
         'images': images,
-        'posture': points.tolist()
+        'posture': points.tolist(),
+        'curvatures': curvatures,
     }
     if masks is not None:
         response['masks'] = masks
@@ -203,17 +221,12 @@ def get_posture(_id):
 def get_worm_lengths(_id: str):
     reconstruction = Reconstruction.objects.get(id=_id)
     D = reconstruction.mf_parameters.depth
+    D_min = reconstruction.mf_parameters.depth_min
     ts = TrialState(reconstruction=reconstruction)
-    points = ts.get('points')  # (T, N, 3)
+    l = ts.get('length')  # (T, D)
     lengths = {}
-
-    for d in range(1, D):
-        from_idx = sum([2**d2 for d2 in range(d)])
-        to_idx = from_idx + 2**d
-        points_d = points[:, from_idx:to_idx]
-        segments = points_d[:, 1:] - points_d[:, :-1]
-        segment_lengths = np.linalg.norm(segments, axis=-1)
-        lengths[d] = np.sum(segment_lengths, axis=-1).tolist()
+    for i, d in enumerate(range(D_min, D)):
+        lengths[d] = l[:, i].tolist()
 
     return {
         'timestamps': _get_timestamps(reconstruction),

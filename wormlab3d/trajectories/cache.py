@@ -272,10 +272,12 @@ def _fetch_mf_trajectory(
         X_full = XD
     else:
         D = reconstruction.mf_parameters.depth
+        D_min = reconstruction.mf_parameters.depth_min
+        offset = 2**D_min - 1
         if depth == -1:
             depth = D
         assert depth <= D
-        from_idx = sum([2**d for d in range(depth - 1)])
+        from_idx = sum([2**d for d in range(depth - 1)]) - offset
         to_idx = from_idx + 2**(depth - 1)
         X_full = XD[:, from_idx:to_idx]
 

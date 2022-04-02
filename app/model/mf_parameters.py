@@ -3,6 +3,7 @@ from typing import Dict
 
 from app.model.document_view import DocumentView
 from wormlab3d.data.model import MFParameters
+from wormlab3d.data.model.mf_parameters import RENDER_MODES
 
 
 class MFParametersView(DocumentView):
@@ -35,6 +36,13 @@ class MFParametersView(DocumentView):
                 },
             ),
             (
+                self.prefix + 'depth_min', {
+                    'title': 'Depth min',
+                    'type': 'integer',
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
                 self.prefix + 'n_points_total', {
                     'title': 'Num. points',
                     'type': 'integer',
@@ -45,6 +53,14 @@ class MFParametersView(DocumentView):
                 self.prefix + 'window_size', {
                     'title': 'Window size',
                     'type': 'integer',
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'window_image_diff_threshold', {
+                    'title': 'Window diffs',
+                    'type': 'scientific',
+                    'precision': 1,
                     'filter_type': 'choice_query',
                 },
             ),
@@ -67,6 +83,103 @@ class MFParametersView(DocumentView):
                     'title': 'Masks threshold',
                     'type': 'float',
                     'precision': 2,
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'render_mode', {
+                    'title': 'Render mode',
+                    'type': 'enum',
+                    'choices': RENDER_MODES
+                },
+            ),
+            (
+                self.prefix + 'curvature_mode', {
+                    'title': 'Curvature mode',
+                    'type': 'boolean',
+                },
+            ),
+            (
+                self.prefix + 'curvature_deltas', {
+                    'title': 'Curvature deltas',
+                    'type': 'boolean',
+                },
+            ),
+            (
+                self.prefix + 'curvature_max', {
+                    'title': 'Curvature max',
+                    'type': 'float',
+                    'precision': 1,
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'length_min', {
+                    'title': 'Length min',
+                    'type': 'float',
+                    'precision': 2,
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'length_max', {
+                    'title': 'Length max',
+                    'type': 'float',
+                    'precision': 2,
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'length_init', {
+                    'title': 'Length init',
+                    'type': 'float',
+                    'precision': 2,
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'length_warmup_steps', {
+                    'title': 'Length warmup',
+                    'type': 'integer',
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'dX0_limit', {
+                    'title': 'dX0 limit',
+                    'type': 'float',
+                    'precision': 2,
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'dl_limit', {
+                    'title': 'dl limit',
+                    'type': 'float',
+                    'precision': 2,
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'dk_limit', {
+                    'title': 'dk limit',
+                    'type': 'float',
+                    'precision': 2,
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'dpsi_limit', {
+                    'title': 'dpsi limit',
+                    'type': 'float',
+                    'precision': 2,
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'frame_skip', {
+                    'title': 'Frame skip',
+                    'type': 'integer',
                     'filter_type': 'choice_query',
                 },
             ),
@@ -156,6 +269,12 @@ class MFParametersView(DocumentView):
                 },
             ),
             (
+                self.prefix + 'optimise_exponents', {
+                    'title': 'Opt. exponents',
+                    'type': 'boolean',
+                },
+            ),
+            (
                 self.prefix + 'optimise_intensities', {
                     'title': 'Opt. intensities',
                     'type': 'boolean',
@@ -210,22 +329,15 @@ class MFParametersView(DocumentView):
                 },
             ),
             (
-                self.prefix + 'loss_sigmas', {
-                    'title': 'Loss sigmas',
-                    'type': 'scientific',
-                    'precision': 1,
-                },
-            ),
-            (
-                self.prefix + 'loss_intensities', {
-                    'title': 'Loss intensities',
-                    'type': 'scientific',
-                    'precision': 1,
-                },
-            ),
-            (
                 self.prefix + 'loss_smoothness', {
                     'title': 'Loss smoothness',
+                    'type': 'scientific',
+                    'precision': 1,
+                },
+            ),
+            (
+                self.prefix + 'loss_curvature', {
+                    'title': 'Loss curvature',
                     'type': 'scientific',
                     'precision': 1,
                 },
@@ -261,6 +373,13 @@ class MFParametersView(DocumentView):
             (
                 self.prefix + 'lr_sigmas', {
                     'title': 'lr sigmas',
+                    'type': 'scientific',
+                    'precision': 1,
+                },
+            ),
+            (
+                self.prefix + 'lr_exponents', {
+                    'title': 'lr exponents',
                     'type': 'scientific',
                     'precision': 1,
                 },

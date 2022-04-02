@@ -162,18 +162,34 @@ class Trial(Document):
 
         return self.triplet_reader
 
-    def get_tracking_data(self, fixed: bool, prune_missing: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+    def get_tracking_data(
+            self,
+            fixed: bool,
+            prune_missing: bool = False,
+            start_frame: int = None,
+            end_frame: int = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Fetch the 3D tracking data.
         """
         centres_3d = []
         timestamps = []
-        frame_time = 0.
+
+        # Match this trial and restrict frame range.
+        matches = {'trial': self.id}
+        frame_num_matches = []
+        if start_frame is not None:
+            frame_num_matches['$gte'] = start_frame
+        if end_frame is not None:
+            frame_num_matches['$lte'] = end_frame
+        if len(frame_num_matches):
+            matches['frame_num'] = frame_num_matches
 
         pipeline = [
-            {'$match': {'trial': self.id}},
+            {'$match': matches},
             {'$project': {
                 '_id': 0,
+                'frame_num': 1,
                 'p3d': '$centre_3d' + ('_fixed' if fixed else ''),
             }},
             {'$sort': {'frame_num': 1}},
@@ -190,8 +206,7 @@ class Trial(Document):
             else:
                 break
             centres_3d.append(pt)
-            timestamps.append(frame_time)
-            frame_time += 1 / self.fps
+            timestamps.append(res['frame_num'] / self.fps)
 
         centres_3d = np.array(centres_3d)
         timestamps = np.array(timestamps)

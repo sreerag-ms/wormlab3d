@@ -111,7 +111,15 @@ class DocumentView(ABC):
                 render_kw['class'] += ' form-select'
                 form_field = SelectField(label, choices=choices, render_kw=render_kw)
             elif filter_type == 'enum':
-                choices = {'': '', **field['choices']}
+                opts = field['choices']
+                if type(opts) == list:
+                    opts = dict(zip(opts, opts))
+                choices = {'': '', **opts}
+                choices = zip(choices.keys(), choices.values())
+                render_kw['class'] += ' form-select'
+                form_field = SelectField(label, choices=choices, render_kw=render_kw)
+            elif filter_type == 'boolean':
+                choices = {'': '', True: 'True', False: 'False'}
                 choices = zip(choices.keys(), choices.values())
                 render_kw['class'] += ' form-select'
                 form_field = SelectField(label, choices=choices, render_kw=render_kw)

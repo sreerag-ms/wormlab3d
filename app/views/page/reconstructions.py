@@ -79,8 +79,11 @@ def reconstruction_instance(_id):
     )
     parameters_view = MFParametersView()
 
-    ts = TrialState(reconstruction=reconstruction)
-    stat_keys = list(ts.stats.keys())
+    if reconstruction.source == M3D_SOURCE_MF:
+        ts = TrialState(reconstruction=reconstruction)
+        stat_keys = list(ts.stats.keys())
+    else:
+        stat_keys = []
 
     return render_template(
         'item/reconstruction.html',

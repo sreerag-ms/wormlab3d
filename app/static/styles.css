@@ -33,7 +33,7 @@
     width: 0;
 }
 
-.vc-play, .fc-prev, .fc-next {
+.vc-play, .fc-prev, .fc-next, .fc-prev-25, .fc-next-25 {
     border-radius: 50%;
 }
 

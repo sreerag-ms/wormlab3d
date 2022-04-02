@@ -3,6 +3,8 @@
 {% import 'includes/_details_table.html' as details %}
 {% import 'includes/_tabs.html' as tabs %}
 {% import 'includes/_cards.html' as cards %}
+{% set D = reconstruction.mf_parameters.depth %}
+{% set D_min = reconstruction.mf_parameters.depth_min %}
 
 
 {% block content %}
@@ -29,28 +31,37 @@
     <ul class="nav nav-tabs" id="reconstruction-{{ reconstruction.id }}-tabs" role="tablist">
       {% if reconstruction.source == 'MF' %}
         {{ tabs.tab_item('Parameters', true) }}
-        {{ tabs.tab_item('Stats') }}
+        {% if reconstruction.has_data %}
+          {{ tabs.tab_item('Stats') }}
+        {% endif %}
       {% endif %}
       {% if reconstruction.has_video %}
         {{ tabs.tab_item('Video') }}
       {% endif %}
-      {{ tabs.tab_item('Tracking 2D') }}
-      {{ tabs.tab_item('Tracking 3D', reconstruction.source != 'MF') }}
-      {% if reconstruction.source == 'MF' %}
-        {{ tabs.tab_item('Cameras') }}
-        {{ tabs.tab_item('Point stats') }}
+      {% if reconstruction.has_data %}
+        {{ tabs.tab_item('Tracking 2D') }}
+        {{ tabs.tab_item('Tracking 3D', reconstruction.source != 'MF') }}
+        {% if reconstruction.source == 'MF' %}
+          {{ tabs.tab_item('Cameras') }}
+          {{ tabs.tab_item('Render stats') }}
+        {% endif %}
+        {{ tabs.tab_item('Postures') }}
+        {% if reconstruction.source == 'MF' %}
+          {{ tabs.tab_item('Lengths') }}
+        {% endif %}
+        {{ tabs.tab_item('Planarity') }}
       {% endif %}
-      {{ tabs.tab_item('Postures') }}
-      {% if reconstruction.source == 'MF' %}
-        {{ tabs.tab_item('Lengths') }}
+      {% if reconstruction.eigenworms | length > 0 %}
+        {{ tabs.tab_item('Eigenworms') }}
       {% endif %}
-      {{ tabs.tab_item('Eigenworms') }}
-      {{ tabs.tab_item('Planarity') }}
     </ul>
 
     <div class="frame-controls my-2" style="display: none;">
       <div class="d-flex justify-content-center align-items-center">
-        <button type="button" class="fc-prev btn btn-primary btn-large">
+        <button type="button" class="fc-prev-25 btn btn-primary btn-large">
+          <span class="oi oi-media-skip-backward"></span>
+        </button>
+        <button type="button" class="fc-prev btn btn-primary btn-large ms-1">
           <span class="oi oi-arrow-thick-left"></span>
         </button>
         <div class="fc-progress progress mx-2" title="">
@@ -60,9 +71,18 @@
         <button type="button" class="fc-next btn btn-primary btn-large">
           <span class="oi oi-arrow-thick-right"></span>
         </button>
-        <div class="fc-time ms-3">
-          <span class="fc-current-frame">{{ '{:,}'.format(reconstruction.start_frame) }}</span>
-          / <span class="fc-num-frames">{{ '{:,}'.format(reconstruction.end_frame) }}</span>
+        <button type="button" class="fc-next-25 btn btn-primary btn-large ms-1">
+          <span class="oi oi-media-skip-forward"></span>
+        </button>
+        <div class="">
+          <div class="fc-frame ms-3">
+            <span class="fc-current-frame">{{ '{:,}'.format(reconstruction.start_frame) }}</span>
+            / <span class="fc-num-frames">{{ '{:,}'.format(reconstruction.end_frame) }}</span>
+          </div>
+          <div class="fc-time ms-3">
+            <span class="fc-current-time">{{ reconstruction.get_time(reconstruction.start_frame).strftime('%M:%S') }}</span>
+            / <span class="fc-total-time">{{ reconstruction.get_time(reconstruction.end_frame).strftime('%M:%S') }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -73,22 +93,24 @@
           {{ details.render(parameters_view, reconstruction.mf_parameters) }}
         {% endcall %}
 
-        {% call tabs.tab_panel('Stats') %}
-          <div class="g-0 mt-1 mb-5 stats-plots">
-            {% include 'includes/_loader.html' %}
+        {% if reconstruction.has_data %}
+          {% call tabs.tab_panel('Stats') %}
+            <div class="g-0 mt-1 mb-5 stats-plots">
+              {% include 'includes/_loader.html' %}
 
-            <div class="form-floating form-group">
-              <select name="stat-key" id="stat-key-select" class="form-control form-select" placeholder="Statistic">
-                {% for stat_key in stat_keys %}
-                  <option value="{{ stat_key }}">{{ stat_key }}</option>
-                {% endfor %}
-              </select>
-              <label for="stat-key-select">Statistic</label>
+              <div class="form-floating form-group">
+                <select name="stat-key" id="stat-key-select" class="form-control form-select" placeholder="Statistic">
+                  {% for stat_key in stat_keys %}
+                    <option value="{{ stat_key }}">{{ stat_key }}</option>
+                  {% endfor %}
+                </select>
+                <label for="stat-key-select">Statistic</label>
+              </div>
+
+              <div id="stats-plot"></div>
             </div>
-
-            <div id="stats-plot"></div>
-          </div>
-        {% endcall %}
+          {% endcall %}
+        {% endif %}
       {% endif %}
 
       {% if reconstruction.has_video %}
@@ -99,126 +121,150 @@
         {% endcall %}
       {% endif %}
 
-      {% call tabs.tab_panel('Tracking 2D') %}
-        {% include 'includes/_tracking_plots_2d.html' %}
-      {% endcall %}
-
-      {% call tabs.tab_panel('Tracking 3D', reconstruction.source != 'MF') %}
-        {% include 'includes/_tracking_plots_3d.html' %}
-      {% endcall %}
-
-      {% if reconstruction.source == 'MF' %}
-        {% call tabs.tab_panel('Cameras') %}
-          <div class="g-0 mt-1 mb-5 cameras-plots">
-            {% include 'includes/_loader.html' %}
-            <div class="form-floating form-group">
-              <select name="cameras-key" id="cameras-key-select" class="form-control form-select"
-                      placeholder="Camera parameters">
-                {% for cam_key in cam_keys %}
-                  <option value="{{ cam_key }}">{{ cam_key }}</option>
-                {% endfor %}
-              </select>
-              <label for="cameras-key-select">Camera parameters</label>
-            </div>
-            <div id="cameras-plots"></div>
-          </div>
+      {% if reconstruction.has_data %}
+        {% call tabs.tab_panel('Tracking 2D') %}
+          {% include 'includes/_tracking_plots_2d.html' %}
         {% endcall %}
 
-        {% call tabs.tab_panel('Point stats') %}
-          <div class="g-0 mt-1 mb-5 point-stats-plots">
-            {% include 'includes/_loader.html' %}
-            <div class="row g-1">
-              <div id="sigmas-plots" class="col"></div>
-              <div id="intensities-plots" class="col"></div>
-              <div id="scores-plots" class="col"></div>
-            </div>
-          </div>
+        {% call tabs.tab_panel('Tracking 3D', reconstruction.source != 'MF') %}
+          {% include 'includes/_tracking_plots_3d.html' %}
         {% endcall %}
-      {% endif %}
 
-      {% call tabs.tab_panel('Postures') %}
-        <div class="g-0 mt-1 mb-5 postures-plots">
-          {% include 'includes/_loader.html' %}
-
-          <div class="row g-1 flex">
-            <div class="col col-md-8 flex vh-100">
-              {% if reconstruction.source == 'MF' %}
+        {% if reconstruction.source == 'MF' %}
+          {% call tabs.tab_panel('Cameras') %}
+            <div class="g-0 mt-1 mb-5 cameras-plots">
+              {% include 'includes/_loader.html' %}
               <div class="form-floating form-group">
-                <select name="depth" id="depth-select" class="form-control form-select"
-                        placeholder="Depth">
-                  {% for d in range(reconstruction.mf_parameters.depth) %}
-                    {% set selected = ' selected' if loop.last else '' %}
-                    <option value="{{ d }}"{{ selected }}>{{ d }}</option>
+                <select name="cameras-key" id="cameras-key-select" class="form-control form-select"
+                        placeholder="Camera parameters">
+                  {% for cam_key in cam_keys %}
+                    <option value="{{ cam_key }}">{{ cam_key }}</option>
                   {% endfor %}
                 </select>
-                <label for="depth-select">Depth</label>
+                <label for="cameras-key-select">Camera parameters</label>
               </div>
+              <div id="cameras-plots"></div>
+            </div>
+          {% endcall %}
+
+          {% call tabs.tab_panel('Render stats') %}
+            <div class="g-0 mt-1 mb-5 render-stats-plots">
+              {% include 'includes/_loader.html' %}
+              <div class="row g-1">
+                <div id="sigmas-plots"></div>
+              </div>
+              <div class="row g-1">
+                <div id="exponents-plots"></div>
+              </div>
+              <div class="row g-1">
+                <div id="intensities-plots"></div>
+              </div>
+            </div>
+          {% endcall %}
+        {% endif %}
+
+        {% call tabs.tab_panel('Postures') %}
+          <div class="g-0 mt-1 mb-5 postures-plots">
+            {% include 'includes/_loader.html' %}
+
+            <div class="row g-1 flex">
+              <div class="col col-md-8 flex vh-100">
+                {% if reconstruction.source == 'MF' %}
+                <div class="form-floating form-group">
+                  <select name="depth" id="depth-select" class="form-control form-select"
+                          placeholder="Depth">
+                    {% for d in range(reconstruction.mf_parameters.depth) %}
+                      {% set selected = ' selected' if loop.last else '' %}
+                      <option value="{{ d }}"{{ selected }}>{{ d }}</option>
+                    {% endfor %}
+                  </select>
+                  <label for="depth-select">Depth</label>
+                </div>
+                {% endif %}
+                <div id="posture-3d-plot" class="h-100"></div>
+              </div>
+
+              <div id="posture-2d-images" class="col col-md-{{ '2' if reconstruction.source == 'MF' else '4' }} vh-100">
+                <div class="d-flex flex-column align-items-center h-100"></div>
+              </div>
+              {% if reconstruction.source == 'MF' %}
+                <div id="posture-2d-masks" class="col col-md-2 vh-100">
+                  <div class="d-flex flex-column align-items-center h-100"></div>
+                </div>
               {% endif %}
-              <div id="posture-3d-plot" class="h-100"></div>
             </div>
 
-            <div id="posture-2d-images" class="col col-md-{{ '2' if reconstruction.source == 'MF' else '4' }} vh-100">
-              <div class="d-flex flex-column align-items-center h-100"></div>
-            </div>
             {% if reconstruction.source == 'MF' %}
-              <div id="posture-2d-masks" class="col col-md-2 vh-100">
-                <div class="d-flex flex-column align-items-center h-100"></div>
+              <div class="row g-1">
+                <div id="k-plots"></div>
+              </div>
+              <div class="row g-1">
+                <div id="psi-plots"></div>
+              </div>
+              <div class="row g-1">
+                <div id="m1-plots"></div>
+              </div>
+              <div class="row g-1">
+                <div id="m2-plots"></div>
               </div>
             {% endif %}
           </div>
-        </div>
-      {% endcall %}
+        {% endcall %}
 
-      {% if reconstruction.source == 'MF' %}
-        {% call tabs.tab_panel('Lengths') %}
-          <div class="g-0 mt-1 mb-5 length-plots">
+        {% if reconstruction.source == 'MF' %}
+          {% call tabs.tab_panel('Lengths') %}
+            <div class="g-0 mt-1 mb-5 length-plots">
+              {% include 'includes/_loader.html' %}
+              <div id="length-plots"></div>
+            </div>
+          {% endcall %}
+        {% endif %}
+
+        {% call tabs.tab_panel('Planarity') %}
+          <div class="g-0 mt-1 mb-5 planarity-plots">
             {% include 'includes/_loader.html' %}
-            <div id="length-plots"></div>
+            <div class="row">
+              <div id="planarity-plot"></div>
+            </div>
+          </div>
+        {% endcall %}
+
+      {% endif %}
+
+      {% if reconstruction.eigenworms | length > 0 %}
+        {% call tabs.tab_panel('Eigenworms') %}
+          <div class="g-0 mt-1 mb-5 eigenworms-plots">
+            {% include 'includes/_loader.html' %}
+            <div class="form-floating form-group">
+              <select name="eigenworms-select" id="eigenworms-select" class="form-control form-select"
+                      placeholder="Eigenworms">
+                {% for ew in reconstruction.eigenworms %}
+                  {% set selected = ' selected' if loop.first else '' %}
+                  <option value="{{ ew.id }}"{{ selected }}>{{ ew }}</option>
+                {% endfor %}
+              </select>
+              <label for="eigenworms-select">Eigenworms</label>
+            </div>
+
+            <div class="row">
+              <div class="col col-md-4">
+  {#              {% call cards.card() %}#}
+  {#                {{ details.render(eigenworms_view, reconstruction) }}#}
+  {#              {% endcall %}#}
+              </div>
+
+              <div class="col col-md-4">
+                <div id="ew-eigenvalues-plot"></div>
+              </div>
+              <div class="col col-md-4">
+                <div id="ew-variance-plot"></div>
+              </div>
+
+            </div>
+
           </div>
         {% endcall %}
       {% endif %}
-
-      {% call tabs.tab_panel('Eigenworms') %}
-        <div class="g-0 mt-1 mb-5 eigenworms-plots">
-          {% include 'includes/_loader.html' %}
-          <div class="form-floating form-group">
-            <select name="eigenworms-select" id="eigenworms-select" class="form-control form-select"
-                    placeholder="Eigenworms">
-              {% for ew in reconstruction.eigenworms %}
-                {% set selected = ' selected' if loop.first else '' %}
-                <option value="{{ ew.id }}"{{ selected }}>{{ ew }}</option>
-              {% endfor %}
-            </select>
-            <label for="eigenworms-select">Eigenworms</label>
-          </div>
-
-          <div class="row">
-            <div class="col col-md-4">
-{#              {% call cards.card() %}#}
-{#                {{ details.render(eigenworms_view, reconstruction) }}#}
-{#              {% endcall %}#}
-            </div>
-
-            <div class="col col-md-4">
-              <div id="ew-eigenvalues-plot"></div>
-            </div>
-            <div class="col col-md-4">
-              <div id="ew-variance-plot"></div>
-            </div>
-
-          </div>
-
-        </div>
-      {% endcall %}
-
-      {% call tabs.tab_panel('Planarity') %}
-        <div class="g-0 mt-1 mb-5 planarity-plots">
-          {% include 'includes/_loader.html' %}
-          <div class="row">
-            <div id="planarity-plot"></div>
-          </div>
-        </div>
-      {% endcall %}
 
     </div>
 
@@ -230,7 +276,7 @@
 {% block scripts %}
   <script>
       $(document).ready(function () {
-          {% if reconstruction.source == 'MF' %}
+          {% if reconstruction.source == 'MF' and reconstruction.has_data %}
           // ========================== Stats ==========================
           let stats = {};
           let stats_plot_data = [{
@@ -336,6 +382,7 @@
 
           {% endif %}
 
+          {% if reconstruction.has_data %}
           // ========================== Tracking trajectories ==========================
           let X, ts;
 
@@ -453,65 +500,79 @@
           });
 
 
-          // ========================== Points stats (sigmas, intensities, scores) ==========================
+          // ========================== Render stats (sigmas, exponents, intensities) ==========================
 
-          let ps_keys = ['sigmas', 'intensities', 'scores'];
-          let ps_data = {};
-          let ps_plot_data = {'sigmas': [], 'intensities': [], 'scores': []};
-          let ps_layouts = {};
+          let rs_keys = ['sigmas', 'exponents', 'intensities'];
+          let rs_plot_data = {'sigmas': [], 'exponents': [], 'intensities': []};
+          let rs_layouts = {};
           for (let i = 0; i < 3; i++) {
-              let k = ps_keys[i];
-              for (let d = 0; d < {{ reconstruction.mf_parameters.depth }}; d++) {
-                  ps_plot_data[k].push({
+              let k = rs_keys[i];
+
+              // Point plots
+              for (let d = {{ D_min }}; d < {{ D }}; d++) {
+                  rs_plot_data[k].push({
                       x: [],
                       y: [],
                       type: 'line',
-                      name: 'Depth ' + String(d)
+                      name: 'Points (d=' + String(d) + ')',
+                      yaxis: 'y1',
                   });
               }
 
-              ps_layouts[k] = {
+              // Camera scaling factors plots
+              for (let j = 0; j < 3; j++) {
+                  rs_plot_data[k].push({
+                      x: [],
+                      y: [],
+                      type: 'line',
+                      name: 'Camera ' + String(j),
+                      yaxis: 'y2'
+                  });
+              }
+
+              rs_layouts[k] = {
                   title: k.charAt(0).toUpperCase() + k.slice(1),
-                  xaxis: {title: 'Body coordinate',},
+                  xaxis: {title: 'Time (s)', type: 'date', tickformat: '%M:%S'},
+                  yaxis: {title: 'Points', side: 'left'},
+                  yaxis2: {title: 'Scaling factors', overlaying: 'y', side: 'right'},
                   margin: {t: 50},
               };
 
-              Plotly.newPlot(k + '-plots', ps_plot_data[k], ps_layouts[k], plot_config);
+              Plotly.newPlot(k + '-plots', rs_plot_data[k], rs_layouts[k], plot_config);
           }
 
-          function plot_point_stats() {
-              let xs = ps_data[frame_num]['xs'];
+          function plot_render_stats(data) {
+              let ts = timestamps_to_dates(data['timestamps']);
               for (let i = 0; i < 3; i++) {
-                  let k = ps_keys[i];
-                  let p = ps_data[frame_num][k];
-                  for (let d = 0; d < {{ reconstruction.mf_parameters.depth }}; d++) {
-                      ps_plot_data[k][d]['x'] = xs[d];
-                      ps_plot_data[k][d]['y'] = p[d];
+                  let k = rs_keys[i];
+                  let p = data[k];
+                  let plot_idx = 0;
+                  for (let d = {{ D_min }}; d < {{ D }}; d++) {
+                      rs_plot_data[k][plot_idx]['x'] = ts;
+                      rs_plot_data[k][plot_idx]['y'] = p['points'][d];
+                      plot_idx++;
                   }
-                  Plotly.react(k + '-plots', ps_plot_data[k], ps_layouts[k], plot_config);
+                  for (let j = 0; j < 3; j++) {
+                      rs_plot_data[k][plot_idx]['x'] = ts;
+                      rs_plot_data[k][plot_idx]['y'] = p['sfs'][j];
+                      plot_idx++;
+                  }
+                  Plotly.react(k + '-plots', rs_plot_data[k], rs_layouts[k], plot_config);
               }
           }
 
-          function get_point_stats() {
-              $('#point-stats-panel .loader').show();
-              $.getJSON('{{ url_for('api.get_point_stats', _id=reconstruction.id) }}', {frame_num: frame_num}, function (data) {
-                  ps_data[frame_num] = data;
-                  $('#point-stats-panel .loader').hide();
-                  plot_point_stats();
+          function get_render_stats() {
+              $('#render-stats-panel .loader').show();
+              $.getJSON('{{ url_for('api.get_render_stats', _id=reconstruction.id) }}', function (data) {
+                  window.rsdata = data;
+                  $('#render-stats-panel .loader').hide();
+                  plot_render_stats(data);
               });
           }
 
-          function update_point_stats_plots() {
-              if (frame_num in ps_data) {
-                  plot_point_stats();
-              } else {
-                  get_point_stats();
-              }
-          }
-
           // Load sigmas and draw plot when the tab is activated
-          $('#point-stats-tab').one('shown.bs.tab', function () {
-              update_point_stats_plots();
+          $('#render-stats-tab').one('shown.bs.tab', function () {
+              get_render_stats();
           });
 
           {% endif %}
@@ -521,7 +582,7 @@
 
           let postures_data = {
           {% if reconstruction.source == 'MF' %}
-            {% for d in range(reconstruction.mf_parameters.depth) %}
+            {% for d in range(reconstruction.mf_parameters.depth_min, reconstruction.mf_parameters.depth) %}
                 {{ d }}: {},
             {% endfor %}
           {% else %}
@@ -559,6 +620,25 @@
           };
           Plotly.newPlot('posture-3d-plot', postures_3d_plot_data, postures_3d_plot_layout, plot_config);
 
+          let curvatures_keys = ['k', 'psi', 'm1', 'm2'];
+          let curvatures_plot_data = {'k': [], 'psi': [], 'm1': [], 'm2': []};
+          let curvatures_layouts = {};
+          for (let i = 0; i < 4; i++) {
+              let k = curvatures_keys[i];
+              curvatures_plot_data[k] = [{
+                  x: [],
+                  y: [],
+                  type: 'line',
+              },];
+              curvatures_layouts[k] = {
+                  title: k,
+                  xaxis: {title: 'Body coordinate'},
+                  margin: {t: 50},
+              };
+
+              Plotly.newPlot(k + '-plots', curvatures_plot_data[k], curvatures_layouts[k], plot_config);
+          }
+
           function plot_posture_3d() {
               let data = postures_data[depth][frame_num].posture;
               postures_3d_plot_data[0].x = data[0];
@@ -586,20 +666,14 @@
               $('#posture-2d-masks .flex-column').html(imgs);
           }
 
-          function get_posture() {
-              $('#postures-panel .loader').show();
-              $.getJSON('{{ url_for('api.get_posture', _id=reconstruction.id) }}', {
-                  frame_num: frame_num,
-                  depth: depth
-              }, function (data) {
-                  postures_data[depth][frame_num] = data;
-                  $('#postures-panel .loader').hide();
-                  draw_posture_2d_images();
-                  {% if reconstruction.source == 'MF' %}
-                    draw_posture_2d_masks();
-                  {% endif %}
-                  plot_posture_3d();
-              });
+          function plot_curvatures() {
+              let data = postures_data[depth][frame_num].curvatures;
+              for (let i = 0; i < 4; i++) {
+                  let k = curvatures_keys[i];
+                  curvatures_plot_data[k][0]['x'] = data['xs'];
+                  curvatures_plot_data[k][0]['y'] = data[k];
+                  Plotly.react(k + '-plots', curvatures_plot_data[k], curvatures_layouts[k], plot_config);
+              }
           }
 
           function update_postures() {
@@ -608,10 +682,23 @@
                   draw_posture_2d_images();
                   {% if reconstruction.source == 'MF' %}
                       draw_posture_2d_masks();
+                      plot_curvatures();
                   {% endif %}
               } else {
                   get_posture();
               }
+          }
+
+          function get_posture() {
+              $('#postures-panel .loader').show();
+              $.getJSON('{{ url_for('api.get_posture', _id=reconstruction.id) }}', {
+                  frame_num: frame_num,
+                  depth: depth
+              }, function (data) {
+                  postures_data[depth][frame_num] = data;
+                  $('#postures-panel .loader').hide();
+                  update_postures();
+              });
           }
 
           $('#depth-select').change(function () {
@@ -630,24 +717,27 @@
           function set_frame_num(new_frame_num) {
               frame_num = new_frame_num;
               let progress = (frame_num -{{ reconstruction.start_frame }}) / {{ reconstruction.n_frames }};
+              let t = ({{ reconstruction.start_frame }} + progress * {{ reconstruction.n_frames }}) / {{ reconstruction.trial.fps }};
               $('.fc-current-frame').text(Number(frame_num).toLocaleString());
+              $('.fc-current-time').text(moment(t * 1000).format('mm:ss'));
               $('.fc-progress .progress-bar').width((progress * 100) + '%');
-              {% if reconstruction.source == 'MF' %}
-              update_point_stats_plots();
-              {% endif %}
               update_postures();
           }
 
           $('.fc-prev').click(function () {
-              if (frame_num > 0) {
-                  set_frame_num(frame_num - 1);
-              }
+              set_frame_num(Math.max({{ reconstruction.start_frame }}, frame_num - 1));
+          });
+
+          $('.fc-prev-25').click(function () {
+              set_frame_num(Math.max({{ reconstruction.start_frame }}, frame_num - 25))
           });
 
           $('.fc-next').click(function () {
-              if (frame_num < {{ reconstruction.end_frame }}) {
-                  set_frame_num(frame_num + 1);
-              }
+              set_frame_num(Math.min({{ reconstruction.end_frame }}, frame_num + 1));
+          });
+
+          $('.fc-next-25').click(function () {
+              set_frame_num(Math.min({{ reconstruction.end_frame }}, frame_num + 25));
           });
 
           $('.fc-progress').on('mousedown', function (e) {
@@ -659,17 +749,18 @@
 
           $('.fc-progress').on('mousemove', function (e) {
               let progress = (e.pageX - $(this).offset().left) / $(this).width();
+              let n = Math.round({{ reconstruction.start_frame }} + progress * {{ reconstruction.n_frames }});
               let t = ({{ reconstruction.start_frame }} + progress * {{ reconstruction.n_frames }}) / {{ reconstruction.trial.fps }};
-              $(this).attr('title', moment(t * 1000).format('mm:ss'))
+              $(this).attr('title', String(n) + ' / ' + moment(t * 1000).format('mm:ss'))
           });
 
           // Show frame controls when the relevant tabs are activated
-          $('#point-stats-tab, #postures-tab').on('shown.bs.tab', function () {
+          $('#postures-tab').on('shown.bs.tab', function () {
               $('.frame-controls').show();
           });
 
           // Hide frame controls when not needed
-          $('#point-stats-tab, #postures-tab').on('hidden.bs.tab', function () {
+          $('#postures-tab').on('hidden.bs.tab', function () {
               $('.frame-controls').hide();
           });
 
@@ -677,7 +768,7 @@
           {% if reconstruction.source == 'MF' %}
           // ========================== Lengths ==========================
           let lengths_plot_data = [];
-          for (let d = 1; d < {{ reconstruction.mf_parameters.depth }}; d++) {
+          for (let d = {{ D_min }}; d < {{ D }}; d++) {
               lengths_plot_data.push({
                   x: [],
                   y: [],
@@ -698,9 +789,12 @@
           function get_lengths() {
               $('#lengths-panel .loader').show();
               $.getJSON('{{ url_for('api.get_worm_lengths', _id=reconstruction.id) }}', {frame_num: frame_num}, function (data) {
-                  for (let d = 0; d < {{ reconstruction.mf_parameters.depth }} -1; d++) {
-                      lengths_plot_data[d]['x'] = timestamps_to_dates(data['timestamps']);
-                      lengths_plot_data[d]['y'] = data['lengths'][d + 1];
+                  let ts = timestamps_to_dates(data['timestamps']);
+                  let plot_idx = 0;
+                  for (let d = {{ D_min }}; d < {{ D }}; d++) {
+                      lengths_plot_data[plot_idx]['x'] = ts;
+                      lengths_plot_data[plot_idx]['y'] = data['lengths'][d];
+                      plot_idx++;
                   }
                   Plotly.react('length-plots', lengths_plot_data, lengths_layout, plot_config);
                   $('#lengths-panel .loader').hide();
@@ -714,7 +808,40 @@
 
           {% endif %}
 
+          // ========================== Planarity ==========================
+          let planarity_plot_data = [{
+              x: [],
+              y: [],
+              type: 'scattergl',
+          }];
+          let planarity_plot_layout = {
+              title: 'Planarity',
+              xaxis: {
+                  title: 'Time (s)',
+                  type: 'date',
+                  tickformat: '%M:%S'
+              }
+          };
+          Plotly.newPlot('planarity-plot', planarity_plot_data, planarity_plot_layout, plot_config);
 
+          function plot_planarity() {
+              $('#planarity-panel .loader').show();
+              $.getJSON('{{ url_for('api.get_planarity', _id=reconstruction.id) }}', function (data) {
+                  $('#planarity-panel .loader').hide();
+                  planarity_plot_data[0]['x'] = timestamps_to_dates(data['timestamps']);
+                  planarity_plot_data[0]['y'] = data.planarities;
+                  Plotly.react('planarity-plot', planarity_plot_data, planarity_plot_layout);
+              });
+          }
+
+          // Load planarity and draw plots when the tab is activated
+          $('#planarity-tab').one('shown.bs.tab', function () {
+              plot_planarity();
+          });
+
+          {% endif %}
+
+          {% if reconstruction.eigenworms | length > 0 %}
           // ========================== Eigenworms ==========================
           let eigenworms = {};
 
@@ -781,38 +908,7 @@
           $('#eigenworms-tab').one('shown.bs.tab', function () {
               $('#eigenworms-select').change();
           });
-
-
-          // ========================== Planarity ==========================
-          let planarity_plot_data = [{
-              x: [],
-              y: [],
-              type: 'scattergl',
-          }];
-          let planarity_plot_layout = {
-              title: 'Planarity',
-              xaxis: {
-                  title: 'Time (s)',
-                  type: 'date',
-                  tickformat: '%M:%S'
-              }
-          };
-          Plotly.newPlot('planarity-plot', planarity_plot_data, planarity_plot_layout, plot_config);
-
-          function plot_planarity() {
-              $('#planarity-panel .loader').show();
-              $.getJSON('{{ url_for('api.get_planarity', _id=reconstruction.id) }}', function (data) {
-                  $('#planarity-panel .loader').hide();
-                  planarity_plot_data[0]['x'] = timestamps_to_dates(data['timestamps']);
-                  planarity_plot_data[0]['y'] = data.planarities;
-                  Plotly.react('planarity-plot', planarity_plot_data, planarity_plot_layout);
-              });
-          }
-
-          // Load planarity and draw plots when the tab is activated
-          $('#planarity-tab').one('shown.bs.tab', function () {
-              plot_planarity();
-          });
+          {% endif %}
       });
   </script>
 

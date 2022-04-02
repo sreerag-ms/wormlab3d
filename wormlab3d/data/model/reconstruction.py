@@ -1,19 +1,19 @@
-import datetime
+from datetime import datetime
 from pathlib import Path
 from typing import List
 
 from mongoengine import *
 
-from wormlab3d import RECONSTRUCTION_VIDEOS_PATH
+from wormlab3d import RECONSTRUCTION_VIDEOS_PATH, MF_DATA_PATH
 from wormlab3d.data.model.eigenworms import Eigenworms
 from wormlab3d.data.model.frame import Frame
 from wormlab3d.data.model.mf_parameters import MFParameters
-from wormlab3d.data.model.midline3d import M3D_SOURCES
+from wormlab3d.data.model.midline3d import M3D_SOURCES, M3D_SOURCE_MF
 
 
 class Reconstruction(Document):
-    created = DateTimeField(required=True, default=datetime.datetime.now)
-    updated = DateTimeField(required=True, default=datetime.datetime.now)
+    created = DateTimeField(required=True, default=datetime.now)
+    updated = DateTimeField(required=True, default=datetime.now)
     trial = ReferenceField('Trial', required=True)
     start_frame = IntField(required=True)
     end_frame = IntField(required=True)
@@ -36,7 +36,7 @@ class Reconstruction(Document):
     }
 
     def save(self, *args, **kwargs):
-        self.updated = datetime.datetime.now()
+        self.updated = datetime.now()
         return super().save(*args, **kwargs)
 
     def get_frame(self, frame_num: int) -> Frame:
@@ -57,3 +57,15 @@ class Reconstruction(Document):
     @property
     def has_video(self) -> bool:
         return self.video_filename.exists()
+
+    @property
+    def has_data(self) -> bool:
+        if self.source != M3D_SOURCE_MF:
+            return True
+        path_meta = MF_DATA_PATH / f'trial_{self.trial.id}' / str(self.id) / 'metadata.json'
+        if path_meta.exists():
+            return True
+        return False
+
+    def get_time(self, frame_num: int) -> datetime:
+        return datetime.fromtimestamp(frame_num / self.trial.fps)

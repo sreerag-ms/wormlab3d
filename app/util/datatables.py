@@ -13,6 +13,7 @@ from bson import ObjectId
 from app.model import DocumentView
 from app.util.encoders import JSONEncoder
 from wormlab3d import logger
+from wormlab3d.toolkit.util import str2bool
 
 
 def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting?
@@ -144,6 +145,8 @@ def dt_query(request, doc_view: DocumentView):  # TODO: Inheritance type hinting
             cast_val = _cast_filter_value(raw_val, spec['type_rel'])
         elif ftype == 'enum':
             cast_val = int(raw_val)
+        elif ftype == 'boolean':
+            cast_val = str2bool(raw_val)
         else:
             cast_val = raw_val
         return cast_val

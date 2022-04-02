@@ -557,6 +557,15 @@ class Midline3DFinder:
                     v = v.squeeze().T.reshape(var.shape)
                     v = v.cpu().numpy()
                     var[1:-1] = v[1:-1]
+
+                # Interpolate the stats
+                last_stats = self.last_frame_state.stats
+                curr_stats = mfs.stats
+                for k, v in curr_stats.items():
+                    interpolated_stats = np.linspace(last_stats[k], curr_stats[k], p.frame_skip + 2)
+                    for j, ifn in enumerate(range(self.last_frame_state.frame_num+1, frame_num)):
+                        self.stats[k][ifn] = float(interpolated_stats[1+j])
+
                 self.trial_state.save()
 
             # Make plots
