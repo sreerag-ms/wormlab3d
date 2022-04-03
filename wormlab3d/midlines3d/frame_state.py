@@ -224,8 +224,9 @@ class FrameState(nn.Module):
 
         # Initialise the sigmas
         sigmas = []
+        sigmas_init = max(mp.sigmas_min + 0.01, mp.sigmas_init)
         for d in range(mp.depth_min, mp.depth):
-            sigmas_d = nn.Parameter(torch.tensor(mp.sigmas_init), requires_grad=mp.optimise_sigmas)
+            sigmas_d = nn.Parameter(torch.tensor(sigmas_init), requires_grad=mp.optimise_sigmas)
             sigmas.append(sigmas_d)
         self.register_parameter('sigmas', sigmas)
 

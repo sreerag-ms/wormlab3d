@@ -170,6 +170,8 @@ class ProjectRenderScoreModel(nn.Module):
             self,
             image_size: int = PREPARED_IMAGE_SIZE[0],
             render_mode: str = RENDER_MODE_GAUSSIANS,
+            sigmas_min: float = 0.04,
+            intensities_min: float = 0.4,
             curvature_mode: bool = False,
             curvature_deltas: bool = False,
             length_min: float = 0.5,
@@ -184,6 +186,8 @@ class ProjectRenderScoreModel(nn.Module):
         self.image_size = image_size
         assert render_mode in RENDER_MODES
         self.render_mode = render_mode
+        self.sigmas_min = sigmas_min
+        self.intensities_min = intensities_min
         self.curvature_mode = curvature_mode
         self.curvature_deltas = curvature_deltas
         self.length_min = length_min
@@ -371,9 +375,8 @@ class ProjectRenderScoreModel(nn.Module):
                 N4 = int(N / 4)
 
                 # Sigmas should be equal in the middle section but taper towards the ends
-                min_sigma = 0.04
-                sigma_d = sigmas_d[:, None].clamp(min=min_sigma)
-                slopes = (sigma_d - min_sigma) / N4 * torch.arange(N4, device=device)[None, :] + min_sigma
+                sigma_d = sigmas_d[:, None].clamp(min=self.sigmas_min)
+                slopes = (sigma_d - self.sigmas_min) / N4 * torch.arange(N4, device=device)[None, :] + self.sigmas_min
                 sigmas_d = torch.cat([
                     slopes,
                     torch.ones(bs, 2 * N4, device=device) * sigma_d,
@@ -384,9 +387,8 @@ class ProjectRenderScoreModel(nn.Module):
                 exponents_d = torch.ones(bs, N, device=device) * exponents_d[:, None]
 
                 # Intensities should be equal in the middle section but taper towards the ends
-                min_int = 0.4
                 int_d = intensities_d[:, None]
-                slopes = (int_d - min_int) / N4 * torch.arange(N4, device=device)[None, :] + min_int
+                slopes = (int_d - self.intensities_min) / N4 * torch.arange(N4, device=device)[None, :] + self.intensities_min
                 intensities_d = torch.cat([
                     slopes,
                     torch.ones(bs, 2 * N4, device=device) * int_d,

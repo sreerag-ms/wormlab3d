@@ -173,6 +173,8 @@ class Midline3DFinder:
         model = ProjectRenderScoreModel(
             image_size=PREPARED_IMAGE_SIZE[0],
             render_mode=self.parameters.render_mode,
+            sigmas_min=self.parameters.sigmas_min,
+            intensities_min=self.parameters.intensities_min,
             curvature_mode=self.parameters.curvature_mode,
             curvature_deltas=self.parameters.curvature_deltas,
             length_min=self.parameters.length_min,
@@ -218,7 +220,7 @@ class Midline3DFinder:
         reconstruction = None
         try:
             reconstruction = Reconstruction.objects.get(**params)
-            if reconstruction.start_frame < start_frame:
+            if reconstruction.start_frame > start_frame:
                 reconstruction.start_frame = start_frame
                 reconstruction.save()
             logger.info(f'Loaded reconstruction (id={reconstruction.id}, created={reconstruction.created}).')
@@ -242,28 +244,6 @@ class Midline3DFinder:
         """
         logger.info('Initialising trial state.')
         self.trial: Trial = Trial.objects.get(id=self.source_args.trial_id)
-
-        # Look for existing reconstruction
-        reconstruction = None
-        try:
-            reconstruction = Reconstruction.objects.get(
-                trial=self.trial,
-                source=M3D_SOURCE_MF,
-                mf_parameters=self.parameters,
-            )
-        except DoesNotExist:
-            pass
-
-        if reconstruction is None:
-            reconstruction = Reconstruction(
-                trial=self.trial,
-                source=M3D_SOURCE_MF,
-                mf_parameters=self.parameters,
-                start_frame=self.source_args.start_frame,
-                end_frame=self.source_args.start_frame
-            )
-            reconstruction.save()
-            logger.info('Created reconstruction')
 
         # Prepare trial state
         self.trial_state = TrialState(
@@ -602,6 +582,14 @@ class Midline3DFinder:
                 prev_frame_state=mfs,
                 device=self.device
             )
+
+            # Reduce curvature
+            if p.curvature_mode and p.curvature_relaxation_factor is not None:
+                K = next_frame.get_state('curvatures')
+                with torch.no_grad():
+                    for K_d in K:
+                        K_d.data = K_d * p.curvature_relaxation_factor
+
             if p.use_master:
                 mfs.frame_num = next_frame.frame_num
                 mfs.copy_state(next_frame)
@@ -1052,9 +1040,12 @@ class Midline3DFinder:
                 for v in params:
                     v.data = v.clamp(**render_parameters_limits[sei])
 
-                # Camera scaling factors should average 1
+                # Camera scaling factors should average 1 and not be more than 20% from the mean
                 v = self.master_frame_state.get_state(f'camera_{sei}')
                 v.data = v / v.mean()
+                sf = 0.2 / ((v - 1).abs()).amax()
+                if sf < 1:
+                    v.data = (v - 1) * sf + 1
 
     def _log_progress(self, step: int, final_step: int, loss: float, stats: dict):
         """

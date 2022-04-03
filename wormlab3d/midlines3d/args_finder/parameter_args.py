@@ -17,13 +17,17 @@ class ParameterArgs(BaseArgs):
             window_size: int = 1,
             window_image_diff_threshold: float = 3e3,
             use_master: bool = True,
-            sigmas_init: float = 0.1,
             masks_threshold: float = 0.4,
             render_mode: str = RENDER_MODE_GAUSSIANS,
+
+            sigmas_init: float = 0.1,
+            sigmas_min: float = 0.04,
+            intensities_min: float = 0.4,
 
             curvature_mode: bool = False,
             curvature_deltas: bool = False,
             curvature_max: float = 2.,
+            curvature_relaxation_factor: float = None,
             length_min: float = None,
             length_max: float = None,
             length_init: float = None,
@@ -80,9 +84,12 @@ class ParameterArgs(BaseArgs):
         self.window_size = window_size
         self.window_image_diff_threshold = window_image_diff_threshold
         self.use_master = use_master
-        self.sigmas_init = sigmas_init
         self.masks_threshold = masks_threshold
         self.render_mode = render_mode
+
+        self.sigmas_init = sigmas_init
+        self.sigmas_min = sigmas_min
+        self.intensities_min = intensities_min
 
         self.curvature_mode = curvature_mode
         self.curvature_max = curvature_max
@@ -102,6 +109,7 @@ class ParameterArgs(BaseArgs):
             if length_warmup_steps is None:
                 length_warmup_steps = 100
         self.curvature_deltas = curvature_deltas
+        self.curvature_relaxation_factor = curvature_relaxation_factor
         self.length_min = length_min
         self.length_max = length_max
         self.length_init = length_init
@@ -180,12 +188,17 @@ class ParameterArgs(BaseArgs):
                            help='Minimum image difference threshold between subsequent frames in the window.')
         group.add_argument('--use-master', type=str2bool, default=True,
                            help='Optimise a single parameter set for the full window. Default = True.')
-        group.add_argument('--sigmas-init', type=float, default=0.01,
-                           help='Blur sigmas for rendering points. Default=0.01.')
         group.add_argument('--masks-threshold', type=float, default=0.4,
                            help='Threshold value to use for binarising the frame images. Default=0.4.')
         group.add_argument('--render-mode', type=str, default=RENDER_MODE_GAUSSIANS, choices=RENDER_MODES,
                            help='How to render the points, either as gaussian blobs (gaussians) or as circles (circles). Default=gaussians.')
+
+        group.add_argument('--sigmas-init', type=float, default=0.04,
+                           help='Initial rendering sigmas for points. Default=0.04.')
+        group.add_argument('--sigmas-min', type=float, default=0.04,
+                           help='Minimum rendering sigma. Tapers to this value at head and tail. Default=0.04.')
+        group.add_argument('--intensities-min', type=float, default=0.4,
+                           help='Minimum rendering intensity. Tapers to this value at head and tail. Default=0.4.')
 
         group.add_argument('--curvature-mode', type=str2bool, default=False,
                            help='Optimise the curvature rather than the points. Default=False.')
@@ -194,6 +207,8 @@ class ParameterArgs(BaseArgs):
         group.add_argument('--curvature-max', type=float, default=2.,
                            help='Maximum allowed curvature in terms of coils/revolutions. '
                                 'Used in curvature-loss for points-mode or as a hard limit when in curvature-mode. Default=2.')
+        group.add_argument('--curvature-relaxation-factor', type=float,
+                           help='The curvature is scaled by this factor at the start of each new frame, if defined.')
         group.add_argument('--length-min', type=float,
                            help='Minimum worm length (only used in curvature mode). Default=0.5.')
         group.add_argument('--length-max', type=float,

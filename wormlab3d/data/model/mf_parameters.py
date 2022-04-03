@@ -21,13 +21,17 @@ class MFParameters(Document):
     window_size = IntField()
     window_image_diff_threshold = FloatField()
     use_master = BooleanField()
-    sigmas_init = FloatField()
     masks_threshold = FloatField()
     render_mode = StringField(choices=RENDER_MODES)
+
+    sigmas_init = FloatField()
+    sigmas_min = FloatField()
+    intensities_min = FloatField()
 
     curvature_mode = BooleanField()
     curvature_deltas = BooleanField()
     curvature_max = FloatField()
+    curvature_relaxation_factor = FloatField()
     length_min = FloatField()
     length_max = FloatField()
     length_init = FloatField()

@@ -71,14 +71,6 @@ class MFParametersView(DocumentView):
                 },
             ),
             (
-                self.prefix + 'sigmas_init', {
-                    'title': 'Sigmas init',
-                    'type': 'float',
-                    'precision': 3,
-                    'filter_type': 'choice_query',
-                },
-            ),
-            (
                 self.prefix + 'masks_threshold', {
                     'title': 'Masks threshold',
                     'type': 'float',
@@ -91,6 +83,30 @@ class MFParametersView(DocumentView):
                     'title': 'Render mode',
                     'type': 'enum',
                     'choices': RENDER_MODES
+                },
+            ),
+            (
+                self.prefix + 'sigmas_init', {
+                    'title': 'Sigmas init',
+                    'type': 'float',
+                    'precision': 3,
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'sigmas_min', {
+                    'title': 'Sigmas min',
+                    'type': 'float',
+                    'precision': 2,
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'intensities_min', {
+                    'title': 'Intensities min',
+                    'type': 'float',
+                    'precision': 2,
+                    'filter_type': 'choice_query',
                 },
             ),
             (
@@ -108,6 +124,14 @@ class MFParametersView(DocumentView):
             (
                 self.prefix + 'curvature_max', {
                     'title': 'Curvature max',
+                    'type': 'float',
+                    'precision': 1,
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'curvature_relaxation_factor', {
+                    'title': 'Curvature rf',
                     'type': 'float',
                     'precision': 1,
                     'filter_type': 'choice_query',
