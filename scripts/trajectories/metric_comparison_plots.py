@@ -3,27 +3,32 @@ from argparse import Namespace
 from typing import List
 
 import matplotlib.pyplot as plt
-from wormlab3d import LOGS_PATH, START_TIMESTAMP
+import numpy as np
+
+from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
+from wormlab3d.data.model import Dataset, Reconstruction
 from wormlab3d.simple_worm.estimate_k import get_K_estimates_from_args
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
-from wormlab3d.trajectories.pca import get_planarity_from_args
+from wormlab3d.trajectories.pca import generate_or_load_pca_cache
 from wormlab3d.trajectories.util import calculate_speeds, calculate_htd
 
 show_plots = True
-save_plots = False
+save_plots = True
 img_extension = 'png'
 
 
-def make_filename(method: str, args: Namespace, excludes: List[str] = None):
+def make_filename(metric_a: str, metric_b: str, args: Namespace, excludes: List[str] = None):
     if excludes is None:
         excludes = []
-    fn = LOGS_PATH + '/' + START_TIMESTAMP + f'_{method}'
+    fn = START_TIMESTAMP + f'{metric_a}_vs_{metric_b}'
 
-    for k in ['trial', 'frames', 'src', 'u', 'smoothing_window', 'directionality', 'projection']:
+    for k in ['dataset', 'trial', 'frames', 'src', 'u', 'smoothing_window', 'directionality', 'projection']:
         if k in excludes:
             continue
-        if k == 'trial':
+        if k == 'dataset' and args.dataset is not None:
+            fn += f'_dataset={args.dataset}'
+        elif k == 'trial' and args.trial is not None:
             fn += f'_trial={args.trial}'
         elif k == 'frames':
             frames_str_fn = ''
@@ -44,39 +49,44 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
             fn += f'_p={args.projection}'
 
     # Add K-estimation params
-    if method in ['speed_vs_K', 'HTD_vs_K', 'planarity_vs_K']:
+    if metric_a == 'K' or metric_b == 'K':
         fn += f'_Knf={args.K_sample_frames}'
         fn += f'_K0={args.K0}'
 
     # Add planarity window parameter
-    if method in ['speed_vs_planarity', 'planarity_vs_K', 'planarity_vs_HTD']:
+    if metric_a in ['planarity', 'nonp'] or metric_b in ['planarity', 'nonp']:
         fn += f'_pw={args.planarity_window}'
 
-    return fn + '.' + img_extension
+    return LOGS_PATH / (fn + '.' + img_extension)
 
 
-def make_title(method: str, args: Namespace):
+def make_title(metric_a: str, metric_b: str, args: Namespace):
     speed_title = 'Speed'
     K_est_title = f'K estimate ({args.K_sample_frames} frames, K0={args.K0})'
     htd_title = 'HTD'
     planarity_title = f'Planarity ({args.planarity_window} frames)'
+    nonp_title = f'Non-planarity ({args.planarity_window} frames)'
 
-    if method == 'speed_vs_K':
-        t = f'{speed_title} vs {K_est_title}.'
-    elif method == 'speed_vs_HTD':
-        t = f'{speed_title} vs {htd_title}.'
-    elif method == 'HTD_vs_K':
-        t = f'{htd_title} vs {K_est_title}.'
-    elif method == 'speed_vs_planarity':
-        t = f'{speed_title} vs {planarity_title}.'
-    elif method == 'planarity_vs_K':
-        t = f'{planarity_title} vs {K_est_title}.'
-    elif method == 'planarity_vs_HTD':
-        t = f'{planarity_title} vs {htd_title}.'
-    else:
-        raise RuntimeError(f'Unrecognised method: {method}.')
+    t = []
+    for metric in [metric_a, metric_b]:
+        if metric == 'speed':
+            t.append(speed_title)
+        elif metric == 'K':
+            t.append(K_est_title)
+        elif metric == 'htd':
+            t.append(htd_title)
+        elif metric == 'planarity':
+            t.append(planarity_title)
+        elif metric == 'nonp':
+            t.append(nonp_title)
+        else:
+            raise RuntimeError(f'Unrecognised metric: {metric}.')
+    t = ' vs '.join(t) + '.'
 
-    t += f' Trial {args.trial}.'
+    if args.dataset is not None:
+        t += f' Dataset {args.dataset}.'
+    elif args.trial is not None:
+        t += f' Trial {args.trial}.'
 
     if args.smoothing_window is not None:
         t += f'\nSmoothing window = {args.smoothing_window} frames.'
@@ -84,139 +94,127 @@ def make_title(method: str, args: Namespace):
     return t
 
 
-def plot_speed_vs_K():
+def _get_metric_values(metric: str, X: np.ndarray, args: Namespace) -> np.ndarray:
+    if metric == 'speed':
+        vals = calculate_speeds(X, signed=True)
+    elif metric == 'htd':
+        vals = calculate_htd(X)
+    elif metric in ['planarity', 'nonp']:
+        pcas, _ = generate_or_load_pca_cache(
+            reconstruction_id=args.reconstruction,
+            smoothing_window=args.smoothing_window,
+            window_size=args.planarity_window,
+        )
+        r = pcas.explained_variance_ratio.T
+        vals = r[2] / np.sqrt(r[1] * r[0])
+        if metric == 'planarity':
+            vals = 1 - vals
+    elif metric == 'K':
+        vals = get_K_estimates_from_args(args)
+    else:
+        raise RuntimeError(f'Unrecognised metric {metric}.')
+
+    return vals
+
+
+def _get_label_for_metric(metric: str):
+    if metric == 'speed':
+        vals = 'Speed'
+    elif metric == 'htd':
+        vals = 'HTD'
+    elif metric == 'planarity':
+        vals = 'Planarity'
+    elif metric == 'nonp':
+        vals = 'Non-planarity'
+    elif metric == 'K':
+        vals = 'K_est'
+    else:
+        raise RuntimeError(f'Unrecognised metric {metric}.')
+
+    return vals
+
+
+def plot_reconstruction_metrics(metric_a: str, metric_b: str):
     """
-    Plot speed against K estimate.
+    Plot metrics for a single reconstruction.
     """
     args = get_args()
-    K_ests = get_K_estimates_from_args(args)
+    assert args.reconstruction is not None or args.trial is not None
+
     X = get_trajectory_from_args(args)
-    speeds = calculate_speeds(X, signed=True)
+    vals_a = _get_metric_values(metric_a, X, args)
+    vals_b = _get_metric_values(metric_b, X, args)
 
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_subplot()
-    ax.scatter(x=speeds, y=K_ests, s=2, alpha=0.4)
-    ax.set_xlabel('Speed')
-    ax.set_ylabel('K_est')
-    ax.set_title(make_title('speed_vs_K', args))
+    ax.scatter(x=vals_a, y=vals_b, s=2, alpha=0.4)
+    ax.set_xlabel(_get_label_for_metric(metric_a))
+    ax.set_ylabel(_get_label_for_metric(metric_b))
+    ax.set_title(make_title(metric_a, metric_b, args))
     fig.tight_layout()
 
     if save_plots:
-        plt.savefig(make_filename('speed_vs_K', args))
+        plt.savefig(make_filename(metric_a, metric_b, args))
     if show_plots:
         plt.show()
 
 
-def plot_speed_vs_HTD():
+def plot_dataset_metrics(metric_a: str, metric_b: str):
     """
-    Plot speed against HTD.
+    Plot dataset metrics.
     """
     args = get_args()
-    X = get_trajectory_from_args(args)
-    htd = calculate_htd(X)
-    speeds = calculate_speeds(X, signed=False)
 
+    # Get dataset
+    assert args.dataset is not None
+    ds = Dataset.objects.get(id=args.dataset)
+
+    # Unset midline source args, trajectory point and trial
+    args.midline3d_source = None
+    args.midline3d_source_file = None
+    args.trajectory_point = None
+    args.trial = None
+
+    # Loop over reconstructions
+    res = {}
+    for r_ref in ds.reconstructions:
+        reconstruction = Reconstruction.objects.get(id=r_ref.id)
+        args.reconstruction = reconstruction.id
+        logger.info(f'Calculating data for reconstruction={reconstruction.id}.')
+        X = get_trajectory_from_args(args)
+        c = reconstruction.trial.experiment.concentration
+        if c not in res:
+            res[c] = {metric_a: [], metric_b: []}
+        vals_a = _get_metric_values(metric_a, X, args)
+        vals_b = _get_metric_values(metric_b, X, args)
+        res[c][metric_a].extend(vals_a)
+        res[c][metric_b].extend(vals_b)
+
+    # Sort by concentration
+    res = {k: v for k, v in sorted(list(res.items()))}
+    concs = list(res.keys())
+
+    # Plot
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_subplot()
-    ax.scatter(x=speeds, y=htd, s=2, alpha=0.4)
-    ax.set_xlabel('Speed')
-    ax.set_ylabel('HTD')
-    ax.set_title(make_title('speed_vs_HTD', args))
+
+    if metric_a == 'speed':
+        ax.axvline(x=0, linestyle='--', color='grey')
+    elif metric_b == 'speed':
+        ax.axhline(y=0, linestyle='--', color='grey')
+
+    cmap = plt.get_cmap('jet')
+    colours = cmap(np.linspace(0, 1, len(concs)))
+    for i, (c, res_c) in enumerate(res.items()):
+        ax.scatter(x=res_c[metric_a], y=res_c[metric_b], s=0.05, alpha=0.3, color=colours[i], label=f'c={c:.2f}%')
+    ax.set_xlabel(_get_label_for_metric(metric_a))
+    ax.set_ylabel(_get_label_for_metric(metric_b))
+    ax.set_title(make_title(metric_a, metric_b, args))
+    ax.legend(markerscale=50)
     fig.tight_layout()
 
     if save_plots:
-        plt.savefig(make_filename('speed_vs_HTD', args))
-    if show_plots:
-        plt.show()
-
-
-def plot_HTD_vs_K():
-    """
-    Plot HTD against K estimate.
-    """
-    args = get_args()
-    K_ests = get_K_estimates_from_args(args)
-    X = get_trajectory_from_args(args)
-    htd = calculate_htd(X)
-
-    fig = plt.figure(figsize=(10, 10))
-    ax = fig.add_subplot()
-    ax.scatter(x=htd, y=K_ests, s=2, alpha=0.4)
-    ax.set_xlabel('HTD')
-    ax.set_ylabel('K_est')
-    ax.set_title(make_title('HTD_vs_K', args))
-    fig.tight_layout()
-
-    if save_plots:
-        plt.savefig(make_filename('HTD_vs_K', args))
-    if show_plots:
-        plt.show()
-
-
-def plot_speed_vs_planarity():
-    """
-    Plot speeds against planarity.
-    """
-    args = get_args()
-    X = get_trajectory_from_args(args)
-    speeds = calculate_speeds(X, signed=True)
-    planarity = get_planarity_from_args(args)
-
-    fig = plt.figure(figsize=(10, 10))
-    ax = fig.add_subplot()
-    ax.scatter(x=speeds, y=planarity, s=2, alpha=0.4)
-    ax.set_xlabel('Speed')
-    ax.set_ylabel('Planarity')
-    ax.set_title(make_title('speed_vs_planarity', args))
-    fig.tight_layout()
-
-    if save_plots:
-        plt.savefig(make_filename('speed_vs_planarity', args))
-    if show_plots:
-        plt.show()
-
-
-def plot_planarity_vs_K():
-    """
-    Plot planarity against K estimate.
-    """
-    args = get_args()
-    planarity = get_planarity_from_args(args)
-    K_ests = get_K_estimates_from_args(args)
-
-    fig = plt.figure(figsize=(10, 10))
-    ax = fig.add_subplot()
-    ax.scatter(x=planarity, y=K_ests, s=2, alpha=0.4)
-    ax.set_xlabel('Planarity')
-    ax.set_ylabel('K_est')
-    ax.set_title(make_title('planarity_vs_K', args))
-    fig.tight_layout()
-
-    if save_plots:
-        plt.savefig(make_filename('planarity_vs_K', args))
-    if show_plots:
-        plt.show()
-
-
-def plot_planarity_vs_HTD():
-    """
-    Plot planarity against HTD.
-    """
-    args = get_args()
-    X = get_trajectory_from_args(args)
-    planarity = get_planarity_from_args(args)
-    htd = calculate_htd(X)
-
-    fig = plt.figure(figsize=(10, 10))
-    ax = fig.add_subplot()
-    ax.scatter(x=planarity, y=htd, s=2, alpha=0.4)
-    ax.set_xlabel('Planarity')
-    ax.set_ylabel('HTD')
-    ax.set_title(make_title('planarity_vs_HTD', args))
-    fig.tight_layout()
-
-    if save_plots:
-        plt.savefig(make_filename('planarity_vs_HTD', args))
+        plt.savefig(make_filename(metric_a, metric_b, args, excludes=['trial', 'frames', 'src']))
     if show_plots:
         plt.show()
 
@@ -226,9 +224,11 @@ if __name__ == '__main__':
         os.makedirs(LOGS_PATH, exist_ok=True)
     # from simple_worm.plot3d import interactive
     # interactive()
-    plot_speed_vs_K()
-    plot_speed_vs_HTD()
-    plot_HTD_vs_K()
-    plot_speed_vs_planarity()
-    plot_planarity_vs_K()
-    plot_planarity_vs_HTD()
+
+    args = get_args()
+    if args.dataset is not None:
+        plot_dataset_metrics('htd', 'speed')
+        plot_dataset_metrics('nonp', 'speed')
+        plot_dataset_metrics('htd', 'nonp')
+    else:
+        plot_reconstruction_metrics('htd', 'speed')

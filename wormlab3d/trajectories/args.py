@@ -29,6 +29,7 @@ def get_args(
     parser.add_argument('--start-frame', type=int, help='Frame number to start from.')
     parser.add_argument('--end-frame', type=int, help='Frame number to end at.')
     parser.add_argument('--rebuild-cache', type=str2bool, help='Rebuild the trajectory cache.', default=False)
+    parser.add_argument('--tracking-only', type=str2bool, help='Use the tracking trajectory only.', default=False)
 
     # Trajectory options
     if include_trajectory_options:

@@ -76,10 +76,13 @@ def calculate_speeds(X: np.ndarray, signed: bool = False) -> np.ndarray:
 
 def calculate_htd(X: np.ndarray) -> np.ndarray:
     """
-    Calculate the distances from the head to the tail.
+    Calculate the distances from the head to the tail as a proportion of the worm length.
     """
-    htd = np.linalg.norm(X[:, 0] - X[:, -1], axis=1)
-    return htd
+    htd = np.linalg.norm(X[:, 0] - X[:, -1], axis=-1)
+    sl = np.linalg.norm(X[:, 1:] - X[:, :-1], axis=-1)
+    wl = sl.sum(axis=-1)
+    htd_rel = htd / wl
+    return htd_rel
 
 
 def prune_directionality(
