@@ -52,10 +52,10 @@ class ConvergenceDetector(nn.Module):
         """
         Update the moving averages and determine convergence.
         """
-        self.val = val
+        self.val = val.clone()
         if first_val:
-            self.mu_fast = val
-            self.mu_slow = val
+            self.mu_fast = val.clone()
+            self.mu_slow = val.clone()
         self._update_state()
         self._update_estimates()
 
