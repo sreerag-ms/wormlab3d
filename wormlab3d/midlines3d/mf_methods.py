@@ -535,14 +535,14 @@ def calculate_scores_losses(
     for d in range(D):
         scores_d = scores[d]
 
-        # Scores should be even along body
-        loss = torch.sum(
-            (torch.log(1 + scores_d)
-             - torch.log(1 + scores_d.mean(dim=1, keepdim=True).detach()))**2
-        )
+        # # Scores should be even along body
+        # loss = torch.sum(
+        #     (torch.log(1 + scores_d)
+        #      - torch.log(1 + scores_d.mean(dim=1, keepdim=True).detach()))**2
+        # )
 
         # Scores should be maximised
-        loss = loss + 1 / (torch.sum(scores_d) + 1e-6)
+        loss = 1 / (torch.sum(scores_d) + 1e-6)
 
         losses.append(loss)
 
