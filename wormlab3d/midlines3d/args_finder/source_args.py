@@ -6,7 +6,7 @@ from wormlab3d.nn.args.base_args import BaseArgs
 class SourceArgs(BaseArgs):
     def __init__(
             self,
-            trial_id: str,
+            trial_id: int,
             start_frame: int = 0,
             end_frame: int = -1,
             **kwargs
@@ -21,7 +21,7 @@ class SourceArgs(BaseArgs):
         Add arguments to a command parser.
         """
         group = parser.add_argument_group('Source Args')
-        group.add_argument('--trial-id', type=str,
+        group.add_argument('--trial-id', type=int,
                            help='Database id for a Trial instance to use as the source.')
         parser.add_argument('--start-frame', type=int, default=0, help='Frame number to start from.')
         parser.add_argument('--end-frame', type=int, default=-1, help='Frame number to end at.')

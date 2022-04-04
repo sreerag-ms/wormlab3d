@@ -435,9 +435,9 @@ class ProjectRenderScoreModel(nn.Module):
 
             # Score the points - look at projections in each view and check how well each blob matches against the lowest intensity image
             scores_d = (blobs_normed * masks_target_d.unsqueeze(2)).sum(dim=(3, 4)).amin(dim=1)
-            max_score = scores_d.amax(dim=1, keepdim=True)
             if N > 2:
                 scores_d = _taper_parameter(scores_d)
+            max_score = scores_d.amax(dim=1, keepdim=True)
 
             # Parent points can only score the minimum of their child points
             if d < D - 1:

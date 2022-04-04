@@ -421,13 +421,15 @@ class Midline3DFinder:
                         id=self.runtime_args.resume_from
                     )
                 logger.info(f'Loaded checkpoint id={prev_checkpoint.id}, created={prev_checkpoint.created}.')
-                if self.source_args.trial_id is not None:
-                    logger.info(f'Frame number = {prev_checkpoint.frame_num}')
+                logger.info(f'Saved at frame = {prev_checkpoint.frame_num}.')
                 logger.info(f'Loss = {prev_checkpoint.loss:.6f}')
                 if len(prev_checkpoint.metrics) > 0:
                     logger.info('Metrics:')
                     for key, val in prev_checkpoint.metrics.items():
                         logger.info(f'\t{key}: {val:.4E}')
+                if self.source_args.start_frame != prev_checkpoint.frame_num:
+                    logger.info(f'Setting checkpoint frame number to {self.source_args.start_frame}.')
+                    prev_checkpoint.frame_num = self.source_args.start_frame
             except DoesNotExist:
                 raise RuntimeError(f'Could not load checkpoint={self.runtime_args.resume_from}')
 
