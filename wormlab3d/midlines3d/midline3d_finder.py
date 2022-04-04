@@ -1097,10 +1097,10 @@ class Midline3DFinder:
             detector = self.convergence_detector
             if detector is not None:
                 state_vars = ['mu_fast', 'mu_slow', 'convergence_count', 'converged']
-                for d in range(self.parameters.depth_min, self.parameters.depth + 1):
-                    d_str = 'global' if d == self.parameters.depth_min else d - 1
+                for di, d in enumerate(range(self.parameters.depth_min, self.parameters.depth + 1)):
+                    d_str = 'global' if di == 0 else d
                     for k in state_vars:
-                        self.tb_logger.add_scalar(f'detector/{d_str}/{k}', getattr(detector, k)[d].item(), step)
+                        self.tb_logger.add_scalar(f'detector/{d_str}/{k}', getattr(detector, k)[di].item(), step)
 
     def _make_plots(
             self,
