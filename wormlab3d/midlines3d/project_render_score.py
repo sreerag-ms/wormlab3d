@@ -388,7 +388,8 @@ class ProjectRenderScoreModel(nn.Module):
 
                 # Intensities should be equal in the middle section but taper towards the ends
                 int_d = intensities_d[:, None]
-                slopes = (int_d - self.intensities_min) / N4 * torch.arange(N4, device=device)[None, :] + self.intensities_min
+                slopes = (int_d - self.intensities_min) / N4 \
+                         * torch.arange(N4, device=device)[None, :] + self.intensities_min
                 intensities_d = torch.cat([
                     slopes,
                     torch.ones(bs, 2 * N4, device=device) * int_d,
@@ -463,6 +464,11 @@ class ProjectRenderScoreModel(nn.Module):
                                         torch.zeros_like(tail_blobs))
                 dmd = dmd.clamp(max=1.)
                 detection_masks_d = dmd
+
+                # The final rendering is the maximum of the intensity-and-score-scaled overlapping blobs
+                if 0:
+                    masks2 = (blobs_d * intensities_smoothed[d][:, None, :, None, None] * sf).amax(dim=2)
+                    masks[d] = masks2
             else:
                 detection_masks_d = masks_d.clone()
 

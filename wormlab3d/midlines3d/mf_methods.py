@@ -227,10 +227,8 @@ def integrate_curvature(X0: torch.Tensor, T0: torch.Tensor, l: torch.Tensor, K: 
     m1 = K[:, :, 0] / h
     m2 = K[:, :, 1] / h
 
-    # Initial values
+    # Initial frame values
     T0 = normalise(T0)
-    X[:, N2 - 1] = X0 - T0 * h / 2
-    X[:, N2] = X0 + T0 * h / 2
     T[:, N2 - 1] = T0
     M1[:, N2 - 1] = an_orthonormal(T0)
     M2[:, N2 - 1] = torch.cross(T[:, N2 - 1].clone(), M1[:, N2 - 1].clone())
@@ -242,7 +240,9 @@ def integrate_curvature(X0: torch.Tensor, T0: torch.Tensor, l: torch.Tensor, K: 
         _update_frame(m1, m2, M1, M2, T, h, i, -1)
 
     # Calculate curve coordinates
-    for i in range(N2, -1, -1):
+    X[:, N2 - 1] = X0
+    X[:, N2] = X0 + T0 * h
+    for i in range(N2 - 2, -1, -1):
         X[:, i] = X[:, i + 1] - h * T[:, i]
     for i in range(N2 + 1, N):
         X[:, i] = X[:, i - 1] + h * T[:, i - 1]
@@ -277,10 +277,8 @@ def integrate_curvature_combined(X0: torch.Tensor, T0: torch.Tensor, l: torch.Te
     m1 = K[:, :, 0] / h
     m2 = K[:, :, 1] / h
 
-    # Initial values
+    # Initial frame values
     T0 = normalise(T0)
-    X[:, N2 - 1] = X0 - T0 * h / 2
-    X[:, N2] = X0 + T0 * h / 2
     T[:, N2 - 1] = T0
     M1[:, N2 - 1] = an_orthonormal(T0)
     M2[:, N2 - 1] = torch.cross(T[:, N2 - 1].clone(), M1[:, N2 - 1].clone())
@@ -319,7 +317,9 @@ def integrate_curvature_combined(X0: torch.Tensor, T0: torch.Tensor, l: torch.Te
         M2[:, i - 1] = normalise(M2_tilde)
 
     # Calculate curve coordinates
-    for i in range(N2, -1, -1):
+    X[:, N2 - 1] = X0
+    X[:, N2] = X0 + T0 * h
+    for i in range(N2 - 2, -1, -1):
         X[:, i] = X[:, i + 1] - h * T[:, i]
     for i in range(N2 + 1, N):
         X[:, i] = X[:, i - 1] + h * T[:, i - 1]
@@ -472,13 +472,13 @@ def calculate_parents_losses_curvatures(
     losses = [torch.tensor(0., device=curvatures[0].device), ]
     for d in range(1, D):
         # X0 (midpoint) should be close between parent and child
-        loss_X0 = torch.sum((X0[d] - X0[d-1].detach())**2)
+        loss_X0 = torch.sum((X0[d] - X0[d - 1].detach())**2)
 
         # T0 (initial tangent) direction should be similar
-        loss_T0 = torch.sum((T0[d] - T0[d-1].detach())**2)
+        loss_T0 = torch.sum((T0[d] - T0[d - 1].detach())**2)
 
         # Lengths should be similar
-        loss_l = torch.sum((length[d] - length[d-1].detach())**2)
+        loss_l = torch.sum((length[d] - length[d - 1].detach())**2)
 
         # Curvature values should be close
         Ks_d = curvatures_smoothed[d]
