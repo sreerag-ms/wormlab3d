@@ -7,7 +7,7 @@ import numpy as np
 
 from wormlab3d import logger, LOGS_PATH, START_TIMESTAMP
 from wormlab3d.data.model import Dataset, Reconstruction
-from wormlab3d.trajectories.angles import calculate_trajectory_angles_parallel
+from wormlab3d.trajectories.angles import calculate_trajectory_angles_parallel, calculate_planar_angles_parallel
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 
@@ -59,8 +59,12 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
     return LOGS_PATH / (fn + '.' + img_extension)
 
 
-def plot_angle_distributions_dataset():
+def plot_angle_distributions_dataset(which: str = 'trajectory'):
     args = get_args()
+    assert which in ['trajectory', 'planar']
+
+    if which == 'planar':
+        args.min_delta = max(3, args.min_delta)
 
     # Use exponentially-spaced deltas
     if args.delta_step < 0:
@@ -80,10 +84,13 @@ def plot_angle_distributions_dataset():
     assert args.dataset is not None
     ds = Dataset.objects.get(id=args.dataset)
 
-    # Unset midline source args and use centre-of-mass point
+    # Unset midline source args
     args.midline3d_source = None
     args.midline3d_source_file = None
-    args.trajectory_point = -1
+
+    # Use centre-of-mass point for trajectory angles
+    if which == 'trajectory':
+        args.trajectory_point = -1
 
     # Use the reconstruction from the dataset where possible
     reconstructions = {}
@@ -106,8 +113,13 @@ def plot_angle_distributions_dataset():
 
         # Calculate angles for trial
         trajectory = get_trajectory_from_args(args)
-        d = calculate_trajectory_angles_parallel(trajectory, deltas)
-        # d = calculate_trajectory_angles(trajectory, deltas)
+
+        if which == 'trajectory':
+            d = calculate_trajectory_angles_parallel(trajectory, deltas)
+            # d = calculate_trajectory_angles(trajectory, deltas)
+        else:
+            d = calculate_planar_angles_parallel(trajectory, deltas)
+            # d = calculate_planar_angles(trajectory, deltas)
         c = trial.experiment.concentration
         if c not in angles:
             angles[c] = []
@@ -142,7 +154,10 @@ def plot_angle_distributions_dataset():
         parts['cmeans'].set_color('red')
         parts['cmeans'].set_alpha(0.7)
         parts['cmeans'].set_linestyle('--')
-        ax_.set_ylabel('$\\theta=\measuredangle\left(x_t-x_{t+\Delta}, x_t-x_{t+\Delta})\\right)$')
+        if which == 'trajectory':
+            ax_.set_ylabel('$\\theta=\measuredangle\left(x_t-x_{t+\Delta}, x_{t+\Delta}-x_{t+2\Delta})\\right)$')
+        else:
+            ax_.set_ylabel('$\\theta=\measuredangle\left(v_3[t:t+\Delta], v_3[t+\Delta:t+2\Delta])\\right)$')
         ax_.set_xlabel('$\Delta s$')
 
     n_trials_total = 0
@@ -167,7 +182,7 @@ def plot_angle_distributions_dataset():
 
     # Top plot shows aggregation from all results
     ax = axes[0]
-    ax.set_title(f'All concentrations ({n_trials_total} trials)')
+    ax.set_title(f'{which.capitalize()} angles. All concentrations ({n_trials_total} trials)')
     _violinplot(ax, all_vals.values())
 
     fig.tight_layout()
@@ -176,7 +191,7 @@ def plot_angle_distributions_dataset():
         args.trial = None
         args.reconstruction = None
         plt.savefig(
-            make_filename('violin_dataset', args, excludes=['trial', 'deltas'])
+            make_filename(f'{which}_angles_violin', args, excludes=['trial', 'deltas'])
         )
     if show_plots:
         plt.show()
@@ -185,4 +200,4 @@ def plot_angle_distributions_dataset():
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
-    plot_angle_distributions_dataset()
+    plot_angle_distributions_dataset(which='planar')

@@ -42,7 +42,7 @@ def _map_pcas_to_data(pcas: List[PCA]) -> np.ndarray:
 
 def calculate_pca(X: np.ndarray, i: int, window_size: int) -> PCA:
     w2 = int(window_size / 2)
-    start_idx = max(0, i - w2)
+    start_idx = max(0, min(i - w2, len(X) - window_size))
     end_idx = min(len(X), start_idx + window_size)
     window_size_actual = end_idx - start_idx
 
