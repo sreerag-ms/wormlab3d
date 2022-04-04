@@ -435,7 +435,8 @@ class ProjectRenderScoreModel(nn.Module):
             blobs_normed = blobs_d / sum_
 
             # Score the points - look at projections in each view and check how well each blob matches against the lowest intensity image
-            scores_d = (blobs_normed * masks_target_d.unsqueeze(2)).sum(dim=(3, 4)).amin(dim=1)
+            scores_d = (blobs_normed * masks_target_d.unsqueeze(2)).sum(dim=(3, 4)).amin(dim=1) \
+                       / intensities_smoothed[d].detach()  # Scale scores by intensities
             if N > 2:
                 scores_d = _taper_parameter(scores_d)
             max_score = scores_d.amax(dim=1, keepdim=True)
