@@ -48,11 +48,14 @@ class ConvergenceDetector(nn.Module):
         self.threshold = threshold
         self.patience = patience
 
-    def forward(self, val: torch.Tensor):
+    def forward(self, val: torch.Tensor, first_val: bool = False):
         """
         Update the moving averages and determine convergence.
         """
         self.val = val
+        if first_val:
+            self.mu_fast = val
+            self.mu_slow = val
         self._update_state()
         self._update_estimates()
 

@@ -690,7 +690,7 @@ class Midline3DFinder:
                 [loss_global, *losses_depths],
                 device=self.device
             )
-            self.convergence_detector.forward(losses)
+            self.convergence_detector.forward(losses, first_val=step == start_step)
 
             # When all of the losses have converged, break
             if not first_frame and self.convergence_detector.converged.all():
@@ -1265,7 +1265,8 @@ class Midline3DFinder:
                         p += (200, 0)
                     elif k == 2:
                         p += (400, 0)
-                    ax.scatter(p[:, 0], p[:, 1], cmap='jet', c=np.linspace(0, 1, len(p)), s=scatter_sizes[d+ D_min], alpha=0.6)
+                    ax.scatter(p[:, 0], p[:, 1], cmap='jet', c=np.linspace(0, 1, len(p)), s=scatter_sizes[d + D_min],
+                               alpha=0.6)
 
                 # Errors
                 errors_triplet = X_curve_triplet - X_target_triplet
