@@ -1206,18 +1206,19 @@ class Midline3DFinder:
         Plot the 2D mask renderings of the mutiscale curves.
         """
         D = self.parameters.depth
-        n_rows = int(np.ceil(np.sqrt(D)))
-        n_cols = int(np.ceil(np.sqrt(D)))
+        D_min = self.parameters.depth_min
+        n_rows = int(np.ceil(np.sqrt(D - D_min)))
+        n_cols = int(np.ceil(np.sqrt(D - D_min)))
 
-        fig = plt.figure(figsize=(n_cols * 3, 1 + n_rows * 3))
+        fig = plt.figure(figsize=(1 + n_cols * 3, 1 + n_rows * 3))
         fig.suptitle(self._plot_title(frame_state, skipped))
         gs = GridSpec(n_rows, n_cols)
-        d = self.parameters.depth_min
-        di = 0
+        d = 0
 
         masks_target = frame_state.get_state('masks_target_residuals')
         points_2d = frame_state.get_state('points_2d')
         masks_curve = frame_state.get_state('masks_curve')
+        length = frame_state.get_state('length')
 
         images = to_numpy(frame_state.get_state('images'))
         image_triplet = np.concatenate(images, axis=1)
@@ -1228,14 +1229,17 @@ class Midline3DFinder:
 
         for i in range(n_rows):
             for j in range(n_cols):
-                if d >= D:
+                if d + D_min >= D:
                     break
                 ax = fig.add_subplot(gs[i, j])
-                ax.set_title(f'd={d}')
+                title = f'd={d + D_min}'
+                if self.parameters.curvature_mode:
+                    title += f', l={length[d]:.2f}'
+                ax.set_title(title)
                 ax.axis('off')
 
-                X_target = to_numpy(masks_target[di])
-                X_curve = to_numpy(masks_curve[di])
+                X_target = to_numpy(masks_target[d])
+                X_curve = to_numpy(masks_curve[d])
 
                 # Stitch images and masks together
                 ax.imshow(image_grid, cmap='gray', vmin=0, vmax=1)
@@ -1254,14 +1258,14 @@ class Midline3DFinder:
                           extent=(0, N - 1, 2 * int(M / 3), int(M / 3)))
 
                 # Scatter the midline points
-                p2d = to_numpy(points_2d[di]).transpose(1, 0, 2)
+                p2d = to_numpy(points_2d[d]).transpose(1, 0, 2)
                 for k in range(3):
                     p = p2d[k] + (0, 200)
                     if k == 1:
                         p += (200, 0)
                     elif k == 2:
                         p += (400, 0)
-                    ax.scatter(p[:, 0], p[:, 1], cmap='jet', c=np.linspace(0, 1, len(p)), s=scatter_sizes[d], alpha=0.6)
+                    ax.scatter(p[:, 0], p[:, 1], cmap='jet', c=np.linspace(0, 1, len(p)), s=scatter_sizes[d+ D_min], alpha=0.6)
 
                 # Errors
                 errors_triplet = X_curve_triplet - X_target_triplet
@@ -1270,7 +1274,6 @@ class Midline3DFinder:
                           extent=(0, N - 1, M - 1, 2 * int(M / 3)))
 
                 d += 1
-                di += 1
 
         fig.tight_layout()
         self._save_plot(fig, '2D', frame_state)
