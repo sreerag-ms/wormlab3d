@@ -84,6 +84,6 @@ def get_args(
 
     # Dataset, reconstruction id or trial id is always required
     assert sum([getattr(args, k) is not None for k in ['dataset', 'reconstruction', 'trial']]) == 1, \
-        'Specify just one of reconstruction OR trial.'
+        'Specify just one of dataset, reconstruction OR trial.'
 
     return args

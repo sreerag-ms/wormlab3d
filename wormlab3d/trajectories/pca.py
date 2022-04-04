@@ -85,7 +85,7 @@ def _calculate_pcas(X: np.ndarray, window_size: int) -> List[PCA]:
 
 
 def calculate_pcas(X: np.ndarray, window_size: int) -> List[PCA]:
-    if 0 and N_WORKERS > 1:
+    if N_WORKERS > 1:
         pcas = _calculate_pcas_parallel(X, window_size)
     else:
         pcas = _calculate_pcas(X, window_size)
@@ -104,6 +104,7 @@ def generate_pca_cache_data(
         prune_slowest_ratio: float = None,
         trajectory_point: str = None,
         window_size: int = 5,
+        tracking_only: bool = False,
         rebuild_cache: bool = False
 ) -> Tuple[PCACache, Dict[str, Any]]:
     X, X_meta = get_trajectory(
@@ -117,6 +118,7 @@ def generate_pca_cache_data(
         directionality=directionality,
         prune_slowest_ratio=prune_slowest_ratio,
         trajectory_point=trajectory_point,
+        tracking_only=tracking_only,
         rebuild_cache=rebuild_cache
     )
     pcas = calculate_pcas(X, window_size=window_size)
@@ -136,7 +138,8 @@ def generate_or_load_pca_cache(
         directionality: str = None,
         window_size: int = 5,
         trajectory_point: str = None,
-        rebuild_cache: bool = False
+        tracking_only: bool = False,
+        rebuild_cache: bool = False,
 ) -> Tuple[PCACache, Dict[str, Any]]:
     """
     Try to load an existing pca cache or generate it otherwise.
@@ -144,7 +147,7 @@ def generate_or_load_pca_cache(
     if start_frame is None:
         start_frame = 0
     args = {
-        'reconstruction_id': str(reconstruction_id),
+        'reconstruction_id': str(reconstruction_id) if reconstruction_id is not None else None,
         'trial_id': trial_id,
         'midline_source': midline_source,
         'midline_source_file': midline_source_file,
@@ -153,6 +156,7 @@ def generate_or_load_pca_cache(
         'smoothing_window': smoothing_window,
         'directionality': directionality,
         'window_size': window_size,
+        'tracking_only': tracking_only,
     }
     if trajectory_point is not None:
         args['trajectory_point'] = trajectory_point
@@ -182,7 +186,7 @@ def generate_or_load_pca_cache(
     pca_data[:] = pca_cache.data
 
     # Save the cache onto the hard drive
-    logger.debug(f'Saving PCA file cache to {path_pca}.')
+    logger.info(f'Saving PCA file cache to {path_pca}.')
     pca_data.flush()
 
     # Save the meta data
@@ -212,7 +216,8 @@ def get_pca_cache_from_args(args: Namespace) -> PCACache:
         directionality=args.directionality,
         window_size=ws,
         trajectory_point=args.trajectory_point,
-        rebuild_cache=args.rebuild_cache
+        tracking_only=args.tracking_only,
+        rebuild_cache=args.rebuild_cache,
     )
     return pcas
 
