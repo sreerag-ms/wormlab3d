@@ -97,4 +97,4 @@ class ConvergenceDetector(nn.Module):
         self.T_lower = self.mu_fast - self.threshold * torch.abs(self.mu_fast)
 
     def _check_bounds(self) -> torch.Tensor:
-        return (self.mu_slow > self.T_lower) & (self.mu_slow < self.T_upper)
+        return (self.mu_slow > self.T_lower) & (self.mu_slow < self.T_upper) | (self.mu_fast == 0)
