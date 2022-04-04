@@ -4,12 +4,15 @@ from typing import List
 
 import matplotlib.pyplot as plt
 import numpy as np
+
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
+from wormlab3d.data.model import Dataset
 from wormlab3d.toolkit.plot_utils import tex_mode
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.brownian_particle import BrownianParticle, ActiveParticle, ConfinedParticle
 from wormlab3d.trajectories.cache import get_trajectory_from_args
-from wormlab3d.trajectories.displacement import calculate_msd, plot_msd, plot_msd_multiple
+from wormlab3d.trajectories.displacement import calculate_msd, plot_msd, plot_msd_multiple, \
+    calculate_displacements_parallel, DISPLACEMENT_AGGREGATION_SQUARED_SUM
 
 tex_mode()
 
@@ -21,12 +24,14 @@ img_extension = 'png'
 def make_filename(method: str, args: Namespace, excludes: List[str] = None, append: str = None) -> str:
     if excludes is None:
         excludes = []
-    fn = LOGS_PATH + '/' + START_TIMESTAMP + f'_{method}'
+    fn = START_TIMESTAMP + f'_{method}'
 
-    for k in ['trial', 'frames', 'src', 'directionality', 'deltas', 'delta_step', 'u']:
+    for k in ['dataset', 'trial', 'frames', 'src', 'directionality', 'deltas', 'delta_step', 'u']:
         if k in excludes:
             continue
-        if k == 'trial':
+        if k == 'dataset' and args.dataset is not None:
+            fn += f'_dataset={args.dataset}'
+        elif k == 'trial' and args.trial is not None:
             fn += f'_trial={args.trial}'
         elif k == 'frames':
             frames_str_fn = ''
@@ -51,7 +56,7 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None, appe
     if append is not None:
         fn += append
 
-    return fn + '.' + img_extension
+    return LOGS_PATH / (fn + '.' + img_extension)
 
 
 def make_title(args: Namespace) -> str:
@@ -73,7 +78,7 @@ def make_title(args: Namespace) -> str:
 def msd():
     args = get_args()
     trajectory = get_trajectory_from_args(args)
-    deltas = np.arange(args.min_delta, args.max_delta, step=args.delta_step)
+    deltas = np.arange(args.min_delta, args.max_delta, step=int(args.delta_step))
     msds = calculate_msd(trajectory, deltas)
     plot_msd(msds, title=make_title(args))
 
@@ -90,7 +95,7 @@ def msd_multiple():
     # projections = ['3D', 'x', 'y', 'z']
     projections = ['x', 'y', 'z']
     msds = {}
-    deltas = np.arange(args.min_delta, args.max_delta, step=args.delta_step)
+    deltas = np.arange(args.min_delta, args.max_delta, step=int(args.delta_step))
     for u in us:
         args.trajectory_point = u
         msds[u] = {}
@@ -126,7 +131,7 @@ def msd_wt3d_vs_reconst():
     projections = ['x', 'y', 'z']
 
     msds = {}
-    deltas = np.arange(args.min_delta, args.max_delta, step=args.delta_step)
+    deltas = np.arange(args.min_delta, args.max_delta, step=int(args.delta_step))
     for u in us:
         args.trajectory_point = u
         msds[u] = {}
@@ -201,7 +206,7 @@ def msd_brownian():
     D = 1
 
     # Define deltas
-    deltas = np.arange(args.min_delta, args.max_delta, step=args.delta_step)
+    deltas = np.arange(args.min_delta, args.max_delta, step=int(args.delta_step))
     deltas_s = deltas / fps
 
     # Set up plot
@@ -248,7 +253,7 @@ def msd_brownian_projections():
     D = 1
 
     # Define deltas
-    deltas = np.arange(args.min_delta, args.max_delta, step=args.delta_step)
+    deltas = np.arange(args.min_delta, args.max_delta, step=int(args.delta_step))
     deltas_s = deltas / fps
 
     # Set up plot
@@ -294,7 +299,7 @@ def msd_brownian_varying_Ds():
     n_steps = total_time * fps
 
     # Define deltas
-    deltas = np.arange(args.min_delta, args.max_delta, step=args.delta_step)
+    deltas = np.arange(args.min_delta, args.max_delta, step=int(args.delta_step))
     deltas_s = deltas / fps
 
     # Vary the diffusion coefficient
@@ -345,7 +350,7 @@ def msd_active_particle():
     momentum = 1
 
     # Define deltas
-    deltas = np.arange(args.min_delta, args.max_delta, step=args.delta_step)
+    deltas = np.arange(args.min_delta, args.max_delta, step=int(args.delta_step))
     deltas_s = deltas / fps
 
     # Set up plot
@@ -398,7 +403,7 @@ def msd_active_particles():
     cmaps = [plt.get_cmap(k) for k in ['Blues_r', 'Oranges_r', 'Greens_r', 'Reds_r', 'Purples_r']]
 
     # Define deltas
-    deltas = np.arange(args.min_delta, args.max_delta, step=args.delta_step)
+    deltas = np.arange(args.min_delta, args.max_delta, step=int(args.delta_step))
     deltas_s = deltas / fps
 
     # Set up plot
@@ -456,7 +461,7 @@ def msd_confined_particle():
     D_confined = 0.01
 
     # Define deltas
-    deltas = np.arange(args.min_delta, args.max_delta, step=args.delta_step)
+    deltas = np.arange(args.min_delta, args.max_delta, step=int(args.delta_step))
     deltas_s = deltas / fps
 
     # Set up plot
@@ -507,6 +512,133 @@ def msd_confined_particle():
         plt.show()
 
 
+def msd_dataset():
+    args = get_args()
+
+    # Get dataset
+    assert args.dataset is not None
+    ds = Dataset.objects.get(id=args.dataset)
+
+    deltas = np.arange(args.min_delta, args.max_delta, step=int(args.delta_step))
+    deltas_ts = deltas / 25
+
+    # Unset midline source args and use tracking data only (longer)
+    args.midline3d_source = None
+    args.midline3d_source_file = None
+    args.reconstruction = None
+    args.tracking_only = True
+
+    # Calculate the displacements for all trials
+    displacements = {}
+    all_displacements = {delta: [] for delta in deltas}
+    for trial in ds.include_trials:
+        logger.info(f'Calculating displacements for trial={trial.id}.')
+        args.trial = trial.id
+
+        # Group results by concentration
+        c = trial.experiment.concentration
+        if c not in displacements:
+            displacements[c] = {delta: [] for delta in deltas}
+
+        # Calculate displacements for trial
+        trajectory = get_trajectory_from_args(args)
+        d = calculate_displacements_parallel(trajectory, deltas, aggregation=DISPLACEMENT_AGGREGATION_SQUARED_SUM)
+        for delta in deltas:
+            displacements[c][delta].extend(d[delta])
+            all_displacements[delta].extend(d[delta])
+
+    # Sort by concentration
+    displacements = {k: v for k, v in sorted(list(displacements.items()))}
+    concs = list(displacements.keys())
+
+    # Calculate msds
+    msds = {}
+    for c, displacements_c in displacements.items():
+        msds[c] = {
+            delta: np.mean(displacements_c[delta])
+            for delta in deltas
+        }
+    msds_all_traj = {
+        delta: np.mean(all_displacements[delta])
+        for delta in deltas
+    }
+    msds_all_conc = {
+        delta: np.mean([msds_c[delta] for c, msds_c in msds.items()])
+        for delta in deltas
+    }
+
+    # Calculate gradients
+    grads = {}
+    for c, msds_c in msds.items():
+        msd_vals = np.array(list(msds_c.values()))
+        grads[c] = np.gradient(np.log(msd_vals), np.log(deltas))
+    msd_vals_all_traj = np.array(list(msds_all_traj.values()))
+    grads_all_traj = np.gradient(np.log(msd_vals_all_traj), np.log(deltas))
+    msd_vals_all_conc = np.array(list(msds_all_conc.values()))
+    grads_all_conc = np.gradient(np.log(msd_vals_all_conc), np.log(deltas))
+
+    # Set up plots and colours
+    fig, axes = plt.subplots(2, figsize=(12, 14), sharex=True)
+    cmap = plt.get_cmap('jet')
+    colours = cmap(np.linspace(0, 1, len(concs)))
+
+    # Plot MSD combined results
+    ax = axes[0]
+    msd_vals_all_traj = np.array(list(msds_all_traj.values()))
+    ax.plot(deltas_ts, msd_vals_all_traj, label='Trajectory average',
+            alpha=0.8, c='gray', linestyle=':', linewidth=2, zorder=100)
+    msd_vals_all_conc = np.array(list(msds_all_conc.values()))
+    ax.plot(deltas_ts, msd_vals_all_conc, label='Concentration average',
+            alpha=0.6, c='black', linestyle='--', linewidth=2, zorder=100)
+
+    # Plot MSD for each concentration
+    for i, (c, msds_c) in enumerate(msds.items()):
+        msd_vals = np.array(list(msds_c.values()))
+        ax.plot(deltas_ts, msd_vals, label=f'c={c:.2f}%', alpha=0.6, c=colours[i])
+
+    # Complete MSD plot
+    title = f'MSD. Dataset={args.dataset}. u={args.trajectory_point}.' + \
+            (f'Smoothing window={args.smoothing_window}. ' if args.smoothing_window is not None else '')
+    ax.set_title(title)
+    ax.set_ylabel('$MSD=<(x(t+\Delta)-x(t))^2>_t$')
+    ax.set_xlabel('$\Delta s$')
+    ax.set_yscale('log')
+    ax.set_xscale('log')
+    ax.grid()
+    ax.legend()
+
+    # Plot (log-log) gradients
+    ax = axes[1]
+    ax.plot(deltas_ts, grads_all_traj, label='Trajectory average',
+            alpha=0.8, c='gray', linestyle=':', linewidth=2, zorder=100)
+    ax.plot(deltas_ts, grads_all_conc, label='Concentration average',
+            alpha=0.6, c='black', linestyle='--', linewidth=2, zorder=100)
+
+    # Plot grads for each concentration
+    for i, (c, grads_c) in enumerate(grads.items()):
+        ax.plot(deltas_ts, grads_c, label=f'c={c:.2f}%', alpha=0.6, c=colours[i])
+
+    # Complete grads plot
+    ax.set_title('Gradients (log-log)')
+    ax.set_ylabel('grad')
+    ax.set_xlabel('$\Delta s$')
+    ax.grid()
+    ax.legend()
+
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            make_filename(
+                'msd_dataset',
+                args,
+                excludes=['trial', 'frames', 'src'],
+            )
+        )
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
@@ -518,4 +650,5 @@ if __name__ == '__main__':
     # msd_brownian_varying_Ds()
     # msd_active_particle()
     # msd_active_particles()
-    msd_confined_particle()
+    # msd_confined_particle()
+    msd_dataset()

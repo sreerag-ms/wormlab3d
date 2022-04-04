@@ -91,7 +91,7 @@ def plot_angle_distributions_dataset():
         r = Reconstruction.objects.get(id=r_ref.id)
         reconstructions[r.trial.id] = r.id
 
-    # Calculate the displacements for all trials
+    # Calculate the angles for all trials
     angles = {}
     for trial in ds.include_trials:
         logger.info(f'Calculating angles for trial={trial.id}.')
@@ -104,7 +104,7 @@ def plot_angle_distributions_dataset():
             args.reconstruction = None
             args.tracking_only = True
 
-        # Calculate displacements for trial
+        # Calculate angles for trial
         trajectory = get_trajectory_from_args(args)
         d = calculate_trajectory_angles_parallel(trajectory, deltas)
         # d = calculate_trajectory_angles(trajectory, deltas)
