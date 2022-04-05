@@ -155,12 +155,21 @@ def nonplanarity_dataset():
     fig, axes = plt.subplots(n_rows, figsize=(14, n_rows * 3), sharex=False, sharey=True)
 
     def _violinplot(ax_, vals_):
+        pos = []
+        vvals = []
+        for ii, v in enumerate(vals_):
+            if len(v) > 0:
+                pos.append(delta_ts[ii])
+                vvals.append(v)
+        if len(vvals) == 0:
+            logger.warning('No data available to make violin plot!')
+            return
         if args.delta_step < 0:
-            parts = ax_.violinplot(vals_, widths=1, showmeans=True, showmedians=True)
-            ax_.set_xticks(np.arange(1, len(delta_ts) + 1))
-            ax_.set_xticklabels(delta_ts)
+            parts = ax_.violinplot(vvals, widths=1, showmeans=True, showmedians=True)
+            ax_.set_xticks(np.arange(1, len(pos) + 1))
+            ax_.set_xticklabels(pos)
         else:
-            parts = ax_.violinplot(vals_, delta_ts, widths=args.delta_step / 25, showmeans=True, showmedians=True)
+            parts = ax_.violinplot(vvals, pos, widths=args.delta_step / 25, showmeans=True, showmedians=True)
         parts['cmedians'].set_color('green')
         parts['cmedians'].set_alpha(0.7)
         parts['cmedians'].set_linestyle(':')
