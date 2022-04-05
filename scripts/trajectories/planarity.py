@@ -136,11 +136,16 @@ def nonplanarity_dataset():
         for delta in deltas:
             args.planarity_window = int(delta)
             logger.info(f'Fetching PCA data for window size = {int(delta)}.')
-            pca_cache = get_pca_cache_from_args(args)
-            r = pca_cache.explained_variance_ratio.T
-            nonp_delta = r[2] / np.sqrt(r[1] * r[0])
-            nonp[c][delta].extend(nonp_delta)
-            all_nonp[delta].extend(nonp_delta)
+            try:
+                pca_cache = get_pca_cache_from_args(args)
+                r = pca_cache.explained_variance_ratio.T
+                nonp_delta = r[2] / np.sqrt(r[1] * r[0])
+                nonp[c][delta].extend(nonp_delta)
+                all_nonp[delta].extend(nonp_delta)
+            except AssertionError as e:
+                # Window size is greater than trajectory length, so break here
+                logger.warning(e)
+                break
 
     # Sort by concentration
     nonp = {k: v for k, v in sorted(list(nonp.items()))}

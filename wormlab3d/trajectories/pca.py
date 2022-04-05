@@ -41,6 +41,9 @@ def _map_pcas_to_data(pcas: List[PCA]) -> np.ndarray:
 
 
 def calculate_pca(X: np.ndarray, i: int, window_size: int) -> PCA:
+    """
+    Calculate a PCA basis for a window of a trajectory X centred at index i.
+    """
     w2 = int(window_size / 2)
     start_idx = max(0, min(i - w2, len(X) - window_size))
     end_idx = min(len(X), start_idx + window_size)
@@ -66,25 +69,28 @@ def calculate_pca_wrapper(args) -> float:
 
 
 def _calculate_pcas_parallel(X: np.ndarray, window_size: int) -> List[PCA]:
-    N = X.shape[0] - window_size
+    N = X.shape[0]
+    w2 = int(window_size / 2)
     with Pool(processes=N_WORKERS) as pool:
         pcas = pool.map(
             calculate_pca_wrapper,
-            [[X, i, window_size] for i in range(N)]
+            [[X, i, window_size] for i in range(w2, N - w2)]
         )
     return pcas
 
 
 def _calculate_pcas(X: np.ndarray, window_size: int) -> List[PCA]:
     N = X.shape[0]
+    w2 = int(window_size / 2)
     pcas = []
-    for i in range(N):
+    for i in range(w2, N - w2):
         pca = calculate_pca(X, i, window_size)
         pcas.append(pca)
     return pcas
 
 
 def calculate_pcas(X: np.ndarray, window_size: int) -> List[PCA]:
+    assert window_size < X.shape[0], f'Window size ({window_size}) is larger than trajectory length ({X.shape[0]})!'
     if N_WORKERS > 1:
         pcas = _calculate_pcas_parallel(X, window_size)
     else:
