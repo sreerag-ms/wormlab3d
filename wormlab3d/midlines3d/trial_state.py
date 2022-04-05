@@ -20,7 +20,8 @@ class TrialState:
             reconstruction: Reconstruction,
             start_frame: int = None,
             end_frame: int = None,
-            read_only: bool = True
+            read_only: bool = True,
+            load_only: bool = True,
     ):
         self.reconstruction = reconstruction
         self.trial: Trial = reconstruction.trial
@@ -42,7 +43,10 @@ class TrialState:
             self.frame_nums.append(i)
         assert len(self.frame_nums) == self.n_frames
 
+        # Load the state
         loaded = self._load_state(read_only)
+        if not loaded and load_only:
+            raise RuntimeError('Could not load trial state.')
         if not loaded and not read_only:
             self._init_state()
             self.save()

@@ -225,7 +225,10 @@ class Midline3DFinder:
                 reconstruction.save()
             logger.info(f'Loaded reconstruction (id={reconstruction.id}, created={reconstruction.created}).')
         except DoesNotExist:
-            logger.info(f'No reconstruction record found in database.')
+            err = 'No reconstruction record found in database.'
+            if self.runtime_args.resume:
+                raise RuntimeError(err)
+            logger.info(err)
 
         if reconstruction is None:
             reconstruction = Reconstruction(
@@ -250,7 +253,8 @@ class Midline3DFinder:
             reconstruction=self.reconstruction,
             start_frame=self.source_args.start_frame,
             end_frame=self.source_args.end_frame,
-            read_only=False
+            read_only=False,
+            load_only=self.runtime_args.resume,
         )
 
         # Master state
@@ -412,7 +416,7 @@ class Midline3DFinder:
                         )
                         prev_checkpoint = prev_checkpoints[0]
                     else:
-                        logger.error(
+                        logger.warning(
                             f'Found no checkpoints for trial={self.trial.id} and model={self.parameters.id}.'
                         )
                         raise DoesNotExist()
@@ -431,7 +435,11 @@ class Midline3DFinder:
                     logger.info(f'Setting checkpoint frame number to {self.source_args.start_frame}.')
                     prev_checkpoint.frame_num = self.source_args.start_frame
             except DoesNotExist:
-                raise RuntimeError(f'Could not load checkpoint={self.runtime_args.resume_from}')
+                err = f'Could not load checkpoint={self.runtime_args.resume_from}.'
+                if self.runtime_args.resume_from in ['latest', 'best']:
+                    logger.warning(err + ' Creating new checkpoint.')
+                else:
+                    raise RuntimeError(err)
 
         # Either clone the previous checkpoint to use as the starting point
         if prev_checkpoint is not None:
