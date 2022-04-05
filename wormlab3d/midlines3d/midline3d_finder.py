@@ -988,7 +988,7 @@ class Midline3DFinder:
                         curvatures_d = curvatures[d]
 
                         # Ensure that the worm does not get too long/short.
-                        if self.checkpoint.step > p.length_warmup_steps:
+                        if self.runtime_args.resume or self.checkpoint.step > p.length_warmup_steps:
                             l = length_d.clamp(
                                 min=p.length_min,
                                 max=p.length_max
