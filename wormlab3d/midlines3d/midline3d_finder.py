@@ -698,7 +698,7 @@ class Midline3DFinder:
                 [loss_global, *losses_depths],
                 device=self.device
             )
-            self.convergence_detector.forward(losses, first_val=step == start_step)
+            self.convergence_detector.forward(losses, first_val=False)
 
             # When all of the losses have converged, break
             if not first_frame and self.convergence_detector.converged.all():
