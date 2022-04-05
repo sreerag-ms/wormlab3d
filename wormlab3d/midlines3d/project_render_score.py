@@ -467,7 +467,7 @@ class ProjectRenderScoreModel(nn.Module):
                 detection_masks_d = dmd
 
                 # The final rendering is the maximum of the intensity-and-score-scaled overlapping blobs
-                if 0:
+                if 1:
                     masks2 = (blobs_d * intensities_smoothed[d][:, None, :, None, None] * sf).amax(dim=2)
                     masks[d] = masks2
             else:
