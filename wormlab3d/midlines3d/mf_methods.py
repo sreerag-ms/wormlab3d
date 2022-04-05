@@ -541,8 +541,13 @@ def calculate_scores_losses(
         #      - torch.log(1 + scores_d.mean(dim=1, keepdim=True).detach()))**2
         # )
 
+        # Weight scores with a quadratic with y=0 at x=0.5 and y=boost_factor at x=[0,1]
+        boost_factor = 10
+        sf = 4 * boost_factor * (torch.linspace(0, 1, scores_d.shape[1], device=scores_d.device) - 0.5)**2
+        scaled_scores = scores_d * sf[None, ...]
+
         # Scores should be maximised
-        loss = 1 / (torch.sum(scores_d) + 1e-6)
+        loss = 1 / (torch.sum(scaled_scores) + 1e-6)
 
         losses.append(loss)
 
