@@ -61,7 +61,7 @@ N_WORM_POINTS = 50
 START_TIMESTAMP = time.strftime('%Y%m%d_%H%M')
 
 # Number of parallel workers to use for tasks
-N_WORKERS = os.getenv('N_WORKERS', 8)
+N_WORKERS = int(os.getenv('N_WORKERS', 8))
 
 # PyTorch to use JIT where possible
 PYTORCH_JIT = os.getenv('PYTORCH_JIT', 1)
