@@ -1033,7 +1033,8 @@ class Midline3DFinder:
             # Clamp the sigmas, exponents and intensities
             render_parameters_limits = {
                 'sigmas': {
-                    'min': p.sigmas_min + 0.001
+                    'min': p.sigmas_min + 0.001,
+                    'max': p.sigmas_max,
                 },
                 'exponents': {
                     'min': 0.5,

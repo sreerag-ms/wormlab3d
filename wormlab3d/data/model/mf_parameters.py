@@ -26,6 +26,7 @@ class MFParameters(Document):
 
     sigmas_init = FloatField()
     sigmas_min = FloatField()
+    sigmas_max = FloatField()
     intensities_min = FloatField()
 
     curvature_mode = BooleanField()

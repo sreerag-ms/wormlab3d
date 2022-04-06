@@ -22,6 +22,7 @@ class ParameterArgs(BaseArgs):
 
             sigmas_init: float = 0.1,
             sigmas_min: float = 0.04,
+            sigmas_max: float = 0.08,
             intensities_min: float = 0.4,
 
             curvature_mode: bool = False,
@@ -89,6 +90,7 @@ class ParameterArgs(BaseArgs):
 
         self.sigmas_init = sigmas_init
         self.sigmas_min = sigmas_min
+        self.sigmas_max = sigmas_max
         self.intensities_min = intensities_min
 
         self.curvature_mode = curvature_mode
@@ -197,6 +199,8 @@ class ParameterArgs(BaseArgs):
                            help='Initial rendering sigmas for points. Default=0.04.')
         group.add_argument('--sigmas-min', type=float, default=0.04,
                            help='Minimum rendering sigma. Tapers to this value at head and tail. Default=0.04.')
+        group.add_argument('--sigmas-max', type=float, default=0.08,
+                           help='Maximum rendering sigma. Default=0.08.')
         group.add_argument('--intensities-min', type=float, default=0.4,
                            help='Minimum rendering intensity. Tapers to this value at head and tail. Default=0.4.')
 
