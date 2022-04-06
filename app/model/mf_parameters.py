@@ -86,6 +86,14 @@ class MFParametersView(DocumentView):
                 },
             ),
             (
+                self.prefix + 'second_render_prob', {
+                    'title': 'Second render prob.',
+                    'type': 'float',
+                    'precision': 1,
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
                 self.prefix + 'sigmas_init', {
                     'title': 'Sigmas init',
                     'type': 'float',
@@ -262,6 +270,7 @@ class MFParametersView(DocumentView):
                 self.prefix + 'convergence_loss_target', {
                     'title': 'Conv. loss target',
                     'type': 'float',
+                    'precision': 1,
                     'filter_type': 'choice_query',
                 },
             ),

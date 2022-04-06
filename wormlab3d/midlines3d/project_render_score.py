@@ -181,6 +181,7 @@ class ProjectRenderScoreModel(nn.Module):
             dl_limit: float = None,
             dk_limit: float = None,
             dpsi_limit: float = None,
+            second_render_prob: float = 0.5,
     ):
         super().__init__()
         self.image_size = image_size
@@ -206,6 +207,7 @@ class ProjectRenderScoreModel(nn.Module):
         self.dk_limit = dk_limit
         self.dpsi_limit = dpsi_limit
         self.cams = torch.jit.script(DynamicCameras())
+        self.second_render_prob = second_render_prob
 
     def forward(
             self,
@@ -436,7 +438,8 @@ class ProjectRenderScoreModel(nn.Module):
 
             # Score the points - look at projections in each view and check how well each blob matches against the lowest intensity image
             scores_d = (blobs_normed * masks_target_d.unsqueeze(2)).sum(dim=(3, 4)).amin(dim=1) \
-                       / intensities_smoothed[d].detach()  # Scale scores by intensities
+                       / intensities_smoothed[d].detach() \
+                       / sigmas_smoothed[d].detach()  # Scale scores by sigmas and intensities
             if N > 2:
                 scores_d = _taper_parameter(scores_d)
             max_score = scores_d.amax(dim=1, keepdim=True)
@@ -454,20 +457,27 @@ class ProjectRenderScoreModel(nn.Module):
                 dmd[dmd > 0.1] = 1
                 dmd[dmd < 0.1] = 0.2
 
-                # Add head and tail booster regions only if no gaps detected
+                # Generate head and tail detection regions
                 head_blobs = blobs_normed[:, :, 0].clone()
                 tail_blobs = blobs_normed[:, :, -1].clone()
-                head_blobs[head_blobs > 0.01] = 1
-                tail_blobs[tail_blobs > 0.01] = 1
-                dmd = dmd + torch.where(rel_scores[:, 0][:, None, None, None] > 0.1, head_blobs,
-                                        torch.zeros_like(head_blobs))
-                dmd = dmd + torch.where(rel_scores[:, -1][:, None, None, None] > 0.1, tail_blobs,
-                                        torch.zeros_like(tail_blobs))
+                head_blobs[head_blobs > 0.001] = 1
+                tail_blobs[tail_blobs > 0.001] = 1
+
+                # Add head and tail booster regions only if no gaps detected
+                if 0:
+                    dmd = dmd + torch.where(rel_scores[:, 0][:, None, None, None] > 0.1, head_blobs,
+                                            torch.zeros_like(head_blobs))
+                    dmd = dmd + torch.where(rel_scores[:, -1][:, None, None, None] > 0.1, tail_blobs,
+                                            torch.zeros_like(tail_blobs))
+
+                # Add head and tail booster regions regardless
+                else:
+                    dmd = dmd + head_blobs + tail_blobs
                 dmd = dmd.clamp(max=1.)
                 detection_masks_d = dmd
 
-                # The final rendering is the maximum of the intensity-and-score-scaled overlapping blobs
-                if 1:
+                # The second rendering is the maximum of the intensity-and-score-scaled overlapping blobs
+                if torch.rand(1)[0] < self.second_render_prob:
                     masks2 = (blobs_d * intensities_smoothed[d][:, None, :, None, None] * sf).amax(dim=2)
                     masks[d] = masks2
             else:

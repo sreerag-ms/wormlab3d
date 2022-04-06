@@ -23,6 +23,7 @@ class MFParameters(Document):
     use_master = BooleanField()
     masks_threshold = FloatField()
     render_mode = StringField(choices=RENDER_MODES)
+    second_render_prob = FloatField()
 
     sigmas_init = FloatField()
     sigmas_min = FloatField()
