@@ -700,8 +700,8 @@ class Midline3DFinder:
             )
             self.convergence_detector.forward(losses, first_val=False)
 
-            # When all of the losses have converged, break
-            if not first_frame and self.convergence_detector.converged.all():
+            # When all of the losses have converged and loss has reached target, break
+            if not first_frame and self.convergence_detector.converged.all() and loss.item() < p.convergence_loss_target:
                 break
 
         self.tb_logger.add_scalar('train_steps', self.checkpoint.step_frame, self.checkpoint.frame_num)

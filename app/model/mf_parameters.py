@@ -102,6 +102,14 @@ class MFParametersView(DocumentView):
                 },
             ),
             (
+                self.prefix + 'sigmas_max', {
+                    'title': 'Sigmas max',
+                    'type': 'float',
+                    'precision': 2,
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
                 self.prefix + 'intensities_min', {
                     'title': 'Intensities min',
                     'type': 'float',
@@ -247,6 +255,13 @@ class MFParametersView(DocumentView):
                 self.prefix + 'convergence_patience', {
                     'title': 'Conv. patience',
                     'type': 'integer',
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'convergence_loss_target', {
+                    'title': 'Conv. loss target',
+                    'type': 'float',
                     'filter_type': 'choice_query',
                 },
             ),

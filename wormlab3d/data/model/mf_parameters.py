@@ -49,6 +49,7 @@ class MFParameters(Document):
     convergence_tau_slow = IntField()
     convergence_threshold = FloatField()
     convergence_patience = IntField()
+    convergence_loss_target = FloatField()
 
     optimise_cam_coeffs = BooleanField()
     optimise_cam_intrinsics = BooleanField()

@@ -45,6 +45,7 @@ class ParameterArgs(BaseArgs):
             convergence_tau_slow: int = 100,
             convergence_threshold: float = 0.1,
             convergence_patience: int = 25,
+            convergence_loss_target: float = 50.,
 
             optimise_cam_coeffs: bool = True,
             optimise_cam_intrinsics: bool = True,
@@ -130,6 +131,7 @@ class ParameterArgs(BaseArgs):
         self.convergence_tau_slow = convergence_tau_slow
         self.convergence_threshold = convergence_threshold
         self.convergence_patience = convergence_patience
+        self.convergence_loss_target = convergence_loss_target
 
         # Calculate total number of curve points
         N = 0
@@ -244,6 +246,8 @@ class ParameterArgs(BaseArgs):
                            help='Relative ratio of convergence estimates to qualify as potentially converged.')
         group.add_argument('--convergence-patience', type=int, default=25,
                            help='How many steps to wait after convergence is detected.')
+        group.add_argument('--convergence-loss-target', type=float, default=50.,
+                           help='Keep going until this loss target is reached, even if converged.')
 
         group.add_argument('--optimise-cam-coeffs', type=str2bool, default=True,
                            help='Optimise the camera coefficients. Master flag, overrides individual settings. Default = True.')
