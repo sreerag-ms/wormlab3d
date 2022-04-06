@@ -1178,7 +1178,7 @@ class Midline3DFinder:
                 ax.view_init(azim=self.plot_3d_azim)
                 title = f'd={d + self.parameters.depth_min}'
                 if self.parameters.curvature_mode:
-                    title += f', l={length[d]:.2f}'
+                    title += f', l={length[d]:.3f}'
                 ax.set_title(title)
                 # cla(ax)
 
@@ -1243,7 +1243,7 @@ class Midline3DFinder:
                 ax = fig.add_subplot(gs[i, j])
                 title = f'd={d + D_min}'
                 if self.parameters.curvature_mode:
-                    title += f', l={length[d]:.2f}'
+                    title += f', l={length[d]:.3f}'
                 ax.set_title(title)
                 ax.axis('off')
 
