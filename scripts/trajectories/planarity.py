@@ -123,6 +123,7 @@ def nonplanarity_dataset():
     # Calculate the non-planarity for all trials
     nonp = {}
     all_nonp = {delta: [] for delta in deltas}
+    n_trials = {}
     for trial in ds.include_trials:
         logger.info(f'Calculating non-planarity for trial={trial.id}.')
         args.trial = trial.id
@@ -131,6 +132,9 @@ def nonplanarity_dataset():
         c = trial.experiment.concentration
         if c not in nonp:
             nonp[c] = {delta: [] for delta in deltas}
+        if c not in n_trials:
+            n_trials[c] = 0
+        n_trials[c] += 1
 
         # Calculate non-planarity across different time windows
         for delta in deltas:
@@ -183,9 +187,8 @@ def nonplanarity_dataset():
     n_trials_total = 0
     for i, (c, nonp_c) in enumerate(nonp.items()):
         ax = axes[i + 1]
-        n_trials = len(nonp_c)
-        n_trials_total += n_trials
-        ax.set_title(f'Concentration = {c:.2f}% ({n_trials} trials)')
+        n_trials_total += n_trials[c]
+        ax.set_title(f'Concentration = {c:.2f}% ({n_trials[c]} trials)')
         _violinplot(ax, nonp_c.values())
 
     # Top plot shows aggregation from all results
