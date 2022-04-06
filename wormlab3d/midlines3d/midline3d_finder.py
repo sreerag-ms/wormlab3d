@@ -25,7 +25,8 @@ from wormlab3d.midlines3d.mf_methods import generate_residual_targets, calculate
     calculate_scores_losses, calculate_smoothness_losses, calculate_neighbours_losses, calculate_parents_losses, \
     calculate_aunts_losses, calculate_curvature_losses, calculate_temporal_losses, calculate_parents_losses_curvatures, \
     calculate_smoothness_losses_curvatures, calculate_curvature_losses_curvatures, calculate_temporal_losses_curvatures, \
-    calculate_temporal_losses_curvature_deltas, calculate_curvature_losses_curvature_deltas
+    calculate_temporal_losses_curvature_deltas, calculate_curvature_losses_curvature_deltas, \
+    calculate_intersection_losses_curvatures
 from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.nn.detector import ConvergenceDetector
@@ -42,7 +43,8 @@ PRINT_KEYS = [
     'loss/smoothness',
     'loss/temporal',
     # 'loss/global',
-    'loss/scores'
+    'loss/scores',
+    'loss/intersections'
 ]
 
 
@@ -773,6 +775,7 @@ class Midline3DFinder:
             scores=scores,
             curvatures_smoothed=curvatures_smoothed,
             points_smoothed=points_smoothed,
+            sigmas_smoothed=sigmas_smoothed
         )
 
         # Take optimisation step
@@ -840,6 +843,7 @@ class Midline3DFinder:
             scores: List[torch.Tensor],
             curvatures_smoothed: List[torch.Tensor],
             points_smoothed: List[torch.Tensor],
+            sigmas_smoothed: List[torch.Tensor],
     ) -> Tuple[torch.Tensor, torch.Tensor, List[torch.Tensor], Dict[str, float]]:
         """
         Calculate the losses.
@@ -881,6 +885,7 @@ class Midline3DFinder:
             losses = {**losses, **{
                 'parents': calculate_parents_losses_curvatures(X0, T0, length, curvatures, curvatures_smoothed),
                 'smoothness': calculate_smoothness_losses_curvatures(curvatures, curvatures_smoothed),
+                'intersections': calculate_intersection_losses_curvatures(points_smoothed, sigmas_smoothed, p.curvature_max),
             }}
             if p.curvature_deltas:
                 losses['temporal'] = calculate_temporal_losses_curvature_deltas(

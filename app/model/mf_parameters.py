@@ -398,6 +398,13 @@ class MFParametersView(DocumentView):
                 },
             ),
             (
+                self.prefix + 'loss_intersections', {
+                    'title': 'Loss intersections',
+                    'type': 'scientific',
+                    'precision': 1,
+                },
+            ),
+            (
                 self.prefix + 'algorithm', {
                     'title': 'Algorithm',
                     'type': 'string',

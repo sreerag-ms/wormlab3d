@@ -823,3 +823,47 @@ def calculate_temporal_losses_curvature_deltas(
         losses.append(loss)
 
     return losses
+
+
+@torch.jit.script
+def calculate_intersection_losses_curvatures(
+        points: List[torch.Tensor],
+        sigmas_smoothed: List[torch.Tensor],
+        max_curvature: float,
+) -> List[torch.Tensor]:
+    """
+    The curve should not intersect itself.
+    """
+    D = len(points)
+    bs = points[0].shape[0]
+    device = points[0].device
+    losses = []
+    eps = 1e-8
+
+    for d in range(D):
+        loss_d = torch.tensor(0., device=device)
+        points_d = points[d]
+        sigmas_d = sigmas_smoothed[d]
+        N = points_d.shape[1]
+
+        for bi in range(bs):
+            sigs = sigmas_d[bi]
+
+            # Calculate distances between points
+            dists = F.pdist(points_d[bi])
+
+            # Check distances between sufficiently far apart points on the body
+            pos_offset = int(N / max_curvature)
+            for i in range(N - 1):
+                if i + pos_offset > N:
+                    break
+                for j in range(i + pos_offset, N):
+                    idx = N * i - i * (i + 1) // 2 + j - 1 - i
+                    dij = dists[idx]
+                    dist_threshold = sigs[i] + sigs[j]
+                    if dij < dist_threshold:
+                        loss_d += dist_threshold / (dij + eps)
+
+        losses.append(loss_d)
+
+    return losses
