@@ -10,6 +10,7 @@ from wormlab3d import logger
 from wormlab3d.data.model import Dataset
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.pca import get_pca_cache_from_args
+from wormlab3d.trajectories.util import get_deltas_from_args
 
 # tex_mode()
 
@@ -95,20 +96,7 @@ def nonplanarity_trajectory():
 
 def nonplanarity_dataset():
     args = get_args()
-
-    # Use exponentially-spaced deltas
-    if args.delta_step < 0:
-        delta = args.min_delta
-        deltas = []
-        while delta < args.max_delta:
-            deltas.append(delta)
-            delta = delta**(-args.delta_step)
-        deltas = np.array(deltas).astype(np.int64)
-
-    # Use equally-spaced deltas
-    else:
-        deltas = np.arange(args.min_delta, args.max_delta, step=int(args.delta_step))
-    delta_ts = deltas / 25
+    deltas, delta_ts = get_deltas_from_args(args)
 
     # Get dataset
     assert args.dataset is not None

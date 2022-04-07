@@ -1,3 +1,4 @@
+from argparse import Namespace
 from typing import List, Tuple, Union
 
 import numpy as np
@@ -5,6 +6,7 @@ import numpy as np
 from wormlab3d import DATA_PATH, logger
 from wormlab3d.data.model import Frame, Tag, Reconstruction
 
+DEFAULT_FPS = 25
 TRAJECTORY_CACHE_PATH = DATA_PATH / 'trajectory_cache'
 SMOOTHING_WINDOW_TYPES = ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']
 
@@ -88,7 +90,7 @@ def calculate_htd(X: np.ndarray) -> np.ndarray:
 def prune_directionality(
         X: np.ndarray,
         directionality: str = None,
-) -> np.ndarray:
+) -> Tuple[np.ndarray, List[int]]:
     """
     Remove forward- or backwards-locomotion frames.
     """
@@ -111,7 +113,7 @@ def prune_directionality(
 def prune_slowest_frames(
         X: np.ndarray,
         cut_ratio: float = 0.1,
-) -> np.ndarray:
+) -> Tuple[np.ndarray, List[int]]:
     """
     Remove slowest speed frames.
     """
@@ -128,7 +130,7 @@ def prune_slowest_frames(
 def _prune_frames(
         X: np.ndarray,
         frame_idxs_to_cut: np.ndarray
-):
+) -> Tuple[np.ndarray, List[int]]:
     """
     Prune the given frame idxs from the trajectory.
     """
@@ -239,3 +241,24 @@ def fetch_reconstruction(
             reconstruction = reconstructions[0]
 
     return reconstruction
+
+
+def get_deltas_from_args(args: Namespace, fps: int = DEFAULT_FPS) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Get deltas and delta times from command line arguments.
+    """
+    # Use exponentially-spaced deltas
+    if args.delta_step < 0:
+        delta = args.min_delta
+        deltas = []
+        while delta < args.max_delta:
+            deltas.append(delta)
+            delta = delta**(-args.delta_step)
+        deltas = np.array(deltas).astype(np.int64)
+
+    # Use equally-spaced deltas
+    else:
+        deltas = np.arange(args.min_delta, args.max_delta, step=int(args.delta_step))
+    delta_ts = deltas / fps
+
+    return deltas, delta_ts

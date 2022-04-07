@@ -10,8 +10,9 @@ from wormlab3d.data.model import Dataset, Reconstruction
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.displacement import calculate_displacements, plot_displacement_histograms, \
-    calculate_displacement_projections, plot_displacement_projections_histograms, plot_squared_displacements_over_time, \
-    calculate_transitions_and_dwells_multiple_deltas, calculate_displacements_parallel, DISPLACEMENT_AGGREGATION_L2
+    calculate_displacement_projections, plot_displacement_projections_histograms, calculate_displacements_parallel, \
+    DISPLACEMENT_AGGREGATION_L2
+from wormlab3d.trajectories.util import get_deltas_from_args
 
 # tex_mode()
 
@@ -89,20 +90,6 @@ def displacement_projections():
         plt.show()
 
 
-def displacement_over_time():
-    args = get_args()
-    trajectory = get_trajectory_from_args(args)
-    displacements = calculate_displacements(trajectory, args.deltas, args.aggregation)
-    dwells = calculate_transitions_and_dwells_multiple_deltas(displacements)
-    plot_squared_displacements_over_time(displacements, dwells)
-    if save_plots:
-        plt.savefig(
-            make_filename('traces', args, excludes=['delta_range', 'delta_step'])
-        )
-    if show_plots:
-        plt.show()
-
-
 def displacement_violin_plot():
     args = get_args()
     trajectory = get_trajectory_from_args(args)
@@ -140,20 +127,7 @@ def displacement_violin_plot():
 
 def displacement_violin_plots_across_dataset_concentrations():
     args = get_args()
-
-    # Use exponentially-spaced deltas
-    if args.delta_step < 0:
-        delta = args.min_delta
-        deltas = []
-        while delta < args.max_delta:
-            deltas.append(delta)
-            delta = delta**(-args.delta_step)
-        deltas = np.array(deltas).astype(np.int64)
-
-    # Use equally-spaced deltas
-    else:
-        deltas = np.arange(args.min_delta, args.max_delta, step=int(args.delta_step))
-    delta_ts = deltas / 25
+    deltas, delta_ts = get_deltas_from_args(args)
 
     # Get dataset
     assert args.dataset is not None

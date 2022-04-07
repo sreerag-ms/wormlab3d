@@ -6,8 +6,7 @@ import numpy as np
 from matplotlib.figure import Figure
 
 from wormlab3d import logger, N_WORKERS
-
-DEFAULT_FPS = 25
+from wormlab3d.trajectories.util import DEFAULT_FPS
 
 DISPLACEMENT_AGGREGATION_L2 = 'l2'
 DISPLACEMENT_AGGREGATION_SQUARED_SUM = 'ss'
@@ -29,15 +28,19 @@ def calculate_displacements(
         return_dict = False
         deltas = [deltas]
 
+    if trajectory.ndim == 3:
+        logger.info('Using center of mass for displacement calculations.')
+        trajectory = trajectory.mean(axis=1)
+
     for delta in deltas:
         logger.info(f'Calculating displacements for delta = {delta}.')
         diff = trajectory[delta:] - trajectory[:-delta]
         if diff.ndim == 1:
             diff = diff[:, None]
         if aggregation == DISPLACEMENT_AGGREGATION_L2:
-            displacements = np.linalg.norm(diff, axis=1)
+            displacements = np.linalg.norm(diff, axis=-1)
         elif aggregation == DISPLACEMENT_AGGREGATION_SQUARED_SUM:
-            displacements = np.sum(diff**2, axis=1)
+            displacements = np.sum(diff**2, axis=-1)
         d[delta] = displacements
 
     if return_dict:
@@ -151,6 +154,7 @@ def calculate_transitions_and_dwells_multiple_deltas(
     """
     Calculate the transitions and dwell times for multiple deltas.
     """
+    logger.info('Calculating transitions and dwells.')
     ret = {}
     for delta, d in displacements.items():
         ret[delta] = calculate_transitions_and_dwells(d)
@@ -208,49 +212,6 @@ def plot_displacement_projections_histograms(
             ax.set_ylabel('$P(d;\Delta)$')
             xyz = ['x', 'y', 'z'][j]
             ax.set_xlabel(f'$d={xyz}(t+\Delta)-{xyz}(t)$')
-    fig.tight_layout()
-    return fig
-
-
-def plot_squared_displacements_over_time(
-        displacements: Dict[int, np.ndarray],
-        dwells: Dict[int, dict],
-        fps: int = DEFAULT_FPS
-):
-    """
-    Plot time trace of the results.
-    """
-    deltas = list(displacements.keys())
-    fig, axes = plt.subplots(len(deltas), 2, figsize=(12, 4 + 2 * len(deltas)))
-    for i, delta in enumerate(deltas):
-        d = displacements[delta]
-
-        # Trace over time
-        ax = axes[i, 0]
-        ax.plot(d, alpha=0.75)
-        ax.set_title(f'$\Delta={delta / fps:.2f}s$')
-        ax.set_ylabel('$|x(t+\Delta)-x(t)|$')
-        ax.set_xlabel('$t$')
-
-        # Add average indicator
-        avg = d.mean()
-        ax.axhline(y=avg, color='red')
-
-        # Highlight regions where above/below average
-        for on_dwell in dwells[delta]['on']:
-            ax.fill_between(np.arange(on_dwell[0], on_dwell[1]), max(d), color='green', alpha=0.3, zorder=-1,
-                            linewidth=0)
-        for off_dwell in dwells[delta]['off']:
-            ax.fill_between(np.arange(off_dwell[0], off_dwell[1]), max(d), color='orange', alpha=0.3, zorder=-1,
-                            linewidth=0)
-
-        # Plot histogram of dwell times
-        ax = axes[i, 1]
-        ax.set_yscale('log')
-        ax.set_xscale('log')
-        ax.hist(dwells[delta]['on_durations'], bins=50, density=True, alpha=0.5, color='green')
-        ax.hist(dwells[delta]['off_durations'], bins=50, density=True, alpha=0.5, color='orange')
-
     fig.tight_layout()
     return fig
 
