@@ -337,6 +337,13 @@ class ProjectRenderScoreModel(nn.Module):
                         length_d = length[d]
                         curvatures_d = curvatures[d]
 
+                    # Add some noise!
+                    if 1:
+                        X0_d = X0_d + torch.randn_like(X0_d) * 0.001
+                        T0_d = T0_d + torch.randn_like(T0_d) * 0.002
+                        length_d = length_d + torch.randn_like(length_d) * 0.0005
+                        curvatures_d = curvatures_d + torch.randn_like(curvatures_d) * 0.001
+
                     # Ensure that the worm does not get too long/short.
                     if not length_warmup:
                         length_d = length_d.clamp(min=self.length_min, max=self.length_max)
