@@ -467,11 +467,11 @@ class ProjectRenderScoreModel(nn.Module):
                 # Generate head and tail detection regions
                 head_blobs = blobs_normed[:, :, 0].clone()
                 tail_blobs = blobs_normed[:, :, -1].clone()
-                head_blobs[head_blobs > 0.001] = 1
-                tail_blobs[tail_blobs > 0.001] = 1
+                head_blobs[head_blobs > 0.01] = 1
+                tail_blobs[tail_blobs > 0.01] = 1
 
                 # Add head and tail booster regions only if no gaps detected
-                if 0:
+                if 1:
                     dmd = dmd + torch.where(rel_scores[:, 0][:, None, None, None] > 0.1, head_blobs,
                                             torch.zeros_like(head_blobs))
                     dmd = dmd + torch.where(rel_scores[:, -1][:, None, None, None] > 0.1, tail_blobs,
