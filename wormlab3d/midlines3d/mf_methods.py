@@ -542,12 +542,17 @@ def calculate_scores_losses(
         # )
 
         # Weight scores with a quadratic with y=0 at x=0.5 and y=ht_weight at x=[0,1]
-        ht_weight = 1e-2
+        ht_weight = 1
         sf = 4 * ht_weight * (torch.linspace(0, 1, scores_d.shape[1], device=scores_d.device) - 0.5)**2
         scaled_scores = scores_d * sf[None, ...]
 
         # Scores should be maximised
-        loss = torch.sum(1 / (torch.mean(scaled_scores, dim=-1) + 1e-8))
+        loss = torch.sum(torch.amax(scores_d, dim=-1).detach() / (torch.mean(scaled_scores, dim=-1) + 1e-8))
+
+        # Symmetry loss
+        N2 = int(scores_d.shape[1] / 2)
+        loss_sym = torch.sum(((scores_d[:, :N2].flip(dims=(1,)) - scores_d[:, N2:]) / torch.amax(scores_d, dim=-1))**2)
+        loss = loss + loss_sym
 
         losses.append(loss)
 
