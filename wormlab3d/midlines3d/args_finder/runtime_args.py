@@ -9,6 +9,8 @@ class RuntimeArgs(BaseArgs):
             self,
             resume: bool = True,
             resume_from: str = 'latest',
+            fix_mode: bool = False,
+            fix_decay_rate: float = 10.,
             gpu_only: bool = False,
             cpu_only: bool = False,
             gpu_id: int = 0,
@@ -29,6 +31,8 @@ class RuntimeArgs(BaseArgs):
     ):
         self.resume = resume
         self.resume_from = resume_from
+        self.fix_mode = fix_mode
+        self.fix_decay_rate = fix_decay_rate
         self.gpu_only = gpu_only
         self.cpu_only = cpu_only
         self.gpu_id = gpu_id
@@ -66,6 +70,10 @@ class RuntimeArgs(BaseArgs):
         resume_parser.set_defaults(resume=False)
         group.add_argument('--resume-from', type=str, default='latest',
                            help='Resume from a specific checkpoint id, "latest" or "best". Default="latest".')
+        group.add_argument('--fix-mode', type=str2bool, default=False,
+                           help='Run in fix-mode. Requires --resume and --end-frame to be set.')
+        group.add_argument('--fix-decay-rate', type=float, default=10.,
+                           help='Target frame loss ratio decay rate. Used only in fix-mode.')
         group.add_argument('--gpu-only', action='store_true',
                            help='Abort if no gpus are detected.')
         group.add_argument('--cpu-only', action='store_true',

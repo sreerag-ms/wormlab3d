@@ -232,7 +232,7 @@ class Trial(Document):
         video_filename = TRACKING_VIDEOS_PATH / f'{self.id:03d}.mp4'
         return video_filename.exists()
 
-    def find_next_frame_with_different_images(self, start_frame: int, threshold: float) -> Frame:
+    def find_next_frame_with_different_images(self, start_frame: int, threshold: float, direction: int = 1) -> Frame:
         """
         Find the next frame from the one given which has an image difference greater than the threshold.
         """
@@ -241,7 +241,7 @@ class Trial(Document):
             raise RuntimeError('Start frame does not have a triplet of prepared images.')
         images0 = np.stack(f0.images)
         diff = 0
-        step = 15
+        step = direction * 15
         frame_num = start_frame + step
         while diff < threshold or abs(step) > 1:
             f1 = self.get_frame(frame_num)

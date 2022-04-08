@@ -448,7 +448,7 @@ class FrameState(nn.Module):
         else:
             return super().register_parameter(name, param)
 
-    def get_state(self, key: str) -> torch.Tensor:
+    def get_state(self, key: str) -> Union[torch.Tensor, List[torch.Tensor]]:
         """
         Retrieve a buffer or parameter.
         """

@@ -14,6 +14,10 @@ class SourceArgs(BaseArgs):
         self.trial_id = trial_id
         self.start_frame = start_frame
         self.end_frame = end_frame
+        if end_frame == -1 or start_frame < end_frame:
+            self.direction = 1
+        else:
+            self.direction = -1
 
     @classmethod
     def add_args(cls, parser: ArgumentParser):

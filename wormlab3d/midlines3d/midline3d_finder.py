@@ -248,22 +248,50 @@ class Midline3DFinder:
         Load the trial.
         """
         logger.info('Initialising trial state.')
-        self.trial: Trial = Trial.objects.get(id=self.source_args.trial_id)
+        sa = self.source_args
+        ra = self.runtime_args
+        self.trial: Trial = Trial.objects.get(id=sa.trial_id)
 
         # Prepare trial state
         self.trial_state = TrialState(
             reconstruction=self.reconstruction,
-            start_frame=self.source_args.start_frame,
-            end_frame=self.source_args.end_frame,
+            start_frame=min(sa.start_frame, sa.end_frame),
+            end_frame=max(sa.start_frame, sa.end_frame),
             read_only=False,
-            load_only=self.runtime_args.resume,
+            load_only=ra.resume,
         )
+
+        # Get frame numbers in the order they will be tackled
+        frame_nums = self.trial_state.frame_nums
+        if sa.direction == -1:
+            frame_nums = frame_nums[::-1]
+
+        # In fix mode load the start and end frames as targets
+        if ra.fix_mode:
+            assert sa.end_frame != -1, 'End frame must be defined in fix-mode.'
+            self.fix_target_start = self.trial_state.init_frame_state(
+                sa.start_frame,
+                trainable=False,
+                load=True,
+                device=self.device
+            )
+            self.fix_target_end = self.trial_state.init_frame_state(
+                sa.end_frame,
+                trainable=False,
+                load=True,
+                device=self.device
+            )
+
+            # Start optimisation from 1-in from the start frame
+            start_frame = frame_nums[1]
+        else:
+            start_frame = frame_nums[0]
 
         # Master state
         self.master_frame_state = self.trial_state.init_frame_state(
-            self.trial_state.frame_nums[0],
+            start_frame,
             trainable=True,
-            load=self.runtime_args.resume,
+            load=ra.resume,
             device=self.device
         )
 
@@ -277,14 +305,16 @@ class Midline3DFinder:
                 # Try to find a frame with sufficiently different images
                 diff_frame = self.trial.find_next_frame_with_different_images(
                     self.frame_batch[-1].frame_num,
-                    threshold=self.parameters.window_image_diff_threshold
+                    threshold=self.parameters.window_image_diff_threshold,
+                    direction=sa.direction
+
                 )
                 frame_num = diff_frame.frame_num
 
             fs = self.trial_state.init_frame_state(
                 frame_num,
                 trainable=True,
-                load=self.runtime_args.resume,
+                load=ra.resume,
                 master_frame_state=mfs,
                 use_master_points=i == 0,
                 device=self.device
@@ -433,9 +463,9 @@ class Midline3DFinder:
                     logger.info('Metrics:')
                     for key, val in prev_checkpoint.metrics.items():
                         logger.info(f'\t{key}: {val:.4E}')
-                if self.source_args.start_frame != prev_checkpoint.frame_num:
-                    logger.info(f'Setting checkpoint frame number to {self.source_args.start_frame}.')
-                    prev_checkpoint.frame_num = self.source_args.start_frame
+                if prev_checkpoint.frame_num != self.master_frame_state.frame_num:
+                    logger.info(f'Setting checkpoint frame number to {self.master_frame_state.frame_num}.')
+                    prev_checkpoint.frame_num = self.master_frame_state.frame_num
             except DoesNotExist:
                 err = f'Could not load checkpoint={self.runtime_args.resume_from}.'
                 if self.runtime_args.resume_from in ['latest', 'best']:
@@ -462,7 +492,7 @@ class Midline3DFinder:
             checkpoint = MFCheckpoint(
                 trial=self.trial,
                 parameters=self.parameters,
-                frame_num=self.source_args.start_frame,
+                frame_num=self.master_frame_state.frame_num,
                 runtime_args=to_dict(self.runtime_args),
                 source_args=to_dict(self.source_args),
             )
@@ -499,6 +529,7 @@ class Midline3DFinder:
         Process the trial.
         """
         p = self.parameters
+        direction = self.source_args.direction
         mfs = self.master_frame_state
         self._configure_paths()
         self._init_tb_logger()
@@ -507,13 +538,18 @@ class Midline3DFinder:
         # Initial plots
         self._make_plots(pre_step=True)
 
-        # Train
-        # w2 = int((p.window_size - 1) / 2)
+        # Get frame numbers to be optimised
+        frame_nums = self.trial_state.frame_nums
+        if self.source_args.direction == -1:
+            frame_nums = frame_nums[::-1]
+        if self.runtime_args.fix_mode:
+            frame_nums = frame_nums[1:-1]
         frame_skip = 1 if p.frame_skip is None else p.frame_skip
         first_frame = self.checkpoint.frame_num
-        frame_nums = list(range(first_frame, self.trial_state.frame_nums[-1]))[::frame_skip]
+        frame_nums = frame_nums[::frame_skip]
         n_frames = len(frame_nums)
 
+        # Train
         for i, frame_num in enumerate(frame_nums):
             logger.info(f'======== Training frame #{frame_num} ({i + 1}/{n_frames}) ========')
             # active_idx = min(i, w2)
@@ -533,14 +569,24 @@ class Midline3DFinder:
             self.trial_state.save()
 
             # Update the reconstruction
-            self.reconstruction.end_frame = max(frame_num + 1, self.reconstruction.end_frame)
+            if direction == 1:
+                self.reconstruction.end_frame = max(frame_num + 1, self.reconstruction.end_frame)
+            else:
+                self.reconstruction.start_frame = min(frame_num, self.reconstruction.start_frame)
             self.reconstruction.save()
 
             # Interpolate skipped frame parameters
             if p.frame_skip and self.last_frame_state is not None:
                 logger.info('Interpolating skipped frames.')
+                if direction == 1:
+                    start_frame = self.last_frame_state.frame_num
+                    end_frame = frame_num + 1
+                else:
+                    start_frame = frame_num
+                    end_frame = self.last_frame_state.frame_num + 1
+
                 for k in BUFFER_NAMES + PARAMETER_NAMES:
-                    var = self.trial_state.get(k, start_frame=self.last_frame_state.frame_num, end_frame=frame_num + 1)
+                    var = self.trial_state.get(k, start_frame=start_frame, end_frame=end_frame)
                     v = torch.from_numpy(np.stack([var[0], var[-1]]))
                     v = v.to(self.device)
                     v = v.reshape([1, 2, -1])
@@ -555,7 +601,9 @@ class Midline3DFinder:
                 curr_stats = mfs.stats
                 for k, v in curr_stats.items():
                     interpolated_stats = np.linspace(float(last_stats[k]), float(curr_stats[k]), p.frame_skip + 2)
-                    for j, ifn in enumerate(range(self.last_frame_state.frame_num + 1, frame_num)):
+                    if direction == -1:
+                        interpolated_stats = interpolated_stats[::-1]
+                    for j, ifn in enumerate(range(start_frame + 1, end_frame - 1)):
                         self.trial_state.stats[k][ifn] = float(interpolated_stats[1 + j])
                 self.trial_state.save()
 
@@ -586,23 +634,23 @@ class Midline3DFinder:
             )
 
             # Roll window
-            next_frame_num = frame_num + frame_skip  # + w2
-            next_frame = self.trial_state.init_frame_state(
-                frame_num=next_frame_num,
-                trainable=True,
-                load=False,
-                prev_frame_state=mfs,
-                device=self.device
-            )
+            if i < n_frames - 1:
+                next_frame_num = frame_num + direction * frame_skip  # + w2
+                next_frame = self.trial_state.init_frame_state(
+                    frame_num=next_frame_num,
+                    trainable=True,
+                    load=False,
+                    prev_frame_state=mfs,
+                    device=self.device
+                )
 
-            # Reduce curvature
-            if p.curvature_mode and p.curvature_relaxation_factor is not None:
-                K = next_frame.get_state('curvatures')
-                with torch.no_grad():
-                    for K_d in K:
-                        K_d.data = K_d * p.curvature_relaxation_factor
+                # Reduce curvature
+                if p.curvature_mode and p.curvature_relaxation_factor is not None:
+                    K = next_frame.get_state('curvatures')
+                    with torch.no_grad():
+                        for K_d in K:
+                            K_d.data = K_d * p.curvature_relaxation_factor
 
-            if p.use_master:
                 mfs.frame_num = next_frame.frame_num
                 mfs.copy_state(next_frame)
 
@@ -617,7 +665,8 @@ class Midline3DFinder:
                     # Try to find a frame with sufficiently different images
                     diff_frame = self.trial.find_next_frame_with_different_images(
                         prev_frame.frame_num,
-                        threshold=self.parameters.window_image_diff_threshold
+                        threshold=self.parameters.window_image_diff_threshold,
+                        direction=direction
                     )
                     next_frame = self.trial_state.init_frame_state(
                         frame_num=diff_frame.frame_num,
@@ -629,29 +678,6 @@ class Midline3DFinder:
 
                     curr_frame.copy_state(next_frame)
                     curr_frame.frame_num = next_frame.frame_num
-
-            # for j in range(p.window_size):
-            #     curr_frame = self.frame_batch[j]
-            #     # if j < min(i+1, w2):
-            #     #     curr_frame.freeze()
-            #     if i >= w2:
-            #         if j + 1 < p.window_size:
-            #             next_frame = self.frame_batch[j + 1]
-            #         elif i + w2 < len(self.trial_state):
-            #             next_frame = self.trial_state.init_frame_state(
-            #                 frame_num=next_frame_num,
-            #                 trainable=True,
-            #                 load=False,
-            #                 prev_frame_state=curr_frame,
-            #                 device=self.device
-            #             )
-            #         else:
-            #             continue
-            #
-            #         with torch.no_grad():
-            #             for k in BUFFER_NAMES + PARAMETER_NAMES + TRANSIENTS_NAMES:
-            #                 curr_frame.set_state(k, next_frame.get_state(k))
-            #         curr_frame.frame_num = next_frame.frame_num
 
             # Checkpoint
             if self.runtime_args.checkpoint_every_n_frames > 0 \
@@ -783,7 +809,11 @@ class Midline3DFinder:
             logger.warning('Bad loss, skipping parameter update.')
         else:
             self.optimiser.zero_grad()
-            loss.backward()
+            if self.runtime_args.fix_mode:
+                loss_fix = self._calculate_fix_loss(loss, stats)
+                loss_fix.backward()
+            else:
+                loss.backward()
             self.optimiser.step()
             self._clamp_parameters(points_smoothed)
 
@@ -885,7 +915,9 @@ class Midline3DFinder:
             losses = {**losses, **{
                 'parents': calculate_parents_losses_curvatures(X0, T0, length, curvatures, curvatures_smoothed),
                 'smoothness': calculate_smoothness_losses_curvatures(curvatures, curvatures_smoothed),
-                'intersections': calculate_intersection_losses_curvatures(points_smoothed, sigmas_smoothed, p.curvature_max),
+                'intersections': calculate_intersection_losses_curvatures(
+                    points_smoothed, sigmas_smoothed, p.curvature_max
+                ),
             }}
             if p.curvature_deltas:
                 losses['temporal'] = calculate_temporal_losses_curvature_deltas(
@@ -972,6 +1004,59 @@ class Midline3DFinder:
         stats['loss/total'] = loss.item()
 
         return loss, loss_global, losses_depths, stats
+
+    def _calculate_fix_loss(self, loss: torch.Tensor, stats: dict) -> torch.Tensor:
+        """
+        In fix-mode, the start and end frames are targets that must be reached.
+        """
+        ra = self.runtime_args
+        assert ra.fix_mode
+        mfs = self.master_frame_state
+        start_fs = self.fix_target_start
+        end_fs = self.fix_target_end
+
+        # Calculate target losses - squared distances from all parameters to each end point.
+        loss_start = 0.
+        loss_end = 0.
+        for k in PARAMETER_NAMES:
+            p_start = start_fs.get_state(k)
+            p_end = end_fs.get_state(k)
+            p_curr = mfs.get_state(k)
+            if type(p_start) == list:
+                for i in range(len(p_start)):
+                    loss_start += torch.sum((p_start[i] - p_curr[i])**2)
+                    loss_end += torch.sum((p_end[i] - p_curr[i])**2)
+            else:
+                loss_start += torch.sum((p_start - p_curr)**2)
+                loss_end += torch.sum((p_end - p_curr)**2)
+
+        # Calculate relative loss weightings
+        n_frames = abs(start_fs.frame_num - end_fs.frame_num)
+        target_weightings = torch.exp(-torch.arange(n_frames) / ra.fix_decay_rate)
+        loss_weighting = 1 - (target_weightings + target_weightings.flip(dims=(0,)))
+        if self.source_args.direction == 1:
+            idx = mfs.frame_num - start_fs.frame_num
+        else:
+            idx = start_fs.frame_num - mfs.frame_num
+
+        # Weight and sum the losses
+        loss_start_weighted = target_weightings[idx] * loss_start
+        loss_end_weighted = target_weightings.flip(dims=(0,))[idx] * loss_end
+        loss_weighted = loss_weighting[idx] * loss
+        loss_fix = loss_start_weighted + loss_end_weighted + loss_weighted
+
+        # Log losses
+        stats['loss_fix/start'] = loss_start.item()
+        stats['loss_fix/start_weighted'] = loss_start_weighted.item()
+        stats['loss_fix/end'] = loss_end.item()
+        stats['loss_fix/end_weighted'] = loss_end_weighted.item()
+        stats['loss_fix/total'] = loss_fix.item()
+        if self.runtime_args.log_level > 0:
+            stats['loss_fix/weights_start'] = target_weightings[idx].item()
+            stats['loss_fix/weights_end'] = target_weightings.flip(dims=(0,))[idx].item()
+            stats['loss_fix/weights_loss'] = loss_weighting[idx].item()
+
+        return loss_fix
 
     def _clamp_parameters(self, points_smoothed: torch.Tensor):
         """
@@ -1557,7 +1642,7 @@ class Midline3DFinder:
 
     def _plot_title(self, frame_state: FrameState, skipped: bool = False) -> str:
         title = f'Trial: {self.trial.id}. {self.trial.date:%Y%m%d}. ' \
-                f'Frame: {frame_state.frame_num}/{self.trial_state.frame_nums[-1]}.\n' \
+                f'Frame: {frame_state.frame_num}/{self.trial.n_frames_min}.\n' \
                 f'Global step: {self.checkpoint.step}. '
         if not skipped:
             title += f'Frame step: {self.checkpoint.step_frame}.'

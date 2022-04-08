@@ -299,7 +299,7 @@ class TrialState:
         else:
             start_frame = self.start_frame
         if end_frame is not None:
-            assert end_frame <= self.frame_nums[-1]
+            assert end_frame <= self.frame_nums[-1] + 1
         else:
             end_frame = self.end_frame + 1
 
