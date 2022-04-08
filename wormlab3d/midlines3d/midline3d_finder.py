@@ -239,7 +239,7 @@ class Midline3DFinder:
                 copied_from = Reconstruction.objects.get(id=self.runtime_args.copy_state)
                 params['start_frame'] = copied_from.start_frame
                 params['end_frame'] = copied_from.end_frame
-                params['copied_from'] = None
+                params['copied_from'] = copied_from
             else:
                 params['start_frame'] = start_frame
                 params['end_frame'] = start_frame
