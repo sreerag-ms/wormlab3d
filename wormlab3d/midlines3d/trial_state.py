@@ -49,7 +49,7 @@ class TrialState:
         # Load the state
         loaded = self._load_state(read_only)
         if loaded:
-            assert copy_state is not None, 'Cannot copy state into an existing state.'
+            assert copy_state is None, 'Cannot copy state into an existing state.'
         if not loaded and (load_only or read_only):
             raise RuntimeError('Could not load trial state.')
         if not loaded and not read_only:
