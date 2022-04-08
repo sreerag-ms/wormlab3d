@@ -230,7 +230,7 @@ class Midline3DFinder:
             logger.info(f'Loaded reconstruction (id={reconstruction.id}, created={reconstruction.created}).')
         except DoesNotExist:
             err = 'No reconstruction record found in database.'
-            if self.runtime_args.resume:
+            if self.runtime_args.resume and self.runtime_args.copy_state is None:
                 raise RuntimeError(err)
             logger.info(err)
 
