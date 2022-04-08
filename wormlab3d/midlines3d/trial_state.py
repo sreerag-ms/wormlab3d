@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Dict, Any
 
@@ -24,8 +25,6 @@ class TrialState:
             load_only: bool = True,
             copy_state: 'TrialState' = None,
     ):
-        if copy_state is not None:
-            assert not read_only and not load_only
         self.reconstruction = reconstruction
         self.trial: Trial = reconstruction.trial
         if start_frame is None:
@@ -46,14 +45,17 @@ class TrialState:
             self.frame_nums.append(i)
         assert len(self.frame_nums) == self.n_frames
 
+        # Copy state if required
+        if copy_state is not None:
+            assert not read_only and not load_only
+            self._copy_state(copy_state)
+
         # Load the state
         loaded = self._load_state(read_only)
-        if loaded:
-            assert copy_state is None, 'Cannot copy state into an existing state.'
         if not loaded and (load_only or read_only):
             raise RuntimeError('Could not load trial state.')
         if not loaded and not read_only:
-            self._init_state(copy_state)
+            self._init_state()
             self.save()
 
     @property
@@ -112,13 +114,29 @@ class TrialState:
 
         return True
 
+    def _copy_state(self, from_state: 'TrialState' = None):
+        """
+        Copy state data across from another trial state.
+        """
+        logger.info(f'Copying state data across from {from_state.path} to {self.path}.')
+        os.makedirs(self.path, exist_ok=True)
+
+        # Copy metadata
+        assert not (self.path / 'metadata.json').exists(), 'Cannot copy state into an existing state.'
+        shutil.copy(from_state.path / 'metadata.json', self.path / 'metadata.json')
+
+        # Copy state files
+        for k in BUFFER_NAMES + PARAMETER_NAMES:
+            shutil.copy(from_state.path / f'{k}.npz', self.path / f'{k}.npz')
+
+        # Copy statistics
+        shutil.copy(from_state.path / 'stats.json', self.path / 'stats.json')
+
     def _init_state(self, copy_state: 'TrialState' = None):
         """
-        Initialise empty state or copy from another state if provided.
+        Initialise empty state.
         """
         logger.info(f'Initialising state in {self.path}.')
-        if copy_state is not None:
-            logger.info(f'Copying state data across from {copy_state.path}.')
         os.makedirs(self.path, exist_ok=True)
         mp = self.parameters
         T = self.trial.n_frames_min
@@ -170,10 +188,6 @@ class TrialState:
             shapes[k] = shape
             dtype = np.float32 if k not in BINARY_DATA_KEYS else np.bool
             states[k] = np.memmap(path_state, dtype=dtype, mode='w+', shape=shape)
-
-            # Copy data from previous state.
-            if copy_state is not None:
-                states[k][:] = copy_state.get(k)
 
         self.states = states
         self.shapes = shapes
