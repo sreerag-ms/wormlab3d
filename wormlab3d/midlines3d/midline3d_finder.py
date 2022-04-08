@@ -237,14 +237,14 @@ class Midline3DFinder:
         if reconstruction is None:
             if self.runtime_args.copy_state is not None:
                 copied_from = Reconstruction.objects.get(id=self.runtime_args.copy_state)
+                params['start_frame'] = copied_from.start_frame
+                params['end_frame'] = copied_from.end_frame
+                params['copied_from'] = None
             else:
-                copied_from = None
-            reconstruction = Reconstruction(
-                **params,
-                start_frame=start_frame,
-                end_frame=start_frame,
-                copied_from=copied_from
-            )
+                params['start_frame'] = start_frame
+                params['end_frame'] = start_frame
+                params['copied_from'] = None
+            reconstruction = Reconstruction(**params)
             reconstruction.save()
             logger.info(f'Saved reconstruction record to database (id={reconstruction.id})')
 
