@@ -7,7 +7,6 @@ from mongoengine import *
 from wormlab3d import RECONSTRUCTION_VIDEOS_PATH, MF_DATA_PATH
 from wormlab3d.data.model.eigenworms import Eigenworms
 from wormlab3d.data.model.frame import Frame
-from wormlab3d.data.model.mf_parameters import MFParameters
 from wormlab3d.data.model.midline3d import M3D_SOURCES, M3D_SOURCE_MF
 
 
@@ -20,7 +19,8 @@ class Reconstruction(Document):
     midlines = ListField(LazyReferenceField('Midline3D'))
     source = StringField(choices=M3D_SOURCES, required=True)
     source_file = StringField()
-    mf_parameters = ReferenceField(MFParameters)
+    mf_parameters = ReferenceField('MFParameters')
+    copied_from = ReferenceField('Reconstruction')
 
     meta = {
         'indexes': [

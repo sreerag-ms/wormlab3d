@@ -222,6 +222,8 @@ class Midline3DFinder:
         reconstruction = None
         try:
             reconstruction = Reconstruction.objects.get(**params)
+            if self.runtime_args.copy_state is not None:
+                raise RuntimeError('Can only copy state to a new reconstruction!')
             if reconstruction.start_frame > start_frame:
                 reconstruction.start_frame = start_frame
                 reconstruction.save()
@@ -233,10 +235,15 @@ class Midline3DFinder:
             logger.info(err)
 
         if reconstruction is None:
+            if self.runtime_args.copy_state is not None:
+                copied_from = Reconstruction.objects.get(id=self.runtime_args.copy_state)
+            else:
+                copied_from = None
             reconstruction = Reconstruction(
                 **params,
                 start_frame=start_frame,
-                end_frame=start_frame
+                end_frame=start_frame,
+                copied_from=copied_from
             )
             reconstruction.save()
             logger.info(f'Saved reconstruction record to database (id={reconstruction.id})')
@@ -250,15 +257,29 @@ class Midline3DFinder:
         logger.info('Initialising trial state.')
         sa = self.source_args
         ra = self.runtime_args
-        self.trial: Trial = Trial.objects.get(id=sa.trial_id)
+        self.trial: Trial = self.reconstruction.trial
+
+        # Copy state across from previous reconstruction
+        if self.reconstruction.copied_from is not None:
+            copy_state = TrialState(reconstruction=self.reconstruction.copied_from)
+        else:
+            copy_state = None
+
+        if sa.end_frame == -1:
+            start_frame = sa.start_frame
+            end_frame = sa.end_frame
+        else:
+            start_frame = min(sa.start_frame, sa.end_frame)
+            end_frame = max(sa.start_frame, sa.end_frame)
 
         # Prepare trial state
         self.trial_state = TrialState(
             reconstruction=self.reconstruction,
-            start_frame=min(sa.start_frame, sa.end_frame),
-            end_frame=max(sa.start_frame, sa.end_frame),
+            start_frame=start_frame,
+            end_frame=end_frame,
             read_only=False,
             load_only=ra.resume,
+            copy_state=copy_state
         )
 
         # Get frame numbers in the order they will be tackled
@@ -421,81 +442,52 @@ class Midline3DFinder:
 
     def _init_checkpoint(self) -> MFCheckpoint:
         """
-        The current checkpoint instance contains the most up to date instance of the model.
-        This is not persisted to the database until we actually want to checkpoint it, so should
-        be thought of more as a checkpoint-buffer.
+        The checkpoint contains all the arguments and keeps track of progress.
         """
 
         # Load previous checkpoint
         prev_checkpoint: MFCheckpoint = None
-        if self.runtime_args.resume:
-            try:
-                if self.runtime_args.resume_from in ['latest', 'best']:
-                    if self.runtime_args.resume_from == 'latest':
-                        order_by = '-created'
-                    else:
-                        order_by = '+loss'
+        try:
+            prev_checkpoints = MFCheckpoint.objects(
+                trial=self.trial,
+                reconstruction=self.reconstruction,
+                parameters=self.parameters
+            ).order_by('-created')
 
-                    prev_checkpoints = MFCheckpoint.objects(
-                        trial=self.trial,
-                        parameters=self.parameters
-                    ).order_by(order_by)
-
-                    if prev_checkpoints.count() > 0:
-                        logger.info(
-                            f'Found {prev_checkpoints.count()} previous checkpoints. '
-                            f'Using {self.runtime_args.resume_from}.'
-                        )
-                        prev_checkpoint = prev_checkpoints[0]
-                    else:
-                        logger.warning(
-                            f'Found no checkpoints for trial={self.trial.id} and model={self.parameters.id}.'
-                        )
-                        raise DoesNotExist()
-                else:
-                    prev_checkpoint = MFCheckpoint.objects.get(
-                        id=self.runtime_args.resume_from
-                    )
-                logger.info(f'Loaded checkpoint id={prev_checkpoint.id}, created={prev_checkpoint.created}.')
+            if prev_checkpoints.count() > 0:
+                prev_checkpoint = prev_checkpoints[0]
+                logger.info(f'Found {prev_checkpoints.count()} previous checkpoints.')
+                logger.info(f'Loaded previous checkpoint id={prev_checkpoint.id}, created={prev_checkpoint.created}.')
                 logger.info(f'Saved at frame = {prev_checkpoint.frame_num}.')
                 logger.info(f'Loss = {prev_checkpoint.loss:.6f}')
                 if len(prev_checkpoint.metrics) > 0:
                     logger.info('Metrics:')
                     for key, val in prev_checkpoint.metrics.items():
                         logger.info(f'\t{key}: {val:.4E}')
-                if prev_checkpoint.frame_num != self.master_frame_state.frame_num:
-                    logger.info(f'Setting checkpoint frame number to {self.master_frame_state.frame_num}.')
-                    prev_checkpoint.frame_num = self.master_frame_state.frame_num
-            except DoesNotExist:
-                err = f'Could not load checkpoint={self.runtime_args.resume_from}.'
-                if self.runtime_args.resume_from in ['latest', 'best']:
-                    logger.warning(err + ' Creating new checkpoint.')
-                else:
-                    raise RuntimeError(err)
+            else:
+                logger.info(f'Found no checkpoints for trial={self.trial.id} and model={self.parameters.id}.')
 
         # Either clone the previous checkpoint to use as the starting point
         if prev_checkpoint is not None:
             checkpoint = prev_checkpoint.clone()
-
-            # Update the model references to the ones now in use
-            if checkpoint.parameters.id != self.parameters.id:
-                logger.warning('Parameters have changed! This may cause problems!')
-                checkpoint.parameters = self.parameters
-
-            # Args are stored against the checkpoint, so just override them
+            checkpoint.frame_num = self.master_frame_state.frame_num
             checkpoint.runtime_args = to_dict(self.runtime_args)
             checkpoint.source_args = to_dict(self.source_args)
-            checkpoint.parameter_args = to_dict(self.parameter_args)
 
         # ..or start a new checkpoint
         else:
             checkpoint = MFCheckpoint(
                 trial=self.trial,
+                reconstruction=self.reconstruction,
                 parameters=self.parameters,
                 frame_num=self.master_frame_state.frame_num,
                 runtime_args=to_dict(self.runtime_args),
                 source_args=to_dict(self.source_args),
             )
+        checkpoint.save()
+
+        # Set checkpoint reference in trial state
+        self.trial_state.checkpoint = self.checkpoint
 
         return checkpoint
 
@@ -510,19 +502,6 @@ class Midline3DFinder:
         os.makedirs(self.logs_path, exist_ok=True)
         os.makedirs(self.logs_path / 'events', exist_ok=True)
         os.makedirs(self.logs_path / 'plots', exist_ok=True)
-
-    def save_checkpoint(self):
-        """
-        Save the checkpoint information to the database and the parameters to file.
-        """
-        logger.info('Saving checkpoint...')
-        self.checkpoint.save()
-
-        # Replace the current checkpoint-buffer with a clone of the just-saved checkpoint
-        self.checkpoint = self.checkpoint.clone()
-
-        # Update checkpoint in TrialState
-        self.trial_state.checkpoint = self.checkpoint
 
     def process_trial(self):
         """
@@ -679,11 +658,6 @@ class Midline3DFinder:
                     curr_frame.copy_state(next_frame)
                     curr_frame.frame_num = next_frame.frame_num
 
-            # Checkpoint
-            if self.runtime_args.checkpoint_every_n_frames > 0 \
-                    and frame_num % self.runtime_args.checkpoint_every_n_frames == 0:
-                self.save_checkpoint()
-
     def train(self, first_frame: bool = False):
         """
         Train the camera coefficients and multiscale curve.
@@ -704,6 +678,7 @@ class Midline3DFinder:
             self.checkpoint.step_frame += 1
             self.checkpoint.loss = loss.item()
             self.checkpoint.metrics = stats
+            self.checkpoint.save()
 
             # Log
             self._log_progress(
@@ -715,11 +690,6 @@ class Midline3DFinder:
 
             # Make plots
             self._make_plots(first_frame=first_frame)
-
-            # Checkpoint
-            if self.runtime_args.checkpoint_every_n_steps > 0 \
-                    and self.step % self.runtime_args.checkpoint_every_n_steps == 0:
-                self.save_checkpoint()
 
             # Update convergence detector
             losses = torch.tensor(

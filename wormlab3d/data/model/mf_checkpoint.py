@@ -7,6 +7,7 @@ class MFCheckpoint(Document):
     created = DateTimeField(required=True, default=datetime.datetime.utcnow)
     cloned_from = ReferenceField('MFCheckpoint')
     trial = ReferenceField('Trial')
+    reconstruction = ReferenceField('Reconstruction', required=True)
     parameters = ReferenceField('MFParameters', required=True)
 
     frame_num = IntField(required=True, default=0)
@@ -31,6 +32,7 @@ class MFCheckpoint(Document):
         return MFCheckpoint(
             cloned_from=self,
             trial=self.trial,
+            reconstruction=self.reconstruction,
             parameters=self.parameters,
             frame_num=self.frame_num,
             step=self.step,

@@ -9,13 +9,12 @@ class RuntimeArgs(BaseArgs):
             self,
             resume: bool = True,
             resume_from: str = 'latest',
+            copy_state: str = None,
             fix_mode: bool = False,
             fix_decay_rate: float = 10.,
             gpu_only: bool = False,
             cpu_only: bool = False,
             gpu_id: int = 0,
-            checkpoint_every_n_steps: int = -1,
-            checkpoint_every_n_frames: int = 1,
             log_level: int = 0,
             plot_every_n_steps: int = -1,
             plot_every_n_init_steps: int = -1,
@@ -31,13 +30,12 @@ class RuntimeArgs(BaseArgs):
     ):
         self.resume = resume
         self.resume_from = resume_from
+        self.copy_state = copy_state
         self.fix_mode = fix_mode
         self.fix_decay_rate = fix_decay_rate
         self.gpu_only = gpu_only
         self.cpu_only = cpu_only
         self.gpu_id = gpu_id
-        self.checkpoint_every_n_steps = checkpoint_every_n_steps
-        self.checkpoint_every_n_frames = checkpoint_every_n_frames
         self.log_level = log_level
         self.plot_every_n_steps = plot_every_n_steps
         self.plot_every_n_init_steps = plot_every_n_init_steps
@@ -70,6 +68,8 @@ class RuntimeArgs(BaseArgs):
         resume_parser.set_defaults(resume=False)
         group.add_argument('--resume-from', type=str, default='latest',
                            help='Resume from a specific checkpoint id, "latest" or "best". Default="latest".')
+        group.add_argument('--copy-state', type=str, default=None,
+                           help='Copy trial state from an existing reconstruction id.')
         group.add_argument('--fix-mode', type=str2bool, default=False,
                            help='Run in fix-mode. Requires --resume and --end-frame to be set.')
         group.add_argument('--fix-decay-rate', type=float, default=10.,
@@ -80,10 +80,6 @@ class RuntimeArgs(BaseArgs):
                            help='Only run on CPU. Otherwise will use GPU if available.')
         group.add_argument('--gpu-id', type=int, default=0,
                            help='GPU id to use if using GPUs.')
-        group.add_argument('--checkpoint-every-n-steps', type=int, default=-1,
-                           help='Save a checkpoint every n steps, -1 turns this off. Default=-1.')
-        group.add_argument('--checkpoint-every-n-frames', type=int, default=1,
-                           help='Save a checkpoint every n frames, -1 turns this off. Default=1.')
         group.add_argument('--plot-every-n-steps', type=int, default=-1,
                            help='Plot example inputs and outputs every n steps, -1 turns this off.')
         group.add_argument('--plot-every-n-init-steps', type=int, default=-1,
