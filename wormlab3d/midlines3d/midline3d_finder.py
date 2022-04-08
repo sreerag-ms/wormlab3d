@@ -278,7 +278,7 @@ class Midline3DFinder:
             start_frame=start_frame,
             end_frame=end_frame,
             read_only=False,
-            load_only=ra.resume,
+            load_only=ra.resume if copy_state is None else False,
             copy_state=copy_state
         )
 
