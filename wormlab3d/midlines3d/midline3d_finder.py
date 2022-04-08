@@ -447,35 +447,30 @@ class Midline3DFinder:
 
         # Load previous checkpoint
         prev_checkpoint: MFCheckpoint = None
-        try:
-            prev_checkpoints = MFCheckpoint.objects(
-                trial=self.trial,
-                reconstruction=self.reconstruction,
-                parameters=self.parameters
-            ).order_by('-created')
+        prev_checkpoints = MFCheckpoint.objects(
+            trial=self.trial,
+            reconstruction=self.reconstruction,
+            parameters=self.parameters
+        ).order_by('-created')
 
-            if prev_checkpoints.count() > 0:
-                prev_checkpoint = prev_checkpoints[0]
-                logger.info(f'Found {prev_checkpoints.count()} previous checkpoints.')
-                logger.info(f'Loaded previous checkpoint id={prev_checkpoint.id}, created={prev_checkpoint.created}.')
-                logger.info(f'Saved at frame = {prev_checkpoint.frame_num}.')
-                logger.info(f'Loss = {prev_checkpoint.loss:.6f}')
-                if len(prev_checkpoint.metrics) > 0:
-                    logger.info('Metrics:')
-                    for key, val in prev_checkpoint.metrics.items():
-                        logger.info(f'\t{key}: {val:.4E}')
-            else:
-                logger.info(f'Found no checkpoints for trial={self.trial.id} and model={self.parameters.id}.')
+        if prev_checkpoints.count() > 0:
+            prev_checkpoint = prev_checkpoints[0]
+            logger.info(f'Found {prev_checkpoints.count()} previous checkpoints.')
+            logger.info(f'Loaded previous checkpoint id={prev_checkpoint.id}, created={prev_checkpoint.created}.')
+            logger.info(f'Saved at frame = {prev_checkpoint.frame_num}.')
+            logger.info(f'Loss = {prev_checkpoint.loss:.6f}')
+            if len(prev_checkpoint.metrics) > 0:
+                logger.info('Metrics:')
+                for key, val in prev_checkpoint.metrics.items():
+                    logger.info(f'\t{key}: {val:.4E}')
 
-        # Either clone the previous checkpoint to use as the starting point
-        if prev_checkpoint is not None:
+            # Clone the previous checkpoint to use as the starting point
             checkpoint = prev_checkpoint.clone()
             checkpoint.frame_num = self.master_frame_state.frame_num
             checkpoint.runtime_args = to_dict(self.runtime_args)
             checkpoint.source_args = to_dict(self.source_args)
-
-        # ..or start a new checkpoint
         else:
+            logger.info(f'Found no checkpoints for trial={self.trial.id} and model={self.parameters.id}. Creating new.')
             checkpoint = MFCheckpoint(
                 trial=self.trial,
                 reconstruction=self.reconstruction,
