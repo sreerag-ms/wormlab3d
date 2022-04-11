@@ -29,8 +29,10 @@ from wormlab3d.midlines3d.mf_methods import generate_residual_targets, calculate
     calculate_intersection_losses_curvatures
 from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
+from wormlab3d.nn.LBFGS import FullBatchLBFGS
+from wormlab3d.nn.args.optimiser_args import OPTIMISER_LBFGS_NEW
 from wormlab3d.nn.detector import ConvergenceDetector
-from wormlab3d.toolkit.util import is_bad, to_numpy, to_dict, hash_data
+from wormlab3d.toolkit.util import is_bad, to_numpy, to_dict
 
 cmap_cloud = 'autumn_r'
 cmap_curve = 'YlGnBu'
@@ -101,12 +103,7 @@ class Midline3DFinder:
 
     @staticmethod
     def get_logs_path(checkpoint: MFCheckpoint) -> Path:
-        identifiers = {
-            'parameters': str(checkpoint.parameters.id),
-            **to_dict(checkpoint.source_args),
-        }
-        arg_hash = hash_data(identifiers)
-        return LOGS_PATH / f'trial_{checkpoint.trial.id:03d}' / arg_hash
+        return LOGS_PATH / f'trial_{checkpoint.trial.id:03d}' / f'{checkpoint.parameters.created:%Y%m%d_%H:%M}_{checkpoint.parameters.id}'
 
     @property
     def step(self):
@@ -176,6 +173,7 @@ class Midline3DFinder:
             image_size=PREPARED_IMAGE_SIZE[0],
             render_mode=self.parameters.render_mode,
             sigmas_min=self.parameters.sigmas_min,
+            sigmas_max=self.parameters.sigmas_max,
             intensities_min=self.parameters.intensities_min,
             curvature_mode=self.parameters.curvature_mode,
             curvature_deltas=self.parameters.curvature_deltas,
@@ -241,7 +239,8 @@ class Midline3DFinder:
             logger.info(f'Loaded reconstruction (id={reconstruction.id}, created={reconstruction.created}).')
         except DoesNotExist:
             err = 'No reconstruction record found in database.'
-            if self.runtime_args.resume and (self.runtime_args.copy_state is None or self.runtime_args.resume_from != 'latest'):
+            if self.runtime_args.resume and \
+                    (self.runtime_args.copy_state is None or self.runtime_args.resume_from != 'latest'):
                 raise RuntimeError(err)
             logger.info(err)
 
@@ -391,19 +390,19 @@ class Midline3DFinder:
                 k: [fs.get_state(k) for fs in self.frame_batch]
                 for k in PARAMETER_NAMES
             }
+        cam_params = [params[f'cam_{k}'] for k in CAM_PARAMETER_NAMES]
 
         # Merge the curvature parameters into a single parameter group
         if p.curvature_mode:
             del params['points']
             point_params = []
             for ck in CURVATURE_PARAMETER_NAMES:
+                if ck == 'curvatures' and p.algorithm == OPTIMISER_LBFGS_NEW:
+                    continue
                 point_params.extend(params[ck])
             params['points'] = point_params
 
-        optimiser_cls: Optimizer = getattr(torch.optim, p.algorithm)
-        cam_params = [params[f'cam_{k}'] for k in CAM_PARAMETER_NAMES]
-
-        params = [
+        opt_params = [
             {'params': cam_params, 'lr': p.lr_cam_coeffs},
             {'params': params['points'], 'lr': p.lr_points},
             {'params': params['sigmas'], 'lr': p.lr_sigmas},
@@ -414,10 +413,29 @@ class Midline3DFinder:
             {'params': params['camera_intensities'], 'lr': p.lr_intensities},
         ]
 
-        optimiser = optimiser_cls(
-            params=params,
-            weight_decay=0
-        )
+        if p.algorithm == OPTIMISER_LBFGS_NEW:
+            assert p.curvature_mode, 'Can only use LBFGS algorithm in curvature mode.'
+
+            # Use the LBFGS optimiser for the curvatures only
+            optimiser = FullBatchLBFGS(
+                params['curvatures'],
+                lr=1.,
+                history_size=100,
+                line_search='Wolfe',
+                debug=False,
+            )
+
+            # Use AdamW to optimise all of the other parameters
+            self.optimiser_gd = torch.optim.AdamW(
+                params=opt_params,
+                weight_decay=0
+            )
+        else:
+            optimiser_cls: Optimizer = getattr(torch.optim, p.algorithm)
+            optimiser = optimiser_cls(
+                params=opt_params,
+                weight_decay=0
+            )
 
         return optimiser
 
@@ -475,6 +493,7 @@ class Midline3DFinder:
 
             # Clone the previous checkpoint to use as the starting point
             checkpoint = prev_checkpoint.clone()
+            checkpoint.step = 0
             checkpoint.parameters = self.parameters
             checkpoint.frame_num = self.master_frame_state.frame_num
             checkpoint.runtime_args = to_dict(self.runtime_args)
@@ -716,81 +735,118 @@ class Midline3DFinder:
         p = self.parameters
         D = p.depth - p.depth_min
 
-        # Collect parameters
-        cam_coeffs = torch.stack([f.get_state('cam_coeffs') for f in self.frame_batch])
-        cam_rotation_preangles = torch.stack([f.get_state('cam_rotation_preangles') for f in self.frame_batch])
-        points_3d_base = torch.stack([f.get_state('points_3d_base') for f in self.frame_batch])
-        points_2d_base = torch.stack([f.get_state('points_2d_base') for f in self.frame_batch])
-        camera_sigmas = torch.stack([f.get_state('camera_sigmas') for f in self.frame_batch])
-        camera_exponents = torch.stack([f.get_state('camera_exponents') for f in self.frame_batch])
-        camera_intensities = torch.stack([f.get_state('camera_intensities') for f in self.frame_batch])
-        X0 = [torch.stack([f.get_state('X0')[d] for f in self.frame_batch]) for d in range(D)]
-        T0 = [torch.stack([f.get_state('T0')[d] for f in self.frame_batch]) for d in range(D)]
-        length = [torch.stack([f.get_state('length')[d] for f in self.frame_batch]) for d in range(D)]
-        curvatures = [torch.stack([f.get_state('curvatures')[d] for f in self.frame_batch]) for d in range(D)]
-        points = [torch.stack([f.get_state('points')[d] for f in self.frame_batch]) for d in range(D)]
-        masks_target = [torch.stack([f.get_state('masks_target')[d] for f in self.frame_batch]) for d in range(D)]
-        sigmas = [torch.stack([f.get_state('sigmas')[d] for f in self.frame_batch]) for d in range(D)]
-        exponents = [torch.stack([f.get_state('exponents')[d] for f in self.frame_batch]) for d in range(D)]
-        intensities = [torch.stack([f.get_state('intensities')[d] for f in self.frame_batch]) for d in range(D)]
+        # Outputs
+        masks = None
+        detection_masks = None
+        points_2d = None
+        scores = None
+        curvatures_smoothed = None
+        points_smoothed = None
+        sigmas_smoothed = None
+        exponents_smoothed = None
+        intensities_smoothed = None
+        masks_target_residuals = None
+        loss = None
+        loss_global = None
+        losses_depths = None
+        stats = None
 
-        # Generate the outputs
-        masks, detection_masks, points_2d, scores, curvatures_smoothed, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed = self.model.forward(
-            cam_coeffs=cam_coeffs,
-            points_3d_base=points_3d_base,
-            points_2d_base=points_2d_base,
-            X0=X0,
-            T0=T0,
-            length=length,
-            curvatures=curvatures,
-            points=points,
-            masks_target=masks_target,
-            sigmas=sigmas,
-            exponents=exponents,
-            intensities=intensities,
-            camera_sigmas=camera_sigmas,
-            camera_exponents=camera_exponents,
-            camera_intensities=camera_intensities,
-            length_warmup=self.checkpoint.step < p.length_warmup_steps,
-        )
-
-        # Generate targets with added residuals
-        masks_target_residuals = generate_residual_targets(masks_target, masks, detection_masks)
-
-        # Calculate the losses
-        loss, loss_global, losses_depths, stats = self._calculate_losses(
-            cam_rotation_preangles=cam_rotation_preangles,
-            X0=X0,
-            T0=T0,
-            length=length,
-            curvatures=curvatures,
-            points=points,
-            masks_target=masks_target_residuals,
-            sigmas=sigmas,
-            exponents=exponents,
-            intensities=intensities,
-            camera_sigmas=camera_sigmas,
-            camera_exponents=camera_exponents,
-            camera_intensities=camera_intensities,
-            masks=masks,
-            scores=scores,
-            curvatures_smoothed=curvatures_smoothed,
-            points_smoothed=points_smoothed,
-            sigmas_smoothed=sigmas_smoothed
-        )
-
-        # Take optimisation step
-        if is_bad(loss):
-            logger.warning('Bad loss, skipping parameter update.')
-        else:
+        def closure():
+            nonlocal masks, detection_masks, points_2d, scores, curvatures_smoothed, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed, masks_target_residuals, loss, loss_global, losses_depths, stats
             self.optimiser.zero_grad()
+
+            # Collect parameters
+            cam_coeffs = torch.stack([f.get_state('cam_coeffs') for f in self.frame_batch])
+            cam_rotation_preangles = torch.stack([f.get_state('cam_rotation_preangles') for f in self.frame_batch])
+            points_3d_base = torch.stack([f.get_state('points_3d_base') for f in self.frame_batch])
+            points_2d_base = torch.stack([f.get_state('points_2d_base') for f in self.frame_batch])
+            camera_sigmas = torch.stack([f.get_state('camera_sigmas') for f in self.frame_batch])
+            camera_exponents = torch.stack([f.get_state('camera_exponents') for f in self.frame_batch])
+            camera_intensities = torch.stack([f.get_state('camera_intensities') for f in self.frame_batch])
+            X0 = [torch.stack([f.get_state('X0')[d] for f in self.frame_batch]) for d in range(D)]
+            T0 = [torch.stack([f.get_state('T0')[d] for f in self.frame_batch]) for d in range(D)]
+            length = [torch.stack([f.get_state('length')[d] for f in self.frame_batch]) for d in range(D)]
+            curvatures = [torch.stack([f.get_state('curvatures')[d] for f in self.frame_batch]) for d in range(D)]
+            points = [torch.stack([f.get_state('points')[d] for f in self.frame_batch]) for d in range(D)]
+            masks_target = [torch.stack([f.get_state('masks_target')[d] for f in self.frame_batch]) for d in range(D)]
+            sigmas = [torch.stack([f.get_state('sigmas')[d] for f in self.frame_batch]) for d in range(D)]
+            exponents = [torch.stack([f.get_state('exponents')[d] for f in self.frame_batch]) for d in range(D)]
+            intensities = [torch.stack([f.get_state('intensities')[d] for f in self.frame_batch]) for d in range(D)]
+
+            # Generate the outputs
+            masks, detection_masks, points_2d, scores, curvatures_smoothed, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed = self.model.forward(
+                cam_coeffs=cam_coeffs,
+                points_3d_base=points_3d_base,
+                points_2d_base=points_2d_base,
+                X0=X0,
+                T0=T0,
+                length=length,
+                curvatures=curvatures,
+                points=points,
+                masks_target=masks_target,
+                sigmas=sigmas,
+                exponents=exponents,
+                intensities=intensities,
+                camera_sigmas=camera_sigmas,
+                camera_exponents=camera_exponents,
+                camera_intensities=camera_intensities,
+                length_warmup=self.checkpoint.step < p.length_warmup_steps,
+            )
+
+            # Generate targets with added residuals
+            masks_target_residuals = generate_residual_targets(masks_target, masks, detection_masks)
+
+            # Calculate the losses
+            loss, loss_global, losses_depths, stats = self._calculate_losses(
+                cam_rotation_preangles=cam_rotation_preangles,
+                X0=X0,
+                T0=T0,
+                length=length,
+                curvatures=curvatures,
+                points=points,
+                masks_target=masks_target_residuals,
+                sigmas=sigmas,
+                exponents=exponents,
+                intensities=intensities,
+                camera_sigmas=camera_sigmas,
+                camera_exponents=camera_exponents,
+                camera_intensities=camera_intensities,
+                masks=masks,
+                scores=scores,
+                curvatures_smoothed=curvatures_smoothed,
+                points_smoothed=points_smoothed,
+                sigmas_smoothed=sigmas_smoothed,
+            )
+
+            # Get fix-loss
             if self.runtime_args.fix_mode:
                 loss_fix = self._calculate_fix_loss(loss, stats)
-                loss_fix.backward()
+                loss_to_minimise = loss_fix
             else:
-                loss.backward()
+                loss_to_minimise = loss
+
+            return loss_to_minimise
+
+        # Take optimisation step
+        self.optimiser.zero_grad()
+        l2m = closure()
+        l2m.backward()
+        if self.parameters.algorithm == OPTIMISER_LBFGS_NEW:
+            options = {'closure': closure, 'current_loss': loss, 'ls_debug': False, 'damping': False, 'eps': 1e-3,
+                       'eta': 2, 'max_ls': 10}
+            self.optimiser.step(options)
+
+            # Update non-lbfgs parameters
+            l2m = closure()
+            l2m.backward()
+            self.optimiser_gd.step()
+        else:
             self.optimiser.step()
-            self._clamp_parameters(points_smoothed)
+        if is_bad(loss):
+            logger.warning('Bad loss!')
+
+        # Clamp parameters
+        self._clamp_parameters(points_smoothed)
 
         # Update master state
         self.master_frame_state.set_state('masks_curve', [masks[d][self.active_idx] for d in range(D)])
@@ -1327,9 +1383,10 @@ class Midline3DFinder:
 
                 # Curve overlay
                 X_curve_triplet = np.concatenate(X_curve, axis=1) / max(1e-5, X_curve.max())
-                alphas = X_curve_triplet.copy() * 0.5
-                ax.imshow(X_curve_triplet, vmin=0, vmax=1, cmap='Reds', aspect='equal', alpha=alphas,
-                          extent=(0, N - 1, 2 * int(M / 3), int(M / 3)))
+                if not np.isnan(X_curve_triplet).any():
+                    alphas = X_curve_triplet.copy() * 0.5
+                    ax.imshow(X_curve_triplet, vmin=0, vmax=1, cmap='Reds', aspect='equal', alpha=alphas,
+                              extent=(0, N - 1, 2 * int(M / 3), int(M / 3)))
 
                 # Scatter the midline points
                 p2d = to_numpy(points_2d[d]).transpose(1, 0, 2)

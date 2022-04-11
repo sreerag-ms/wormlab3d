@@ -171,6 +171,7 @@ class ProjectRenderScoreModel(nn.Module):
             image_size: int = PREPARED_IMAGE_SIZE[0],
             render_mode: str = RENDER_MODE_GAUSSIANS,
             sigmas_min: float = 0.04,
+            sigmas_max: float = 0.1,
             intensities_min: float = 0.4,
             curvature_mode: bool = False,
             curvature_deltas: bool = False,
@@ -188,6 +189,7 @@ class ProjectRenderScoreModel(nn.Module):
         assert render_mode in RENDER_MODES
         self.render_mode = render_mode
         self.sigmas_min = sigmas_min
+        self.sigmas_max = sigmas_max
         self.intensities_min = intensities_min
         self.curvature_mode = curvature_mode
         self.curvature_deltas = curvature_deltas
@@ -208,6 +210,22 @@ class ProjectRenderScoreModel(nn.Module):
         self.dpsi_limit = dpsi_limit
         self.cams = torch.jit.script(DynamicCameras())
         self.second_render_prob = second_render_prob
+
+        # Collate the render-parameters bounds
+        self.render_parameters_limits = {
+            'sigmas': {
+                'min': self.sigmas_min + 0.001,
+                'max': self.sigmas_max,
+            },
+            'exponents': {
+                'min': 0.5,
+                'max': 10
+            },
+            'intensities': {
+                'min': self.intensities_min + 0.01,
+                'max': 10
+            }
+        }
 
     def forward(
             self,
@@ -255,6 +273,22 @@ class ProjectRenderScoreModel(nn.Module):
         sigmas_smoothed = []
         exponents_smoothed = []
         intensities_smoothed = []
+
+        # Clamp the sigmas, exponents and intensities
+        for sei, params in {
+            'sigmas': [sigmas, camera_sigmas],
+            'exponents': [exponents, camera_exponents],
+            'intensities': [intensities, camera_intensities]
+        }.items():
+            for v in params[0]:
+                v.clamp_(**self.render_parameters_limits[sei])
+
+            # Camera scaling factors should average 1 and not be more than 20% from the mean
+            v = params[1]
+            v.data = v / v.mean()
+            sf = 0.2 / ((v - 1).abs()).amax()
+            if sf < 1:
+                params[1] = (v - 1) * sf + 1
 
         # Run the parameters through the model at each scale to get the outputs
         for d in range(D):
@@ -359,6 +393,9 @@ class ProjectRenderScoreModel(nn.Module):
                         curvatures_d * (k_max / (k + eps))[..., None],
                         curvatures_d
                     )
+
+                    # Keep X0 somewhere in the frame
+                    X0_d = X0_d.clamp(min=-0.5, max=0.5)
 
                     # Integrate the curvature to get the midline coordinates
                     points_d = integrate_curvature(X0_d, T0_d, length_d, curvatures_d)
