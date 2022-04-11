@@ -163,6 +163,18 @@ def _taper_parameter(param: torch.Tensor) -> torch.Tensor:
     return tapered
 
 
+@torch.jit.script
+def _normalise_scale_factor(v: torch.Tensor) -> torch.Tensor:
+    """
+    Camera scaling factors should average 1 and not be more than 20% from the mean.
+    """
+    v = v / v.mean()
+    sf = 0.2 / ((v - 1).abs()).amax()
+    if sf < 1:
+        v = (v - 1) * sf + 1
+    return v
+
+
 class ProjectRenderScoreModel(nn.Module):
     image_size: Final[int]
 
@@ -172,7 +184,10 @@ class ProjectRenderScoreModel(nn.Module):
             render_mode: str = RENDER_MODE_GAUSSIANS,
             sigmas_min: float = 0.04,
             sigmas_max: float = 0.1,
+            exponents_min: float = 0.5,
+            exponents_max: float = 10.,
             intensities_min: float = 0.4,
+            intensities_max: float = 10.,
             curvature_mode: bool = False,
             curvature_deltas: bool = False,
             length_min: float = 0.5,
@@ -188,9 +203,12 @@ class ProjectRenderScoreModel(nn.Module):
         self.image_size = image_size
         assert render_mode in RENDER_MODES
         self.render_mode = render_mode
-        self.sigmas_min = sigmas_min
+        self.sigmas_min = sigmas_min + 0.001
         self.sigmas_max = sigmas_max
-        self.intensities_min = intensities_min
+        self.exponents_min = exponents_min
+        self.exponents_max = exponents_max
+        self.intensities_min = intensities_min + 0.01
+        self.intensities_max = intensities_max
         self.curvature_mode = curvature_mode
         self.curvature_deltas = curvature_deltas
         self.length_min = length_min
@@ -210,22 +228,6 @@ class ProjectRenderScoreModel(nn.Module):
         self.dpsi_limit = dpsi_limit
         self.cams = torch.jit.script(DynamicCameras())
         self.second_render_prob = second_render_prob
-
-        # Collate the render-parameters bounds
-        self.render_parameters_limits = {
-            'sigmas': {
-                'min': self.sigmas_min + 0.001,
-                'max': self.sigmas_max,
-            },
-            'exponents': {
-                'min': 0.5,
-                'max': 10
-            },
-            'intensities': {
-                'min': self.intensities_min + 0.01,
-                'max': 10
-            }
-        }
 
     def forward(
             self,
@@ -274,28 +276,19 @@ class ProjectRenderScoreModel(nn.Module):
         exponents_smoothed = []
         intensities_smoothed = []
 
-        # Clamp the sigmas, exponents and intensities
-        for sei, params in {
-            'sigmas': [sigmas, camera_sigmas],
-            'exponents': [exponents, camera_exponents],
-            'intensities': [intensities, camera_intensities]
-        }.items():
-            for v in params[0]:
-                v.clamp_(**self.render_parameters_limits[sei])
-
-            # Camera scaling factors should average 1 and not be more than 20% from the mean
-            v = params[1]
-            v.data = v / v.mean()
-            sf = 0.2 / ((v - 1).abs()).amax()
-            if sf < 1:
-                params[1] = (v - 1) * sf + 1
+        # Camera scaling factors should average 1 and not be more than 20% from the mean
+        camera_sigmas = _normalise_scale_factor(camera_sigmas)
+        camera_exponents = _normalise_scale_factor(camera_exponents)
+        camera_intensities = _normalise_scale_factor(camera_intensities)
 
         # Run the parameters through the model at each scale to get the outputs
         for d in range(D):
             points_d = points[d]
-            sigmas_d = sigmas[d]
-            exponents_d = exponents[d]
-            intensities_d = intensities[d]
+
+            # Clamp the sigmas, exponents and intensities
+            sigmas_d = sigmas[d].clamp(min=self.sigmas_min, max=self.sigmas_max)
+            exponents_d = exponents[d].clamp(min=self.exponents_min, max=self.exponents_max)
+            intensities_d = intensities[d].clamp(min=self.intensities_min, max=self.intensities_max)
 
             N = points_d.shape[1]
             depth = int(torch.log2(torch.tensor(N)))
