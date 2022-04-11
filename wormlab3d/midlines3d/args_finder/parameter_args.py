@@ -32,8 +32,10 @@ class ParameterArgs(BaseArgs):
             curvature_relaxation_factor: float = None,
             length_min: float = None,
             length_max: float = None,
+            length_shrink_factor: float = None,
             length_init: float = None,
             length_warmup_steps: int = None,
+            length_regrow_steps: int = None,
             dX0_limit: float = None,
             dl_limit: float = None,
             dk_limit: float = None,
@@ -103,8 +105,10 @@ class ParameterArgs(BaseArgs):
             curvature_deltas = False
             length_min = None
             length_max = None
+            length_shrink_factor = None
             length_init = None
             length_warmup_steps = None
+            length_regrow_steps = None
         else:
             if length_min is None:
                 length_min = 0.5
@@ -114,12 +118,21 @@ class ParameterArgs(BaseArgs):
                 length_init = 0.2
             if length_warmup_steps is None:
                 length_warmup_steps = 100
+            if length_shrink_factor is not None:
+                if length_regrow_steps is None:
+                    length_regrow_steps = int(n_steps_max / 2)
+                else:
+                    assert length_regrow_steps <= n_steps_max
+            elif length_shrink_factor is None:
+                length_regrow_steps = None
         self.curvature_deltas = curvature_deltas
         self.curvature_relaxation_factor = curvature_relaxation_factor
         self.length_min = length_min
         self.length_max = length_max
+        self.length_shrink_factor = length_shrink_factor
         self.length_init = length_init
         self.length_warmup_steps = length_warmup_steps
+        self.length_regrow_steps = length_regrow_steps
         self.dX0_limit = dX0_limit
         self.dl_limit = dl_limit
         self.dk_limit = dk_limit
@@ -225,10 +238,14 @@ class ParameterArgs(BaseArgs):
                            help='Minimum worm length (only used in curvature mode). Default=0.5.')
         group.add_argument('--length-max', type=float,
                            help='Maximum worm length (only used in curvature mode). Default=2.')
+        group.add_argument('--length-shrink-factor', type=float,
+                           help='The length is reduced by this factor at the start of each new frame, if defined.')
         group.add_argument('--length-init', type=float,
                            help='Initial worm length (only used in curvature mode). Default=0.2.')
         group.add_argument('--length-warmup-steps', type=int,
                            help='Number of initial steps to linearly grow worm length from length_init to length_min (only used in curvature mode). Default=100.')
+        group.add_argument('--length-regrow-steps', type=int,
+                           help='Number of steps to linearly grow worm length from shrunken length back to length_min (only used if length-shrink-factor is defined). Default=n_steps_max/2.')
         group.add_argument('--dX0-limit', type=float,
                            help='Maximum allowable change in X0 between batched frames (only used in curvature mode). Default=None.')
         group.add_argument('--dl-limit', type=float,

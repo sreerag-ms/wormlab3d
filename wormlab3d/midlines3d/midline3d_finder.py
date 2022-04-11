@@ -368,6 +368,12 @@ class Midline3DFinder:
         # Last optimised frame state
         self.last_frame_state: FrameState = None
 
+        # Shrunken lengths
+        self.shrunken_lengths = torch.tensor(
+            [0. for _ in range(self.parameters.depth - self.parameters.depth_min)],
+            device=self.device
+        )
+
     def _init_optimiser(self) -> Optimizer:
         """
         Set up the joint cameras and cloud optimiser and the curve optimiser.
@@ -393,13 +399,16 @@ class Midline3DFinder:
         cam_params = [params[f'cam_{k}'] for k in CAM_PARAMETER_NAMES]
 
         # Merge the curvature parameters into a single parameter group
+        lbfgs_params = []
+        lbfgs_keys = ['curvatures', 'T0']
         if p.curvature_mode:
             del params['points']
             point_params = []
             for ck in CURVATURE_PARAMETER_NAMES:
-                if ck == 'curvatures' and p.algorithm == OPTIMISER_LBFGS_NEW:
-                    continue
-                point_params.extend(params[ck])
+                if ck in lbfgs_keys and p.algorithm == OPTIMISER_LBFGS_NEW:
+                    lbfgs_params.extend(params[ck])
+                else:
+                    point_params.extend(params[ck])
             params['points'] = point_params
 
         opt_params = [
@@ -418,7 +427,7 @@ class Midline3DFinder:
 
             # Use the LBFGS optimiser for the curvatures only
             optimiser = FullBatchLBFGS(
-                params['curvatures'],
+                lbfgs_params,
                 lr=1.,
                 history_size=100,
                 line_search='Wolfe',
@@ -654,6 +663,14 @@ class Midline3DFinder:
                         for K_d in K:
                             K_d.data = K_d * p.curvature_relaxation_factor
 
+                # Shrink length
+                if p.curvature_mode and p.length_shrink_factor is not None:
+                    l = next_frame.get_state('length')
+                    with torch.no_grad():
+                        for d, l_d in enumerate(l):
+                            l_d.data = l_d * p.length_shrink_factor
+                            self.shrunken_lengths[d] = l_d.detach()
+
                 mfs.frame_num = next_frame.frame_num
                 mfs.copy_state(next_frame)
 
@@ -723,7 +740,10 @@ class Midline3DFinder:
             self.convergence_detector.forward(losses, first_val=False)
 
             # When all of the losses have converged and loss has reached target, break
-            if not first_frame and self.convergence_detector.converged.all() and loss.item() < p.convergence_loss_target:
+            if not first_frame \
+                    and self.convergence_detector.converged.all() \
+                    and loss.item() < p.convergence_loss_target \
+                    and (p.length_regrow_steps is None or self.checkpoint.step_frame > p.length_regrow_steps):
                 break
 
         self.tb_logger.add_scalar('train_steps', self.checkpoint.step_frame, self.checkpoint.frame_num)
@@ -773,6 +793,10 @@ class Midline3DFinder:
             exponents = [torch.stack([f.get_state('exponents')[d] for f in self.frame_batch]) for d in range(D)]
             intensities = [torch.stack([f.get_state('intensities')[d] for f in self.frame_batch]) for d in range(D)]
 
+            # Check if the length should be fixed
+            length_fixed = (p.length_warmup_steps is not None and self.checkpoint.step < p.length_warmup_steps) \
+                           or (p.length_regrow_steps is not None and self.checkpoint.step_frame < p.length_regrow_steps)
+
             # Generate the outputs
             masks, detection_masks, points_2d, scores, curvatures_smoothed, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed = self.model.forward(
                 cam_coeffs=cam_coeffs,
@@ -790,7 +814,7 @@ class Midline3DFinder:
                 camera_sigmas=camera_sigmas,
                 camera_exponents=camera_exponents,
                 camera_intensities=camera_intensities,
-                length_warmup=self.checkpoint.step < p.length_warmup_steps,
+                length_warmup=length_fixed,
             )
 
             # Generate targets with added residuals
@@ -1108,19 +1132,31 @@ class Midline3DFinder:
                         length_d = length[d]
                         curvatures_d = curvatures[d]
 
-                        # Ensure that the worm does not get too long/short.
-                        if self.runtime_args.resume or self.checkpoint.step > p.length_warmup_steps:
-                            l = length_d.clamp(
-                                min=p.length_min,
-                                max=p.length_max
-                            )
-                        else:
-                            # In length warmup phase, linearly grow the length from length_init to length_min
+                        # In length warmup phase, linearly grow the length from length_init to length_min
+                        if not self.runtime_args.resume \
+                                and p.length_warmup_steps is not None \
+                                and self.checkpoint.step < p.length_warmup_steps:
                             l = torch.tensor(
                                 p.length_init
                                 + (p.length_min - p.length_init) * self.checkpoint.step / p.length_warmup_steps,
                                 device=self.device
                             )
+
+                        # In regrowth phase, linearly grow the length from length_init to length_min
+                        elif p.length_regrow_steps is not None \
+                                and self.checkpoint.step_frame < p.length_regrow_steps \
+                                and self.shrunken_lengths[d] < p.length_min:
+                            l = self.shrunken_lengths[d] \
+                                + (p.length_min - self.shrunken_lengths[d]) \
+                                * self.checkpoint.step_frame / p.length_regrow_steps
+
+                        # Otherwise, ensure that the worm does not get too long/short.
+                        else:
+                            l = length_d.clamp(
+                                min=p.length_min,
+                                max=p.length_max
+                            )
+
                         length[d].data = l
 
                         # Ensure curvature doesn't get too large.
