@@ -158,21 +158,26 @@ def generate_reconstruction_video(reconstruction_id: int, missing_only: bool = T
         return
 
     if reconstruction.source == M3D_SOURCE_MF:
-        D = reconstruction.mf_parameters.depth - 1  # todo - different depth videos
+        D = reconstruction.mf_parameters.depth  # todo - different depth videos
+        D_min = reconstruction.mf_parameters.depth_min
         ts = TrialState(reconstruction=reconstruction)
-        from_idx = sum([2**d2 for d2 in range(D)])
-        to_idx = from_idx + 2**D
+        from_idx = 2**(D - 1) - 2**(D_min)
+        to_idx = from_idx + 2**(D - 1)
 
         # Get 3D postures
         all_points = ts.get('points')
         X_full = all_points[:, from_idx:to_idx]
+
+        # Add tracking points to get trajectory
+        X_base = ts.get('points_3d_base')
+        X_full = X_full + X_base[:, None, :]
 
         # Get 2D projections
         all_projections = ts.get('points_2d')  # (M, N, 3, 2)
         points_2d = np.round(all_projections[:, from_idx:to_idx]).astype(np.int32)
 
         # Colour map
-        colours = np.array([cmap(d) for d in np.linspace(0, 1, 2**D)])
+        colours = np.array([cmap(d) for d in np.linspace(0, 1, 2**(D - 1))])
         colours = np.round(colours * 255).astype(np.uint8)
 
     else:
