@@ -79,7 +79,7 @@ def reconstruction_instance(_id):
     )
     parameters_view = MFParametersView()
 
-    if reconstruction.source == M3D_SOURCE_MF:
+    if reconstruction.source == M3D_SOURCE_MF and reconstruction.has_data:
         ts = TrialState(reconstruction=reconstruction)
         stat_keys = list(ts.stats.keys())
     else:
