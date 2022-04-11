@@ -67,7 +67,7 @@ class RuntimeArgs(BaseArgs):
                                    help='Do not resume from a previous checkpoint.')
         resume_parser.set_defaults(resume=False)
         group.add_argument('--resume-from', type=str, default='latest',
-                           help='Resume from a specific checkpoint id, "latest" or "best". Default="latest".')
+                           help='Resume from a specific reconstruction id or "latest". Default="latest".')
         group.add_argument('--copy-state', type=str, default=None,
                            help='Copy trial state from an existing reconstruction id.')
         group.add_argument('--fix-mode', type=str2bool, default=False,

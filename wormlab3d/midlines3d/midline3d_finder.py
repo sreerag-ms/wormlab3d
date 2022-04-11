@@ -221,16 +221,27 @@ class Midline3DFinder:
         # Look for existing reconstruction
         reconstruction = None
         try:
-            reconstruction = Reconstruction.objects.get(**params)
+            # Fetch a reconstruction by id, check that the trial and source match and update the parameters if required.
+            if self.runtime_args.resume_from != 'latest':
+                reconstruction = Reconstruction.objects.get(id=self.runtime_args.resume_from)
+                if reconstruction.trial.id != params['trial']:
+                    raise RuntimeError('Cannot resume from a reconstruction for a different trial!')
+                if reconstruction.source != params['source']:
+                    raise RuntimeError('Cannot resume from a different midline source!')
+                if reconstruction.mf_parameters.id != params['mf_parameters'].id:
+                    logger.warning('Parameters have changed! This may cause problems!')
+                    reconstruction.mf_parameters = self.parameters
+            else:
+                reconstruction = Reconstruction.objects.get(**params)
             if self.runtime_args.copy_state is not None:
                 raise RuntimeError('Can only copy state to a new reconstruction!')
             if reconstruction.start_frame > start_frame:
                 reconstruction.start_frame = start_frame
-                reconstruction.save()
+            reconstruction.save()
             logger.info(f'Loaded reconstruction (id={reconstruction.id}, created={reconstruction.created}).')
         except DoesNotExist:
             err = 'No reconstruction record found in database.'
-            if self.runtime_args.resume and self.runtime_args.copy_state is None:
+            if self.runtime_args.resume and (self.runtime_args.copy_state is None or self.runtime_args.resume_from != 'latest'):
                 raise RuntimeError(err)
             logger.info(err)
 
@@ -260,7 +271,7 @@ class Midline3DFinder:
         self.trial: Trial = self.reconstruction.trial
 
         # Copy state across from previous reconstruction
-        if self.reconstruction.copied_from is not None:
+        if self.runtime_args.copy_state is not None:
             copy_state = TrialState(reconstruction=self.reconstruction.copied_from)
         else:
             copy_state = None
@@ -446,11 +457,9 @@ class Midline3DFinder:
         """
 
         # Load previous checkpoint
-        prev_checkpoint: MFCheckpoint = None
         prev_checkpoints = MFCheckpoint.objects(
             trial=self.trial,
             reconstruction=self.reconstruction,
-            parameters=self.parameters
         ).order_by('-created')
 
         if prev_checkpoints.count() > 0:
@@ -466,11 +475,12 @@ class Midline3DFinder:
 
             # Clone the previous checkpoint to use as the starting point
             checkpoint = prev_checkpoint.clone()
+            checkpoint.parameters = self.parameters
             checkpoint.frame_num = self.master_frame_state.frame_num
             checkpoint.runtime_args = to_dict(self.runtime_args)
             checkpoint.source_args = to_dict(self.source_args)
         else:
-            logger.info(f'Found no checkpoints for trial={self.trial.id} and model={self.parameters.id}. Creating new.')
+            logger.info(f'Found no checkpoints for reconstruction={self.reconstruction.id}. Creating new.')
             checkpoint = MFCheckpoint(
                 trial=self.trial,
                 reconstruction=self.reconstruction,
