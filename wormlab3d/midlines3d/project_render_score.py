@@ -364,8 +364,8 @@ class ProjectRenderScoreModel(nn.Module):
                         length_d = length[d]
                         curvatures_d = curvatures[d]
 
-                    # Add some noise!
-                    if 1:
+                    # Add some noise..?
+                    if 0:
                         X0_d = X0_d + torch.randn_like(X0_d) * 0.001
                         T0_d = T0_d + torch.randn_like(T0_d) * 0.002
                         length_d = length_d + torch.randn_like(length_d) * 0.0005
