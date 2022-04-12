@@ -477,6 +477,7 @@ class ProjectRenderScoreModel(nn.Module):
             scores_d = (blobs_normed * masks_target_d.unsqueeze(2)).sum(dim=(3, 4)).amin(dim=1) \
                        / intensities_smoothed[d].detach() \
                        / sigmas_smoothed[d].detach()  # Scale scores by sigmas and intensities
+            scores_d_untapered = scores_d.clone()
             if N > 2:
                 scores_d = _taper_parameter(scores_d)
             max_score = scores_d.amax(dim=1, keepdim=True)
@@ -497,15 +498,23 @@ class ProjectRenderScoreModel(nn.Module):
                 # Generate head and tail detection regions
                 head_blobs = blobs_normed[:, :, 0].clone()
                 tail_blobs = blobs_normed[:, :, -1].clone()
-                head_blobs[head_blobs > 0.01] = 1
-                tail_blobs[tail_blobs > 0.01] = 1
+                head_blobs[head_blobs > 0.001] = 1
+                tail_blobs[tail_blobs > 0.001] = 1
 
                 # Add head and tail booster regions only if no gaps detected
-                if 1:
+                if 0:
                     dmd = dmd + torch.where(rel_scores[:, 0][:, None, None, None] > 0.1, head_blobs,
                                             torch.zeros_like(head_blobs))
                     dmd = dmd + torch.where(rel_scores[:, -1][:, None, None, None] > 0.1, tail_blobs,
                                             torch.zeros_like(tail_blobs))
+
+                elif 1:
+                    scores_rel_tapered = (scores_d - scores_d_untapered).abs() \
+                                         / (torch.amax(torch.stack([scores_d, scores_d_untapered], dim=2), dim=2) + eps)
+                    head_consistent = scores_rel_tapered[:, 0] < 0.2
+                    tail_consistent = scores_rel_tapered[:, -1] < 0.2
+                    dmd = dmd + torch.where(head_consistent, head_blobs, torch.zeros_like(head_blobs))
+                    dmd = dmd + torch.where(tail_consistent, tail_blobs, torch.zeros_like(tail_blobs))
 
                 # Add head and tail booster regions regardless
                 else:
