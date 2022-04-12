@@ -12,6 +12,9 @@
 
     <ul class="nav nav-tabs" id="dataset-{{ dataset.id }}-tabs" role="tablist">
       {{ tabs.tab_item('Details', true) }}
+      {% if dataset.include_trials | length > 0 %}
+        {{ tabs.tab_item('Trials') }}
+      {% endif %}
       {% if dataset.reconstructions | length > 0 %}
         {{ tabs.tab_item('Reconstructions') }}
       {% endif %}
@@ -22,6 +25,12 @@
       {% call tabs.tab_panel('Details', true) %}
         {{ details.render(dataset_view, dataset) }}
       {% endcall %}
+
+      {% if dataset.include_trials | length > 0 %}
+        {% call tabs.tab_panel('Trials') %}
+          {{ table.render(trial_view, table_name) }}
+        {% endcall %}
+      {% endif %}
 
       {% if dataset.reconstructions | length > 0 %}
         {% call tabs.tab_panel('Reconstructions') %}
@@ -67,6 +76,14 @@
 
 
 {% block scripts %}
+  {% if dataset.include_trials | length > 0 %}
+    {% with %}
+      {% set doc_view=trial_view %}
+      {% set table_order=[1, 'asc'] %}
+      {% set initialise=False %}
+      {% include 'includes/_table_js.html' %}
+    {% endwith %}
+  {% endif %}
   {% if dataset.reconstructions | length > 0 %}
     {% with %}
       {% set doc_view=reconstruction_view %}
@@ -78,6 +95,11 @@
 
   <script>
       $(document).ready(function () {
+
+          // ========================== Trials ==========================
+          $('#trials-tab').one('shown.bs.tab', function () {
+              initialise_{{ trial_view.collection_name }}_table()
+          });
 
           // ========================== Reconstructions ==========================
           $('#reconstructions-tab').one('shown.bs.tab', function () {

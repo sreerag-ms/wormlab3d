@@ -2,7 +2,7 @@ import os
 
 from flask import Blueprint, render_template
 
-from app.model import DatasetView, ReconstructionView
+from app.model import DatasetView, ReconstructionView, TrialView
 from wormlab3d.data.model import Dataset
 
 bp_datasets = Blueprint('datasets', __name__, url_prefix='/dataset')
@@ -36,6 +36,15 @@ def dataset_instance(_id: str):
 
     dataset_view = DatasetView(
         hide_fields=['_id']
+    )
+
+    trial_view = TrialView(
+        hide_fields=[
+            'legacy_id',
+            'experiment___id',
+            'experiment__legacy_id',
+        ],
+        field_values={'_id': '|'.join(str(r.id) for r in dataset.include_trials)}
     )
 
     reconstruction_view = ReconstructionView(
@@ -72,5 +81,6 @@ def dataset_instance(_id: str):
         active=active,
         dataset=dataset,
         dataset_view=dataset_view,
+        trial_view=trial_view,
         reconstruction_view=reconstruction_view,
     )
