@@ -369,10 +369,7 @@ class Midline3DFinder:
         self.last_frame_state: FrameState = None
 
         # Shrunken lengths
-        self.shrunken_lengths = torch.tensor(
-            [0. for _ in range(self.parameters.depth - self.parameters.depth_min)],
-            device=self.device
-        )
+        self.shrunken_lengths = torch.stack(self.master_frame_state.get_state('length')).detach()
 
     def _init_optimiser(self) -> Optimizer:
         """
