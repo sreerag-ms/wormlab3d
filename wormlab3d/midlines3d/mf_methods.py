@@ -865,7 +865,7 @@ def calculate_intersection_losses_curvatures(
                 for j in range(i + pos_offset, N):
                     idx = N * i - i * (i + 1) // 2 + j - 1 - i
                     dij = dists[idx]
-                    dist_threshold = sigs[i] + sigs[j]
+                    dist_threshold = (sigs[i] + sigs[j]) /2
                     if dij < dist_threshold:
                         loss_d += dist_threshold / (dij + eps)
 
