@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -30,6 +30,54 @@ def avg_pool_2d(x: torch.Tensor, oob_grad_val: float = 0., mode: str = 'constant
     padded_grad = F.pad(x, (1, 1, 1, 1), mode=mode, value=oob_grad_val)
     ag = F.avg_pool2d(padded_grad, kernel_size=3, stride=2, padding=0)
     return ag
+
+
+@torch.jit.script
+def make_gaussian_kernel(sigma: float, device: torch.device) -> torch.Tensor:
+    ks = int(sigma * 5)
+    if ks % 2 == 0:
+        ks += 1
+    ts = torch.linspace(-ks // 2, ks // 2 + 1, ks, device=device)
+    gauss = torch.exp((-(ts / sigma)**2 / 2))
+    kernel = gauss / gauss.sum()
+
+    return kernel
+
+
+@torch.jit.script
+def smooth_parameter(param: torch.Tensor, ks: int, mode: str = 'avg') -> torch.Tensor:
+    """
+    Apply 1D average pooling to smooth a parameter vector.
+    """
+    pad_size = int(ks / 2)
+    p_smoothed = torch.cat([
+        torch.repeat_interleave(param[:, 0].unsqueeze(1), pad_size, dim=1),
+        param,
+        torch.repeat_interleave(param[:, -1].unsqueeze(1), pad_size, dim=1),
+    ], dim=1)
+
+    # Average pooling smoothing
+    if mode == 'avg':
+        p_smoothed = p_smoothed[:, None, :]
+        p_smoothed = F.avg_pool1d(p_smoothed, kernel_size=ks, stride=1, padding=0)
+        p_smoothed = p_smoothed.squeeze(1)
+
+    # Smooth with a gaussian kernel
+    elif mode == 'gaussian':
+        k_sig = ks / 5
+        if param.ndim == 2:
+            param = param.unsqueeze(-1)
+        n_channels = param.shape[-1]
+        k = make_gaussian_kernel(k_sig, device=param.device)
+        k = torch.stack([k] * n_channels)[:, None, :]
+        p_smoothed = p_smoothed.permute(0, 2, 1)
+        p_smoothed = F.conv1d(p_smoothed, weight=k, groups=n_channels)
+        p_smoothed = p_smoothed.permute(0, 2, 1)
+
+    else:
+        raise RuntimeError(f'Unknown smoothing mode: "{mode}".')
+
+    return p_smoothed
 
 
 @torch.jit.script
@@ -202,13 +250,23 @@ def _update_frame(
 
 
 @torch.jit.script
-def integrate_curvature(X0: torch.Tensor, T0: torch.Tensor, l: torch.Tensor, K: torch.Tensor) -> torch.Tensor:
+def integrate_curvature(
+        X0: torch.Tensor,
+        T0: torch.Tensor,
+        l: torch.Tensor,
+        K: torch.Tensor,
+        start_idx: Optional[int] = None
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    Starting from midpoint X0 with tangent T0, integrate the curvature to produce a curve of length l.
+    Starting from vertex point X0 with tangent T0 at start_idx,
+    integrate the curvature to produce a curve of length l.
     """
     bs = X0.shape[0]
     N = K.shape[1]
-    N2 = int(N / 2)
+    if start_idx is None:
+        start_idx = int((N - 1) / 2)
+    else:
+        assert 0 < start_idx < N
     device = X0.device
     shape = (bs, N, 3)
 
@@ -229,25 +287,25 @@ def integrate_curvature(X0: torch.Tensor, T0: torch.Tensor, l: torch.Tensor, K: 
 
     # Initial frame values
     T0 = normalise(T0)
-    T[:, N2 - 1] = T0
-    M1[:, N2 - 1] = an_orthonormal(T0)
-    M2[:, N2 - 1] = torch.cross(T[:, N2 - 1].clone(), M1[:, N2 - 1].clone())
+    T[:, start_idx] = T0
+    M1[:, start_idx] = an_orthonormal(T0)
+    M2[:, start_idx] = torch.cross(T[:, start_idx].clone(), M1[:, start_idx].clone())
 
     # Calculate orthonormal frame from the middle-out
-    for i in range(N2, N):
+    for i in range(start_idx + 1, N):
         _update_frame(m1, m2, M1, M2, T, h, i, 1)
-    for i in range(N2 - 1, 0, -1):
+    for i in range(start_idx, 0, -1):
         _update_frame(m1, m2, M1, M2, T, h, i, -1)
 
     # Calculate curve coordinates
-    X[:, N2 - 1] = X0
-    X[:, N2] = X0 + T0 * h
-    for i in range(N2 - 2, -1, -1):
+    X[:, start_idx] = X0
+    X[:, start_idx + 1] = X0 + T0 * h
+    for i in range(start_idx - 1, -1, -1):
         X[:, i] = X[:, i + 1] - h * T[:, i]
-    for i in range(N2 + 1, N):
+    for i in range(start_idx + 2, N):
         X[:, i] = X[:, i - 1] + h * T[:, i - 1]
 
-    return X
+    return X, T
 
 
 @torch.jit.script
@@ -865,7 +923,7 @@ def calculate_intersection_losses_curvatures(
                 for j in range(i + pos_offset, N):
                     idx = N * i - i * (i + 1) // 2 + j - 1 - i
                     dij = dists[idx]
-                    dist_threshold = (sigs[i] + sigs[j]) /2
+                    dist_threshold = (sigs[i] + sigs[j]) / 2
                     if dij < dist_threshold:
                         loss_d += dist_threshold / (dij + eps)
 

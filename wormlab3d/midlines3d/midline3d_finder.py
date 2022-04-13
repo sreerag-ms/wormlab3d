@@ -26,7 +26,7 @@ from wormlab3d.midlines3d.mf_methods import generate_residual_targets, calculate
     calculate_aunts_losses, calculate_curvature_losses, calculate_temporal_losses, calculate_parents_losses_curvatures, \
     calculate_smoothness_losses_curvatures, calculate_curvature_losses_curvatures, calculate_temporal_losses_curvatures, \
     calculate_temporal_losses_curvature_deltas, calculate_curvature_losses_curvature_deltas, \
-    calculate_intersection_losses_curvatures
+    calculate_intersection_losses_curvatures, integrate_curvature
 from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.nn.LBFGS import FullBatchLBFGS
@@ -46,7 +46,7 @@ PRINT_KEYS = [
     'loss/temporal',
     # 'loss/global',
     'loss/scores',
-    'loss/intersections'
+    'loss/intersections',
 ]
 
 
@@ -425,7 +425,7 @@ class Midline3DFinder:
             # Use the LBFGS optimiser for the curvatures only
             optimiser = FullBatchLBFGS(
                 lbfgs_params,
-                lr=1.,
+                lr=0.1,
                 history_size=100,
                 line_search='Wolfe',
                 debug=False,
@@ -622,7 +622,8 @@ class Midline3DFinder:
                         and (frame_num - first_frame + 1) % self.runtime_args.plot_every_n_frames == 0:
                     self._make_plots(final_step=True)
                 else:
-                    for j in range(p.frame_skip):
+                    skip = p.frame_skip if p.frame_skip is not None else 1
+                    for j in range(skip):
                         plot_frame_num = self.last_frame_state.frame_num + j + 1
                         if (plot_frame_num - first_frame + 1) % self.runtime_args.plot_every_n_frames == 0:
                             if plot_frame_num == mfs.frame_num:
@@ -852,7 +853,7 @@ class Midline3DFinder:
         self.optimiser.zero_grad()
         l2m = closure()
         l2m.backward()
-        if self.parameters.algorithm == OPTIMISER_LBFGS_NEW:
+        if p.algorithm == OPTIMISER_LBFGS_NEW:
             options = {'closure': closure, 'current_loss': loss, 'ls_debug': False, 'damping': False, 'eps': 1e-3,
                        'eta': 2, 'max_ls': 10}
             self.optimiser.step(options)
@@ -869,6 +870,9 @@ class Midline3DFinder:
         # Clamp parameters
         self._clamp_parameters(points_smoothed)
 
+        # Centre worm
+        self._centre_shift()
+
         # Update master state
         self.master_frame_state.set_state('masks_curve', [masks[d][self.active_idx] for d in range(D)])
         self.master_frame_state.set_state('masks_target_residuals',
@@ -882,7 +886,8 @@ class Midline3DFinder:
                                           [intensities_smoothed[d][self.active_idx] for d in range(D)])
         self.master_frame_state.set_stats(stats)
         if p.curvature_mode:
-            self.master_frame_state.set_state('points', [points_smoothed[d][self.active_idx] for d in range(D)])
+            self.master_frame_state.set_state('points',
+                                              [points_smoothed[d][self.active_idx] for d in range(D)])
             self.master_frame_state.set_state('curvatures_smoothed',
                                               [curvatures_smoothed[d][self.active_idx] for d in range(D)])
         else:
@@ -1126,9 +1131,6 @@ class Midline3DFinder:
                     length = fs.get_state('length')
                     curvatures = fs.get_state('curvatures')
                     for d in range(D):
-                        length_d = length[d]
-                        curvatures_d = curvatures[d]
-
                         # In length warmup phase, linearly grow the length from length_init to length_min
                         if not self.runtime_args.resume \
                                 and p.length_warmup_steps is not None \
@@ -1149,7 +1151,7 @@ class Midline3DFinder:
 
                         # Otherwise, ensure that the worm does not get too long/short.
                         else:
-                            l = length_d.clamp(
+                            l = length[d].clamp(
                                 min=p.length_min,
                                 max=p.length_max
                             )
@@ -1157,7 +1159,7 @@ class Midline3DFinder:
                         length[d].data = l
 
                         # Ensure curvature doesn't get too large.
-                        K = curvatures_d
+                        K = curvatures[d]
                         k = torch.norm(K, dim=-1)
                         k_max = p.curvature_max * 2 * torch.pi / (K.shape[0] + 2 - 1)
                         K = torch.where(
@@ -1211,6 +1213,71 @@ class Midline3DFinder:
                 sf = 0.2 / ((v - 1).abs()).amax()
                 if sf < 1:
                     v.data = (v - 1) * sf + 1
+
+    def _centre_shift(self):
+        """
+        Shift the curve along its midline so as to centre the scores.
+        """
+        p = self.parameters
+        D = p.depth - p.depth_min
+
+        if not p.curvature_mode or p.centre_shift_threshold is None or p.centre_shift_threshold == 0:
+            return
+
+        with torch.no_grad():
+            for i, fs in enumerate(self.frame_batch):
+                if p.curvature_deltas and i != 0:
+                    # Centring only needed for the master frame in deltas-mode.
+                    break
+                scores = fs.get_state('scores')
+                X0 = fs.get_state('X0')
+                T0 = fs.get_state('T0')
+                length = fs.get_state('length')
+                curvatures = fs.get_state('curvatures')
+
+                for d in range(D):
+                    scores_d = scores[d]
+                    curvatures_d = curvatures[d]
+                    N = scores_d.shape[0]
+
+                    # Find the midpoint of the tapered scores
+                    above_average_idxs = torch.nonzero(scores_d > scores_d.mean())[:, 0]
+                    if len(above_average_idxs) == 0:
+                        continue
+                    old_midpoint = int((N - 1) / 2)
+                    shift = ((above_average_idxs[0] + above_average_idxs[-1]) / 2 - old_midpoint).to(torch.int32)
+                    if shift.abs() < p.centre_shift_threshold * N:
+                        continue
+                    shift.clamp_(min=-p.centre_shift_adj, max=p.centre_shift_adj)
+                    new_midpoint = old_midpoint + shift
+
+                    # Shift the curvatures and decay towards zero at the new ends
+                    decay = torch.linspace(1, 0, shift.abs()+2)[1:-1]
+                    if shift < 0:
+                        curvatures_shifted = torch.cat([
+                            decay.flip(dims=(0,))[:, None]
+                            * torch.repeat_interleave(curvatures_d[0].unsqueeze(0), shift.abs(), dim=0),
+                            curvatures_d[:shift],
+                        ])
+                    else:
+                        curvatures_shifted = torch.cat([
+                            curvatures_d[shift:],
+                            decay[:, None]
+                            * torch.repeat_interleave(curvatures_d[-1].unsqueeze(0), shift.abs(), dim=0),
+                        ])
+
+                    # Compute the curve with the updated parameters
+                    points_d_new, tangents_d_new = integrate_curvature(
+                        X0[d].unsqueeze(0),
+                        T0[d].unsqueeze(0),
+                        length[d].unsqueeze(0),
+                        curvatures_shifted.unsqueeze(0),
+                    )
+
+                    # Update the parameters to match the shifted curve
+                    X0[d].data = points_d_new[0][new_midpoint]
+                    T0[d].data = tangents_d_new[0][new_midpoint]
+                    curvatures[d].data = curvatures_shifted
 
     def _log_progress(self, step: int, final_step: int, loss: float, stats: dict):
         """
@@ -1336,18 +1403,20 @@ class Midline3DFinder:
                 ax.set_title(title)
                 # cla(ax)
 
-                # Scatter vertices
-                vertices = to_numpy(points[d])
+                # Scale vertices by sigmas and colour by score
                 scores_d = to_numpy(scores[d])
                 sigmas_d = np.clip(
                     2000 * to_numpy(sigmas[d]),
                     a_min=10,
                     a_max=1000,
                 )
+
+                # Scatter smoothed output points generated by integrating the curvature
+                vertices = to_numpy(points[d])
                 x, y, z = (vertices[:, j] for j in range(3))
                 ax.scatter(x, y, z, c=scores_d, cmap=cmap_vertices, s=sigmas_d, alpha=0.4)
 
-                # # Draw lines connecting points
+                # Draw lines connecting vertices
                 colours = np.linspace(0, 1, len(vertices))
                 v2 = vertices[:, None, :]
                 segments = np.concatenate([v2[:-1], v2[1:]], axis=1)

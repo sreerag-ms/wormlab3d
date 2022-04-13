@@ -1,25 +1,12 @@
 from typing import Tuple, List, Final
 
 import torch
-import torch.nn.functional as F
 from torch import nn
 
 from wormlab3d import PREPARED_IMAGE_SIZE
 from wormlab3d.data.model.mf_parameters import RENDER_MODE_GAUSSIANS, RENDER_MODES
 from wormlab3d.midlines3d.dynamic_cameras import DynamicCameras
-from wormlab3d.midlines3d.mf_methods import calculate_curvature, integrate_curvature, normalise
-
-
-@torch.jit.script
-def make_gaussian_kernel(sigma: float, device: torch.device) -> torch.Tensor:
-    ks = int(sigma * 5)
-    if ks % 2 == 0:
-        ks += 1
-    ts = torch.linspace(-ks // 2, ks // 2 + 1, ks, device=device)
-    gauss = torch.exp((-(ts / sigma)**2 / 2))
-    kernel = gauss / gauss.sum()
-
-    return kernel
+from wormlab3d.midlines3d.mf_methods import calculate_curvature, integrate_curvature, normalise, smooth_parameter
 
 
 @torch.jit.script
@@ -98,42 +85,6 @@ def render_points(
     blobs = blobs.reshape(bs, 3, N, image_size, image_size)
 
     return masks, blobs
-
-
-@torch.jit.script
-def _smooth_parameter(param: torch.Tensor, ks: int, mode: str = 'avg') -> torch.Tensor:
-    """
-    Apply 1D average pooling to smooth a parameter vector.
-    """
-    pad_size = int(ks / 2)
-    p_smoothed = torch.cat([
-        torch.repeat_interleave(param[:, 0].unsqueeze(1), pad_size, dim=1),
-        param,
-        torch.repeat_interleave(param[:, -1].unsqueeze(1), pad_size, dim=1),
-    ], dim=1)
-
-    # Average pooling smoothing
-    if mode == 'avg':
-        p_smoothed = p_smoothed[:, None, :]
-        p_smoothed = F.avg_pool1d(p_smoothed, kernel_size=ks, stride=1, padding=0)
-        p_smoothed = p_smoothed.squeeze(1)
-
-    # Smooth with a gaussian kernel
-    elif mode == 'gaussian':
-        k_sig = ks / 5
-        if param.ndim == 2:
-            param = param.unsqueeze(-1)
-        n_channels = param.shape[-1]
-        k = make_gaussian_kernel(k_sig, device=param.device)
-        k = torch.stack([k] * n_channels)[:, None, :]
-        p_smoothed = p_smoothed.permute(0, 2, 1)
-        p_smoothed = F.conv1d(p_smoothed, weight=k, groups=n_channels)
-        p_smoothed = p_smoothed.permute(0, 2, 1)
-
-    else:
-        raise RuntimeError(f'Unknown smoothing mode: "{mode}".')
-
-    return p_smoothed
 
 
 @torch.jit.script
@@ -376,7 +327,7 @@ class ProjectRenderScoreModel(nn.Module):
                         length_d = length_d.clamp(min=self.length_min, max=self.length_max)
 
                     # Smooth the curvatures
-                    curvatures_d = _smooth_parameter(curvatures_d, ks, mode='gaussian')
+                    curvatures_d = smooth_parameter(curvatures_d, ks, mode='gaussian')
 
                     # Ensure curvature doesn't get too large
                     k = torch.norm(curvatures_d, dim=-1)
@@ -391,7 +342,7 @@ class ProjectRenderScoreModel(nn.Module):
                     X0_d = X0_d.clamp(min=-0.5, max=0.5)
 
                     # Integrate the curvature to get the midline coordinates
-                    points_d = integrate_curvature(X0_d, T0_d, length_d, curvatures_d)
+                    points_d, tangents_d = integrate_curvature(X0_d, T0_d, length_d, curvatures_d)
 
                 else:
                     # Distance to parent points fixed as a quarter of the mean segment-length between parents.
@@ -407,7 +358,7 @@ class ProjectRenderScoreModel(nn.Module):
                             points_anchored[:, 1:-1],
                             points_d[:, -1][:, None, :]
                         ], dim=1)
-                    points_d = _smooth_parameter(points_d, ks, mode='gaussian')
+                    points_d = smooth_parameter(points_d, ks, mode='gaussian')
                     curvatures_d = calculate_curvature(points_d)
 
                 # Prepare sigmas, exponents and intensities

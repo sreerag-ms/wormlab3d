@@ -8,7 +8,7 @@ from torchvision.transforms.functional import gaussian_blur
 
 from wormlab3d import CAMERA_IDXS, PREPARED_IMAGE_SIZE
 from wormlab3d.data.model import Cameras, MFParameters, Frame
-from wormlab3d.midlines3d.mf_methods import make_rotation_matrix, normalise
+from wormlab3d.midlines3d.mf_methods import make_rotation_matrix, normalise, integrate_curvature
 
 PARAMETER_NAMES = [
     'cam_intrinsics',
@@ -262,10 +262,10 @@ class FrameState(nn.Module):
         """
         Initialise the multiscale curve points and curvatures.
         """
-        if not self.parameters.curvature_mode:
-            self._init_points_parameters_points_mode()
-        else:
+        if self.parameters.curvature_mode:
             self._init_points_parameters_curvature_mode()
+        else:
+            self._init_points_parameters_points_mode()
 
     def _init_points_parameters_points_mode(self):
         """
@@ -319,12 +319,18 @@ class FrameState(nn.Module):
 
         # Start in a straight line configuration
         curvatures = []
-        for d in range(mp.depth_min, mp.depth):
+        for i, d in enumerate(range(mp.depth_min, mp.depth)):
             N = 2**d
             K = nn.Parameter(torch.zeros(N, 2), requires_grad=True)
+            points_d, tangents_d = integrate_curvature(
+                X0s[i].unsqueeze(0),
+                T0s[i].unsqueeze(0),
+                lengths[i].unsqueeze(0),
+                K.unsqueeze(0)
+            )
             curvatures.append(K)
-            self.register_buffer(f'points_{d}', torch.zeros(N, 3))
-            self.register_buffer(f'curvatures_smoothed_{d}', torch.zeros((N, 2)))
+            self.register_buffer(f'points_{d}', points_d[0].detach())
+            self.register_buffer(f'curvatures_smoothed_{d}', K.detach())
 
         self.register_parameter('X0', X0s)
         self.register_parameter('T0', T0s)

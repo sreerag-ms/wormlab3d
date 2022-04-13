@@ -41,6 +41,9 @@ class ParameterArgs(BaseArgs):
             dk_limit: float = None,
             dpsi_limit: float = None,
 
+            centre_shift_threshold: float = None,
+            centre_shift_adj: float = None,
+
             frame_skip: int = None,
             n_steps_init: int = 5000,
             n_steps_max: int = 500,
@@ -137,6 +140,14 @@ class ParameterArgs(BaseArgs):
         self.dl_limit = dl_limit
         self.dk_limit = dk_limit
         self.dpsi_limit = dpsi_limit
+
+        self.centre_shift_threshold = centre_shift_threshold
+        if centre_shift_threshold is not None:
+            if centre_shift_adj is None:
+                centre_shift_adj = 1
+            else:
+                assert centre_shift_adj >= 1
+        self.centre_shift_adj = centre_shift_adj
 
         if frame_skip == 1:
             frame_skip = None
@@ -254,6 +265,12 @@ class ParameterArgs(BaseArgs):
                            help='Maximum allowable change in scalar curvature between batched frames (only used in delta-curvatures mode). Default=None.')
         group.add_argument('--dpsi-limit', type=float,
                            help='Maximum allowable change in curvature angle between batched frames (only used in delta-curvatures mode). Default=None.')
+
+        group.add_argument('--centre-shift-threshold', type=float,
+                           help='Shift the curve along the midline to centre the scores. '
+                                'Start shifting when the central index is > threshold*N away from the midpoint. Default=None (no shifting).')
+        group.add_argument('--centre-shift-adj', type=int,
+                           help='When centre shifting move at most this number of vertices in either direction. Default=1.')
 
         group.add_argument('--frame-skip', type=int,
                            help='Number of frames to skip between optimisations. Interim frames will populate parameters with linear interpolation.')

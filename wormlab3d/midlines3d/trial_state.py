@@ -241,7 +241,7 @@ class TrialState:
         # Add the stats into the json dictionary
         for k, v in frame_state.stats.items():
             if k not in self.stats:
-                self.stats[k] = [0. for _ in range(self.n_frames)]
+                self.stats[k] = [0. for _ in range(self.trial.n_frames_min)]
             self.stats[k][frame_num] = float(v)
 
     def init_frame_state(
