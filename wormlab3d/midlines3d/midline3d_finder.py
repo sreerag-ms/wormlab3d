@@ -1252,7 +1252,7 @@ class Midline3DFinder:
                     new_midpoint = old_midpoint + shift
 
                     # Shift the curvatures and decay towards zero at the new ends
-                    decay = torch.linspace(1, 0, shift.abs()+2)[1:-1]
+                    decay = torch.linspace(1, 0, shift.abs()+2, device=self.device)[1:-1]
                     if shift < 0:
                         curvatures_shifted = torch.cat([
                             decay.flip(dims=(0,))[:, None]
