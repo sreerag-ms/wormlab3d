@@ -47,6 +47,7 @@ PRINT_KEYS = [
     # 'loss/global',
     'loss/scores',
     'loss/intersections',
+    'shifts'
 ]
 
 
@@ -871,7 +872,7 @@ class Midline3DFinder:
         self._clamp_parameters(points_smoothed)
 
         # Centre worm
-        self._centre_shift()
+        self._centre_shift(stats)
 
         # Update master state
         self.master_frame_state.set_state('masks_curve', [masks[d][self.active_idx] for d in range(D)])
@@ -1214,7 +1215,7 @@ class Midline3DFinder:
                 if sf < 1:
                     v.data = (v - 1) * sf + 1
 
-    def _centre_shift(self):
+    def _centre_shift(self, stats: dict):
         """
         Shift the curve along its midline so as to centre the scores.
         """
@@ -1224,6 +1225,7 @@ class Midline3DFinder:
         if not p.curvature_mode or p.centre_shift_threshold is None or p.centre_shift_threshold == 0:
             return
 
+        points_shifted = 0
         with torch.no_grad():
             for i, fs in enumerate(self.frame_batch):
                 if p.curvature_deltas and i != 0:
@@ -1236,11 +1238,16 @@ class Midline3DFinder:
                 curvatures = fs.get_state('curvatures')
 
                 for d in range(D):
-                    scores_d = scores[d]
-                    curvatures_d = curvatures[d]
-                    N = scores_d.shape[0]
+                    # Skip shifting during regrowth phase
+                    length_d = length[d]
+                    if p.length_regrow_steps is not None \
+                            and self.checkpoint.step_frame < p.length_regrow_steps \
+                            and length_d < p.length_min:
+                        continue
 
                     # Find the midpoint of the tapered scores
+                    scores_d = scores[d]
+                    N = scores_d.shape[0]
                     above_average_idxs = torch.nonzero(scores_d > scores_d.mean())[:, 0]
                     if len(above_average_idxs) == 0:
                         continue
@@ -1252,7 +1259,8 @@ class Midline3DFinder:
                     new_midpoint = old_midpoint + shift
 
                     # Shift the curvatures and decay towards zero at the new ends
-                    decay = torch.linspace(1, 0, shift.abs()+2, device=self.device)[1:-1]
+                    curvatures_d = curvatures[d]
+                    decay = torch.linspace(1, 0, shift.abs() + 2, device=self.device)[1:-1]
                     if shift < 0:
                         curvatures_shifted = torch.cat([
                             decay.flip(dims=(0,))[:, None]
@@ -1278,6 +1286,9 @@ class Midline3DFinder:
                     X0[d].data = points_d_new[0][new_midpoint]
                     T0[d].data = tangents_d_new[0][new_midpoint]
                     curvatures[d].data = curvatures_shifted
+                    points_shifted += shift.abs()
+
+            stats['shifts'] = points_shifted
 
     def _log_progress(self, step: int, final_step: int, loss: float, stats: dict):
         """
