@@ -255,8 +255,9 @@ def integrate_curvature(
         T0: torch.Tensor,
         l: torch.Tensor,
         K: torch.Tensor,
-        start_idx: Optional[int] = None
-) -> Tuple[torch.Tensor, torch.Tensor]:
+        M10: Optional[torch.Tensor] = None,
+        start_idx: Optional[int] = None,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Starting from vertex point X0 with tangent T0 at start_idx,
     integrate the curvature to produce a curve of length l.
@@ -288,7 +289,9 @@ def integrate_curvature(
     # Initial frame values
     T0 = normalise(T0)
     T[:, start_idx] = T0
-    M1[:, start_idx] = an_orthonormal(T0)
+    if M10 is None:
+        M10 = an_orthonormal(T0)
+    M1[:, start_idx] = M10
     M2[:, start_idx] = torch.cross(T[:, start_idx].clone(), M1[:, start_idx].clone())
 
     # Calculate orthonormal frame from the middle-out
@@ -305,11 +308,17 @@ def integrate_curvature(
     for i in range(start_idx + 2, N):
         X[:, i] = X[:, i - 1] + h * T[:, i - 1]
 
-    return X, T
+    return X, T, M1
 
 
 @torch.jit.script
-def integrate_curvature_combined(X0: torch.Tensor, T0: torch.Tensor, l: torch.Tensor, K: torch.Tensor) -> torch.Tensor:
+def integrate_curvature_combined(
+        X0: torch.Tensor,
+        T0: torch.Tensor,
+        l: torch.Tensor,
+        K: torch.Tensor,
+        M10: Optional[torch.Tensor] = None,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Starting from midpoint X0 with tangent T0, integrate the curvature to produce a curve of length l.
     Same as above but update frame included in loops, kept for posterity.
@@ -338,7 +347,9 @@ def integrate_curvature_combined(X0: torch.Tensor, T0: torch.Tensor, l: torch.Te
     # Initial frame values
     T0 = normalise(T0)
     T[:, N2 - 1] = T0
-    M1[:, N2 - 1] = an_orthonormal(T0)
+    if M10 is None:
+        M10 = an_orthonormal(T0)
+    M1[:, N2 - 1] = M10
     M2[:, N2 - 1] = torch.cross(T[:, N2 - 1].clone(), M1[:, N2 - 1].clone())
 
     # Calculate orthonormal frame from the middle-out
@@ -382,7 +393,7 @@ def integrate_curvature_combined(X0: torch.Tensor, T0: torch.Tensor, l: torch.Te
     for i in range(N2 + 1, N):
         X[:, i] = X[:, i - 1] + h * T[:, i - 1]
 
-    return X
+    return X, T, M1
 
 
 @torch.jit.script

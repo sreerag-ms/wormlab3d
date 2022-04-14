@@ -342,7 +342,7 @@ class ProjectRenderScoreModel(nn.Module):
                     X0_d = X0_d.clamp(min=-0.5, max=0.5)
 
                     # Integrate the curvature to get the midline coordinates
-                    points_d, tangents_d = integrate_curvature(X0_d, T0_d, length_d, curvatures_d)
+                    points_d, tangents_d, M1_d = integrate_curvature(X0_d, T0_d, length_d, curvatures_d)
 
                 else:
                     # Distance to parent points fixed as a quarter of the mean segment-length between parents.

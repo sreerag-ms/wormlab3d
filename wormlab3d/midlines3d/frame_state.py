@@ -322,7 +322,7 @@ class FrameState(nn.Module):
         for i, d in enumerate(range(mp.depth_min, mp.depth)):
             N = 2**d
             K = nn.Parameter(torch.zeros(N, 2), requires_grad=True)
-            points_d, tangents_d = integrate_curvature(
+            points_d, tangents_d, M1_d = integrate_curvature(
                 X0s[i].unsqueeze(0),
                 T0s[i].unsqueeze(0),
                 lengths[i].unsqueeze(0),
