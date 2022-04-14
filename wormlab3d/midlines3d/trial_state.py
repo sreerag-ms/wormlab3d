@@ -162,7 +162,7 @@ class TrialState:
                 shape = (T, 3, 5)
             elif k == 'cam_shifts':
                 shape = (T, 3, 1)
-            elif k in ['X0', 'T0']:
+            elif k in ['X0', 'T0', 'M10']:
                 shape = (T, D, 3)
             elif k == 'curvatures':
                 shape = (T, N, 2)
@@ -227,7 +227,7 @@ class TrialState:
                     p = to_numpy(p_ms[-1])
 
                 # Stack parameters which do not change across depths
-                elif k in ['X0', 'T0', 'length', 'sigmas', 'exponents', 'intensities']:
+                elif k in ['X0', 'T0', 'M10', 'length', 'sigmas', 'exponents', 'intensities']:
                     p = np.array([to_numpy(p) for p in p_ms])
 
                 # Vectorise everything else
@@ -287,7 +287,7 @@ class TrialState:
                 # Expand collapsed
                 elif k in ['curvatures', 'points', 'points_2d', 'scores']:
                     v = [v[2**d - idx_offset - 1:2**(d + 1) - idx_offset - 1] for d in range(D_min, D)]
-                elif k in ['X0', 'T0', 'length', 'sigmas', 'exponents', 'intensities']:
+                elif k in ['X0', 'T0', 'M10', 'length', 'sigmas', 'exponents', 'intensities']:
                     v = [v[i] for i in range(D - D_min)]
 
                 frame_state.set_state(k, v)

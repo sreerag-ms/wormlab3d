@@ -187,6 +187,7 @@ class ProjectRenderScoreModel(nn.Module):
             points_2d_base: torch.Tensor,
             X0: List[torch.Tensor],
             T0: List[torch.Tensor],
+            M10: List[torch.Tensor],
             length: List[torch.Tensor],
             curvatures: List[torch.Tensor],
             points: List[torch.Tensor],
@@ -259,6 +260,10 @@ class ProjectRenderScoreModel(nn.Module):
                         T0_d = torch.zeros_like(dT0)
                         T0_d[0] = normalise(dT0[0])
 
+                        dM10 = M10[d]
+                        M10_d = torch.zeros_like(dM10)
+                        M10_d[0] = normalise(dM10[0])
+
                         dl = length[d]
                         length_d = torch.zeros_like(dl)
                         length_d[0] = dl[0]
@@ -284,6 +289,9 @@ class ProjectRenderScoreModel(nn.Module):
 
                             # T0 always has length 1
                             T0_d[i] = normalise(T0_d[i - 1] + dT0[i])
+
+                            # M10 always has length 1
+                            M10_d[i] = normalise(M10_d[i - 1] + dM10[i])
 
                             # Limit length change
                             if length_warmup:
@@ -312,6 +320,7 @@ class ProjectRenderScoreModel(nn.Module):
                     else:
                         X0_d = X0[d]
                         T0_d = T0[d]
+                        M10_d = M10[d]
                         length_d = length[d]
                         curvatures_d = curvatures[d]
 
@@ -319,6 +328,7 @@ class ProjectRenderScoreModel(nn.Module):
                     if 0:
                         X0_d = X0_d + torch.randn_like(X0_d) * 0.001
                         T0_d = T0_d + torch.randn_like(T0_d) * 0.002
+                        M10_d = M10_d + torch.randn_like(M10_d) * 0.001
                         length_d = length_d + torch.randn_like(length_d) * 0.0005
                         curvatures_d = curvatures_d + torch.randn_like(curvatures_d) * 0.001
 
@@ -342,7 +352,7 @@ class ProjectRenderScoreModel(nn.Module):
                     X0_d = X0_d.clamp(min=-0.5, max=0.5)
 
                     # Integrate the curvature to get the midline coordinates
-                    points_d, tangents_d, M1_d = integrate_curvature(X0_d, T0_d, length_d, curvatures_d)
+                    points_d, tangents_d, M1_d = integrate_curvature(X0_d, T0_d, length_d, curvatures_d, M10_d)
 
                 else:
                     # Distance to parent points fixed as a quarter of the mean segment-length between parents.

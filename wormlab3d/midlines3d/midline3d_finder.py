@@ -26,7 +26,7 @@ from wormlab3d.midlines3d.mf_methods import generate_residual_targets, calculate
     calculate_aunts_losses, calculate_curvature_losses, calculate_temporal_losses, calculate_parents_losses_curvatures, \
     calculate_smoothness_losses_curvatures, calculate_curvature_losses_curvatures, calculate_temporal_losses_curvatures, \
     calculate_temporal_losses_curvature_deltas, calculate_curvature_losses_curvature_deltas, \
-    calculate_intersection_losses_curvatures, integrate_curvature, an_orthonormal
+    calculate_intersection_losses_curvatures, integrate_curvature, normalise, orthogonalise
 from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.nn.LBFGS import FullBatchLBFGS
@@ -355,14 +355,9 @@ class Midline3DFinder:
             # Zero-out the initial curvature-deltas
             if i > 0 and self.parameters.curvature_mode and self.parameters.curvature_deltas:
                 with torch.no_grad():
-                    for v in fs.get_state('X0'):
-                        v.data.zero_()
-                    for v in fs.get_state('T0'):
-                        v.data.zero_()
-                    for v in fs.get_state('length'):
-                        v.data.zero_()
-                    for v in fs.get_state('curvatures'):
-                        v.data.zero_()
+                    for k in CURVATURE_PARAMETER_NAMES:
+                        for v in fs.get_state(k):
+                            v.data.zero_()
 
             self.frame_batch.append(fs)
 
@@ -398,7 +393,7 @@ class Midline3DFinder:
 
         # Merge the curvature parameters into a single parameter group
         lbfgs_params = []
-        lbfgs_keys = ['curvatures', 'T0']
+        lbfgs_keys = ['curvatures', 'T0', 'M10']
         if p.curvature_mode:
             del params['points']
             point_params = []
@@ -784,6 +779,7 @@ class Midline3DFinder:
             camera_intensities = torch.stack([f.get_state('camera_intensities') for f in self.frame_batch])
             X0 = [torch.stack([f.get_state('X0')[d] for f in self.frame_batch]) for d in range(D)]
             T0 = [torch.stack([f.get_state('T0')[d] for f in self.frame_batch]) for d in range(D)]
+            M10 = [torch.stack([f.get_state('M10')[d] for f in self.frame_batch]) for d in range(D)]
             length = [torch.stack([f.get_state('length')[d] for f in self.frame_batch]) for d in range(D)]
             curvatures = [torch.stack([f.get_state('curvatures')[d] for f in self.frame_batch]) for d in range(D)]
             points = [torch.stack([f.get_state('points')[d] for f in self.frame_batch]) for d in range(D)]
@@ -803,6 +799,7 @@ class Midline3DFinder:
                 points_2d_base=points_2d_base,
                 X0=X0,
                 T0=T0,
+                M10=M10,
                 length=length,
                 curvatures=curvatures,
                 points=points,
@@ -824,6 +821,7 @@ class Midline3DFinder:
                 cam_rotation_preangles=cam_rotation_preangles,
                 X0=X0,
                 T0=T0,
+                M10=M10,
                 length=length,
                 curvatures=curvatures,
                 points=points,
@@ -917,6 +915,7 @@ class Midline3DFinder:
             cam_rotation_preangles: torch.Tensor,
             X0: List[torch.Tensor],
             T0: List[torch.Tensor],
+            M10: List[torch.Tensor],
             length: List[torch.Tensor],
             curvatures: List[torch.Tensor],
             points: List[torch.Tensor],
@@ -953,12 +952,14 @@ class Midline3DFinder:
         if self.last_frame_state is not None:
             X0_prev = self.last_frame_state.get_state('X0')
             T0_prev = self.last_frame_state.get_state('T0')
+            M10_prev = self.last_frame_state.get_state('M10')
             length_prev = self.last_frame_state.get_state('length')
             curvatures_prev = self.last_frame_state.get_state('curvatures')
             points_prev = self.last_frame_state.get_state('points')
         else:
             X0_prev = None
             T0_prev = None
+            M10_prev = None
             length_prev = None
             curvatures_prev = None
             points_prev = None
@@ -971,7 +972,7 @@ class Midline3DFinder:
 
         if p.curvature_mode:
             losses = {**losses, **{
-                'parents': calculate_parents_losses_curvatures(X0, T0, length, curvatures, curvatures_smoothed),
+                'parents': calculate_parents_losses_curvatures(X0, T0, M10, length, curvatures, curvatures_smoothed),
                 'smoothness': calculate_smoothness_losses_curvatures(curvatures, curvatures_smoothed),
                 'intersections': calculate_intersection_losses_curvatures(
                     points_smoothed, sigmas_smoothed, p.curvature_max
@@ -979,14 +980,14 @@ class Midline3DFinder:
             }}
             if p.curvature_deltas:
                 losses['temporal'] = calculate_temporal_losses_curvature_deltas(
-                    X0, T0, length, curvatures,
-                    X0_prev, T0_prev, length_prev, curvatures_prev
+                    X0, T0, M10, length, curvatures,
+                    X0_prev, T0_prev, M10_prev, length_prev, curvatures_prev
                 )
                 losses['curvature'] = calculate_curvature_losses_curvature_deltas(curvatures)
             else:
                 losses['temporal'] = calculate_temporal_losses_curvatures(
-                    X0, T0, length, curvatures,
-                    X0_prev, T0_prev, length_prev, curvatures_prev
+                    X0, T0, M10, length, curvatures,
+                    X0_prev, T0_prev, M10_prev, length_prev, curvatures_prev
                 )
                 losses['curvature'] = calculate_curvature_losses_curvatures(curvatures)
         else:
@@ -1129,9 +1130,19 @@ class Midline3DFinder:
                     if p.curvature_deltas and i != 0:
                         # Clamping only needed for the master frame in deltas-mode.
                         break
+                    T0 = fs.get_state('T0')
+                    M10 = fs.get_state('M10')
                     length = fs.get_state('length')
                     curvatures = fs.get_state('curvatures')
                     for d in range(D):
+                        # T0 should be normalised
+                        T0[d].data = normalise(T0[d])
+
+                        # M10 should be orthogonal to T0 and normalised
+                        M10_d = normalise(M10[d])
+                        M10_d = orthogonalise(M10_d.unsqueeze(0), T0[d].unsqueeze(0))[0]
+                        M10[d].data = normalise(M10_d)
+
                         # In length warmup phase, linearly grow the length from length_init to length_min
                         if not self.runtime_args.resume \
                                 and p.length_warmup_steps is not None \
@@ -1234,6 +1245,7 @@ class Midline3DFinder:
                 scores = fs.get_state('scores')
                 X0 = fs.get_state('X0')
                 T0 = fs.get_state('T0')
+                M10 = fs.get_state('M10')
                 length = fs.get_state('length')
                 curvatures = fs.get_state('curvatures')
 
@@ -1249,7 +1261,8 @@ class Midline3DFinder:
                     scores_d = scores[d]
                     N = scores_d.shape[0]
                     old_midpoint = int((N - 1) / 2)
-                    centroid_idx = (torch.arange(N) * scores_d).sum() / scores_d.sum()
+                    scores_d_aa = (scores_d > scores_d.mean()).to(torch.float32)
+                    centroid_idx = (torch.arange(N, device=self.device) * scores_d_aa).sum() / scores_d_aa.sum()
                     stats[f'centroid_idx/{d}'] = centroid_idx.item()
                     shift = torch.ceil(centroid_idx).to(torch.int32) - old_midpoint
                     if shift.abs() < p.centre_shift_threshold * N:
@@ -1259,43 +1272,38 @@ class Midline3DFinder:
 
                     # Compute the curve with the current parameters
                     curvatures_d = curvatures[d]
-                    points_d_new, tangents_d_new, M1 = integrate_curvature(
+                    points_d_new, tangents_d_new, M1_new = integrate_curvature(
                         X0[d].unsqueeze(0),
                         T0[d].unsqueeze(0),
                         length[d].unsqueeze(0),
                         curvatures_d.unsqueeze(0),
+                        M10[d].unsqueeze(0),
                     )
 
-                    # Calculate the frame rotation and apply to the curvatures
+                    # Get the new position, tangent and frame values at the new midpoint
                     X0_new = points_d_new[0][new_midpoint]
                     T0_new = tangents_d_new[0][new_midpoint]
-                    M10_default = an_orthonormal(T0_new.unsqueeze(0))[0]
-                    M10_ideal = M1[0][new_midpoint]
-                    angle = torch.arccos(torch.dot(M10_default, M10_ideal))
-                    if new_midpoint < old_midpoint:
-                        angle *= -1
-                    m1m2 = curvatures_d[:, 0] + 1j * curvatures_d[:, 1]
-                    m1m2_new = torch.exp(1j * angle) * m1m2
-                    curvatures_new = torch.stack([torch.real(m1m2_new), torch.imag(m1m2_new)], dim=1)
+                    M10_new = M1_new[0][new_midpoint]
 
                     # Shift the curvatures and decay towards zero at the new ends
                     decay = torch.linspace(1, 0, shift.abs() + 2, device=self.device)[1:-1]
                     if shift < 0:
                         curvatures_shifted = torch.cat([
                             decay.flip(dims=(0,))[:, None]
-                            * torch.repeat_interleave(curvatures_new[0].unsqueeze(0), shift.abs(), dim=0),
-                            curvatures_new[:shift],
+                            * torch.repeat_interleave(curvatures_d[0].unsqueeze(0), shift.abs(), dim=0),
+                            curvatures_d[:shift],
                         ])
                     else:
                         curvatures_shifted = torch.cat([
-                            curvatures_new[shift:],
+                            curvatures_d[shift:],
                             decay[:, None]
-                            * torch.repeat_interleave(curvatures_new[-1].unsqueeze(0), shift.abs(), dim=0),
+                            * torch.repeat_interleave(curvatures_d[-1].unsqueeze(0), shift.abs(), dim=0),
                         ])
 
                     # Update the parameters to match the shifted curve
                     X0[d].data = X0_new
                     T0[d].data = T0_new
+                    M10[d].data = M10_new
                     curvatures[d].data = curvatures_shifted
                     points_shifted += shift.abs()
 

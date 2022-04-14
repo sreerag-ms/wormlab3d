@@ -8,7 +8,7 @@ from torchvision.transforms.functional import gaussian_blur
 
 from wormlab3d import CAMERA_IDXS, PREPARED_IMAGE_SIZE
 from wormlab3d.data.model import Cameras, MFParameters, Frame
-from wormlab3d.midlines3d.mf_methods import make_rotation_matrix, normalise, integrate_curvature
+from wormlab3d.midlines3d.mf_methods import make_rotation_matrix, normalise, integrate_curvature, an_orthonormal
 
 PARAMETER_NAMES = [
     'cam_intrinsics',
@@ -18,6 +18,7 @@ PARAMETER_NAMES = [
     'cam_shifts',
     'X0',
     'T0',
+    'M10',
     'length',
     'curvatures',
     'points',
@@ -32,6 +33,7 @@ PARAMETER_NAMES = [
 CURVATURE_PARAMETER_NAMES = [
     'X0',
     'T0',
+    'M10',
     'length',
     'curvatures',
 ]
@@ -293,6 +295,7 @@ class FrameState(nn.Module):
                 points.append(x)
                 self.register_buffer(f'X0_{d}', torch.zeros(3))
                 self.register_buffer(f'T0_{d}', torch.tensor([1., 0., 0.]))
+                self.register_buffer(f'M10_{d}', torch.tensor([0., 1., 0.]))
                 self.register_buffer(f'length_{d}', torch.tensor(1.))
                 self.register_buffer(f'curvatures_{d}', torch.zeros(2**d, 2))
 
@@ -313,6 +316,12 @@ class FrameState(nn.Module):
         T0 = normalise(T0)
         T0s = [nn.Parameter(T0, requires_grad=True) for _ in range(mp.depth - mp.depth_min)]
 
+        # Pick a consistent M10 direction
+        M10s = [
+            nn.Parameter(an_orthonormal(T0s[i].unsqueeze(0))[0].detach(), requires_grad=True)
+            for i in range(mp.depth - mp.depth_min)
+        ]
+
         # Init lengths
         l = torch.tensor(mp.length_init)
         lengths = [nn.Parameter(l, requires_grad=True) for _ in range(mp.depth - mp.depth_min)]
@@ -326,7 +335,8 @@ class FrameState(nn.Module):
                 X0s[i].unsqueeze(0),
                 T0s[i].unsqueeze(0),
                 lengths[i].unsqueeze(0),
-                K.unsqueeze(0)
+                K.unsqueeze(0),
+                M10=M10s[i].unsqueeze(0)
             )
             curvatures.append(K)
             self.register_buffer(f'points_{d}', points_d[0].detach())
@@ -334,6 +344,7 @@ class FrameState(nn.Module):
 
         self.register_parameter('X0', X0s)
         self.register_parameter('T0', T0s)
+        self.register_parameter('M10', M10s)
         self.register_parameter('length', lengths)
         self.register_parameter('curvatures', curvatures)
 
