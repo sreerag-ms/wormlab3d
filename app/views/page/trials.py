@@ -61,9 +61,11 @@ def trial_instance(_id):
         'triangulations': 'Triangulations',
         'triangulations_fixed': 'Triangulations fixed',
         'tracking_video': 'Tracking video exists',
-        # 'syncing': 'Syncing',
+        'syncing': 'Syncing',
+        'crop_size': 'Crop size',
         'verified': 'Manually verified',
     }
+    quality_check_toggleable_fields = ['syncing', 'crop_size', 'verified']
 
     return render_template(
         'item/trial.html',
@@ -74,5 +76,6 @@ def trial_instance(_id):
         experiment_view=experiment_view,
         frame_view=frame_view,
         reconstruction_view=reconstruction_view,
-        quality_check_fields=quality_check_fields
+        quality_check_fields=quality_check_fields,
+        quality_check_toggleable_fields=quality_check_toggleable_fields
     )

@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from wormlab3d import PREPARED_IMAGE_SIZE
+from wormlab3d import PREPARED_IMAGE_SIZE_DEFAULT
 from wormlab3d.data.model import Midline2D
 from wormlab3d.midlines2d.args import DatasetMidline2DArgs
 from wormlab3d.midlines2d.data_loader import get_data_loader
@@ -28,11 +28,11 @@ class Manager(BaseManager):
 
     @property
     def input_shape(self) -> Tuple[int]:
-        return (1,) + PREPARED_IMAGE_SIZE
+        return 1, PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGE_SIZE_DEFAULT
 
     @property
     def output_shape(self) -> Tuple[int]:
-        return (1,) + PREPARED_IMAGE_SIZE
+        return 1, PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGE_SIZE_DEFAULT
 
     @property
     def stat_keys(self) -> List[str]:

@@ -12,7 +12,7 @@ from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from simple_worm.frame import FrameSequenceNumpy
 from simple_worm.plot3d import FrameArtist
 from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT
-from wormlab3d import logger, PREPARED_IMAGE_SIZE, PREPARED_IMAGES_PATH
+from wormlab3d import logger, PREPARED_IMAGES_PATH
 from wormlab3d.data.model import Frame, Reconstruction
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF, Midline3D
 from wormlab3d.midlines3d.trial_state import TrialState
@@ -20,8 +20,6 @@ from wormlab3d.toolkit.plot_utils import tex_mode, equal_aspect_ratio
 from wormlab3d.trajectories.cache import get_trajectory
 
 tex_mode()
-width = PREPARED_IMAGE_SIZE[0] * 3
-height = PREPARED_IMAGE_SIZE[1] * 3
 n_revolutions = 2
 cmap = plt.get_cmap(MIDLINE_CMAP_DEFAULT)
 
@@ -38,6 +36,8 @@ def get_reconstruction_ids() -> List[str]:
 
 
 def _make_3d_plot(
+        width: int,
+        height: int,
         X_slice: np.ndarray,
         X_full: np.ndarray,
         colours: np.ndarray = None,
@@ -151,6 +151,11 @@ def generate_reconstruction_video(reconstruction_id: int, missing_only: bool = T
     worm moving along it and camera images with overlaid 2D midline reprojections.
     """
     reconstruction = Reconstruction.objects.get(id=reconstruction_id)
+    trial = reconstruction.trial
+
+    # Video dimensions
+    width = trial.crop_size * 3
+    height = trial.crop_size
 
     # Check if trajectory video is already present
     if missing_only and reconstruction.has_video:
@@ -188,6 +193,8 @@ def generate_reconstruction_video(reconstruction_id: int, missing_only: bool = T
 
     # Build plot
     fig, update_plot = _make_3d_plot(
+        width=width,
+        height=height,
         X_slice=X_slice,
         X_full=X_full,
         draw_edges=True
@@ -197,7 +204,7 @@ def generate_reconstruction_video(reconstruction_id: int, missing_only: bool = T
     logger.info('Querying database.')
     pipeline = [
         {'$match': {
-            'trial': reconstruction.trial.id,
+            'trial': trial.id,
             'frame_num': {
                 '$gte': reconstruction.start_frame,
                 '$lte': reconstruction.end_frame,
@@ -219,8 +226,8 @@ def generate_reconstruction_video(reconstruction_id: int, missing_only: bool = T
     output_args = {
         'pix_fmt': 'yuv444p',
         'vcodec': 'libx264',
-        'r': reconstruction.trial.fps,
-        'metadata:g:0': f'title=Trial {reconstruction.trial.id}. Reconstruction {reconstruction.id}.',
+        'r': trial.fps,
+        'metadata:g:0': f'title=Trial {trial.id}. Reconstruction {reconstruction.id}.',
         'metadata:g:1': 'artist=Leeds Wormlab',
         'metadata:g:2': f'year={time.strftime("%Y")}',
     }
@@ -246,9 +253,12 @@ def generate_reconstruction_video(reconstruction_id: int, missing_only: bool = T
         assert n == n0 + i
 
         # Check images are present
-        img_path = PREPARED_IMAGES_PATH / f'{reconstruction.trial.id:03d}' / f'{n:06d}.npz'
+        img_path = PREPARED_IMAGES_PATH / f'{trial.id:03d}' / f'{n:06d}.npz'
         try:
             image_triplet = np.load(img_path)['images']
+            if image_triplet.shape != (3, trial.crop_size, trial.crop_size):
+                logger.warning('Prepared images are the wrong size, regeneration needed!')
+                raise RuntimeError()
         except Exception:
             logger.warning('Prepared images not available, stopping here.')
             break

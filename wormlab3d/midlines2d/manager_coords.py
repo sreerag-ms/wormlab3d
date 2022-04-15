@@ -7,7 +7,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from wormlab3d import PREPARED_IMAGE_SIZE
+from wormlab3d import PREPARED_IMAGE_SIZE_DEFAULT
 from wormlab3d.data.model import Midline2D, NetworkParameters
 from wormlab3d.midlines2d.args import DatasetMidline2DArgs
 from wormlab3d.midlines2d.coords_net import CoordsNet
@@ -32,7 +32,7 @@ class ManagerCoords(BaseManager):
 
     @property
     def input_shape(self) -> Tuple[int]:
-        return (1,) + PREPARED_IMAGE_SIZE
+        return 1, PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGE_SIZE_DEFAULT
 
     @property
     def output_shape(self) -> Tuple[int]:
@@ -155,7 +155,7 @@ class ManagerCoords(BaseManager):
                 X=coords[idx],
                 blur_sigma=self.dataset_args.blur_sigma,
                 draw_mode='line_aa',
-                image_size=PREPARED_IMAGE_SIZE
+                image_size=(PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGE_SIZE_DEFAULT)
             )
 
             # Output mask
@@ -163,7 +163,7 @@ class ManagerCoords(BaseManager):
                 X=outputs[idx],
                 blur_sigma=self.dataset_args.blur_sigma,
                 draw_mode='line_aa',
-                image_size=PREPARED_IMAGE_SIZE,
+                image_size=(PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGE_SIZE_DEFAULT),
                 raise_on_empty=False
             )
 

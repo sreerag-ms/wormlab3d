@@ -1,8 +1,7 @@
 import numpy as np
 
-from wormlab3d import logger, PREPARED_IMAGES_PATH
-from wormlab3d.data.model import Trial
-from wormlab3d.data.model.frame import PREPARED_IMAGE_SIZE, Frame
+from wormlab3d import logger
+from wormlab3d.data.model import Frame, Trial
 from wormlab3d.preprocessing.cropper import crop_image
 from wormlab3d.toolkit.util import resolve_targets
 
@@ -26,7 +25,7 @@ def generate_prepared_images(
     trials, _ = resolve_targets(experiment_id, trial_id, frame_num=frame_num)
     trial_ids = [t.id for t in trials]
     if missing_only:
-        logger.info(f'Generating any missing prepared images for {len(trial_ids)} trials.')
+        logger.info(f'Generating any missing/wrong-size prepared images for {len(trial_ids)} trials.')
     else:
         logger.info(f'(Re)generating ALL prepared images for {len(trial_ids)} trials.')
     if fixed_centres_only:
@@ -34,22 +33,15 @@ def generate_prepared_images(
 
     # Iterate over matching trials
     for trial_id in trial_ids:
-        logger.info(f'Processing trial id={trial_id}')
+        logger.info(f'Processing trial id={trial_id}.')
         trial = Trial.objects.get(id=trial_id)
-        dest = PREPARED_IMAGES_PATH / f'{trial.id:03d}'
+        imgs_shape = (trial.crop_size, trial.crop_size)
 
         # Filter frames
         if frame_num is not None:
             frames = [trial.get_frame(frame_num)]
         else:
             filters = {}
-            if missing_only:
-                filters['__raw__'] = {
-                    '$or': [
-                        {'images': None},
-                        {'images': {'$size': 0}},
-                    ]
-                }
             if max_3d_error > 0:
                 filters['centre_3d__error__lte'] = max_3d_error
             elif not fix_missing_centres and not fixed_centres_only:
@@ -60,7 +52,7 @@ def generate_prepared_images(
         frame_ids = [f.id for f in frames]
 
         if len(frame_ids) == 0:
-            logger.debug('No frames missing images!')
+            logger.info('No frames found!')
             continue
 
         reader = trial.get_video_triplet_reader()
@@ -72,7 +64,7 @@ def generate_prepared_images(
 
             # Due to the large number of frames in each trial, we need to reload from the
             # database to catch changes since we fetched the results.
-            if missing_only and len(frame.images) == 3:
+            if missing_only and frame.images is not None and frame.images.shape == (3,) + imgs_shape:
                 logger.info(log_prefix + 'Has images, skipping.')
                 continue
 
@@ -119,7 +111,7 @@ def generate_prepared_images(
                 crop = crop_image(
                     image=image,
                     centre_2d=p3d.reprojected_points_2d[c],
-                    size=PREPARED_IMAGE_SIZE,
+                    size=imgs_shape,
                     fix_overlaps=True
                 )
 
@@ -129,8 +121,7 @@ def generate_prepared_images(
                 crops.append(crop)
 
             # Save cropped images to disk
-            np.savez_compressed(dest / f'{frame.frame_num:06d}.npz', images=np.array(crops))
-            # frame.images = crops  # todo - use Frame to save images
+            frame.images = np.array(crops)
 
             # Unlock the frame when finished
             frame.release_lock_and_save()
@@ -138,7 +129,7 @@ def generate_prepared_images(
 
 if __name__ == '__main__':
     generate_prepared_images(
-        missing_only=False,
+        missing_only=True,
         fixed_centres_only=True,
         fix_missing_centres=False,
         max_3d_error=0,

@@ -17,7 +17,7 @@ from scipy.cluster.hierarchy import dendrogram
 from simple_worm.controls import ControlSequenceNumpy
 from simple_worm.frame import FrameSequenceNumpy
 from simple_worm.plot3d import FrameArtist, cla, MIDLINE_CMAP_DEFAULT
-from wormlab3d import logger, PREPARED_IMAGE_SIZE
+from wormlab3d import logger
 from wormlab3d.data.model import FrameSequence, SwRun
 
 
@@ -168,7 +168,7 @@ def generate_interactive_3d_clip_with_projections(
     fps = trial.fps
 
     # Load the camera image sequences
-    IS = np.zeros((FS.n_frames, 3, *PREPARED_IMAGE_SIZE))
+    IS = np.zeros((FS.n_frames, 3, FS.trial.crop_size, FS.trial.crop_size))
     for i, frame in enumerate(FS_db.frames):
         if not frame.is_ready():
             logger.warning(f'Frame #{frame.frame_num} is not ready! Preparing now...')

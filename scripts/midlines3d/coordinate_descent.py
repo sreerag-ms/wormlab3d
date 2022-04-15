@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch.optim import *
 from torchvision.transforms.functional import gaussian_blur
 
-from wormlab3d import PREPARED_IMAGE_SIZE
+from wormlab3d import PREPARED_IMAGE_SIZE_DEFAULT
 from wormlab3d.midlines2d.masks_from_coordinates import make_segmentation_mask
 from wormlab3d.toolkit.util import to_numpy
 
@@ -124,7 +124,7 @@ def get_directional_gradients(J, idxs, n_points):
 def test_points_to_masks():
     """
     """
-    image_size = PREPARED_IMAGE_SIZE
+    image_size = (PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGE_SIZE_DEFAULT)
     n_points = 3
 
     # Make target mask

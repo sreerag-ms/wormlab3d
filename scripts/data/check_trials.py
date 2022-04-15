@@ -2,7 +2,7 @@ import numpy as np
 
 from wormlab3d import logger
 from wormlab3d.data.model import Trial, Frame
-from wormlab3d.data.model.trial import TrialQualityChecks, TRIAL_QUALITY_VERIFIED, TRIAL_QUALITY_BROKEN, \
+from wormlab3d.data.model.trial import TrialQualityChecks, TRIAL_QUALITY_BEST, TRIAL_QUALITY_BROKEN, \
     TRIAL_QUALITY_VIDEO_ISSUES, TRIAL_QUALITY_TRACKING_ISSUES, TRIAL_QUALITY_MINOR_ISSUES, TRIAL_QUALITY_GOOD
 from wormlab3d.toolkit.util import resolve_targets
 
@@ -167,18 +167,18 @@ def check_trial(trial_id: int, missing_only: bool = True):
         logger.warning('Fixed triangulations but other issues present!')
 
     # Calculate overall quality score
-    if qc.verified:
-        q = TRIAL_QUALITY_VERIFIED  # manual verification trumps all else
-    elif not qc.fps or not qc.durations:
+    if not qc.fps or not qc.durations:
         q = TRIAL_QUALITY_BROKEN
-    elif not qc.durations or not qc.brightnesses:
+    elif not qc.brightnesses:
         q = TRIAL_QUALITY_VIDEO_ISSUES
     elif not qc.triangulations or not qc.triangulations_fixed:
         q = TRIAL_QUALITY_TRACKING_ISSUES
-    elif not qc.tracking_video:
+    elif not qc.tracking_video or not qc.syncing or not qc.crop_size:
         q = TRIAL_QUALITY_MINOR_ISSUES
-    else:
+    elif not qc.verified:
         q = TRIAL_QUALITY_GOOD
+    else:
+        q = TRIAL_QUALITY_BEST
 
     # Report
     logger.info(
@@ -187,7 +187,10 @@ def check_trial(trial_id: int, missing_only: bool = True):
         f'brightnesses={int(qc.brightnesses)}, '
         f'triangulations={int(qc.triangulations)}, '
         f'triangulations_fixed={int(qc.triangulations_fixed)}, '
-        f'tracking_video={int(qc.tracking_video)}'
+        f'tracking_video={int(qc.tracking_video)}, '
+        f'syncing={int(qc.syncing)}, '
+        f'crop_size={int(qc.crop_size)}, '
+        f'verified={int(qc.verified)}'
     )
     logger.info(f'Overall quality = {q}')
 
@@ -197,7 +200,7 @@ def check_trial(trial_id: int, missing_only: bool = True):
         trial.save()
 
 
-def fix_tracking(missing_only: bool = True):
+def check_trials(missing_only: bool = True):
     trials, _ = resolve_targets()
     trial_ids = [trial.id for trial in trials]
     for trial_id in trial_ids:
@@ -205,4 +208,4 @@ def fix_tracking(missing_only: bool = True):
 
 
 if __name__ == '__main__':
-    fix_tracking(missing_only=False)
+    check_trials(missing_only=False)

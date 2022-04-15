@@ -3,7 +3,7 @@ from typing import List
 import numpy as np
 from mongoengine import *
 
-from wormlab3d import CAMERA_IDXS, PREPARED_IMAGE_SIZE, logger
+from wormlab3d import CAMERA_IDXS, logger
 from wormlab3d.data.model import Cameras
 from wormlab3d.data.model.cameras import CAM_SOURCE_WT3D, CAM_SOURCE_ANNEX
 from wormlab3d.data.model.model import Model
@@ -63,7 +63,7 @@ class Midline3D(Document):
                 X=prepared_coords[c],
                 blur_sigma=blur_sigma,
                 draw_mode=draw_mode,
-                image_size=PREPARED_IMAGE_SIZE
+                image_size=(self.frame.trial.crop_size, self.frame.trial.crop_size)
             )
             masks.append(mask)
         return masks
@@ -164,11 +164,11 @@ class Midline3D(Document):
             p3d = self.frame.centre_3d
         centre_2d = p3d.reprojected_points_2d[camera_idx]
         X = image_points.copy()
-        X[:, 0] = X[:, 0] - centre_2d[0] + PREPARED_IMAGE_SIZE[0] / 2
-        X[:, 1] = X[:, 1] - centre_2d[1] + PREPARED_IMAGE_SIZE[1] / 2
+        X[:, 0] = X[:, 0] - centre_2d[0] + self.frame.trial.crop_size / 2
+        X[:, 1] = X[:, 1] - centre_2d[1] + self.frame.trial.crop_size / 2
         # X = X[(X[:, 0] >= 0) & (X[:, 1] >= 0)
-        #       & (X[:, 0] < PREPARED_IMAGE_SIZE[0] - 0.5)
-        #       & (X[:, 1] < PREPARED_IMAGE_SIZE[1] - 0.5)]
+        #       & (X[:, 0] < self.frame.trial.crop_size - 0.5)
+        #       & (X[:, 1] < self.frame.trial.crop_size - 0.5)]
         return X
 
     def get_natural_frame(self, regenerate: bool = False) -> np.ndarray:

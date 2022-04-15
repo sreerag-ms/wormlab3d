@@ -9,7 +9,7 @@
 
 {% block content %}
   <div class="row mb-4">
-    <div class="col-sm-12 col-md-4">
+    <div id="trial-details-card" class="col-sm-12 col-md-4">
       {% call cards.card() %}
         {{ details.render(trial_view, trial) }}
       {% endcall %}
@@ -32,10 +32,16 @@
             <tr>
               <th width="40%">{{ title }}</th>
               <td>
+                  {% if key in quality_check_toggleable_fields %}
+                    <a href="#" class="quality-toggle" data-key="{{ key }}">
+                  {% endif %}
                   {% if trial.quality_checks[key] %}
                     <span class="oi oi-check text-success"></span>
                   {% else %}
                     <span class="oi oi-x text-danger"></span>
+                  {% endif %}
+                  {% if key in quality_check_toggleable_fields %}
+                    </a>
                   {% endif %}
               </td>
             </tr>
@@ -139,6 +145,94 @@
 
   <script>
       $(document).ready(function () {
+          // ========================== Set comments ==========================
+          let comments_tr = $('#trial-details-card tr[data-key="comments"]');
+          comments_tr.css('cursor', 'pointer');
+          comments_tr.click(function(e) {
+              e.preventDefault();
+              let new_comments = window.prompt(
+                  'Update the comments. Bear in mind this will replace the current comments and no record of old comments is stored!',
+                  comments_tr.children('td:last').text().trim()
+              ).trim();
+              if (new_comments == null || new_comments == '') {
+                  return;
+              }
+              $.ajax({
+                  url: '{{ url_for('api.set_comments', _id=trial.id) }}',
+                  method: 'POST',
+                  dataType: 'json',
+                  data: {new_comments: new_comments},
+                  success: function () {
+                      alert('Comments updated.');
+                      comments_tr.children('td:last').html(new_comments);
+                  },
+                  error: function (xhr, status, error) {
+                      console.log(xhr, status, error);
+                      alert('Failed to update comments.');
+                  }
+              });
+          });
+
+          // ========================== Adjust crop size ==========================
+          let crop_size_tr = $('#trial-details-card tr[data-key="crop_size"]');
+          crop_size_tr.css('cursor', 'pointer');
+          crop_size_tr.click(function(e) {
+              e.preventDefault();
+              let new_size = window.prompt(
+                  'Enter a new crop size. This will not take affect until other scripts are ' +
+                  'run and may result in invalidating various results. Proceed with caution!',
+                  crop_size_tr.children('td:last').text().trim()
+              ).trim();
+              if (new_size == null || new_size == '') {
+                  return;
+              }
+              new_size = Number(new_size)
+              if (new_size < 150 || new_size > 400) {
+                  alert('New size is outside of sensible range (150-400).');
+                  return;
+              }
+
+              $.ajax({
+                  url: '{{ url_for('api.adjust_crop_size', _id=trial.id) }}',
+                  method: 'POST',
+                  dataType: 'json',
+                  data: {new_size: new_size},
+                  success: function () {
+                      alert('Crop size updated.');
+                      crop_size_tr.children('td:last').html(new_size);
+                  },
+                  error: function (xhr, status, error) {
+                      console.log(xhr, status, error);
+                      alert('Failed to update crop size.');
+                  }
+              });
+          });
+
+          // ========================== Quality check toggles ==========================
+          $('.quality-toggle').click(function(e) {
+              e.preventDefault();
+              let btn = $(this);
+              let key = btn.data('key');
+              $.ajax({
+                  url: '{{ url_for('api.quality_toggle', _id=trial.id) }}',
+                  method: 'POST',
+                  dataType: 'json',
+                  data: {key: key},
+                  success: function (data) {
+                      alert('Quality check "' + key + '" updated.');
+                      if (data['status']) {
+                          btn.children().removeClass('oi-x text-danger').addClass('oi-check text-success');
+                      } else {
+                          btn.children().removeClass('oi-check text-success').addClass('oi-x text-danger');
+                      }
+                  },
+                  error: function (xhr, status, error) {
+                      console.log(xhr, status, error);
+                      alert('Failed to update quality check "' + key + '".');
+                  }
+              });
+          });
+
           {% if trial.quality_checks.tracking_video %}
           // ========================== Tracking videos player ==========================
           let stream_endpoint = '/media/tracking-videos/{{ trial.id }}';

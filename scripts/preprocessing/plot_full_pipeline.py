@@ -1,11 +1,11 @@
 import os
-import time
 
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import patches
-from wormlab3d import CAMERA_IDXS, PREPARED_IMAGE_SIZE, LOGS_PATH
+
+from wormlab3d import CAMERA_IDXS, LOGS_PATH, START_TIMESTAMP
 from wormlab3d.data.model.trial import Trial
 from wormlab3d.preprocessing.contour import CONT_THRESH_RATIO_DEFAULT
 from wormlab3d.toolkit.triangulate import triangulate
@@ -28,7 +28,7 @@ def plot_full_pipeline():
         2) Cropped images around centre points.
         3) Inverted and background-subtracted, full size.
         4) Inverted, background-subtracted and cropped.
-        5) Prepared images as loaded from database (if available).
+        5) Prepared images as loaded from filesystem (if available).
     """
 
     # interactive_plots()
@@ -79,7 +79,9 @@ def plot_full_pipeline():
         ),
     )
 
-    crop_size = 400
+    # Set crop sizes
+    crop_size_final = trial.crop_size
+    crop_size_intermediate = crop_size_final * 2
 
     # Row 1: Originals
     for c in CAMERA_IDXS:
@@ -92,10 +94,11 @@ def plot_full_pipeline():
         # Show region which is zoomed into on next row
         rect = patches.Rectangle(
             (
-                p2d[c][0] - crop_size / 2,
-                p2d[c][1] - crop_size / 2
+                p2d[c][0] - crop_size_intermediate / 2,
+                p2d[c][1] - crop_size_intermediate / 2
             ),
-            crop_size, crop_size, linewidth=1, edgecolor='darkblue', facecolor='none', linestyle='--'
+            crop_size_intermediate, crop_size_intermediate, linewidth=1, edgecolor='darkblue', facecolor='none',
+            linestyle='--'
         )
         ax.add_patch(rect)
 
@@ -109,33 +112,33 @@ def plot_full_pipeline():
             cv2.drawContours(img, contours[c], -1, (0, 255, 0), 3)
 
         # Zoom in
-        l = max(0, round(p2d[c][1] - crop_size / 2))
-        r = max(0, round(p2d[c][0] - crop_size / 2))
-        img = img[l:l + crop_size + 1, r:r + crop_size + 1]
+        l = max(0, round(p2d[c][1] - crop_size_intermediate / 2))
+        r = max(0, round(p2d[c][0] - crop_size_intermediate / 2))
+        img = img[l:l + crop_size_intermediate + 1, r:r + crop_size_intermediate + 1]
         ax.imshow(img, vmin=0, vmax=255)
 
         # Scatter the 2D image centre points
         centre_pts = np.stack(centres[c])
         ax.scatter(
-            x=centre_pts[:, 0] - (p2d[c][0] - crop_size / 2),
-            y=centre_pts[:, 1] - (p2d[c][1] - crop_size / 2),
+            x=centre_pts[:, 0] - (p2d[c][0] - crop_size_intermediate / 2),
+            y=centre_pts[:, 1] - (p2d[c][1] - crop_size_intermediate / 2),
             color='blue', s=200, alpha=0.9, marker='+', linewidths=3
         )
 
         # Show the 2d reprojections for the triangulated object point
         ax.scatter(
-            x=p2d[c][0] - (p2d[c][0] - crop_size / 2),
-            y=p2d[c][1] - (p2d[c][1] - crop_size / 2),
+            x=p2d[c][0] - (p2d[c][0] - crop_size_intermediate / 2),
+            y=p2d[c][1] - (p2d[c][1] - crop_size_intermediate / 2),
             color='red', s=200, alpha=0.7, marker='x', linewidths=3
         )
 
         # Show final crop region
         rect = patches.Rectangle(
             (
-                crop_size / 2 - PREPARED_IMAGE_SIZE[0] / 2,
-                crop_size / 2 - PREPARED_IMAGE_SIZE[1] / 2
+                crop_size_intermediate / 2 - crop_size_final / 2,
+                crop_size_intermediate / 2 - crop_size_final / 2
             ),
-            PREPARED_IMAGE_SIZE[0], PREPARED_IMAGE_SIZE[1], linewidth=1, edgecolor='darkblue', facecolor='none',
+            crop_size_final, crop_size_final, linewidth=1, edgecolor='darkblue', facecolor='none',
             linestyle='--'
         )
         ax.add_patch(rect)
@@ -158,7 +161,7 @@ def plot_full_pipeline():
 
     if save_plot:
         os.makedirs(LOGS_PATH, exist_ok=True)
-        fn = LOGS_PATH + '/' + time.strftime('%Y%m%d_%H%M') + f'_trial={trial.id}_frame={frame.frame_num}.svg'
+        fn = LOGS_PATH / (START_TIMESTAMP + f'_trial={trial.id}_frame={frame.frame_num}.svg')
         plt.savefig(fn)
 
     plt.show()

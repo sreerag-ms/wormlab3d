@@ -10,7 +10,8 @@ from mongoengine import DoesNotExist
 from torch import Tensor, autograd
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
-from wormlab3d import PREPARED_IMAGE_SIZE, CAMERA_IDXS, logger
+
+from wormlab3d import PREPARED_IMAGE_SIZE_DEFAULT, CAMERA_IDXS, logger
 from wormlab3d.data.model import SegmentationMasks, NetworkParameters
 from wormlab3d.data.model.network_parameters import NetworkParametersRotAE
 from wormlab3d.midlines2d.args import DatasetMidline2DCoordsArgs
@@ -60,12 +61,12 @@ class ManagerRotAE(BaseManager):
     @property
     def input_shape(self) -> Tuple[int]:
         """A triplet of segmentation masks, one from each camera."""
-        return (3,) + PREPARED_IMAGE_SIZE
+        return 3, PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGE_SIZE_DEFAULT
 
     @property
     def output_shape(self) -> Tuple[int]:
         """A triplet of projected coordinate renderings, one from each camera."""
-        return (3,) + PREPARED_IMAGE_SIZE
+        return 3, PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGE_SIZE_DEFAULT
 
     def _init_dataset(self):
         """
@@ -130,13 +131,13 @@ class ManagerRotAE(BaseManager):
         """
         Initialise the network which includes 2-4 subnetworks.
         """
-        masks_shape = (3,) + PREPARED_IMAGE_SIZE
+        masks_shape = (3, PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGE_SIZE_DEFAULT)
         n_supplements = N_CAM_COEFFICIENTS * 3 + 3 + 2 * 3
-        c2d_input_shape = (3 + n_supplements,) + PREPARED_IMAGE_SIZE
+        c2d_input_shape = (3 + n_supplements, PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGE_SIZE_DEFAULT)
         c2d_output_shape = (3 + n_supplements, 2, self.dataset_args.n_worm_points)
         c3d_input_shape = (3 * 2 + n_supplements, self.dataset_args.n_worm_points)
         c3d_output_shape = (3, self.dataset_args.n_worm_points)
-        d0_input_shape = (6,) + PREPARED_IMAGE_SIZE
+        d0_input_shape = (6, PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGE_SIZE_DEFAULT)
         d2d_input_shape = (2, self.dataset_args.n_worm_points)
         d_output_shape = (1,)
         d3d_input_shape = (self.dataset_args.n_worm_points, 2)
@@ -576,7 +577,8 @@ class ManagerRotAE(BaseManager):
             # Got all the grad averages, now add them together and average
             G_sum = torch.zeros_like(G)
             for i, g in enumerate(GS):
-                G_sum += F.interpolate(GS[i], PREPARED_IMAGE_SIZE, mode='bilinear', align_corners=False)
+                G_sum += F.interpolate(GS[i], (PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGE_SIZE_DEFAULT),
+                                       mode='bilinear', align_corners=False)
             G_avg = G_sum  # / len(GS)
 
             return G_avg
@@ -854,8 +856,8 @@ class ManagerRotAE(BaseManager):
             ax.axis('off')
             for c in CAMERA_IDXS:
                 p2d = X1[idx][2 * c:2 * c + 2]
-                p2d = p2d + np.array([[100.], [100.]])
-                p2d[0] += c * 200
+                p2d = p2d + np.array([[PREPARED_IMAGE_SIZE_DEFAULT/2.], [PREPARED_IMAGE_SIZE_DEFAULT/2.]])
+                p2d[0] += c * PREPARED_IMAGE_SIZE_DEFAULT
                 ax.scatter(p2d[0], p2d[1], **p2d_opts)
             if i == 0:
                 ax.text(-0.05, 0.1, '$X_1$', transform=ax.transAxes, rotation='vertical')
@@ -880,8 +882,8 @@ class ManagerRotAE(BaseManager):
             ax.imshow(Y0_triplet, vmin=0, vmax=1, cmap='Reds', aspect='equal', alpha=alphas)
             for c in CAMERA_IDXS:
                 p2d = Y1[idx][2 * c:2 * c + 2]
-                p2d = p2d + np.array([[100.], [100.]])
-                p2d[0] += c * 200
+                p2d = p2d + np.array([[PREPARED_IMAGE_SIZE_DEFAULT/2.], [PREPARED_IMAGE_SIZE_DEFAULT/2.]])
+                p2d[0] += c * PREPARED_IMAGE_SIZE_DEFAULT
                 ax.scatter(p2d[0], p2d[1], **p2d_opts)
             if i == 0:
                 ax.text(-0.05, 0.1, '$Y_1$', transform=ax.transAxes, rotation='vertical')

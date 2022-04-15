@@ -4,7 +4,7 @@ from typing import List
 import numpy as np
 from mongoengine import *
 
-from wormlab3d import PREPARED_IMAGE_SIZE
+from wormlab3d import PREPARED_IMAGE_SIZE_DEFAULT
 from wormlab3d.data.numpy_field import NumpyField, COMPRESS_BLOSC_POINTER
 
 
@@ -18,7 +18,7 @@ class SegmentationMasks(Document):
     X = NumpyField(
         required=True,
         dtype=np.float32,
-        shape=(3,) + PREPARED_IMAGE_SIZE,
+        shape=(3, PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGE_SIZE_DEFAULT),
         compression=COMPRESS_BLOSC_POINTER
     )
 
@@ -37,4 +37,4 @@ class SegmentationMasks(Document):
     }
 
     def get_images(self) -> List[np.ndarray]:
-        return self.frame.images
+        return self.frame.images  # todo: resize to fit

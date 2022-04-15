@@ -7,7 +7,7 @@ from bson import ObjectId
 from torch.utils.data import DataLoader
 from torch.utils.data.dataloader import default_collate
 
-from wormlab3d import logger, DATASETS_SEG_MASKS_PATH, PREPARED_IMAGE_SIZE
+from wormlab3d import logger, DATASETS_SEG_MASKS_PATH, PREPARED_IMAGE_SIZE_DEFAULT
 from wormlab3d.data.model import SegmentationMasks, Frame
 from wormlab3d.data.model.dataset import DatasetSegmentationMasks
 from wormlab3d.midlines3d.args import DatasetSegmentationMasksArgs
@@ -45,7 +45,7 @@ class DatasetSegmentationMasksLoader(DatasetLoader):
         for mask in self.masks:
             mask_ids.append(mask.id)
         self.mask_ids = mask_ids
-        shape = ((len(mask_ids), 3,) + PREPARED_IMAGE_SIZE)
+        shape = (len(mask_ids), 3, PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGE_SIZE_DEFAULT)
 
         # Try to load from file cache if available
         hash = hash_data([str(m) for m in mask_ids])

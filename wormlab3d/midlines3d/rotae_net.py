@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch.distributions import Uniform
 
-from wormlab3d import PREPARED_IMAGE_SIZE
+from wormlab3d import PREPARED_IMAGE_SIZE_DEFAULT
 from wormlab3d.midlines3d.dynamic_cameras import DynamicCameras, N_CAM_COEFFICIENTS
 from wormlab3d.nn.models.basenet import BaseNet
 
@@ -140,7 +140,8 @@ def _avg_surface_2d(X_: torch.Tensor):
     # Got all the grad averages, now add them together and average
     G_sum = torch.zeros_like(G)
     for i, g in enumerate(GS):
-        G_sum += F.interpolate(GS[i], PREPARED_IMAGE_SIZE, mode='bilinear', align_corners=False)
+        G_sum += F.interpolate(GS[i], (PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGE_SIZE_DEFAULT),
+                               mode='bilinear', align_corners=False)
     G_avg = G_sum  # / len(GS)
 
     return G_avg
@@ -315,7 +316,7 @@ class RotAENet(nn.Module):
         self.register_buffer('rng_high', torch.ones(3) * 2 * np.pi / 360)
         self.euler_angles = None
         self.rotation_matrix = None
-        self.size = PREPARED_IMAGE_SIZE[0]
+        self.size = PREPARED_IMAGE_SIZE_DEFAULT
         self.blur_sigma = blur_sigma
         self.max_rotation = max_rotation
 

@@ -9,7 +9,7 @@ from matplotlib import gridspec
 from torch import Tensor, nn
 from torch.utils.data import DataLoader
 
-from wormlab3d import PREPARED_IMAGE_SIZE, N_WORM_POINTS, CAMERA_IDXS
+from wormlab3d import PREPARED_IMAGE_SIZE_DEFAULT, N_WORM_POINTS, CAMERA_IDXS
 from wormlab3d.data.model import SegmentationMasks, NetworkParameters
 from wormlab3d.midlines3d.args import DatasetSegmentationMasksArgs
 from wormlab3d.midlines3d.args.network_args import Midline3DNetworkArgs, ENCODING_MODE_DELTA_VECTORS, \
@@ -59,7 +59,7 @@ class Manager(BaseManager):
     @property
     def input_shape(self) -> Tuple[int]:
         """A triplet of segmentation maps, one from each camera."""
-        return (3,) + PREPARED_IMAGE_SIZE
+        return 3, PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGE_SIZE_DEFAULT
 
     @property
     def output_shape(self) -> Tuple[int]:
@@ -559,7 +559,7 @@ class Manager(BaseManager):
             if points_2d is not None:
                 for c in CAMERA_IDXS:
                     p2d = points_2d[idx][c]
-                    p2d[:, 0] += c * 200
+                    p2d[:, 0] += c * PREPARED_IMAGE_SIZE_DEFAULT
                     ax.scatter(p2d[:, 0], p2d[:, 1], **p2d_opts)
             if i == 0:
                 ax.text(-0.05, 0.1, 'Original+Masks_Out', transform=ax.transAxes, rotation='vertical')

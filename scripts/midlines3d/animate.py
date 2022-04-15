@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import animation
 from matplotlib.axes import GridSpec
+
 from simple_worm.frame import FrameSequenceNumpy
 from simple_worm.plot3d import FrameArtist, cla
-from wormlab3d import PREPARED_IMAGE_SIZE
 from wormlab3d import logger, LOGS_PATH, START_TIMESTAMP
 from wormlab3d.data.model import Trial, FrameSequence
 from wormlab3d.simple_worm.args import FrameSequenceArgs
@@ -108,7 +108,7 @@ def generate_3d_clip_with_projections(
         frame_idxs = np.arange(n_frames)
 
     # Load the camera image sequences
-    IS = np.zeros((FS.n_frames, 3, *PREPARED_IMAGE_SIZE))
+    IS = np.zeros((FS.n_frames, 3, trial.crop_size, trial.crop_size))
     for i, frame_idx in enumerate(frame_idxs):
         frame = frames[frame_idx]
         if not frame.is_ready():
@@ -181,7 +181,7 @@ def generate_3d_clip_with_projections(
             title=fn,
             artist='WormLab Leeds'
         )
-        save_path = LOGS_PATH + '/' + START_TIMESTAMP + '_' + fn + '.mp4'
+        save_path = LOGS_PATH / (START_TIMESTAMP + '_' + fn + '.mp4')
         logger.info(f'Saving animation to {save_path}.')
         ani.save(save_path, writer='ffmpeg', fps=fps, metadata=metadata)
 

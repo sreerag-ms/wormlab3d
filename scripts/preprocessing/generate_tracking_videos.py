@@ -1,21 +1,22 @@
 import os
+import time
 
 import ffmpeg
 import numpy as np
 
-from wormlab3d import logger, PREPARED_IMAGE_SIZE, TRACKING_VIDEOS_PATH, PREPARED_IMAGES_PATH
+from wormlab3d import logger, PREPARED_IMAGES_PATH
 from wormlab3d.data.model import Trial, Frame
 from wormlab3d.toolkit.util import resolve_targets
 
-width = PREPARED_IMAGE_SIZE[0] * 3
-height = PREPARED_IMAGE_SIZE[1]
 
-
-def generate_tracking_video_trial(trial_id: int):
-    trial = Trial.objects.get(id=trial_id)
+def generate_tracking_video_trial(trial: Trial):
     if trial.fps == 0:
         logger.warning('Trial FPS=0. Cannot create video.')
         return
+
+    # Video dimensions
+    width = trial.crop_size * 3
+    height = trial.crop_size
 
     # Fetch the images
     logger.info('Querying database.')
@@ -30,16 +31,24 @@ def generate_tracking_video_trial(trial_id: int):
     cursor = Frame.objects().aggregate(pipeline, allowDiskUse=True)
 
     # Delete existing video
-    video_filename = TRACKING_VIDEOS_PATH / f'{trial.id:03d}.mp4'
+    video_filename = trial.tracking_video_path
     if video_filename.exists():
         logger.info(f'Video already exists at: {video_filename}. Deleting.')
         os.remove(video_filename)
 
     # Initialise ffmpeg process
+    output_args = {
+        'pix_fmt': 'gray',
+        'vcodec': 'libx264',
+        'r': trial.fps,
+        'metadata:g:0': f'title=Trial {trial.id}',
+        'metadata:g:1': 'artist=Leeds Wormlab',
+        'metadata:g:2': f'year={time.strftime("%Y")}',
+    }
     process = (
         ffmpeg
             .input('pipe:', format='rawvideo', pix_fmt='gray', s='{}x{}'.format(width, height))
-            .output(str(video_filename), pix_fmt='gray', vcodec='libx264', r=trial.fps)
+            .output(str(video_filename), **output_args)
             .overwrite_output()
             .run_async(pipe_stdin=True)
     )
@@ -56,10 +65,13 @@ def generate_tracking_video_trial(trial_id: int):
             n0 = n
         assert n == n0 + i
 
-        # Check images are present
+        # Check images are present and the right size
         img_path = PREPARED_IMAGES_PATH / f'{trial.id:03d}' / f'{n:06d}.npz'
         try:
             image_triplet = np.load(img_path)['images']
+            if image_triplet.shape != (3, trial.crop_size, trial.crop_size):
+                logger.warning('Prepared images are the wrong size, regeneration needed!')
+                raise RuntimeError()
         except Exception:
             logger.warning('Prepared images not available, stopping here.')
             break
@@ -88,20 +100,23 @@ def generate_tracking_videos(missing_only: bool = True):
     trial_ids = [trial.id for trial in trials]
     for trial_id in trial_ids:
         logger.info(f'------ Generating tracking video for trial id={trial_id}.')
+        trial = Trial.objects.get(id=trial_id)
 
-        # Check if tracking video is already present
-        if missing_only:
-            video_filename = TRACKING_VIDEOS_PATH / f'{trial_id:03d}.mp4'
-            if video_filename.exists():
-                logger.info(f'Video already exists at: {video_filename}. Skipping.')
+        # Check if tracking video is already present and the right size
+        if missing_only and trial.has_tracking_video:
+            metadata = ffmpeg.probe(trial.tracking_video_path)
+            width = metadata['streams'][0]['width']
+            height = metadata['streams'][0]['height']
+            if width == height * 3 and height == trial.crop_size:
+                logger.info(f'Video already exists at: {trial.tracking_video_path}. Skipping.')
                 continue
 
         # Soft fail on errors
         try:
-            generate_tracking_video_trial(trial_id)
+            generate_tracking_video_trial(trial)
         except Exception as e:
             logger.error(str(e))
 
 
 if __name__ == '__main__':
-    generate_tracking_videos(missing_only=False)
+    generate_tracking_videos(missing_only=True)

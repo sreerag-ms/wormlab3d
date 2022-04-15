@@ -116,4 +116,11 @@ class TrialView(DocumentView):
                     'choices': TRIAL_QUALITY_CHOICES
                 },
             ),
+            (
+                self.prefix + 'crop_size', {
+                    'title': 'Crop size',
+                    'type': 'integer',
+                    'filter_type': 'choice_query',
+                },
+            ),
         ])

@@ -7,7 +7,7 @@ from typing import Dict, Any
 import numpy as np
 import torch
 
-from wormlab3d import PREPARED_IMAGE_SIZE, MF_DATA_PATH
+from wormlab3d import MF_DATA_PATH
 from wormlab3d import logger
 from wormlab3d.data.model import MFParameters, MFCheckpoint, Reconstruction, Trial
 from wormlab3d.midlines3d.frame_state import FrameState, BUFFER_NAMES, PARAMETER_NAMES, BINARY_DATA_KEYS, \
@@ -132,7 +132,7 @@ class TrialState:
         # Copy statistics
         shutil.copy(from_state.path / 'stats.json', self.path / 'stats.json')
 
-    def _init_state(self, copy_state: 'TrialState' = None):
+    def _init_state(self):
         """
         Initialise empty state.
         """
@@ -149,7 +149,7 @@ class TrialState:
             path_state = self.path / f'{k}.npz'
 
             if k in ['masks_target', 'masks_target_residuals', 'masks_curve']:
-                shape = (T, 3, *PREPARED_IMAGE_SIZE)
+                shape = (T, 3, self.trial.crop_size, self.trial.crop_size)
             elif k == 'cam_intrinsics':
                 shape = (T, 3, 4)
             elif k == 'cam_rotations':

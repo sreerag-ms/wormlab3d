@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from wormlab3d import N_WORM_POINTS, PREPARED_IMAGE_SIZE
+from wormlab3d import N_WORM_POINTS, PREPARED_IMAGE_SIZE_DEFAULT
 from wormlab3d.midlines3d.args.network_args import ENCODING_MODE_DELTA_VECTORS, \
     ENCODING_MODE_DELTA_ANGLES, ENCODING_MODE_DELTA_ANGLES_BASIS, MAX_DECAY_FACTOR
 from wormlab3d.midlines3d.dynamic_cameras import DynamicCameras
@@ -32,7 +32,7 @@ class EncDec(nn.Module):
         self.pointsToMasks = PointsToMasks(
             blur_sigma=blur_sigma,
             n_points=N_WORM_POINTS,
-            image_size=PREPARED_IMAGE_SIZE,
+            image_size=(PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGE_SIZE_DEFAULT),
             max_n_optimisation_steps=500,
             oob_grad_val=1e-2,
             noise_std=0.
@@ -206,7 +206,7 @@ class EncDec(nn.Module):
         points_2d = self.cams.forward(camera_coeffs, points_3d)
 
         # Re-centre according to 2D base points plus a (100,100) to put it in the centre of the cropped image
-        image_centre_pt = torch.ones((bs, 1, 1, 2), dtype=torch.float32, device=device) * PREPARED_IMAGE_SIZE[0] / 2
+        image_centre_pt = torch.ones((bs, 1, 1, 2), dtype=torch.float32, device=device) * PREPARED_IMAGE_SIZE_DEFAULT / 2
         points_2d_net = points_2d - points_2d_base.unsqueeze(2) + image_centre_pt
 
         # Apply 2D offsets, max shift allowed is within centre 50%

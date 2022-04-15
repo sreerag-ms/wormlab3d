@@ -1,9 +1,10 @@
+import os
 from typing import List, Union
 
 import numpy as np
 from mongoengine import *
 
-from wormlab3d import logger, PREPARED_IMAGE_SIZE, CAMERA_IDXS, PREPARED_IMAGES_PATH
+from wormlab3d import logger, CAMERA_IDXS, PREPARED_IMAGES_PATH
 from wormlab3d.data.model import Cameras, CameraShifts
 from wormlab3d.data.model.cameras import CAM_SOURCE_ANNEX
 from wormlab3d.data.model.experiment import Experiment
@@ -47,10 +48,21 @@ class Frame(Document):
         'ordering': ['+trial', '+frame_num']
     }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.images: np.ndarray = None
+
     def __getattribute__(self, k):
         # Load images from the file system
         if k != 'images':
             return super().__getattribute__(k)
+
+        # Check if the images have been defined or loaded already
+        images = super().__getattribute__('images')
+        if images is not None:
+            return images
+
+        # Otherwise try to load from disk
         path = PREPARED_IMAGES_PATH / f'{self.trial.id:03d}' / f'{self.frame_num:06d}.npz'
         try:
             return np.load(path)['images']
@@ -272,7 +284,7 @@ class Frame(Document):
             results = []
             for cams in cameras_list:
                 # If the camera reprojection error is greater than the best error we currently have, skip it
-                #if cams.reprojection_error > best_err:
+                # if cams.reprojection_error > best_err:
                 #    continue
                 results.append(_triangulate(cams))
             return any(results)
@@ -391,19 +403,19 @@ class Frame(Document):
         reader = self.trial.get_video_triplet_reader()
         reader.set_frame_num(self.frame_num)
         images = reader.get_images(invert=True, subtract_background=True)
-        crops = []
+        crops = np.zeros((3, self.trial.crop_size, self.trial.crop_size), dtype=np.float32)
         for c, image in images.items():
             crop = crop_image(
                 image=image,
                 centre_2d=p3d.reprojected_points_2d[c],
-                size=PREPARED_IMAGE_SIZE,
+                size=(self.trial.crop_size, self.trial.crop_size),
                 fix_overlaps=True
             )
 
             # Normalise to [0-1] with float32 dtype
             crop = crop.astype(np.float32) / 255.
             crop = (crop - crop.min()) / (crop.max() - crop.min())
-            crops.append(crop)
+            crops[c] = crop
 
         self.images = crops
 
@@ -429,7 +441,10 @@ class Frame(Document):
         """
         Checks to see if the frame has 2D centres for all views, a 3D centre point and 3 prepared images.
         """
-        return self.centres_2d_available() and self.centre_3d is not None and len(self.images) == 3
+        return self.centres_2d_available() \
+               and self.centre_3d is not None \
+               and self.images is not None \
+               and self.images.shape == (3, self.trial.crop_size, self.trial.crop_size)
 
     def get_lock(self) -> bool:
         """
@@ -450,6 +465,19 @@ class Frame(Document):
         """
         self.locked = False
         self.save()
+
+    def save(self, *args, **kwargs):
+        res = super().save(*args, **kwargs)
+
+        # Save images to disk
+        dest = PREPARED_IMAGES_PATH / f'{self.trial.id:03d}'
+        os.makedirs(dest, exist_ok=True)
+        np.savez_compressed(
+            dest / f'{self.frame_num:06d}.npz',
+            images=self.images
+        )
+
+        return res
 
     @staticmethod
     def unlock_all():

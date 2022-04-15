@@ -3,7 +3,7 @@ from typing import List
 import torch
 from torchvision.transforms.functional import to_tensor
 
-from wormlab3d import logger, PREPARED_IMAGE_SIZE, CAMERA_IDXS
+from wormlab3d import logger, PREPARED_IMAGE_SIZE_DEFAULT, CAMERA_IDXS
 from wormlab3d.data.model import Checkpoint, SegmentationMasks
 from wormlab3d.midlines2d.args import DatasetMidline2DArgs
 from wormlab3d.midlines2d.manager import Manager
@@ -59,9 +59,9 @@ def generate_2d_segmentation_masks(
         logger.info('Processing batch...')
 
         # Stack all views from all frames
-        X = torch.zeros((nn_batch_size, 1) + PREPARED_IMAGE_SIZE)
+        X = torch.zeros((nn_batch_size, 1, PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGE_SIZE_DEFAULT))
         X[:len(batch) * 3] = torch.stack([
-            to_tensor(m.frame.images[c])
+            to_tensor(m.frame.images[c])  # todo - might need resizing
             for m in batch for c in CAMERA_IDXS
         ])
 

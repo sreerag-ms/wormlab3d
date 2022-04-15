@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch import nn
 from torchvision.transforms.functional import gaussian_blur
 
-from wormlab3d import CAMERA_IDXS, PREPARED_IMAGE_SIZE
+from wormlab3d import CAMERA_IDXS
 from wormlab3d.data.model import Cameras, MFParameters, Frame
 from wormlab3d.midlines3d.mf_methods import make_rotation_matrix, normalise, integrate_curvature, an_orthonormal
 
@@ -189,10 +189,10 @@ class FrameState(nn.Module):
         masks_fr[self.images < self.parameters.masks_threshold] = 0
         masks_fr = masks_fr.unsqueeze(0)
 
-        # Linearly interpolate target mask resolutions from 8x8 to 200x200
+        # Linearly interpolate target mask resolutions from 8x8 to crop_size x crop_size (200x200 default)
         D = self.parameters.depth
         D_min = self.parameters.depth_min
-        sizes = torch.linspace(8, PREPARED_IMAGE_SIZE[0], D).to(torch.int32)
+        sizes = torch.linspace(8, self.frame.trial.crop_size, D).to(torch.int32)
 
         # Generate downsampled target masks
         for d in range(D_min, D):
@@ -203,7 +203,8 @@ class FrameState(nn.Module):
                 masks_ds = F.interpolate(masks_fr, (image_size, image_size), mode='nearest')
 
                 # Upsample to restore the target size
-                masks_rs = F.interpolate(masks_ds, PREPARED_IMAGE_SIZE, mode='bilinear', align_corners=False)
+                masks_rs = F.interpolate(masks_ds, (self.frame.trial.crop_size, self.frame.trial.crop_size),
+                                         mode='bilinear', align_corners=False)
 
                 # Add a gaussian-blur, smaller at lower depths.
                 blur_sigma = 1 / (2**(d + 1))

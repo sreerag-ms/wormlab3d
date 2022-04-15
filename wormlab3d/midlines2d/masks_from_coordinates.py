@@ -3,14 +3,14 @@ from typing import Tuple
 import numpy as np
 from skimage.draw import line, line_aa
 from skimage.filters import gaussian
-from wormlab3d import PREPARED_IMAGE_SIZE
+from wormlab3d import PREPARED_IMAGE_SIZE_DEFAULT
 
 
 def make_segmentation_mask(
         X: np.ndarray,
         blur_sigma: float = None,
         draw_mode: str = 'line_aa',
-        image_size: Tuple[int] = PREPARED_IMAGE_SIZE,
+        image_size: Tuple[int] = (PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGE_SIZE_DEFAULT),
         raise_on_empty: bool = True
 ) -> np.ndarray:
     """

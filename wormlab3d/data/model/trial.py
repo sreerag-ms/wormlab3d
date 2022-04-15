@@ -1,9 +1,10 @@
+from pathlib import Path
 from typing import List, Dict, Union, Tuple
 
 import numpy as np
 from mongoengine import *
 
-from wormlab3d import CAMERA_IDXS, TRACKING_VIDEOS_PATH
+from wormlab3d import CAMERA_IDXS, TRACKING_VIDEOS_PATH, PREPARED_IMAGE_SIZE_DEFAULT
 from wormlab3d.data.model import Cameras
 from wormlab3d.data.model.experiment import Experiment
 from wormlab3d.data.model.frame import Frame
@@ -12,7 +13,7 @@ from wormlab3d.data.util import fix_path
 from wormlab3d.preprocessing.video_reader import VideoReader
 from wormlab3d.preprocessing.video_triplet_reader import VideoTripletReader
 
-TRIAL_QUALITY_VERIFIED = 10
+TRIAL_QUALITY_BEST = 10
 TRIAL_QUALITY_GOOD = 9
 TRIAL_QUALITY_MINOR_ISSUES = 7
 TRIAL_QUALITY_TRACKING_ISSUES = 5
@@ -20,7 +21,7 @@ TRIAL_QUALITY_VIDEO_ISSUES = 3
 TRIAL_QUALITY_BROKEN = 1
 
 TRIAL_QUALITY_CHOICES = {
-    TRIAL_QUALITY_VERIFIED: 'Verified',
+    TRIAL_QUALITY_BEST: 'Best',
     TRIAL_QUALITY_GOOD: 'Good',
     TRIAL_QUALITY_MINOR_ISSUES: 'Minor issues',
     TRIAL_QUALITY_TRACKING_ISSUES: 'Tracking issues',
@@ -37,6 +38,7 @@ class TrialQualityChecks(EmbeddedDocument):
     triangulations_fixed = BooleanField(default=False)
     tracking_video = BooleanField(default=False)
     syncing = BooleanField(default=False)
+    crop_size = BooleanField(default=False)
     verified = BooleanField(default=False)
 
 
@@ -58,6 +60,7 @@ class Trial(Document):
     legacy_data = DictField()
     quality = IntField()
     quality_checks = EmbeddedDocumentField(TrialQualityChecks)
+    crop_size = IntField(default=PREPARED_IMAGE_SIZE_DEFAULT)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -228,9 +231,12 @@ class Trial(Document):
         return dt
 
     @property
+    def tracking_video_path(self) -> Path:
+        return TRACKING_VIDEOS_PATH / f'{self.id:03d}.mp4'
+
+    @property
     def has_tracking_video(self) -> bool:
-        video_filename = TRACKING_VIDEOS_PATH / f'{self.id:03d}.mp4'
-        return video_filename.exists()
+        return self.tracking_video_path.exists()
 
     def find_next_frame_with_different_images(self, start_frame: int, threshold: float, direction: int = 1) -> Frame:
         """

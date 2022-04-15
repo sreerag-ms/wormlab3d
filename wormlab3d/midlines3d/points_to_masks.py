@@ -7,7 +7,7 @@ from torch import nn
 from torch.optim import RMSprop
 from torchvision.transforms.functional import gaussian_blur
 
-from wormlab3d import PREPARED_IMAGE_SIZE, N_WORM_POINTS
+from wormlab3d import PREPARED_IMAGE_SIZE_DEFAULT, N_WORM_POINTS
 from wormlab3d.midlines3d.args.network_args import MAX_DECAY_FACTOR
 from wormlab3d.toolkit.util import to_numpy
 
@@ -17,7 +17,7 @@ class PointsToMasks(nn.Module):
             self,
             blur_sigma: float = 0,
             n_points: int = N_WORM_POINTS,
-            image_size: Tuple[int] = PREPARED_IMAGE_SIZE,
+            image_size: Tuple[int] = (PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGE_SIZE_DEFAULT),
             max_n_optimisation_steps: int = 10,
             oob_grad_val: float = 1e-5,
             noise_std: float = 0.5,

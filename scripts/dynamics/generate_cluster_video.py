@@ -9,7 +9,7 @@ import numpy as np
 from scipy.cluster.hierarchy import fcluster
 
 from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT
-from wormlab3d import logger, PREPARED_IMAGE_SIZE, PREPARED_IMAGES_PATH, LOGS_PATH, START_TIMESTAMP
+from wormlab3d import logger, PREPARED_IMAGE_SIZE_DEFAULT, PREPARED_IMAGES_PATH, LOGS_PATH, START_TIMESTAMP
 from wormlab3d.data.model import Frame, Reconstruction
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF, Midline3D
 from wormlab3d.dynamics.clusterer import DynamicsClusterer
@@ -21,8 +21,9 @@ from wormlab3d.trajectories.pca import generate_or_load_pca_cache
 from wormlab3d.trajectories.util import calculate_speeds
 
 tex_mode()
-width = PREPARED_IMAGE_SIZE[0] * 3 * 2
-height = PREPARED_IMAGE_SIZE[1] * 3
+img_size = PREPARED_IMAGE_SIZE_DEFAULT
+width = img_size * 3 * 2
+height = img_size * 3
 cmap = plt.get_cmap(MIDLINE_CMAP_DEFAULT)
 
 
@@ -200,6 +201,9 @@ def _generate_annotated_images(image_triplet: np.ndarray, points_2d: np.ndarray,
                     lineType=cv2.LINE_AA
                 )
 
+        # Resize
+        if z.shape != (img_size, img_size, 3):
+            z = cv2.resize(z, dsize=(img_size, img_size), interpolation=cv2.INTER_AREA)
         images.append(z)
 
     return np.concatenate(images).transpose(1, 0, 2)

@@ -3,7 +3,7 @@ from typing import Tuple, List, Final
 import torch
 from torch import nn
 
-from wormlab3d import PREPARED_IMAGE_SIZE
+from wormlab3d import PREPARED_IMAGE_SIZE_DEFAULT
 from wormlab3d.data.model.mf_parameters import RENDER_MODE_GAUSSIANS, RENDER_MODES
 from wormlab3d.midlines3d.dynamic_cameras import DynamicCameras
 from wormlab3d.midlines3d.mf_methods import calculate_curvature, integrate_curvature, normalise, smooth_parameter
@@ -18,7 +18,7 @@ def render_points(
         camera_sigmas: torch.Tensor,
         camera_exponents: torch.Tensor,
         cameras_intensities: torch.Tensor,
-        image_size: int = PREPARED_IMAGE_SIZE[0],
+        image_size: int = PREPARED_IMAGE_SIZE_DEFAULT,
         render_mode: str = RENDER_MODE_GAUSSIANS
 ):
     """
@@ -131,7 +131,7 @@ class ProjectRenderScoreModel(nn.Module):
 
     def __init__(
             self,
-            image_size: int = PREPARED_IMAGE_SIZE[0],
+            image_size: int = PREPARED_IMAGE_SIZE_DEFAULT,
             render_mode: str = RENDER_MODE_GAUSSIANS,
             sigmas_min: float = 0.04,
             sigmas_max: float = 0.1,

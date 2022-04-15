@@ -40,7 +40,7 @@
   <table class="table w-30">
     <tbody>
     {% for key, field in doc_view.fields.items() if key not in doc_view.hide_fields %}
-      <tr>
+      <tr data-key="{{ key }}">
         <th width="40%">{{ field.title }}</th>
         <td>
         {% if key == '_id' and not doc._id %}

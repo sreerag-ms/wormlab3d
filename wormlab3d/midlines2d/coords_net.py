@@ -2,7 +2,7 @@ from typing import Tuple
 
 import torch
 from torch import nn
-from wormlab3d import PREPARED_IMAGE_SIZE
+from wormlab3d import PREPARED_IMAGE_SIZE_DEFAULT
 from wormlab3d.nn.models.basenet import BaseNet
 
 
@@ -30,7 +30,7 @@ class CoordsNet(nn.Module):
         z = z.reshape(bs, self.n_worm_points, 2)
 
         # Add centre-point offset
-        cp = torch.tensor((PREPARED_IMAGE_SIZE[0] // 2, PREPARED_IMAGE_SIZE[0] // 2), device=device)
+        cp = torch.tensor((PREPARED_IMAGE_SIZE_DEFAULT // 2, PREPARED_IMAGE_SIZE_DEFAULT // 2), device=device)
         z = z + cp
 
         return z

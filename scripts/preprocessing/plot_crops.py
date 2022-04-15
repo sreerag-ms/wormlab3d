@@ -2,7 +2,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from wormlab3d import logger, CAMERA_IDXS
-from wormlab3d.data.model.frame import PREPARED_IMAGE_SIZE
 from wormlab3d.data.model.trial import Trial
 from wormlab3d.preprocessing.cropper import crop_image
 from wormlab3d.toolkit.plot_utils import interactive_plots
@@ -15,7 +14,7 @@ def plot_crops(trial_id, frame_num=1):
         2) Cropped images around centre points.
         3) Inverted and background-subtracted, full size.
         4) Inverted, background-subtracted and cropped.
-        5) Prepared images as loaded from database (if available).
+        5) Prepared images as loaded from filesystem (if available).
     """
     interactive_plots()
 
@@ -23,6 +22,7 @@ def plot_crops(trial_id, frame_num=1):
     trial = Trial.objects.get(id=trial_id)
     reader = trial.get_video_triplet_reader()
     frame = trial.get_frame(frame_num)
+    crop_size = (trial.crop_size, trial.crop_size)
 
     # Set the frame number, fetch the images from each video and find objects in all 3
     reader.set_frame_num(frame_num)
@@ -69,12 +69,12 @@ def plot_crops(trial_id, frame_num=1):
         # Cropped images
         ax = axes[1, c]
         if c == 1:
-            ax.set_title(f'Cropped to ({PREPARED_IMAGE_SIZE})')
+            ax.set_title(f'Cropped to ({crop_size})')
         if len(centres_2d[c]) > 0:
             crop = crop_image(
                 images[c],
                 centre_2d=centres_2d[c][0],
-                size=PREPARED_IMAGE_SIZE,
+                size=crop_size,
                 fix_overlaps=True
             )
             ax.imshow(crop, vmin=0, vmax=255, cmap='gray')
@@ -89,12 +89,12 @@ def plot_crops(trial_id, frame_num=1):
         # Cropped final images
         ax = axes[3, c]
         if c == 1:
-            ax.set_title(f'Cropped to ({PREPARED_IMAGE_SIZE})')
+            ax.set_title(f'Cropped to ({crop_size})')
         if len(centres_2d[c]) > 0:
             crop_inv_no_bg = crop_image(
                 images_inv_no_bg[c],
                 centre_2d=centres_2d[c][0],
-                size=PREPARED_IMAGE_SIZE,
+                size=crop_size,
                 fix_overlaps=True
             )
             ax.imshow(crop_inv_no_bg, vmin=0, vmax=255, cmap='gray')

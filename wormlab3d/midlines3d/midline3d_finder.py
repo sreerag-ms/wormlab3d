@@ -15,7 +15,7 @@ from torch.backends import cudnn
 from torch.optim import Optimizer
 from torch.utils.tensorboard import SummaryWriter
 
-from wormlab3d import logger, LOGS_PATH, PREPARED_IMAGE_SIZE, START_TIMESTAMP
+from wormlab3d import logger, LOGS_PATH, START_TIMESTAMP
 from wormlab3d.data.model import Trial, MFCheckpoint, MFParameters, Reconstruction
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
 from wormlab3d.midlines3d.args_finder import ParameterArgs, RuntimeArgs, SourceArgs
@@ -171,7 +171,7 @@ class Midline3DFinder:
         """
         logger.info(f'Initialising model.')
         model = ProjectRenderScoreModel(
-            image_size=PREPARED_IMAGE_SIZE[0],
+            image_size=self.trial.crop_size,
             render_mode=self.parameters.render_mode,
             sigmas_min=self.parameters.sigmas_min,
             sigmas_max=self.parameters.sigmas_max,
@@ -1523,11 +1523,11 @@ class Midline3DFinder:
                 # Scatter the midline points
                 p2d = to_numpy(points_2d[d]).transpose(1, 0, 2)
                 for k in range(3):
-                    p = p2d[k] + (0, 200)
+                    p = p2d[k] + (0, self.trial.crop_size)
                     if k == 1:
-                        p += (200, 0)
+                        p += (self.trial.crop_size, 0)
                     elif k == 2:
-                        p += (400, 0)
+                        p += (self.trial.crop_size * 2, 0)
                     ax.scatter(p[:, 0], p[:, 1], cmap='jet', c=np.linspace(0, 1, len(p)), s=scatter_sizes[d + D_min],
                                alpha=0.6)
 
@@ -1608,11 +1608,11 @@ class Midline3DFinder:
                 # Scatter the midline points
                 p2d = to_numpy(points_2d[j]).transpose(1, 0, 2)
                 for k in range(3):
-                    p = p2d[k] + (0, 200)
+                    p = p2d[k] + (0, self.trial.crop_size)
                     if k == 1:
-                        p += (200, 0)
+                        p += (self.trial.crop_size, 0)
                     elif k == 2:
-                        p += (400, 0)
+                        p += (self.trial.crop_size * 2, 0)
                     ax.scatter(p[:, 0], p[:, 1], cmap='jet', c=np.linspace(0, 1, len(p)), s=scatter_sizes[d], alpha=0.6)
 
                 # Errors
