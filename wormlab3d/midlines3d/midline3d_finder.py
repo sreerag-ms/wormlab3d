@@ -69,9 +69,8 @@ class Midline3DFinder:
         # Set random seed
         self._set_seed()
 
-        # Initialise the parameters and model
+        # Initialise the parameters
         self.parameters: MFParameters = self._init_parameters()
-        self.model = self._init_model()
 
         # Initialise convergence detector
         self.convergence_detector = self._init_convergence_detector()
@@ -84,6 +83,9 @@ class Midline3DFinder:
 
         # Load the trial and initialise trainable parameters
         self._init_trial()
+
+        # Initialise the model
+        self.model = self._init_model()
 
         # Optimiser
         self.optimiser = self._init_optimiser()
@@ -165,30 +167,6 @@ class Midline3DFinder:
 
         return parameters
 
-    def _init_model(self) -> ProjectRenderScoreModel:
-        """
-        Build the model.
-        """
-        logger.info(f'Initialising model.')
-        model = ProjectRenderScoreModel(
-            image_size=self.trial.crop_size,
-            render_mode=self.parameters.render_mode,
-            sigmas_min=self.parameters.sigmas_min,
-            sigmas_max=self.parameters.sigmas_max,
-            intensities_min=self.parameters.intensities_min,
-            curvature_mode=self.parameters.curvature_mode,
-            curvature_deltas=self.parameters.curvature_deltas,
-            length_min=self.parameters.length_min,
-            length_max=self.parameters.length_max,
-            curvature_max=self.parameters.curvature_max,
-            dX0_limit=self.parameters.dX0_limit,
-            dl_limit=self.parameters.dl_limit,
-            dk_limit=self.parameters.dk_limit,
-            dpsi_limit=self.parameters.dpsi_limit,
-        )
-        model = torch.jit.script(model)
-        return model
-
     def _init_convergence_detector(self) -> ConvergenceDetector:
         """
         Initialise the convergence detector.
@@ -204,6 +182,36 @@ class Midline3DFinder:
         )
         cd = torch.jit.script(cd)
         return cd
+
+    def _init_devices(self):
+        """
+        Find available devices and try to use what we want.
+        """
+        if self.runtime_args.gpu_only:
+            cpu_or_gpu = 'gpu'
+        elif self.runtime_args.cpu_only:
+            cpu_or_gpu = 'cpu'
+        else:
+            cpu_or_gpu = None
+
+        if cpu_or_gpu == 'cpu':
+            device = torch.device('cpu')
+        else:
+            device = torch.device(f'cuda:{self.runtime_args.gpu_id}' if torch.cuda.is_available() else 'cpu')
+        if device.type == 'cuda':
+            logger.info('Using GPU.')
+            cudnn.benchmark = True  # optimises code for constant input sizes
+
+            # Move modules to the gpu
+            for k, v in vars(self).items():
+                if isinstance(v, torch.nn.Module):
+                    v.to(device)
+        else:
+            if cpu_or_gpu == 'gpu':
+                raise RuntimeError('GPU requested but not available. Aborting.')
+            logger.info('Using CPU.')
+
+        return device
 
     def _init_reconstruction(self) -> Reconstruction:
         """
@@ -367,6 +375,31 @@ class Midline3DFinder:
         # Shrunken lengths
         self.shrunken_lengths = torch.stack(self.master_frame_state.get_state('length')).detach()
 
+    def _init_model(self) -> ProjectRenderScoreModel:
+        """
+        Build the model.
+        """
+        logger.info(f'Initialising model.')
+        model = ProjectRenderScoreModel(
+            image_size=self.trial.crop_size,
+            render_mode=self.parameters.render_mode,
+            sigmas_min=self.parameters.sigmas_min,
+            sigmas_max=self.parameters.sigmas_max,
+            intensities_min=self.parameters.intensities_min,
+            curvature_mode=self.parameters.curvature_mode,
+            curvature_deltas=self.parameters.curvature_deltas,
+            length_min=self.parameters.length_min,
+            length_max=self.parameters.length_max,
+            curvature_max=self.parameters.curvature_max,
+            dX0_limit=self.parameters.dX0_limit,
+            dl_limit=self.parameters.dl_limit,
+            dk_limit=self.parameters.dk_limit,
+            dpsi_limit=self.parameters.dpsi_limit,
+        )
+        model = torch.jit.script(model)
+        model = model.to(self.device)
+        return model
+
     def _init_optimiser(self) -> Optimizer:
         """
         Set up the joint cameras and cloud optimiser and the curve optimiser.
@@ -440,36 +473,6 @@ class Midline3DFinder:
             )
 
         return optimiser
-
-    def _init_devices(self):
-        """
-        Find available devices and try to use what we want.
-        """
-        if self.runtime_args.gpu_only:
-            cpu_or_gpu = 'gpu'
-        elif self.runtime_args.cpu_only:
-            cpu_or_gpu = 'cpu'
-        else:
-            cpu_or_gpu = None
-
-        if cpu_or_gpu == 'cpu':
-            device = torch.device('cpu')
-        else:
-            device = torch.device(f'cuda:{self.runtime_args.gpu_id}' if torch.cuda.is_available() else 'cpu')
-        if device.type == 'cuda':
-            logger.info('Using GPU.')
-            cudnn.benchmark = True  # optimises code for constant input sizes
-
-            # Move modules to the gpu
-            for k, v in vars(self).items():
-                if isinstance(v, torch.nn.Module):
-                    v.to(device)
-        else:
-            if cpu_or_gpu == 'gpu':
-                raise RuntimeError('GPU requested but not available. Aborting.')
-            logger.info('Using CPU.')
-
-        return device
 
     def _init_checkpoint(self) -> MFCheckpoint:
         """
