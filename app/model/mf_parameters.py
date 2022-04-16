@@ -217,6 +217,28 @@ class MFParametersView(DocumentView):
                 },
             ),
             (
+                self.prefix + 'centre_shift_every_n_steps', {
+                    'title': 'Centre shift every n',
+                    'type': 'integer',
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'centre_shift_threshold', {
+                    'title': 'Centre shift threshold',
+                    'type': 'float',
+                    'precision': 2,
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'centre_shift_adj', {
+                    'title': 'Centre shift adj',
+                    'type': 'integer',
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
                 self.prefix + 'frame_skip', {
                     'title': 'Frame skip',
                     'type': 'integer',

@@ -709,7 +709,14 @@ class Midline3DFinder:
 
         # Train the cam coeffs and multiscale curve
         for step in range(start_step, final_step):
+            # Centre the worm first so any changes get picked up by the loss
+            stats_centre = self._centre_shift()
+
+            # Calculate losses and optimise
             loss, loss_global, losses_depths, stats = self._train_step()
+
+            # Merge stats
+            stats = {**stats, **stats_centre}
 
             # Update steps and checkpoint stats
             self.checkpoint.step += 1
@@ -744,6 +751,94 @@ class Midline3DFinder:
                 break
 
         self.tb_logger.add_scalar('train_steps', self.checkpoint.step_frame, self.checkpoint.frame_num)
+
+    def _centre_shift(self):
+        """
+        Shift the curve along its midline so as to centre the scores.
+        """
+        p = self.parameters
+        D = p.depth - p.depth_min
+        stats = {}
+
+        if not p.curvature_mode \
+                or p.centre_shift_every_n_steps is None \
+                or self.checkpoint.step_frame == 0 \
+                or (p.length_regrow_steps is not None and self.checkpoint.step_frame < p.length_regrow_steps) \
+                or self.checkpoint.step_frame % p.centre_shift_every_n_steps != 0:
+            return stats
+
+        points_shifted = 0
+        with torch.no_grad():
+            for i, fs in enumerate(self.frame_batch):
+                if p.curvature_deltas and i != 0:
+                    # Centring only needed for the master frame in deltas-mode.
+                    break
+                scores = fs.get_state('scores')
+                X0 = fs.get_state('X0')
+                T0 = fs.get_state('T0')
+                M10 = fs.get_state('M10')
+                length = fs.get_state('length')
+                curvatures = fs.get_state('curvatures')
+
+                for d in range(D):
+                    # Skip shifting during regrowth phase
+                    length_d = length[d]
+                    if length_d < p.length_min:
+                        continue
+
+                    # Find the midpoint of the tapered scores
+                    scores_d = scores[d]
+                    N = scores_d.shape[0]
+                    old_midpoint = int((N - 1) / 2)
+                    scores_d_aa = (scores_d > scores_d.mean()).to(torch.float32)
+                    centroid_idx = (torch.arange(N, device=self.device) * scores_d_aa).sum() / scores_d_aa.sum()
+                    stats[f'centroid_idx/{d}'] = centroid_idx.item()
+                    shift = torch.ceil(centroid_idx).to(torch.int32) - old_midpoint
+                    if shift.abs() < p.centre_shift_threshold * N:
+                        continue
+                    shift.clamp_(min=-p.centre_shift_adj, max=p.centre_shift_adj)
+                    new_midpoint = old_midpoint + shift
+
+                    # Compute the curve with the current parameters
+                    curvatures_d = curvatures[d]
+                    points_d_new, tangents_d_new, M1_new = integrate_curvature(
+                        X0[d].unsqueeze(0),
+                        T0[d].unsqueeze(0),
+                        length[d].unsqueeze(0),
+                        curvatures_d.unsqueeze(0),
+                        M10[d].unsqueeze(0),
+                    )
+
+                    # Get the new position, tangent and frame values at the new midpoint
+                    X0_new = points_d_new[0][new_midpoint]
+                    T0_new = tangents_d_new[0][new_midpoint]
+                    M10_new = M1_new[0][new_midpoint]
+
+                    # Shift the curvatures and decay towards zero at the new ends
+                    decay = torch.linspace(1, 0, shift.abs() + 2, device=self.device)[1:-1]
+                    if shift < 0:
+                        curvatures_shifted = torch.cat([
+                            decay.flip(dims=(0,))[:, None]
+                            * torch.repeat_interleave(curvatures_d[0].unsqueeze(0), shift.abs(), dim=0),
+                            curvatures_d[:shift],
+                        ])
+                    else:
+                        curvatures_shifted = torch.cat([
+                            curvatures_d[shift:],
+                            decay[:, None]
+                            * torch.repeat_interleave(curvatures_d[-1].unsqueeze(0), shift.abs(), dim=0),
+                        ])
+
+                    # Update the parameters to match the shifted curve
+                    X0[d].data = X0_new
+                    T0[d].data = T0_new
+                    M10[d].data = M10_new
+                    curvatures[d].data = curvatures_shifted
+                    points_shifted += shift.abs()
+
+            stats['shifts'] = points_shifted
+
+        return stats
 
     def _train_step(self) -> Tuple[torch.Tensor, Dict[str, Union[torch.Tensor, float, int]]]:
         """
@@ -871,9 +966,6 @@ class Midline3DFinder:
 
         # Clamp parameters
         self._clamp_parameters(points_smoothed)
-
-        # Centre worm
-        self._centre_shift(stats)
 
         # Update master state
         self.master_frame_state.set_state('masks_curve', [masks[d][self.active_idx] for d in range(D)])
@@ -1228,89 +1320,6 @@ class Midline3DFinder:
                 sf = 0.2 / ((v - 1).abs()).amax()
                 if sf < 1:
                     v.data = (v - 1) * sf + 1
-
-    def _centre_shift(self, stats: dict):
-        """
-        Shift the curve along its midline so as to centre the scores.
-        """
-        p = self.parameters
-        D = p.depth - p.depth_min
-
-        if not p.curvature_mode or p.centre_shift_threshold is None or p.centre_shift_threshold == 0:
-            return
-
-        points_shifted = 0
-        with torch.no_grad():
-            for i, fs in enumerate(self.frame_batch):
-                if p.curvature_deltas and i != 0:
-                    # Centring only needed for the master frame in deltas-mode.
-                    break
-                scores = fs.get_state('scores')
-                X0 = fs.get_state('X0')
-                T0 = fs.get_state('T0')
-                M10 = fs.get_state('M10')
-                length = fs.get_state('length')
-                curvatures = fs.get_state('curvatures')
-
-                for d in range(D):
-                    # Skip shifting during regrowth phase
-                    length_d = length[d]
-                    if p.length_regrow_steps is not None \
-                            and self.checkpoint.step_frame < p.length_regrow_steps \
-                            and length_d < p.length_min:
-                        continue
-
-                    # Find the midpoint of the tapered scores
-                    scores_d = scores[d]
-                    N = scores_d.shape[0]
-                    old_midpoint = int((N - 1) / 2)
-                    scores_d_aa = (scores_d > scores_d.mean()).to(torch.float32)
-                    centroid_idx = (torch.arange(N, device=self.device) * scores_d_aa).sum() / scores_d_aa.sum()
-                    stats[f'centroid_idx/{d}'] = centroid_idx.item()
-                    shift = torch.ceil(centroid_idx).to(torch.int32) - old_midpoint
-                    if shift.abs() < p.centre_shift_threshold * N:
-                        continue
-                    shift.clamp_(min=-p.centre_shift_adj, max=p.centre_shift_adj)
-                    new_midpoint = old_midpoint + shift
-
-                    # Compute the curve with the current parameters
-                    curvatures_d = curvatures[d]
-                    points_d_new, tangents_d_new, M1_new = integrate_curvature(
-                        X0[d].unsqueeze(0),
-                        T0[d].unsqueeze(0),
-                        length[d].unsqueeze(0),
-                        curvatures_d.unsqueeze(0),
-                        M10[d].unsqueeze(0),
-                    )
-
-                    # Get the new position, tangent and frame values at the new midpoint
-                    X0_new = points_d_new[0][new_midpoint]
-                    T0_new = tangents_d_new[0][new_midpoint]
-                    M10_new = M1_new[0][new_midpoint]
-
-                    # Shift the curvatures and decay towards zero at the new ends
-                    decay = torch.linspace(1, 0, shift.abs() + 2, device=self.device)[1:-1]
-                    if shift < 0:
-                        curvatures_shifted = torch.cat([
-                            decay.flip(dims=(0,))[:, None]
-                            * torch.repeat_interleave(curvatures_d[0].unsqueeze(0), shift.abs(), dim=0),
-                            curvatures_d[:shift],
-                        ])
-                    else:
-                        curvatures_shifted = torch.cat([
-                            curvatures_d[shift:],
-                            decay[:, None]
-                            * torch.repeat_interleave(curvatures_d[-1].unsqueeze(0), shift.abs(), dim=0),
-                        ])
-
-                    # Update the parameters to match the shifted curve
-                    X0[d].data = X0_new
-                    T0[d].data = T0_new
-                    M10[d].data = M10_new
-                    curvatures[d].data = curvatures_shifted
-                    points_shifted += shift.abs()
-
-            stats['shifts'] = points_shifted
 
     def _log_progress(self, step: int, final_step: int, loss: float, stats: dict):
         """

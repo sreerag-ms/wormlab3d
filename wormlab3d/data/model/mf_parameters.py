@@ -45,6 +45,7 @@ class MFParameters(Document):
     dk_limit = FloatField()
     dpsi_limit = FloatField()
 
+    centre_shift_every_n_steps = IntField()
     centre_shift_threshold = FloatField()
     centre_shift_adj = IntField()
 

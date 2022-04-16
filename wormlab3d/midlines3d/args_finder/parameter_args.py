@@ -41,8 +41,9 @@ class ParameterArgs(BaseArgs):
             dk_limit: float = None,
             dpsi_limit: float = None,
 
+            centre_shift_every_n_steps: int = None,
             centre_shift_threshold: float = None,
-            centre_shift_adj: float = None,
+            centre_shift_adj: int = None,
 
             frame_skip: int = None,
             n_steps_init: int = 5000,
@@ -141,12 +142,22 @@ class ParameterArgs(BaseArgs):
         self.dk_limit = dk_limit
         self.dpsi_limit = dpsi_limit
 
-        self.centre_shift_threshold = centre_shift_threshold
-        if centre_shift_threshold is not None:
+        if not curvature_mode:
+            centre_shift_every_n_steps = None
+        self.centre_shift_every_n_steps = centre_shift_every_n_steps
+        if centre_shift_every_n_steps is not None:
+            if centre_shift_threshold is None:
+                centre_shift_threshold = 0.01
+            else:
+                assert centre_shift_threshold > 0
             if centre_shift_adj is None:
                 centre_shift_adj = 1
             else:
                 assert centre_shift_adj >= 1
+        else:
+            centre_shift_threshold = None
+            centre_shift_adj = None
+        self.centre_shift_threshold = centre_shift_threshold
         self.centre_shift_adj = centre_shift_adj
 
         if frame_skip == 1:
@@ -266,9 +277,10 @@ class ParameterArgs(BaseArgs):
         group.add_argument('--dpsi-limit', type=float,
                            help='Maximum allowable change in curvature angle between batched frames (only used in delta-curvatures mode). Default=None.')
 
+        group.add_argument('--centre-shift-every-n-steps', type=int,
+                           help='Shift the curve along the midline to centre the scores every n steps. Default=None (no shifting).')
         group.add_argument('--centre-shift-threshold', type=float,
-                           help='Shift the curve along the midline to centre the scores. '
-                                'Start shifting when the central index is > threshold*N away from the midpoint. Default=None (no shifting).')
+                           help='Start shifting when the central index is > threshold*N away from the midpoint. Default=0.01.')
         group.add_argument('--centre-shift-adj', type=int,
                            help='When centre shifting move at most this number of vertices in either direction. Default=1.')
 
