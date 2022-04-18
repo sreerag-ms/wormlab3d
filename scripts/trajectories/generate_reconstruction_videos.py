@@ -155,7 +155,7 @@ def generate_reconstruction_video(reconstruction_id: int, missing_only: bool = T
 
     # Video dimensions
     width = trial.crop_size * 3
-    height = trial.crop_size
+    height = trial.crop_size * 3
 
     # Check if trajectory video is already present
     if missing_only and reconstruction.has_video:
