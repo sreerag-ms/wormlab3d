@@ -2,6 +2,7 @@ from typing import Tuple, List, Final
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 from wormlab3d import PREPARED_IMAGE_SIZE_DEFAULT
 from wormlab3d.data.model.mf_parameters import RENDER_MODE_GAUSSIANS, RENDER_MODES
@@ -134,6 +135,7 @@ class ProjectRenderScoreModel(nn.Module):
             image_size: int = PREPARED_IMAGE_SIZE_DEFAULT,
             render_mode: str = RENDER_MODE_GAUSSIANS,
             second_render_prob: float = 0.5,
+            filter_size: int = None,
             sigmas_min: float = 0.04,
             sigmas_max: float = 0.1,
             exponents_min: float = 0.5,
@@ -155,6 +157,7 @@ class ProjectRenderScoreModel(nn.Module):
         assert render_mode in RENDER_MODES
         self.render_mode = render_mode
         self.second_render_prob = second_render_prob
+        self.filter_size = filter_size
         self.sigmas_min = sigmas_min + 0.001
         self.sigmas_max = sigmas_max
         self.exponents_min = exponents_min
@@ -198,6 +201,7 @@ class ProjectRenderScoreModel(nn.Module):
             camera_sigmas: torch.Tensor,
             camera_exponents: torch.Tensor,
             camera_intensities: torch.Tensor,
+            filters: torch.Tensor,
             length_warmup: bool
     ) -> Tuple[
         List[torch.Tensor],
@@ -494,6 +498,18 @@ class ProjectRenderScoreModel(nn.Module):
             detection_masks.append(detection_masks_d)
         scores = scores[::-1]
         detection_masks = detection_masks[::-1]
+
+        # Apply filters
+        if self.filter_size is not None:
+            for d in range(D):
+                masks_filtered = []
+                for i in range(bs):
+                    filters_i = filters[i].unsqueeze(1)
+                    masks_i = masks[d][i].unsqueeze(0)
+                    masks_di_filtered = F.conv2d(masks_i, filters_i, padding='same', groups=3)
+                    masks_di_filtered = masks_di_filtered.clamp(min=0., max=1.)
+                    masks_filtered.append(masks_di_filtered)
+                masks[d] = torch.cat(masks_filtered, dim=0)
 
         return masks, detection_masks, points_2d, scores, curvatures_smoothed, points_smoothed, \
                sigmas_smoothed, exponents_smoothed, intensities_smoothed

@@ -92,6 +92,36 @@ class TrialState:
         for k in BUFFER_NAMES + PARAMETER_NAMES:
             path_state = self.path / f'{k}.npz'
             try:
+                if k == 'filters':
+                    # If filters don't exist already then just create them
+                    if k not in meta['shapes'] or not path_state.exists():
+                        _, shape = self._init_state_component('filters')
+                        meta['shapes'][k] = shape
+                        with open(self.path / 'metadata.json', 'w') as f:
+                            json.dump(meta, f, indent=2, separators=(',', ': '))
+
+                    # Check if the filter shapes have changed
+                    T = meta['shapes'][k][0]
+                    ks_old = meta['shapes'][k][2]
+                    ks_new = self.parameters.filter_size
+                    new_filter_shape = (T, 3, ks_new, ks_new)
+                    if ks_old != ks_new:
+                        if mode == 'r+':
+                            # Make a backup of the old filters
+                            backup_path = path_state.with_suffix(f'.{meta["checkpoint"]}.npz.bkup')
+                            shutil.copy(path_state, backup_path)
+                            logger.warning(f'Filter shape has changed! Old filters backed up to: {backup_path}.')
+
+                            # Initialise the new filters
+                            self._init_state_component('filters')
+
+                            # Update the meta data on disk
+                            meta['shapes'][k] = new_filter_shape
+                            with open(self.path / 'metadata.json', 'w') as f:
+                                json.dump(meta, f, indent=2, separators=(',', ': '))
+                        else:
+                            raise RuntimeError('Filter shape invalid for loading!')
+
                 state = np.memmap(path_state, dtype=np.float32, mode=mode, shape=tuple(meta['shapes'][k]))
                 states[k] = state
                 logger.info(f'Loaded data from {path_state}.')
@@ -138,59 +168,66 @@ class TrialState:
         """
         logger.info(f'Initialising state in {self.path}.')
         os.makedirs(self.path, exist_ok=True)
+        states = {}
+        shapes = {}
+        for k in BUFFER_NAMES + PARAMETER_NAMES:
+            states[k], shapes[k] = self._init_state_component(k)
+        self.states = states
+        self.shapes = shapes
+
+    def _init_state_component(self, k: str):
+        """
+        Initialise an empty state component.
+        """
         mp = self.parameters
         T = self.trial.n_frames_min
         N = mp.n_points_total
         D = mp.depth - mp.depth_min
-        states = {}
-        shapes = {}
+        path_state = self.path / f'{k}.npz'
 
-        for k in BUFFER_NAMES + PARAMETER_NAMES:
-            path_state = self.path / f'{k}.npz'
+        if k in ['masks_target', 'masks_target_residuals', 'masks_curve']:
+            shape = (T, 3, self.trial.crop_size, self.trial.crop_size)
+        elif k == 'cam_intrinsics':
+            shape = (T, 3, 4)
+        elif k == 'cam_rotations':
+            shape = (T, 3, 9)
+        elif k == 'cam_rotation_preangles':
+            shape = (T, 3, 3, 2)
+        elif k == 'cam_translations':
+            shape = (T, 3, 3)
+        elif k == 'cam_distortions':
+            shape = (T, 3, 5)
+        elif k == 'cam_shifts':
+            shape = (T, 3, 1)
+        elif k in ['X0', 'T0', 'M10']:
+            shape = (T, D, 3)
+        elif k == 'curvatures':
+            shape = (T, N, 2)
+        elif k == 'points':
+            shape = (T, N, 3)
+        elif k == 'points_2d':
+            shape = (T, N, 3, 2)
+        elif k in ['length', 'sigmas', 'exponents', 'intensities']:
+            shape = (T, D)
+        elif k == 'scores':
+            shape = (T, N)
+        elif k in ['camera_sigmas', 'camera_exponents', 'camera_intensities']:
+            shape = (T, 3)
+        elif k == 'filters':
+            ks = mp.filter_size if mp.filter_size is not None else 1
+            shape = (T, 3, ks, ks)
+        else:
+            raise RuntimeError(f'Unknown shape for buffer/parameter key: {k}')
 
-            if k in ['masks_target', 'masks_target_residuals', 'masks_curve']:
-                shape = (T, 3, self.trial.crop_size, self.trial.crop_size)
-            elif k == 'cam_intrinsics':
-                shape = (T, 3, 4)
-            elif k == 'cam_rotations':
-                shape = (T, 3, 9)
-            elif k == 'cam_rotation_preangles':
-                shape = (T, 3, 3, 2)
-            elif k == 'cam_translations':
-                shape = (T, 3, 3)
-            elif k == 'cam_distortions':
-                shape = (T, 3, 5)
-            elif k == 'cam_shifts':
-                shape = (T, 3, 1)
-            elif k in ['X0', 'T0', 'M10']:
-                shape = (T, D, 3)
-            elif k == 'curvatures':
-                shape = (T, N, 2)
-            elif k == 'points':
-                shape = (T, N, 3)
-            elif k == 'points_2d':
-                shape = (T, N, 3, 2)
-            elif k in ['length', 'sigmas', 'exponents', 'intensities']:
-                shape = (T, D)
-            elif k == 'scores':
-                shape = (T, N)
-            elif k in ['camera_sigmas', 'camera_exponents', 'camera_intensities']:
-                shape = (T, 3)
-            else:
-                raise RuntimeError(f'Unknown shape for buffer/parameter key: {k}')
+        shape = np.array(shape)
+        shape = shape.clip(min=1)
+        shape = tuple(int(s) for s in shape)
+        if any(s == 0 for s in shape):
+            raise RuntimeError(f'Empty shape for {k}.')
+        dtype = np.float32 if k not in BINARY_DATA_KEYS else np.bool
+        state = np.memmap(path_state, dtype=dtype, mode='w+', shape=shape)
 
-            shape = np.array(shape)
-            shape = shape.clip(min=1)
-            shape = tuple(int(s) for s in shape)
-            if any(s == 0 for s in shape):
-                logger.debug(f'Empty shape for {k}, skipping.')
-                continue
-            shapes[k] = shape
-            dtype = np.float32 if k not in BINARY_DATA_KEYS else np.bool
-            states[k] = np.memmap(path_state, dtype=dtype, mode='w+', shape=shape)
-
-        self.states = states
-        self.shapes = shapes
+        return state, shape
 
     def save(self):
         """
@@ -203,7 +240,7 @@ class TrialState:
         # Save the meta data
         meta = {**self.meta, 'shapes': self.shapes}
         if self.checkpoint is not None and self.checkpoint.id is not None:
-            meta['checkpoint'] = self.checkpoint.id
+            meta['checkpoint'] = str(self.checkpoint.id)
         with open(self.path / 'metadata.json', 'w') as f:
             json.dump(meta, f, indent=2, separators=(',', ': '))
 
@@ -289,6 +326,13 @@ class TrialState:
                     v = [v[2**d - idx_offset - 1:2**(d + 1) - idx_offset - 1] for d in range(D_min, D)]
                 elif k in ['X0', 'T0', 'M10', 'length', 'sigmas', 'exponents', 'intensities']:
                     v = [v[i] for i in range(D - D_min)]
+
+                # Check filters
+                if k == 'filters' and v.sum() == 0:
+                    ks = v.shape[1]
+                    v[:, int(ks / 2), int(ks / 2)] = 1.
+                    v += torch.randn_like(v) * 1e-4
+                    v /= v.norm(dim=(1, 2), keepdim=True)
 
                 frame_state.set_state(k, v)
 

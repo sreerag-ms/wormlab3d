@@ -20,6 +20,7 @@ class ParameterArgs(BaseArgs):
             masks_threshold: float = 0.4,
             render_mode: str = RENDER_MODE_GAUSSIANS,
             second_render_prob: float = 0.5,
+            filter_size: int = None,
 
             sigmas_init: float = 0.1,
             sigmas_min: float = 0.04,
@@ -84,6 +85,7 @@ class ParameterArgs(BaseArgs):
             lr_sigmas: float = 1e-3,
             lr_exponents: float = 1e-3,
             lr_intensities: float = 1e-3,
+            lr_filters: float = 1e-3,
             **kwargs
     ):
         self.load = load
@@ -97,6 +99,10 @@ class ParameterArgs(BaseArgs):
         self.masks_threshold = masks_threshold
         self.render_mode = render_mode
         self.second_render_prob = second_render_prob
+        if filter_size is not None:
+            assert filter_size >= 3, 'Filter size must be >= 3.'
+            assert filter_size % 2 == 1, 'Filter size must be odd.'
+        self.filter_size = filter_size
 
         self.sigmas_init = sigmas_init
         self.sigmas_min = sigmas_min
@@ -208,6 +214,7 @@ class ParameterArgs(BaseArgs):
         self.lr_sigmas = lr_sigmas
         self.lr_exponents = lr_exponents
         self.lr_intensities = lr_intensities
+        self.lr_filters = lr_filters
 
     @classmethod
     def add_args(cls, parser: ArgumentParser) -> _ArgumentGroup:
@@ -237,6 +244,8 @@ class ParameterArgs(BaseArgs):
                            help='How to render the points, either as gaussian blobs (gaussians) or as circles (circles). Default=gaussians.')
         group.add_argument('--second-render-prob', type=float, default=0.5,
                            help='Probability of generating a second render scaled by tapered scores. Default=0.5.')
+        group.add_argument('--filter-size', type=int,
+                           help='Set >= 3 to train a set of 3 2D convolutional filters, one for each camera render.')
 
         group.add_argument('--sigmas-init', type=float, default=0.04,
                            help='Initial rendering sigmas for points. Default=0.04.')
@@ -357,6 +366,8 @@ class ParameterArgs(BaseArgs):
                            help='Learning rate for the rendering exponents.')
         group.add_argument('--lr-intensities', type=float, default=1e-3,
                            help='Learning rate for the rendering intensities.')
+        group.add_argument('--lr-filters', type=float, default=1e-3,
+                           help='Learning rate for the filters.')
         return group
 
     def get_db_params(self) -> dict:

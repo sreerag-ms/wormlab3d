@@ -15,6 +15,7 @@ from torch.backends import cudnn
 from torch.optim import Optimizer
 from torch.utils.tensorboard import SummaryWriter
 
+from simple_worm.plot3d import MidpointNormalize
 from wormlab3d import logger, LOGS_PATH, START_TIMESTAMP
 from wormlab3d.data.model import Trial, MFCheckpoint, MFParameters, Reconstruction
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
@@ -380,22 +381,24 @@ class Midline3DFinder:
         Build the model.
         """
         logger.info(f'Initialising model.')
+        p = self.parameters
         model = ProjectRenderScoreModel(
             image_size=self.trial.crop_size,
-            render_mode=self.parameters.render_mode,
-            second_render_prob=self.parameters.second_render_prob,
-            sigmas_min=self.parameters.sigmas_min,
-            sigmas_max=self.parameters.sigmas_max,
-            intensities_min=self.parameters.intensities_min,
-            curvature_mode=self.parameters.curvature_mode,
-            curvature_deltas=self.parameters.curvature_deltas,
-            length_min=self.parameters.length_min,
-            length_max=self.parameters.length_max,
-            curvature_max=self.parameters.curvature_max,
-            dX0_limit=self.parameters.dX0_limit,
-            dl_limit=self.parameters.dl_limit,
-            dk_limit=self.parameters.dk_limit,
-            dpsi_limit=self.parameters.dpsi_limit,
+            render_mode=p.render_mode,
+            second_render_prob=p.second_render_prob,
+            filter_size=p.filter_size,
+            sigmas_min=p.sigmas_min,
+            sigmas_max=p.sigmas_max,
+            intensities_min=p.intensities_min,
+            curvature_mode=p.curvature_mode,
+            curvature_deltas=p.curvature_deltas,
+            length_min=p.length_min,
+            length_max=p.length_max,
+            curvature_max=p.curvature_max,
+            dX0_limit=p.dX0_limit,
+            dl_limit=p.dl_limit,
+            dk_limit=p.dk_limit,
+            dpsi_limit=p.dpsi_limit,
         )
         model = torch.jit.script(model)
         model = model.to(self.device)
@@ -447,6 +450,7 @@ class Midline3DFinder:
             {'params': params['camera_sigmas'], 'lr': p.lr_sigmas},
             {'params': params['camera_exponents'], 'lr': p.lr_exponents},
             {'params': params['camera_intensities'], 'lr': p.lr_intensities},
+            {'params': params['filters'], 'lr': p.lr_filters},
         ]
 
         if p.algorithm == OPTIMISER_LBFGS_NEW:
@@ -517,7 +521,7 @@ class Midline3DFinder:
         checkpoint.save()
 
         # Set checkpoint reference in trial state
-        self.trial_state.checkpoint = self.checkpoint
+        self.trial_state.checkpoint = checkpoint
 
         return checkpoint
 
@@ -876,6 +880,7 @@ class Midline3DFinder:
             camera_sigmas = torch.stack([f.get_state('camera_sigmas') for f in self.frame_batch])
             camera_exponents = torch.stack([f.get_state('camera_exponents') for f in self.frame_batch])
             camera_intensities = torch.stack([f.get_state('camera_intensities') for f in self.frame_batch])
+            filters = torch.stack([f.get_state('filters') for f in self.frame_batch])
             X0 = [torch.stack([f.get_state('X0')[d] for f in self.frame_batch]) for d in range(D)]
             T0 = [torch.stack([f.get_state('T0')[d] for f in self.frame_batch]) for d in range(D)]
             M10 = [torch.stack([f.get_state('M10')[d] for f in self.frame_batch]) for d in range(D)]
@@ -909,6 +914,7 @@ class Midline3DFinder:
                 camera_sigmas=camera_sigmas,
                 camera_exponents=camera_exponents,
                 camera_intensities=camera_intensities,
+                filters=filters,
                 length_warmup=length_fixed,
             )
 
@@ -1322,6 +1328,10 @@ class Midline3DFinder:
                 if sf < 1:
                     v.data = (v - 1) * sf + 1
 
+            # Camera filters should be normalised
+            filters = self.master_frame_state.get_state('filters')
+            filters.data = filters / filters.norm(dim=(1, 2), keepdim=True)
+
     def _log_progress(self, step: int, final_step: int, loss: float, stats: dict):
         """
         Log the loss and stats to the tensorboard logger and command line.
@@ -1409,6 +1419,8 @@ class Midline3DFinder:
                 self._plot_2d_batch()
             if self.parameters.curvature_mode:
                 self._plot_curvatures()
+            if self.parameters.filter_size > 0:
+                self._plot_filters()
             self._plot_point_stats(frame_state, skipped)
 
     def _plot_3d(self, frame_state: FrameState, skipped: bool = False):
@@ -1816,6 +1828,29 @@ class Midline3DFinder:
 
         fig.tight_layout()
         self._save_plot(fig, 'curvatures', frame_state)
+
+    def _plot_filters(self):
+        """
+        Plot the filters.
+        """
+        fig, axes = plt.subplots(len(self.frame_batch), 3, figsize=(10, 4), squeeze=False)
+        fig.suptitle(self._plot_title(self.master_frame_state))
+
+        for i, frame_state in enumerate(self.frame_batch):
+            filters = to_numpy(frame_state.get_state('filters'))
+            for j in range(3):
+                ax = axes[i, j]
+                if i == 0:
+                    ax.set_title(f'Camera {j}')
+                if j == 0:
+                    ax.set_ylabel(f'Frame {frame_state.frame_num}')
+                im = ax.imshow(filters[j], cmap=plt.cm.PRGn, norm=MidpointNormalize(midpoint=0))
+                ax.set_xticks([])
+                ax.set_yticks([])
+                fig.colorbar(im, ax=ax)
+
+        fig.tight_layout()
+        self._save_plot(fig, 'filters', frame_state)
 
     def _plot_title(self, frame_state: FrameState, skipped: bool = False) -> str:
         title = f'Trial: {self.trial.id}. {self.trial.date:%Y%m%d}. ' \

@@ -24,6 +24,7 @@ class MFParameters(Document):
     masks_threshold = FloatField()
     render_mode = StringField(choices=RENDER_MODES)
     second_render_prob = FloatField()
+    filter_size = IntField()
 
     sigmas_init = FloatField()
     sigmas_min = FloatField()
@@ -94,6 +95,7 @@ class MFParameters(Document):
     lr_sigmas = FloatField()
     lr_exponents = FloatField()
     lr_intensities = FloatField()
+    lr_filters = FloatField()
 
     meta = {
         'collection': 'mf_parameters',

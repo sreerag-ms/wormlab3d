@@ -28,6 +28,7 @@ PARAMETER_NAMES = [
     'camera_sigmas',
     'camera_exponents',
     'camera_intensities',
+    'filters'
 ]
 
 CURVATURE_PARAMETER_NAMES = [
@@ -260,6 +261,22 @@ class FrameState(nn.Module):
             'camera_intensities',
             nn.Parameter(torch.ones(3), requires_grad=mp.optimise_intensities)
         )
+
+        # Camera filters
+        if mp.filter_size is not None:
+            filters = torch.zeros((3, mp.filter_size, mp.filter_size), dtype=torch.float32)
+            filters[:, int(mp.filter_size / 2), int(mp.filter_size / 2)] = 1.
+            filters += torch.randn_like(filters) * 1e-4
+            filters /= filters.norm(dim=(1, 2), keepdim=True)
+            self.register_parameter(
+                'filters',
+                nn.Parameter(filters, requires_grad=True)
+            )
+        else:
+            self.register_parameter(
+                'filters',
+                nn.Parameter(torch.zeros((3, 1, 1), dtype=torch.float32), requires_grad=False)
+            )
 
     def _init_points_parameters(self):
         """
