@@ -1,6 +1,7 @@
 import os
 import time
 from argparse import ArgumentParser
+from datetime import datetime
 from typing import List
 
 import cv2
@@ -13,7 +14,7 @@ from simple_worm.frame import FrameSequenceNumpy
 from simple_worm.plot3d import FrameArtist
 from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT
 from wormlab3d import logger, PREPARED_IMAGES_PATH
-from wormlab3d.data.model import Frame, Reconstruction
+from wormlab3d.data.model import Frame, Reconstruction, Trial
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF, Midline3D
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.toolkit.plot_utils import tex_mode, equal_aspect_ratio
@@ -36,16 +37,18 @@ def get_reconstruction_ids() -> List[str]:
 
 
 def _make_3d_plot(
+        trial: Trial,
         width: int,
         height: int,
         X_slice: np.ndarray,
         X_full: np.ndarray,
+        lengths: np.ndarray,
         colours: np.ndarray = None,
         cmap: str = 'viridis_r',
         show_colourbar: bool = False,
         draw_edges: bool = True,
         show_axis: bool = True,
-        show_ticks: bool = True,
+        show_ticks: bool = True
 ):
     """
     Build a 3D trajectory plot with worm.
@@ -94,12 +97,25 @@ def _make_3d_plot(
     azims = np.linspace(start=0, stop=360 * n_revolutions, num=len(X_slice))
     ax.view_init(azim=azims[0])  # elev
 
+    def get_details(frame_idx: int) -> str:
+        curr_time = datetime.fromtimestamp(np.floor(frame_idx / trial.fps))
+        total_time = datetime.fromtimestamp(np.floor(len(X_slice) / trial.fps))
+        return f'Frame {frame_idx + 1}/{len(X_slice)}\n' \
+               f'Time {curr_time:%M:%S}/{total_time:%M:%S}\n' \
+               f'Length: {lengths[frame_idx]:.3f}'
+
+    # Details
+    text = fig.text(0.01, 0.98, get_details(0), ha='left', va='top')
+
     def update(frame_idx: int):
         # Rotate the view.
         ax.view_init(azim=azims[frame_idx])
 
         # Update the worm
         fa.update(FS[frame_idx])
+
+        # Update the text
+        text.set_text(get_details(frame_idx))
 
         # Redraw the canvas
         fig.canvas.draw()
@@ -181,22 +197,28 @@ def generate_reconstruction_video(reconstruction_id: int, missing_only: bool = T
         all_projections = ts.get('points_2d')  # (M, N, 3, 2)
         points_2d = np.round(all_projections[:, from_idx:to_idx]).astype(np.int32)
 
+        # Get lengths
+        lengths = ts.get('length')[:, 0]
+
         # Colour map
         colours = np.array([cmap(d) for d in np.linspace(0, 1, 2**(D - 1))])
         colours = np.round(colours * 255).astype(np.uint8)
 
     else:
         X_full, _ = get_trajectory(reconstruction_id=reconstruction.id)
+        lengths = np.linalg.norm(X_full[:, 1:] - X_full[:, :-1], dim=-1).sum(dim=-1)
 
     # Get trajectory from centre of mass of reconstruction
     X_slice = X_full.mean(axis=1)
 
     # Build plot
     fig, update_plot = _make_3d_plot(
+        trial=trial,
         width=width,
         height=height,
         X_slice=X_slice,
         X_full=X_full,
+        lengths=lengths,
         draw_edges=True
     )
 
