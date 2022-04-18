@@ -133,6 +133,7 @@ class ProjectRenderScoreModel(nn.Module):
             self,
             image_size: int = PREPARED_IMAGE_SIZE_DEFAULT,
             render_mode: str = RENDER_MODE_GAUSSIANS,
+            second_render_prob: float = 0.5,
             sigmas_min: float = 0.04,
             sigmas_max: float = 0.1,
             exponents_min: float = 0.5,
@@ -148,12 +149,12 @@ class ProjectRenderScoreModel(nn.Module):
             dl_limit: float = None,
             dk_limit: float = None,
             dpsi_limit: float = None,
-            second_render_prob: float = 0.5,
     ):
         super().__init__()
         self.image_size = image_size
         assert render_mode in RENDER_MODES
         self.render_mode = render_mode
+        self.second_render_prob = second_render_prob
         self.sigmas_min = sigmas_min + 0.001
         self.sigmas_max = sigmas_max
         self.exponents_min = exponents_min
@@ -178,7 +179,6 @@ class ProjectRenderScoreModel(nn.Module):
         self.dk_limit = dk_limit
         self.dpsi_limit = dpsi_limit
         self.cams = torch.jit.script(DynamicCameras())
-        self.second_render_prob = second_render_prob
 
     def forward(
             self,

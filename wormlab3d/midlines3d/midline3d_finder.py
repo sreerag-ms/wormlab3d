@@ -383,6 +383,7 @@ class Midline3DFinder:
         model = ProjectRenderScoreModel(
             image_size=self.trial.crop_size,
             render_mode=self.parameters.render_mode,
+            second_render_prob=self.parameters.second_render_prob,
             sigmas_min=self.parameters.sigmas_min,
             sigmas_max=self.parameters.sigmas_max,
             intensities_min=self.parameters.intensities_min,
