@@ -795,7 +795,7 @@ class Midline3DFinder:
                     scores_d = scores[d]
                     N = scores_d.shape[0]
                     old_midpoint = int((N - 1) / 2)
-                    scores_d_aa = (scores_d > scores_d.mean()).to(torch.float32)
+                    scores_d_aa = (scores_d > (scores_d.max() - scores_d.min()) / 2).to(torch.float32)
                     centroid_idx = (torch.arange(N, device=self.device) * scores_d_aa).sum() / scores_d_aa.sum()
                     stats[f'centroid_idx/{d}'] = centroid_idx.item()
                     shift = torch.ceil(centroid_idx).to(torch.int32) - old_midpoint
@@ -1269,6 +1269,13 @@ class Midline3DFinder:
                                 min=p.length_min,
                                 max=p.length_max
                             )
+
+                            if self.last_frame_state is not None and p.dl_limit is not None:
+                                l_prev = self.last_frame_state.get_state('length')[d]
+                                l = l.clamp(
+                                    min=l_prev - p.dl_limit,
+                                    max=l_prev + p.dl_limit,
+                                )
 
                         length[d].data = l
 
