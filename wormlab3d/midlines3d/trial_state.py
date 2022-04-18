@@ -103,7 +103,7 @@ class TrialState:
                     # Check if the filter shapes have changed
                     T = meta['shapes'][k][0]
                     ks_old = meta['shapes'][k][2]
-                    ks_new = self.parameters.filter_size
+                    ks_new = self.parameters.filter_size if self.parameters.filter_size is not None else 1
                     new_filter_shape = (T, 3, ks_new, ks_new)
                     if ks_old != ks_new:
                         if mode == 'r+':
