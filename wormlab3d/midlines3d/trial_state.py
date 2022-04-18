@@ -294,9 +294,7 @@ class TrialState:
         """
         Initialise a frame state
         """
-        assert min(self.start_frame, self.end_frame) \
-               <= frame_num \
-               <= max(self.start_frame, self.end_frame), 'Requested frame is not available.'
+        assert self.start_frame <= frame_num <= self.end_frame, 'Requested frame is not available.'
         frame = self.trial.get_frame(frame_num)
         logger.info(f'Initialising frame state for frame #{frame_num} (id={frame.id}).')
 
