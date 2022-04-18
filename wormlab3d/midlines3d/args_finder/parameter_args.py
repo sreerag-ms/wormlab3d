@@ -102,6 +102,8 @@ class ParameterArgs(BaseArgs):
         if filter_size is not None:
             assert filter_size >= 3, 'Filter size must be >= 3.'
             assert filter_size % 2 == 1, 'Filter size must be odd.'
+        elif filter_size == 0:
+            filter_size = None
         self.filter_size = filter_size
 
         self.sigmas_init = sigmas_init
