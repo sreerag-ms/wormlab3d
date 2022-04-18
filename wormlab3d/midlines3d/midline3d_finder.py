@@ -1426,7 +1426,7 @@ class Midline3DFinder:
                 self._plot_2d_batch()
             if self.parameters.curvature_mode:
                 self._plot_curvatures()
-            if self.parameters.filter_size > 0:
+            if self.parameters.filter_size is not None and self.parameters.filter_size > 0:
                 self._plot_filters()
             self._plot_point_stats(frame_state, skipped)
 
