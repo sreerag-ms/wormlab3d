@@ -1,8 +1,8 @@
-from typing import Tuple, List, Final
+from typing import Tuple, List, Final, Optional
 
 import torch
-from torch import nn
 import torch.nn.functional as F
+from torch import nn
 
 from wormlab3d import PREPARED_IMAGE_SIZE_DEFAULT
 from wormlab3d.data.model.mf_parameters import RENDER_MODE_GAUSSIANS, RENDER_MODES
@@ -20,7 +20,8 @@ def render_points(
         camera_exponents: torch.Tensor,
         cameras_intensities: torch.Tensor,
         image_size: int = PREPARED_IMAGE_SIZE_DEFAULT,
-        render_mode: str = RENDER_MODE_GAUSSIANS
+        render_mode: str = RENDER_MODE_GAUSSIANS,
+        filters: Optional[torch.Tensor] = None
 ):
     """
     Render points as Gaussian blobs onto a 2D image.
@@ -66,12 +67,18 @@ def render_points(
         # Make (un-normalised) gaussian blobs
         blobs = torch.exp(-(dst / (2 * sigmas**2))**exponents)
 
+        # Apply filters
+        blobs = _apply_filters(blobs, filters)
+
         # The rendering is the maximum of the intensity-scaled overlapping blobs
         masks = (blobs * intensities).amax(dim=1)
 
     elif render_mode == 'circles':
         # Make circles with radii equal to the sigmas
         blobs = torch.ceil(torch.relu(sigmas - dst))
+
+        # Apply filters
+        blobs = _apply_filters(blobs, filters)
 
         # The rendering is the intersection of all circles
         masks = blobs.sum(dim=1)
@@ -86,6 +93,30 @@ def render_points(
     blobs = blobs.reshape(bs, 3, N, image_size, image_size)
 
     return masks, blobs
+
+
+def _apply_filters(blobs: torch.Tensor, filters: Optional[torch.Tensor] = None) -> torch.Tensor:
+    """
+    Apply filters.
+    """
+    if filters is not None:
+        bs = len(filters)
+        blobs = blobs.reshape(bs, 3, blobs.shape[1], blobs.shape[2], blobs.shape[3])
+        blobs = blobs.permute(0, 2, 1, 3, 4)
+        blobs_filtered = []
+        for i in range(bs):
+            filters_i = filters[i].unsqueeze(1)
+            blobs_i_filtered = F.conv2d(blobs[i], filters_i, padding='same', groups=3)
+            blobs_i_filtered = blobs_i_filtered.clamp(min=0., max=1.)
+            blobs_filtered.append(blobs_i_filtered)
+        blobs_filtered = torch.stack(blobs_filtered, dim=0)
+        blobs_filtered = blobs_filtered.permute(0, 2, 1, 3, 4)
+        blobs_filtered = blobs_filtered.reshape(bs * 3, blobs_filtered.shape[2], blobs_filtered.shape[3],
+                                                blobs_filtered.shape[4])
+    else:
+        blobs_filtered = blobs.clone()
+
+    return blobs_filtered
 
 
 @torch.jit.script
@@ -414,7 +445,8 @@ class ProjectRenderScoreModel(nn.Module):
                 camera_exponents,
                 camera_intensities,
                 self.image_size,
-                self.render_mode
+                self.render_mode,
+                filters if self.filter_size is not None else None
             )
 
             blobs.append(blobs_d)
@@ -498,18 +530,6 @@ class ProjectRenderScoreModel(nn.Module):
             detection_masks.append(detection_masks_d)
         scores = scores[::-1]
         detection_masks = detection_masks[::-1]
-
-        # Apply filters
-        if self.filter_size is not None:
-            for d in range(D):
-                masks_filtered = []
-                for i in range(bs):
-                    filters_i = filters[i].unsqueeze(1)
-                    masks_i = masks[d][i].unsqueeze(0)
-                    masks_di_filtered = F.conv2d(masks_i, filters_i, padding='same', groups=3)
-                    masks_di_filtered = masks_di_filtered.clamp(min=0., max=1.)
-                    masks_filtered.append(masks_di_filtered)
-                masks[d] = torch.cat(masks_filtered, dim=0)
 
         return masks, detection_masks, points_2d, scores, curvatures_smoothed, points_smoothed, \
                sigmas_smoothed, exponents_smoothed, intensities_smoothed
