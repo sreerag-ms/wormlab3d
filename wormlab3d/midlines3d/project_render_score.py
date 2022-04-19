@@ -11,6 +11,31 @@ from wormlab3d.midlines3d.mf_methods import calculate_curvature, integrate_curva
 
 
 @torch.jit.script
+def _apply_filters(blobs: torch.Tensor, filters: Optional[torch.Tensor] = None) -> torch.Tensor:
+    """
+    Apply filters.
+    """
+    if filters is not None:
+        bs = len(filters)
+        blobs = blobs.reshape(bs, 3, blobs.shape[1], blobs.shape[2], blobs.shape[3])
+        blobs = blobs.permute(0, 2, 1, 3, 4)
+        blobs_filtered = []
+        for i in range(bs):
+            filters_i = filters[i].unsqueeze(1)
+            blobs_i_filtered = F.conv2d(blobs[i], filters_i, padding='same', groups=3)
+            blobs_i_filtered = blobs_i_filtered.clamp(min=0., max=1.)
+            blobs_filtered.append(blobs_i_filtered)
+        blobs_filtered = torch.stack(blobs_filtered, dim=0)
+        blobs_filtered = blobs_filtered.permute(0, 2, 1, 3, 4)
+        blobs_filtered = blobs_filtered.reshape(bs * 3, blobs_filtered.shape[2], blobs_filtered.shape[3],
+                                                blobs_filtered.shape[4])
+    else:
+        blobs_filtered = blobs.clone()
+
+    return blobs_filtered
+
+
+@torch.jit.script
 def render_points(
         points: torch.Tensor,
         sigmas: torch.Tensor,
@@ -93,30 +118,6 @@ def render_points(
     blobs = blobs.reshape(bs, 3, N, image_size, image_size)
 
     return masks, blobs
-
-
-def _apply_filters(blobs: torch.Tensor, filters: Optional[torch.Tensor] = None) -> torch.Tensor:
-    """
-    Apply filters.
-    """
-    if filters is not None:
-        bs = len(filters)
-        blobs = blobs.reshape(bs, 3, blobs.shape[1], blobs.shape[2], blobs.shape[3])
-        blobs = blobs.permute(0, 2, 1, 3, 4)
-        blobs_filtered = []
-        for i in range(bs):
-            filters_i = filters[i].unsqueeze(1)
-            blobs_i_filtered = F.conv2d(blobs[i], filters_i, padding='same', groups=3)
-            blobs_i_filtered = blobs_i_filtered.clamp(min=0., max=1.)
-            blobs_filtered.append(blobs_i_filtered)
-        blobs_filtered = torch.stack(blobs_filtered, dim=0)
-        blobs_filtered = blobs_filtered.permute(0, 2, 1, 3, 4)
-        blobs_filtered = blobs_filtered.reshape(bs * 3, blobs_filtered.shape[2], blobs_filtered.shape[3],
-                                                blobs_filtered.shape[4])
-    else:
-        blobs_filtered = blobs.clone()
-
-    return blobs_filtered
 
 
 @torch.jit.script
