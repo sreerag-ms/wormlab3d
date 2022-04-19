@@ -89,9 +89,9 @@ def _calculate_pcas(X: np.ndarray, window_size: int) -> List[PCA]:
     return pcas
 
 
-def calculate_pcas(X: np.ndarray, window_size: int) -> List[PCA]:
+def calculate_pcas(X: np.ndarray, window_size: int, parallel: bool = True) -> List[PCA]:
     assert window_size < X.shape[0], f'Window size ({window_size}) is larger than trajectory length ({X.shape[0]})!'
-    if N_WORKERS > 1:
+    if parallel and N_WORKERS > 1:
         pcas = _calculate_pcas_parallel(X, window_size)
     else:
         pcas = _calculate_pcas(X, window_size)

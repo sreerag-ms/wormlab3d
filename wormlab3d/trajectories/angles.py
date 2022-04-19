@@ -106,7 +106,7 @@ def calculate_planar_angles(
             a[delta] = np.zeros((0,))
             break
         logger.info(f'Calculating angles for delta = {delta}.')
-        pcas = calculate_pcas(X, window_size=delta)
+        pcas = calculate_pcas(X, window_size=delta, parallel=False)
         s = np.zeros(n_out)
         for i in range(L - 2 * delta):
             v1 = pcas[i].components_[2]

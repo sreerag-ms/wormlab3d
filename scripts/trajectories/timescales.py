@@ -7,6 +7,7 @@ import numpy as np
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.data.model import Reconstruction, Trial, Dataset
+from wormlab3d.trajectories.angles import calculate_trajectory_angles_parallel, calculate_planar_angles_parallel
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.displacement import calculate_displacements, \
@@ -86,7 +87,7 @@ def displacement_over_time():
     dwells = calculate_transitions_and_dwells_multiple_deltas(displacements)
 
     deltas = list(displacements.keys())
-    delta_ts = deltas / 25
+    delta_ts = np.array(deltas) / 25
     fig, axes = plt.subplots(len(deltas), 2, figsize=(12, 4 + 2 * len(deltas)))
     for i, delta in enumerate(deltas):
         d = displacements[delta]
@@ -526,12 +527,190 @@ def transition_rates_dataset():
         plt.show()
 
 
+def angle_diffs_over_time(which: str = 'trajectory'):
+    """
+    Plot traces of the angle changes along a trajectory highlighting regions above and below the average.
+    Show histograms of the dwell times spent in each state.
+    """
+    args = get_args()
+    if which == 'trajectory':
+        args.trajectory_point = -1
+    trajectory = get_trajectory_from_args(args)
+
+    if which == 'trajectory':
+        angles = calculate_trajectory_angles_parallel(trajectory, args.deltas)
+    else:
+        angles = calculate_planar_angles_parallel(trajectory, args.deltas)
+    dwells = calculate_transitions_and_dwells_multiple_deltas(angles)
+
+    deltas = list(angles.keys())
+    delta_ts = np.array(deltas) / 25
+    fig, axes = plt.subplots(len(deltas), 2, figsize=(12, 4 + 2 * len(deltas)))
+    for i, delta in enumerate(deltas):
+        a = angles[delta]
+
+        # Trace over time
+        ax = axes[i, 0]
+        ax.plot(a, alpha=0.75)
+        ax.set_title(f'$\Delta={delta_ts[i]:.2f}s$')
+        if which == 'trajectory':
+            ax.set_ylabel('$\\theta=\measuredangle\left(x_t-x_{t+\Delta}, x_{t+\Delta}-x_{t+2\Delta})\\right)$')
+        else:
+            ax.set_ylabel('$\\theta=\measuredangle\left(v_3[t:t+\Delta], v_3[t+\Delta:t+2\Delta])\\right)$')
+        ax.set_xlabel('$t$')
+
+        # Add average indicator
+        avg = a.mean()
+        ax.axhline(y=avg, color='red')
+
+        # Highlight regions where above/below average
+        for on_dwell in dwells[delta]['on']:
+            ax.fill_between(np.arange(on_dwell[0], on_dwell[1]), max(a), color='green', alpha=0.3, zorder=-1,
+                            linewidth=0)
+        for off_dwell in dwells[delta]['off']:
+            ax.fill_between(np.arange(off_dwell[0], off_dwell[1]), max(a), color='orange', alpha=0.3, zorder=-1,
+                            linewidth=0)
+
+        # Plot histogram of dwell times
+        ax = axes[i, 1]
+        ax.set_yscale('log')
+        ax.set_xscale('log')
+        ax.hist(dwells[delta]['on_durations'], bins=50, density=True, alpha=0.5, color='green')
+        ax.hist(dwells[delta]['off_durations'], bins=50, density=True, alpha=0.5, color='orange')
+
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            make_filename(f'traces_angles_{which}', args, excludes=['delta_range', 'delta_step'])
+        )
+    if show_plots:
+        plt.show()
+
+
+def transition_rates_angle_diffs_trajectory(which: str = 'trajectory'):
+    """
+    Show the transition rates between above/below average angles for a single trajectory.
+    """
+    args = get_args()
+    if which == 'trajectory':
+        args.trajectory_point = -1
+    deltas, delta_ts = get_deltas_from_args(args)
+    trajectory = get_trajectory_from_args(args)
+
+    # Calculate angles and states
+    if which == 'trajectory':
+        angles = calculate_trajectory_angles_parallel(trajectory, deltas)
+    else:
+        angles = calculate_planar_angles_parallel(trajectory, deltas)
+    dwells = calculate_transitions_and_dwells_multiple_deltas(angles)
+
+    # Get telegraph signals and calculate transition probabilities
+    lambdas = np.zeros((len(deltas), 2))
+    for i, delta in enumerate(deltas):
+        d = angles[delta]
+        dwd = dwells[delta]
+        t = np.zeros_like(d)
+        for r in dwd['on']:
+            t[r[0]:r[1]] = 1
+        M = _calculate_transition_matrix(t)
+        lambdas[i] = [M[0, 1], M[1, 0]]
+    l0 = lambdas[:, 0]
+    l1 = lambdas[:, 1]
+
+    # Fit exponential distributions
+    exp_params = np.zeros((len(deltas), 2))
+    duration_means = {'on': {}, 'off': {}}
+    for i, delta in enumerate(deltas):
+        dwd = dwells[delta]
+        for j, onoff in enumerate(['off', 'on']):
+            durations = dwd[f'{onoff}_durations']
+            exp_params[i, j] = durations.mean() / durations.var()
+            duration_means[onoff][delta] = durations.mean()
+
+    # Setup plots
+    fig, axes = plt.subplots(3, 2, figsize=(12, 10))
+    if args.reconstruction is not None:
+        reconstruction = Reconstruction.objects.get(id=args.reconstruction)
+        trial = reconstruction.trial
+    else:
+        trial = Trial.objects.get(id=args.trial)
+    fig.suptitle(f'Trial {trial.id}.')
+
+    # Plot lambdas
+    ax = axes[0, 0]
+    ax.plot(delta_ts, l0, label='$\lambda_0 (s_0 \\rightarrow s_1)$')
+    ax.plot(delta_ts, l1, label='$\lambda_1 (s_1 \\rightarrow s_0)$')
+    ax.legend()
+    ax.set_title(f'Transition rates')
+    ax.set_ylabel('P')
+    ax.set_xlabel('$\Delta s$')
+
+    # Plot lambdas on a log-plot
+    ax = axes[0, 1]
+    ax.plot(delta_ts, l0, label='$\lambda_0$')
+    ax.plot(delta_ts, l1, label='$\lambda_1$')
+    ax.set_yscale('log')
+    ax.legend()
+    ax.set_title(f'Transition rates (log-y)')
+    ax.set_ylabel('P')
+    ax.set_xlabel('$\Delta s$')
+
+    # Plot dwell duration means
+    ax = axes[1, 0]
+    ax.plot(delta_ts, duration_means['off'].values(), label='$s_0$')
+    ax.plot(delta_ts, duration_means['on'].values(), label='$s_1$')
+    # ax.axhline(y=1, linestyle='--', color='grey')
+    # ax.plot(delta_ts, l0 / l1, label='$\lambda_0/\lambda_1$')
+    # ax.plot(delta_ts, l1 / l0, label='$\lambda_1/\lambda_0$')
+    ax.legend()
+    # ax.set_title(f'Ratios')
+    ax.set_title(f'Dwell duration means')
+    ax.set_xlabel('$\Delta s$')
+
+    # Plot means
+    ax = axes[1, 1]
+    ax.set_title('State mean')
+    ax.axhline(y=0, linestyle='--', color='grey')
+    mean = l0 / (l0 + l1) * 2 - 1
+    ax.plot(delta_ts, mean, label='$<S>$')
+    ax.legend()
+    ax.set_xlabel('$\Delta s$')
+
+    # Plot variances
+    ax = axes[2, 0]
+    ax.set_title('State variance')
+    variances = l0 * l1 / (l0 + l1)**2
+    ax.plot(delta_ts, variances, label='$var\{S\}$')
+    ax.legend()
+    ax.set_xlabel('$\Delta s$')
+
+    # Plot exponential distribution parameter
+    ax = axes[2, 1]
+    ax.set_title('Dwell duration exponential rate')
+    ax.plot(delta_ts, exp_params[:, 0], label='$r(s_0)$')
+    ax.plot(delta_ts, exp_params[:, 1], label='$r(s_1)$')
+    ax.legend()
+    ax.set_xlabel('$\Delta s$')
+
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            make_filename(f'transition_rates_{which}_angles', args)
+        )
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
     args_ = get_args()
     # displacement_over_time()
-    if args_.dataset is not None:
-        transition_rates_dataset()
-    else:
-        transition_rates_trajectory()
+    # angle_diffs_over_time()
+    # if args_.dataset is not None:
+    #     transition_rates_dataset()
+    # else:
+    #     transition_rates_trajectory()
+    transition_rates_angle_diffs_trajectory()
