@@ -106,6 +106,14 @@ def calculate_transitions_and_dwells(
     Given a time series of windowed-displacements, calculate the transition indices
     and dwell times above and below the average displacement.
     """
+    if len(displacements) == 0:
+        return {
+            'on': [],
+            'on_durations': [],
+            'off': [],
+            'off_durations': [],
+        }
+
     avg = displacements.mean()
     states = (displacements > avg).astype(np.int8)
     on_dwells = []

@@ -213,6 +213,7 @@ def get_pca_cache_from_args(args: Namespace) -> PCACache:
         ws = args.window_size
 
     pcas, meta = generate_or_load_pca_cache(
+        reconstruction_id=args.reconstruction,
         trial_id=args.trial,
         midline_source=args.midline3d_source,
         midline_source_file=args.midline3d_source_file,

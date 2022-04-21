@@ -12,13 +12,14 @@ from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.displacement import calculate_displacements, \
     calculate_transitions_and_dwells_multiple_deltas, DISPLACEMENT_AGGREGATION_L2
+from wormlab3d.trajectories.pca import get_pca_cache_from_args
 from wormlab3d.trajectories.util import get_deltas_from_args
 
 # tex_mode()
 
 show_plots = True
 save_plots = True
-img_extension = 'png'
+img_extension = 'svg'
 
 
 def make_filename(method: str, args: Namespace, excludes: List[str] = None):
@@ -527,6 +528,295 @@ def transition_rates_dataset():
         plt.show()
 
 
+def transition_rates_dataset_simple():
+    """
+    Show the transition rates between above/below average mobility across a dataset.
+    """
+    args = get_args()
+    deltas, delta_ts = get_deltas_from_args(args)
+
+    # Get dataset
+    assert args.dataset is not None
+    ds = Dataset.objects.get(id=args.dataset)
+
+    # Unset midline source args and use tracking data only (longer)
+    args.midline3d_source = None
+    args.midline3d_source_file = None
+    args.reconstruction = None
+    args.tracking_only = True
+
+    # Calculate displacements and states for all trials
+    lambda0_all = {delta: [] for delta in deltas}
+    lambda1_all = {delta: [] for delta in deltas}
+    lambda0 = {}
+    lambda1 = {}
+    n_trials = {}
+    for trial in ds.include_trials:
+        logger.info(f'Calculating data for trial={trial.id}.')
+        args.trial = trial.id
+
+        # Group results by concentration
+        c = trial.experiment.concentration
+        if c == 0.75:
+            continue
+        if c not in lambda0:
+            lambda0[c] = {delta: [] for delta in deltas}
+            lambda1[c] = {delta: [] for delta in deltas}
+            n_trials[c] = 0
+        n_trials[c] += 1
+
+        # Get trajectory and calculate displacements and dwells
+        X = get_trajectory_from_args(args)
+        displacements = calculate_displacements(X, deltas, args.aggregation)
+        dwells = calculate_transitions_and_dwells_multiple_deltas(displacements)
+
+        # Loop over deltas
+        for delta in deltas:
+            if delta not in displacements:
+                continue
+            d = displacements[delta]
+            dwd = dwells[delta]
+
+            # Skip if not enough data
+            if len(dwd['on_durations']) < 3 or len(dwd['off_durations']) < 3:
+                continue
+
+            # Get telegraph signals and calculate transition probabilities
+            t = np.zeros_like(d)
+            for r in dwd['on']:
+                t[r[0]:r[1]] = 1
+            M = _calculate_transition_matrix(t)
+            l0cd = M[0, 1]
+            l1cd = M[1, 0]
+            lambda0[c][delta].append(l0cd)
+            lambda1[c][delta].append(l1cd)
+            lambda0_all[delta].append(l0cd)
+            lambda1_all[delta].append(l1cd)
+
+    # Sort by concentration
+    lambda0 = {k: v for k, v in sorted(list(lambda0.items()))}
+    lambda1 = {k: v for k, v in sorted(list(lambda1.items()))}
+    concs = list(lambda0.keys())
+
+    # Set up plots
+    fig, axes = plt.subplots(2, 2, figsize=(20, 12))
+    fig.suptitle(f'Dataset {ds.id}.')
+
+    ax1 = axes[0, 0]
+    ax1.set_title('All trajectories averaged')
+    ax1.set_ylabel(f'Transition probability')
+    ax1.set_xlabel('$\Delta s$')
+    ax1l = axes[0, 1]
+    ax1l.set_title('All trajectories averaged (log-scale)')
+    ax1l.set_ylabel(f'Transition probability')
+    ax1l.set_xlabel('$\Delta s$')
+    ax1l.set_yscale('log')
+
+    ax2 = axes[1, 0]
+    ax2.set_title('Equally weighted concentrations average')
+    ax2.set_ylabel(f'Transition probability')
+    ax2.set_xlabel('$\Delta s$')
+    ax2l = axes[1, 1]
+    ax2l.set_title('Equally weighted concentrations average (log-scale)')
+    ax2l.set_ylabel(f'Transition probability')
+    ax2l.set_xlabel('$\Delta s$')
+    ax2l.set_yscale('log')
+
+    # Aggregate results at each concentration
+    n_trials_total = 0
+    l0_means = {delta: [] for delta in deltas}
+    l1_means = {delta: [] for delta in deltas}
+    for i, c in enumerate(concs):
+        n_trials_total += n_trials[c]
+
+        # Get means and standard deviations for parameters
+        l0_mean = {}
+        l1_mean = {}
+        for j, delta in enumerate(deltas):
+            n = len(lambda0[c][delta])
+            if n == 0:
+                continue
+            l0s = np.array(lambda0[c][delta])
+            l1s = np.array(lambda1[c][delta])
+            l0_mean[delta] = np.mean(l0s)
+            l1_mean[delta] = np.mean(l1s)
+            l0_means[delta].append(l0_mean[delta])
+            l1_means[delta].append(l1_mean[delta])
+
+    # Get means and standard deviations across all trajectories
+    l0_mean = {}
+    l1_mean = {}
+    l0_std = {}
+    l1_std = {}
+    dts = []
+    for j, delta in enumerate(deltas):
+        n = len(lambda0_all[delta])
+        if n == 0:
+            continue
+        l0s = np.array(lambda0_all[delta])
+        l1s = np.array(lambda1_all[delta])
+        l0_mean[delta] = np.mean(l0s)
+        l1_mean[delta] = np.mean(l1s)
+        l0_std[delta] = np.std(l0s)
+        l1_std[delta] = np.std(l1s)
+        dts.append(delta_ts[j])
+
+    def _plot_data(ax_, dts_, l0_mean_, l1_mean_, l0_std_, l1_std_):
+        l0_mean_ = np.array(list(l0_mean_.values()))
+        l0_std_ = np.array(list(l0_std_.values()))
+        l0_lb = l0_mean_ - l0_std_
+        l0_ub = l0_mean_ + l0_std_
+        l1_mean_ = np.array(list(l1_mean_.values()))
+        l1_std_ = np.array(list(l1_std_.values()))
+        l1_lb = l1_mean_ - l1_std_
+        l1_ub = l1_mean_ + l1_std_
+        ax_.fill_between(dts_, l0_lb, l0_ub, color='blue', alpha=0.2)
+        ax_.fill_between(dts_, l1_lb, l1_ub, color='orange', alpha=0.2)
+        ax_.plot(dts_, l0_mean_, color='blue', label='$p_0 (s_0 \\rightarrow s_1)$')
+        ax_.plot(dts_, l1_mean_, color='orange', label='$p_1 (s_1 \\rightarrow s_0)$')
+
+    # Plot averages across all trajectories
+    _plot_data(ax1, dts, l0_mean, l1_mean, l0_std, l1_std)
+    _plot_data(ax1l, dts, l0_mean, l1_mean, l0_std, l1_std)
+
+    # Get means and stds of the concentration-means
+    l0_mean = {}
+    l1_mean = {}
+    l0_std = {}
+    l1_std = {}
+    dts = []
+    for j, delta in enumerate(deltas):
+        n = len(l0_means[delta])
+        if n == 0:
+            continue
+        l0s = np.array(l0_means[delta])
+        l1s = np.array(l1_means[delta])
+        l0_mean[delta] = np.mean(l0s)
+        l1_mean[delta] = np.mean(l1s)
+        l0_std[delta] = np.std(l0s)
+        l1_std[delta] = np.std(l1s)
+        dts.append(delta_ts[j])
+
+    # Plot concentration averages
+    _plot_data(ax2, dts, l0_mean, l1_mean, l0_std, l1_std)
+    _plot_data(ax2l, dts, l0_mean, l1_mean, l0_std, l1_std)
+
+    ax1.legend()
+    ax2.legend()
+    ax1l.legend()
+    ax2l.legend()
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            make_filename('transition_rates_dataset_simple', args)
+        )
+    if show_plots:
+        plt.show()
+
+
+def displacement_transition_rates_dataset_averages():
+    """
+    Show the average transition rates between above/below average mobility across a dataset.
+    """
+    args = get_args()
+    deltas, delta_ts = get_deltas_from_args(args)
+
+    # Get dataset
+    assert args.dataset is not None
+    ds = Dataset.objects.get(id=args.dataset)
+
+    # Unset midline source args and use tracking data only (longer)
+    args.midline3d_source = None
+    args.midline3d_source_file = None
+    args.reconstruction = None
+    args.tracking_only = True
+
+    # Calculate displacements and states for all trials
+    lambda0_all = {delta: [] for delta in deltas}
+    lambda1_all = {delta: [] for delta in deltas}
+    for trial in ds.include_trials:
+        logger.info(f'Calculating data for trial={trial.id}.')
+
+        # Get trajectory and calculate displacements and dwells
+        args.trial = trial.id
+        X = get_trajectory_from_args(args)
+        displacements = calculate_displacements(X, deltas, args.aggregation)
+        dwells = calculate_transitions_and_dwells_multiple_deltas(displacements)
+
+        # Loop over deltas
+        for delta in deltas:
+            if delta not in displacements:
+                continue
+            d = displacements[delta]
+            dwd = dwells[delta]
+
+            # Skip if not enough data
+            if len(dwd['on_durations']) < 3 or len(dwd['off_durations']) < 3:
+                continue
+
+            # Get telegraph signals and calculate transition probabilities
+            t = np.zeros_like(d)
+            for r in dwd['on']:
+                t[r[0]:r[1]] = 1
+            M = _calculate_transition_matrix(t)
+            l0cd = M[0, 1]
+            l1cd = M[1, 0]
+            lambda0_all[delta].append(l0cd)
+            lambda1_all[delta].append(l1cd)
+
+    # Set up plots
+    fig, ax = plt.subplots(1, figsize=(6, 4))
+    # ax.set_title(f'Dataset {ds.id}.')
+    ax.set_ylabel(f'Transition probability')
+    ax.set_xlabel('$\Delta\ (s)$')
+    ax.set_yscale('log')
+
+    # Get means and standard deviations across all trajectories
+    l0_mean = {}
+    l1_mean = {}
+    l0_std = {}
+    l1_std = {}
+    dts = []
+    for j, delta in enumerate(deltas):
+        n = len(lambda0_all[delta])
+        if n == 0:
+            continue
+        l0s = np.array(lambda0_all[delta])
+        l1s = np.array(lambda1_all[delta])
+        l0_mean[delta] = np.mean(l0s)
+        l1_mean[delta] = np.mean(l1s)
+        l0_std[delta] = np.std(l0s)
+        l1_std[delta] = np.std(l1s)
+        dts.append(delta_ts[j])
+
+    def _plot_data(ax_, dts_, l0_mean_, l1_mean_, l0_std_, l1_std_):
+        l0_mean_ = np.array(list(l0_mean_.values()))
+        l0_std_ = np.array(list(l0_std_.values()))
+        l0_lb = l0_mean_ - l0_std_
+        l0_ub = l0_mean_ + l0_std_
+        l1_mean_ = np.array(list(l1_mean_.values()))
+        l1_std_ = np.array(list(l1_std_.values()))
+        l1_lb = l1_mean_ - l1_std_
+        l1_ub = l1_mean_ + l1_std_
+        ax_.fill_between(dts_, l0_lb, l0_ub, color='blue', alpha=0.2)
+        ax_.fill_between(dts_, l1_lb, l1_ub, color='orange', alpha=0.2)
+        ax_.plot(dts_, l0_mean_, color='blue', label='$p_0 (s_0 \\rightarrow s_1)$')
+        ax_.plot(dts_, l1_mean_, color='orange', label='$p_1 (s_1 \\rightarrow s_0)$')
+
+    # Plot averages across all trajectories
+    _plot_data(ax, dts, l0_mean, l1_mean, l0_std, l1_std)
+    ax.legend()
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            make_filename('transition_rates_dataset_averages', args)
+        )
+    if show_plots:
+        plt.show()
+
+
 def angle_diffs_over_time(which: str = 'trajectory'):
     """
     Plot traces of the angle changes along a trajectory highlighting regions above and below the average.
@@ -703,14 +993,326 @@ def transition_rates_angle_diffs_trajectory(which: str = 'trajectory'):
         plt.show()
 
 
+def nonplanarity_over_time():
+    """
+    Plot traces of the nonplanarity along a trajectory highlighting regions above and below the average.
+    Show histograms of the dwell times spent in each state.
+    """
+    args = get_args()
+
+    # Calculate planarities across different time windows
+    nonp = {}
+    for delta in args.deltas:
+        logger.info(f'Fetching PCA data for delta = {int(delta)}.')
+        args.planarity_window = int(delta)
+        pca_cache = get_pca_cache_from_args(args)
+        r = pca_cache.explained_variance_ratio.T
+        nonp_delta = r[2] / np.sqrt(r[1] * r[0])
+        nonp[delta] = nonp_delta
+    dwells = calculate_transitions_and_dwells_multiple_deltas(nonp)
+
+    deltas = list(nonp.keys())
+    delta_ts = np.array(deltas) / 25
+
+    fig, axes = plt.subplots(len(deltas), 2, figsize=(12, 4 + 2 * len(deltas)))
+    for i, delta in enumerate(deltas):
+        p = nonp[delta]
+
+        # Trace over time
+        ax = axes[i, 0]
+        ax.plot(p, alpha=0.75)
+        ax.set_title(f'$\Delta={delta_ts[i]:.2f}s$')
+        ax.set_ylabel('Non-planarity')
+        ax.set_xlabel('$t$')
+
+        # Add average indicator
+        avg = p.mean()
+        ax.axhline(y=avg, color='red')
+
+        # Highlight regions where above/below average
+        for on_dwell in dwells[delta]['on']:
+            ax.fill_between(np.arange(on_dwell[0], on_dwell[1]), max(p), color='green', alpha=0.3, zorder=-1,
+                            linewidth=0)
+        for off_dwell in dwells[delta]['off']:
+            ax.fill_between(np.arange(off_dwell[0], off_dwell[1]), max(p), color='orange', alpha=0.3, zorder=-1,
+                            linewidth=0)
+
+        # Plot histogram of dwell times
+        ax = axes[i, 1]
+        ax.set_yscale('log')
+        ax.set_xscale('log')
+        ax.hist(dwells[delta]['on_durations'], bins=50, density=True, alpha=0.5, color='green')
+        ax.hist(dwells[delta]['off_durations'], bins=50, density=True, alpha=0.5, color='orange')
+
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            make_filename(f'traces_nonplanarity', args, excludes=['delta_range', 'delta_step'])
+        )
+    if show_plots:
+        plt.show()
+
+
+def nonplanarity_and_displacement_over_time(x_label: str = 'time'):
+    """
+    Plot traces of the nonplanarity/displacement changes along a trajectory highlighting regions above and below the average.
+    Show histograms of the dwell times spent in each state.
+    """
+    args = get_args()
+    X = get_trajectory_from_args(args)
+    deltas = list(args.deltas)
+    delta_ts = np.array(deltas)
+    if x_label == 'time':
+        delta_ts = delta_ts / 25
+    # np.savez(LOGS_PATH / f'{START_TIMESTAMP}_trajectory_trial={args.trial}', trajectory)
+
+    # Calculate displacements
+    displacements = calculate_displacements(X, deltas, args.aggregation)
+    dwells_displacements = calculate_transitions_and_dwells_multiple_deltas(displacements)
+
+    # Calculate planarities across different time windows
+    nonp = {}
+    for delta in deltas:
+        logger.info(f'Fetching PCA data for delta = {int(delta)}.')
+        args.planarity_window = int(delta)
+        pca_cache = get_pca_cache_from_args(args)
+        r = pca_cache.explained_variance_ratio.T
+        nonp[delta] = r[2] / np.sqrt(r[1] * r[0])
+    dwells_nonp = calculate_transitions_and_dwells_multiple_deltas(nonp)
+
+    # # Calculate displacements across all time windows for transitions
+    # deltas_all, delta_ts_all = get_deltas_from_args(args)
+    # displacements_all = calculate_displacements(X, deltas_all, args.aggregation)
+    # dwells_displacements_all = calculate_transitions_and_dwells_multiple_deltas(displacements_all)
+    #
+    # # Calculate planarities across all time windows
+    # nonp_all = {}
+    # for delta in deltas_all:
+    #     logger.info(f'Fetching PCA data for delta = {int(delta)}.')
+    #     args.planarity_window = int(delta)
+    #     pca_cache = get_pca_cache_from_args(args)
+    #     r = pca_cache.explained_variance_ratio.T
+    #     nonp_all[delta] = r[2] / np.sqrt(r[1] * r[0])
+    # dwells_nonp_all = calculate_transitions_and_dwells_multiple_deltas(nonp_all)
+
+    # # Get telegraph signals and calculate transition probabilities
+    # lambdas_displacements = np.zeros((len(deltas_all), 2))
+    # lambdas_nonp = np.zeros((len(deltas_all), 2))
+    # for i, delta in enumerate(deltas_all):
+    #     for data, dwells, lambdas in [
+    #         [displacements_all, dwells_displacements_all, lambdas_displacements],
+    #         [nonp_all, dwells_nonp_all, lambdas_nonp]
+    #     ]:
+    #         d = data[delta]
+    #         dwd = dwells[delta]
+    #         t = np.zeros_like(d)
+    #         for r in dwd['on']:
+    #             t[r[0]:r[1]] = 1
+    #         M = _calculate_transition_matrix(t)
+    #         lambdas[i] = [M[0, 1], M[1, 0]]
+
+    def _add_dwell_regions(ax_, dwells_, ub_):
+        for on_dwell in dwells_[delta]['on']:
+            fill_range = np.arange(on_dwell[0] - 1, on_dwell[1])
+            if x_label == 'time':
+                fill_range = fill_range / 25
+            ax_.fill_between(fill_range, ub_, color='green', alpha=0.2, zorder=-1, linewidth=0)
+        for off_dwell in dwells_[delta]['off']:
+            fill_range = np.arange(off_dwell[0] - 1, off_dwell[1])
+            if x_label == 'time':
+                fill_range = fill_range / 25
+            ax_.fill_between(fill_range, ub_, color='orange', alpha=0.2, zorder=-1, linewidth=0)
+
+    max_i = min([len(d) for _, d in displacements.items()])
+    ts = np.arange(max_i)
+    if x_label == 'time':
+        ts = ts / 25
+    fig, axes = plt.subplots(2, 1 + len(deltas), figsize=(4 + 5 * len(deltas), 8))
+    for i, delta in enumerate(deltas):
+        d = displacements[delta][:max_i]
+        p = nonp[delta][:max_i]
+
+        # Displacement trace over time
+        ax = axes[0, i]
+        ax.plot(ts, d, alpha=0.75, zorder=100)
+        ax.set_title(f'$\Delta={delta_ts[i]:.2f}s$')
+        if args.aggregation == DISPLACEMENT_AGGREGATION_L2:
+            ax.set_ylabel('$d=|x(t)-x(t+\Delta)|$')
+        else:
+            ax.set_ylabel('$d=(x(t)-x(t+\Delta))^2$')
+        avg = d.mean()
+        ax.axhline(y=avg, color='red')
+        ax.set_xlim(left=0, right=ts[-1])
+        ax.set_ylim(bottom=0, top=max(d))
+        _add_dwell_regions(ax, dwells_displacements, max(d))
+        if x_label == 'time':
+            ax.set_xlabel('Time (s)')
+        else:
+            ax.set_xlabel('Frame')
+
+        # Nonplanarity trace over time
+        ax = axes[1, i]
+        ax.plot(ts, p, alpha=0.75, zorder=100)
+        ax.set_ylabel('Non-planarity')
+        avg = p.mean()
+        ax.axhline(y=avg, color='red')
+        ax.set_xlim(left=0, right=ts[-1])
+        ax.set_ylim(bottom=0, top=max(p))
+        _add_dwell_regions(ax, dwells_nonp, max(p))
+        if x_label == 'time':
+            ax.set_xlabel('Time (s)')
+        else:
+            ax.set_xlabel('Frame')
+
+    # # Plot lambdas
+    # for i, lambdas in enumerate([lambdas_displacements, lambdas_nonp]):
+    #     l0 = lambdas[:, 0]
+    #     l1 = lambdas[:, 1]
+    #     ax = axes[i, len(deltas)]
+    #     ax.plot(delta_ts_all, l0, label='$p_0 (s_0 \\rightarrow s_1)$')
+    #     ax.plot(delta_ts_all, l1, label='$p_1 (s_1 \\rightarrow s_0)$')
+    #     ax.set_yscale('log')
+    #     ax.legend()
+    #     ax.set_title(f'Transition probabilities')
+    #     ax.set_ylabel('Probability')
+    #     ax.set_xlabel('$\Delta s$')
+
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            make_filename(f'traces_nonp_and_disp', args, excludes=['delta_range', 'delta_step'])
+        )
+    if show_plots:
+        plt.show()
+
+
+def nonplanarity_transition_rates_dataset_averages():
+    """
+    Show the average transition rates between above/below average nonplanarity across a dataset.
+    """
+    args = get_args()
+    deltas, delta_ts = get_deltas_from_args(args)
+
+    # Get dataset
+    assert args.dataset is not None
+    ds = Dataset.objects.get(id=args.dataset)
+
+    # Unset midline source args and use tracking data only (longer)
+    args.midline3d_source = None
+    args.midline3d_source_file = None
+    args.reconstruction = None
+    args.tracking_only = True
+
+    # Calculate nonplanarity for all trials
+    lambda0_all = {delta: [] for delta in deltas}
+    lambda1_all = {delta: [] for delta in deltas}
+    for trial in ds.include_trials:
+        logger.info(f'Calculating data for trial={trial.id}.')
+
+        # Calculate planarities across different time windows
+        args.trial = trial.id
+        nonp = {}
+        for delta in deltas:
+            logger.info(f'Fetching PCA data for delta = {int(delta)}.')
+            args.planarity_window = int(delta)
+            pca_cache = get_pca_cache_from_args(args)
+            r = pca_cache.explained_variance_ratio.T
+            nonp[delta] = r[2] / np.sqrt(r[1] * r[0])
+        dwells = calculate_transitions_and_dwells_multiple_deltas(nonp)
+
+        # Loop over deltas
+        for delta in deltas:
+            if delta not in nonp:
+                continue
+            p = nonp[delta]
+            dwd = dwells[delta]
+
+            # Skip if not enough data
+            if len(dwd['on_durations']) < 3 or len(dwd['off_durations']) < 3:
+                continue
+
+            # Get telegraph signals and calculate transition probabilities
+            t = np.zeros_like(p)
+            for r in dwd['on']:
+                t[r[0]:r[1]] = 1
+            M = _calculate_transition_matrix(t)
+            l0cd = M[0, 1]
+            l1cd = M[1, 0]
+            lambda0_all[delta].append(l0cd)
+            lambda1_all[delta].append(l1cd)
+
+    # Set up plots
+    fig, ax = plt.subplots(1, figsize=(6, 4))
+    # ax.set_title(f'Dataset {ds.id}.')
+    ax.set_ylabel(f'Transition probability')
+    ax.set_xlabel('$\Delta\ (s)$')
+    ax.set_yscale('log')
+
+    # Get means and standard deviations across all trajectories
+    l0_mean = {}
+    l1_mean = {}
+    l0_std = {}
+    l1_std = {}
+    dts = []
+    for j, delta in enumerate(deltas):
+        n = len(lambda0_all[delta])
+        if n == 0:
+            continue
+        l0s = np.array(lambda0_all[delta])
+        l1s = np.array(lambda1_all[delta])
+        l0_mean[delta] = np.mean(l0s)
+        l1_mean[delta] = np.mean(l1s)
+        l0_std[delta] = np.std(l0s)
+        l1_std[delta] = np.std(l1s)
+        dts.append(delta_ts[j])
+
+    def _plot_data(ax_, dts_, l0_mean_, l1_mean_, l0_std_, l1_std_):
+        l0_mean_ = np.array(list(l0_mean_.values()))
+        l0_std_ = np.array(list(l0_std_.values()))
+        l0_lb = l0_mean_ - l0_std_
+        l0_ub = l0_mean_ + l0_std_
+        l1_mean_ = np.array(list(l1_mean_.values()))
+        l1_std_ = np.array(list(l1_std_.values()))
+        l1_lb = l1_mean_ - l1_std_
+        l1_ub = l1_mean_ + l1_std_
+        ax_.fill_between(dts_, l0_lb, l0_ub, color='blue', alpha=0.2)
+        ax_.fill_between(dts_, l1_lb, l1_ub, color='orange', alpha=0.2)
+        ax_.plot(dts_, l0_mean_, color='blue', label='$p_0 (s_0 \\rightarrow s_1)$')
+        ax_.plot(dts_, l1_mean_, color='orange', label='$p_1 (s_1 \\rightarrow s_0)$')
+
+    # Plot averages across all trajectories
+    _plot_data(ax, dts, l0_mean, l1_mean, l0_std, l1_std)
+    ax.legend()
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            make_filename('nonplanarity_transition_rates_dataset_averages', args)
+        )
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
+    # from simple_worm.plot3d import interactive
+    # interactive()
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
     args_ = get_args()
     # displacement_over_time()
     # angle_diffs_over_time()
+    # nonplanarity_over_time()
+    # nonplanarity_and_displacement_over_time(x_label='frame')
     # if args_.dataset is not None:
     #     transition_rates_dataset()
     # else:
     #     transition_rates_trajectory()
-    transition_rates_angle_diffs_trajectory()
+    # transition_rates_angle_diffs_trajectory()
+
+    if args_.dataset is not None:
+        # transition_rates_dataset()
+        # transition_rates_dataset_simple()
+        # displacement_transition_rates_dataset_averages()
+        nonplanarity_transition_rates_dataset_averages()
