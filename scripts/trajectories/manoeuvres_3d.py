@@ -1,6 +1,6 @@
 import os
 from argparse import Namespace
-from typing import List
+from typing import List, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,19 +11,19 @@ from scipy.signal import find_peaks
 from sklearn.decomposition import PCA
 
 from simple_worm.frame import FrameSequenceNumpy
-from simple_worm.plot3d import FrameArtist, Arrow3D
+from simple_worm.plot3d import FrameArtist, Arrow3D, MidpointNormalize
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.data.model import Dataset, Reconstruction
-from wormlab3d.toolkit.plot_utils import tex_mode, equal_aspect_ratio
+from wormlab3d.toolkit.plot_utils import equal_aspect_ratio, make_box_from_pca
 from wormlab3d.trajectories.angles import calculate_angle
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.util import calculate_speeds
 
-animate = True
-show_plots = False
+animate = False
+show_plots = True
 save_plots = True
-img_extension = 'png'
+img_extension = 'svg'
 fps_anim = 25
 playback_speed = 10
 n_revolutions = 0.5
@@ -34,7 +34,8 @@ arrow_colours = {
     'e2': 'green',
 }
 
-tex_mode()
+
+# tex_mode()
 
 
 def get_trajectory(args: Namespace):
@@ -68,59 +69,32 @@ def add_pca_arrows(X, pca):
     return arrows
 
 
-def get_plane(X, pca, colour):
-    # Add PCA plane
-    centre = X.mean(axis=0)
-    polygons = []
-
-    v0 = pca.components_[0] * pca.explained_variance_ratio_[0]
-    v1 = pca.components_[1] * pca.explained_variance_ratio_[1]
-    v2 = pca.components_[2] * pca.explained_variance_ratio_[2]
-
-    for i in range(3):
-        va = [v0, v1, v2][i]
-        vb = [v1, v2, v0][i]
-        vc = [v2, v0, v1][i]
-
-        for j in range(2):
-            if j == 1:
-                vc *= -1
-            verts = np.zeros((4, 3))
-            for k in range(3):
-                verts[:, k] = [
-                    centre[k] - va[k] - vb[k] - vc[k],
-                    centre[k] + va[k] - vb[k] - vc[k],
-                    centre[k] + va[k] + vb[k] - vc[k],
-                    centre[k] - va[k] + vb[k] - vc[k]
-                ]
-            polygons.append(verts)
-
-    plane = Poly3DCollection(polygons, alpha=0.2, facecolors=colour, edgecolors='dark' + colour)
-    return plane
-
-
 def plot_manoeuvre_3d(
-        title: str,
         X_slice: np.ndarray,
         X_full: np.ndarray = None,
+        title: str = None,
         folder: str = None,
         filename: str = None,
         colours: np.ndarray = None,
         cmap: str = 'jet',
         show_colourbar: bool = False,
         ax: Axes = None,
-        worm_idx: int = 0,
+        worm_idxs: Union[int, List[int]] = 0,
         arrows: List[Arrow3D] = None,
-        planes: List[Arrow3D] = None
+        planes: List[Arrow3D] = None,
+        azim: int = -60,
+        elev: int = 30,
 ):
     x, y, z = X_slice.T
     fig = plt.figure(figsize=(10, 10))
-    ax = fig.add_subplot(projection='3d')
+    ax = fig.add_subplot(projection='3d', azim=azim, elev=elev)
 
     # Scatter the vertices
-    s = ax.scatter(x, y, z, c=colours, cmap=cmap, s=5, alpha=0.4, zorder=-1)
+    s = ax.scatter(x, y, z, c=colours, cmap=cmap, s=10, alpha=0.4, zorder=-1, norm=MidpointNormalize(midpoint=0))
     if show_colourbar:
-        fig.colorbar(s)
+        cb = fig.colorbar(s, shrink=0.5)
+        cb.ax.tick_params(labelsize=12)
+        cb.ax.set_ylabel('Speed (mm/s)', rotation=270, fontsize=14)
 
     # Draw lines connecting points
     points = X_slice[:, None, :]
@@ -129,12 +103,15 @@ def plot_manoeuvre_3d(
     ax.add_collection(lc)
 
     # Add worm
-    if worm_idx != -1:
-        if worm_idx >= len(X_full):
-            worm_idx = len(X_full) - 1
-        FS = FrameSequenceNumpy(x=X_full.transpose(0, 2, 1))
-        fa = FrameArtist(F=FS[worm_idx])
-        fa.add_midline(ax)
+    if worm_idxs != -1:
+        if type(worm_idxs) != list:
+            worm_idxs = [worm_idxs,]
+        for worm_idx in worm_idxs:
+            if worm_idx >= len(X_full):
+                worm_idx = len(X_full) - 1
+            FS = FrameSequenceNumpy(x=X_full.transpose(0, 2, 1))
+            fa = FrameArtist(F=FS[worm_idx], midline_opts={'zorder': 100, 's': 100})
+            fa.add_midline(ax)
 
     # Add arrows
     if arrows is not None:
@@ -147,8 +124,12 @@ def plot_manoeuvre_3d(
             ax.add_collection3d(plane)
 
     equal_aspect_ratio(ax)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_zticks([])
 
-    ax.set_title(title)
+    if title is not None:
+        ax.set_title(title)
     fig.tight_layout()
 
     if animate:
@@ -161,7 +142,7 @@ def plot_manoeuvre_3d(
             ax.view_init(azim=azims[frame_num])
 
             # Update the worm
-            if worm_idx != -1:
+            if worm_idxs != -1:
                 fa.update(FS[frame_num])
             return ()
 
@@ -177,22 +158,22 @@ def plot_manoeuvre_3d(
 
     if save_plots:
         assert filename is not None
-        path = LOGS_PATH + '/' + START_TIMESTAMP + '_'
         if folder is not None:
-            path += folder
+            path = LOGS_PATH / f'{START_TIMESTAMP}_{folder}'
             os.makedirs(path, exist_ok=True)
-            path += '/'
-        path += filename
+            path = path / filename
+        else:
+            path = LOGS_PATH / f'{START_TIMESTAMP}_{filename}'
         if animate:
             metadata = dict(
                 title=title,
                 artist='WormLab Leeds'
             )
-            save_path = path + '.mp4'
+            save_path = path.with_suffix('.mp4')
             logger.info(f'Saving animation to {save_path}.')
             ani.save(save_path, writer='ffmpeg', fps=fps_anim, metadata=metadata)
         else:
-            save_path = path + f'.{img_extension}'
+            save_path = path.with_suffix(f'.{img_extension}')
             logger.info(f'Saving plot to {save_path}.')
             plt.savefig(save_path)
 
@@ -290,8 +271,8 @@ def plot_all_manoeuvres():
 
     # Loop over manoeuvres
     for i, m in enumerate(manoeuvres):
-        plane_prev = get_plane(m['X_prev'], m['pca_prev'], 'orange')
-        plane_next = get_plane(m['X_next'], m['pca_next'], 'green')
+        plane_prev = make_box_from_pca(m['X_prev'], m['pca_prev'], 'orange')
+        plane_next = make_box_from_pca(m['X_next'], m['pca_next'], 'green')
 
         # Xm = X_slice[m['start_idx']:m['end_idx']]
         # pca_all = PCA(svd_solver='full', copy=True, n_components=3)
@@ -311,7 +292,7 @@ def plot_all_manoeuvres():
             colours=signed_speeds[m['start_idx']:m['end_idx']],
             cmap='PRGn',
             show_colourbar=False,
-            worm_idx=int((m['end_idx'] - m['start_idx']) / 2) + 50,
+            worm_idxs=int((m['end_idx'] - m['start_idx']) / 2) + 50,
             # planes=[plane_prev, plane_next, plane_all],
             planes=[plane_prev, plane_next],
         )
@@ -599,13 +580,55 @@ def plot_dataset_distributions():
         plt.show()
 
 
+def plot_single_manoeuvre(index: int):
+    """
+    Plot a single manoeuvres detected in the trajectory.
+    """
+    args = get_args()
+    X_full, X_slice = get_trajectory(args)
+    signed_speeds = calculate_speeds(X_full, signed=True)
+
+    manoeuvres = get_manoeuvres(
+        X_full,
+        X_slice,
+        min_reversal_frames=args.min_reversal_frames,
+        window_size=args.manoeuvre_window
+    )
+    m = manoeuvres[index]
+
+    filename = f'manoeuvre_{index}_trial={args.trial}_{args.midline3d_source}' \
+               f'_rev={args.min_reversal_frames}' \
+               f'_ws={args.manoeuvre_window}' \
+               f'_sw={args.smoothing_window}' \
+               f'_frames={m["start_idx"]}-{m["end_idx"]}'
+
+    plane_prev = make_box_from_pca(m['X_prev'], m['pca_prev'], 'orange', scale=(1, 2, 3))
+    plane_next = make_box_from_pca(m['X_next'], m['pca_next'], 'green', scale=(1, 3, 1))
+
+    plot_manoeuvre_3d(
+        X_slice=X_slice[m['start_idx']:m['end_idx']],
+        X_full=X_full[m['start_idx']:m['end_idx']],
+        filename=filename,
+        colours=signed_speeds[m['start_idx']:m['end_idx']],
+        cmap='PRGn',
+        show_colourbar=True,
+        worm_idxs=[500, 900],
+        planes=[plane_prev, plane_next],
+        azim=55,
+        elev=-5
+    )
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
     # from simple_worm.plot3d import interactive
+    #
     # interactive()
     # plot_all_manoeuvres()
     # plot_angles_and_durations()
     # plot_angles_and_durations_varying_parameters()
     # plot_manoeuvre_rate()
-    plot_dataset_distributions()
+    # plot_dataset_distributions()
+
+    plot_single_manoeuvre(index=2)
