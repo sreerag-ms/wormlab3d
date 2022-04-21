@@ -12,7 +12,9 @@ from matplotlib.figure import Figure
 from matplotlib.image import AxesImage
 from matplotlib.patches import Rectangle
 from matplotlib.widgets import Slider
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from scipy.cluster.hierarchy import dendrogram
+from sklearn.decomposition import PCA
 
 from simple_worm.controls import ControlSequenceNumpy
 from simple_worm.frame import FrameSequenceNumpy
@@ -425,3 +427,36 @@ def make_3d_posture_plot_for_animation(
     fig.tight_layout()
 
     return fig, update
+
+
+def make_box_from_pca(X: np.ndarray, pca: PCA, colour: str, scale: Tuple[float] = (1., 1., 1.)) -> Poly3DCollection:
+    """
+    Make a 3D polygon centred at the centre of X with shape and orientation taken from the PCA components.
+    """
+    centre = X.mean(axis=0)
+    polygons = []
+
+    v0 = scale[0] * pca.components_[0] * pca.explained_variance_ratio_[0]
+    v1 = scale[1] * pca.components_[1] * pca.explained_variance_ratio_[1]
+    v2 = scale[2] * pca.components_[2] * pca.explained_variance_ratio_[2]
+
+    for i in range(3):
+        va = [v0, v1, v2][i]
+        vb = [v1, v2, v0][i]
+        vc = [v2, v0, v1][i]
+
+        for j in range(2):
+            if j == 1:
+                vc *= -1
+            verts = np.zeros((4, 3))
+            for k in range(3):
+                verts[:, k] = [
+                    centre[k] - va[k] - vb[k] - vc[k],
+                    centre[k] + va[k] - vb[k] - vc[k],
+                    centre[k] + va[k] + vb[k] - vc[k],
+                    centre[k] - va[k] + vb[k] - vc[k]
+                ]
+            polygons.append(verts)
+
+    plane = Poly3DCollection(polygons, alpha=0.2, facecolors=colour, edgecolors='dark' + colour)
+    return plane

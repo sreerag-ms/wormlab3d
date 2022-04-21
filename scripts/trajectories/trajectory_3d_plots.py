@@ -7,12 +7,14 @@ from matplotlib import animation
 from matplotlib.axes import Axes
 from matplotlib.gridspec import GridSpec
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
+from sklearn.decomposition import PCA
+
 from simple_worm.frame import FrameSequenceNumpy
 from simple_worm.plot3d import FrameArtist
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.data.model import Trial
 from wormlab3d.simple_worm.estimate_k import get_K_estimates_from_args
-from wormlab3d.toolkit.plot_utils import tex_mode, equal_aspect_ratio
+from wormlab3d.toolkit.plot_utils import tex_mode, equal_aspect_ratio, make_box_from_pca
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.brownian_particle import BrownianParticle, ActiveParticle, BoundedParticle, ConfinedParticle
 from wormlab3d.trajectories.cache import get_trajectory_from_args
@@ -20,8 +22,8 @@ from wormlab3d.trajectories.pca import get_planarity_from_args
 from wormlab3d.trajectories.util import calculate_speeds, calculate_htd
 
 animate = False
-show_plots = True
-save_plots = False
+show_plots = False
+save_plots = True
 img_extension = 'png'
 fps = 25
 playback_speed = 10
@@ -71,7 +73,7 @@ def make_plot(
         return_ax = True
 
     # Scatter the vertices
-    s = ax.scatter(x, y, z, c=c, s=100, alpha=0.4, zorder=-1)
+    s = ax.scatter(x, y, z, c=c, s=10, alpha=0.4, zorder=-1)
     if show_colourbar:
         fig.colorbar(s)
 
@@ -507,6 +509,113 @@ def plot_multiple_trajectories(
         plt.show()
 
 
+def plot_trajectory_with_regions():
+    """
+    Draw the trajectory coloured by the time elapsed.
+    Draw boxes around the regions.
+    """
+    args = get_args()
+    X_full, X_slice = get_trajectory(args)
+    fig = plt.figure(figsize=(10, 10))
+    # ax = fig.add_subplot(projection='3d', azim=95, elev=10)
+    ax = fig.add_subplot(projection='3d', azim=-125, elev=35)
+
+    regions = [
+        {
+            'start_idx': 500,
+            'end_idx': 4000,
+            'colour': 'orange'
+        },
+        {
+            'start_idx': 5500,
+            'end_idx': 7000,
+            'colour': 'green'
+        },
+        {
+            'start_idx': 9000,
+            'end_idx': 11000,
+            'colour': 'orange'
+        },
+        {
+            'start_idx': 11000,
+            'end_idx': 12000,
+            'colour': 'green'
+        },
+        {
+            'start_idx': 12400,
+            'end_idx': 16500,
+            'colour': 'orange'
+        },
+        {
+            'start_idx': 16700,
+            'end_idx': 18000,
+            'colour': 'green'
+        },
+        {
+            'start_idx': 18100,
+            'end_idx': 19600,
+            'colour': 'orange'
+        },
+        {
+            'start_idx': 19700,
+            'end_idx': 20500,
+            'colour': 'green'
+        },
+        {
+            'start_idx': 20800,
+            'end_idx': 22000,
+            'colour': 'orange'
+        },
+        {
+            'start_idx': 22000,
+            'end_idx': 23000,
+            'colour': 'green'
+        },
+    ]
+
+    for region in regions:
+        if region['end_idx'] > len(X_slice):
+            continue
+        X_region = X_slice[region['start_idx']:region['end_idx']]
+        pca = PCA()
+        pca.fit(X_region)
+
+        # Scatter the vertices
+        x, y, z = X_region.T
+        ax.scatter(x, y, z, c=region['colour'], s=10, alpha=0.4, zorder=-1)
+
+        # Add the region box
+        box = make_box_from_pca(X_region, pca, region['colour'], scale=(1, 1, 1))
+        ax.add_collection3d(box)
+
+    # Construct colours
+    colours = np.linspace(0, 1, len(X_slice))
+    cmap = plt.get_cmap('viridis_r')
+
+    # Draw lines connecting points
+    points = X_slice[:, None, :]
+    segments = np.concatenate([points[:-1], points[1:]], axis=1)
+    lc = Line3DCollection(segments, array=colours, cmap=cmap, zorder=-2)
+    ax.add_collection(lc)
+
+    # Setup axis
+    equal_aspect_ratio(ax)
+    ax.grid(False)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_zticks([])
+    ax.axis('off')
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            LOGS_PATH / f'{START_TIMESTAMP}_trajectory_regions_trial={args.trial}.{img_extension}',
+            transparent=True
+        )
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
@@ -524,8 +633,10 @@ if __name__ == '__main__':
     # plot_confined_particle_trajectory()
 
     # plot_trajectory_trial_list()
-    plot_multiple_trajectories(
-        trial_ids=[162, 17, 272, 37],
-        plot_combined=True,
-        plot_individual=True
-    )
+    # plot_multiple_trajectories(
+    #     trial_ids=[162, 17, 272, 37],
+    #     plot_combined=True,
+    #     plot_individual=True
+    # )
+
+    plot_trajectory_with_regions()
