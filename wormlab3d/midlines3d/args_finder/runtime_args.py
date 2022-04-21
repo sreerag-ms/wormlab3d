@@ -26,6 +26,7 @@ class RuntimeArgs(BaseArgs):
             plot_scores: bool = True,
             save_plots: bool = True,
             seed: int = None,
+            prefix_seed_to_plot_names: bool = False,
             **kwargs
     ):
         self.resume = resume
@@ -53,6 +54,7 @@ class RuntimeArgs(BaseArgs):
             rand = os.urandom(4)
             seed = int.from_bytes(rand, byteorder='big')
         self.seed = seed
+        self.prefix_seed_to_plot_names = prefix_seed_to_plot_names
 
     @classmethod
     def add_args(cls, parser: ArgumentParser):
@@ -102,3 +104,5 @@ class RuntimeArgs(BaseArgs):
                            help='Save plot images to disk. Default = True.')
         group.add_argument('--seed', type=int,
                            help='Set a random seed.')
+        group.add_argument('--prefix-seed-to-plot-names', type=str2bool, default=False,
+                           help='Prefix saved plots with the random seed. Default = False.')

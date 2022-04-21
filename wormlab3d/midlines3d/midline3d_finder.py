@@ -1877,7 +1877,10 @@ class Midline3DFinder:
         if self.runtime_args.save_plots:
             save_dir = self.logs_path / 'plots' / plot_type
             os.makedirs(save_dir, exist_ok=True)
-            path = save_dir / f'{frame_state.frame_num:05d}_{self.step:06d}.{img_extension}'
+            fn = f'{frame_state.frame_num:05d}_{self.step:06d}.{img_extension}'
+            if self.runtime_args.prefix_seed_to_plot_names:
+                fn = f'{self.runtime_args.seed:02d}_' + fn
+            path = save_dir / fn
             plt.savefig(path, bbox_inches='tight')
 
         else:
