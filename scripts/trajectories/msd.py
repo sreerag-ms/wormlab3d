@@ -639,6 +639,168 @@ def msd_dataset():
         plt.show()
 
 
+def msd_dataset_trials():
+    """
+    MSD plot for all trials in a dataset.
+    """
+    args = get_args()
+
+    # Get dataset
+    assert args.dataset is not None
+    ds = Dataset.objects.get(id=args.dataset)
+
+    deltas = np.arange(args.min_delta, args.max_delta, step=int(args.delta_step))
+    deltas_ts = deltas / 25
+
+    # Unset midline source args and use tracking data only (longer)
+    args.midline3d_source = None
+    args.midline3d_source_file = None
+    args.reconstruction = None
+    args.tracking_only = True
+
+    # Calculate the displacements for all trials
+    all_displacements = {delta: [] for delta in deltas}
+    conc_displacements = {}
+    trial_displacements = {}
+    trials = {}
+    for trial in ds.include_trials:
+        logger.info(f'Calculating displacements for trial={trial.id}.')
+        args.trial = trial.id
+        trials[trial.id] = trial
+
+        # Group results by concentration
+        c = trial.experiment.concentration
+        if c not in conc_displacements:
+            conc_displacements[c] = {delta: [] for delta in deltas}
+        if c not in trial_displacements:
+            trial_displacements[c] = {}
+        trial_displacements[c][trial.id] = {}
+
+        # Calculate displacements for trial
+        trajectory = get_trajectory_from_args(args)
+        d = calculate_displacements_parallel(trajectory, deltas, aggregation=DISPLACEMENT_AGGREGATION_SQUARED_SUM)
+        for delta in deltas:
+            trial_displacements[c][trial.id][delta] = d[delta]
+            conc_displacements[c][delta].extend(d[delta])
+            all_displacements[delta].extend(d[delta])
+
+    # Sort by concentration
+    conc_displacements = {k: v for k, v in sorted(list(conc_displacements.items()))}
+    trial_displacements = {k: v for k, v in sorted(list(trial_displacements.items()))}
+    concs = list(conc_displacements.keys())
+
+    # Calculate msds
+    msds_trials = {}
+    msds_conc = {c: {} for c in concs}
+    for c in concs:
+        msds_conc[c] = {
+            delta: np.mean(conc_displacements[c][delta])
+            for delta in deltas
+        }
+        msds_trials[c] = {}
+        for trial_id, t_displacements in trial_displacements[c].items():
+            msds_trials[c][trial_id] = {
+                delta: np.mean(t_displacements[delta])
+                for delta in deltas
+            }
+    msds_all_traj = {
+        delta: np.mean(all_displacements[delta])
+        for delta in deltas
+    }
+    msds_all_conc = {
+        delta: np.mean([msds_c[delta] for c, msds_c in msds_conc.items()])
+        for delta in deltas
+    }
+
+    # Calculate gradients
+    grads_trials = {}
+    grads_concs = {}
+    for c in concs:
+        msd_vals_c = np.array(list(msds_conc[c].values()))
+        grads_concs[c] = np.gradient(np.log(msd_vals_c), np.log(deltas))
+        grads_trials[c] = {}
+        for trial_id, t_displacements in msds_trials[c].items():
+            msd_vals_t = np.array(list(t_displacements.values()))
+            grads_trials[c][trial_id] = np.gradient(np.log(msd_vals_t), np.log(deltas))
+    msd_vals_all_traj = np.array(list(msds_all_traj.values()))
+    grads_all_traj = np.gradient(np.log(msd_vals_all_traj), np.log(deltas))
+    msd_vals_all_conc = np.array(list(msds_all_conc.values()))
+    grads_all_conc = np.gradient(np.log(msd_vals_all_conc), np.log(deltas))
+
+    # Make a separate plot for each concentration
+    for c in concs:
+        msds = msds_trials[c]
+        grads = grads_trials[c]
+
+        # Set up plots and colours
+        fig, axes = plt.subplots(2, figsize=(12, 14), sharex=True)
+        cmap = plt.get_cmap('jet')
+        colours = cmap(np.linspace(0, 1, len(msds)))
+
+        # Plot MSD combined results
+        ax = axes[0]
+        msd_vals_all_traj = np.array(list(msds_all_traj.values()))
+        ax.plot(deltas_ts, msd_vals_all_traj, label='Dataset average 1',
+                alpha=0.7, c='brown', linestyle=':', linewidth=2, zorder=80)
+        msd_vals_all_conc = np.array(list(msds_all_conc.values()))
+        ax.plot(deltas_ts, msd_vals_all_conc, label='Dataset average 2',
+                alpha=0.5, c='brown', linestyle='--', linewidth=2, zorder=80)
+        msd_vals_conc = np.array(list(msds_conc[c].values()))
+        ax.plot(deltas_ts, msd_vals_conc, label='Concentration average',
+                alpha=0.6, c='black', linestyle='--', linewidth=2, zorder=100)
+
+        # Plot MSD for each trial
+        for i, (trial_id, msds_t) in enumerate(msds.items()):
+            msd_vals = np.array(list(msds_t.values()))
+            ax.plot(deltas_ts, msd_vals, label=f'trial={trial_id} ({trials[trial_id].duration:%M:%S})', alpha=0.6,
+                    c=colours[i])
+
+        # Complete MSD plot
+        title = f'MSD. Concentration={c:.2f}\%. Dataset={args.dataset}. u={args.trajectory_point}.' + \
+                (f'Smoothing window={args.smoothing_window}. ' if args.smoothing_window is not None else '')
+        ax.set_title(title)
+        ax.set_ylabel('$MSD=<(x(t+\Delta)-x(t))^2>_t$')
+        ax.set_xlabel('$\Delta s$')
+        ax.set_yscale('log')
+        ax.set_xscale('log')
+        ax.grid()
+        ax.legend()
+
+        # Plot (log-log) gradients
+        ax = axes[1]
+        ax.plot(deltas_ts, grads_all_traj, label='Dataset average 1',
+                alpha=0.7, c='brown', linestyle=':', linewidth=2, zorder=80)
+        ax.plot(deltas_ts, grads_all_conc, label='Dataset average 2',
+                alpha=0.5, c='brown', linestyle='--', linewidth=2, zorder=80)
+        ax.plot(deltas_ts, grads_concs[c], label='Concentration average',
+                alpha=0.6, c='black', linestyle='--', linewidth=2, zorder=100)
+
+        # Plot grads for each trial
+        for i, (trial_id, grads_t) in enumerate(grads.items()):
+            ax.plot(deltas_ts, grads_t, label=f'trial={trial_id} ({trials[trial_id].duration:%M:%S})', alpha=0.6,
+                    c=colours[i])
+
+        # Complete grads plot
+        ax.set_title('Gradients (log-log)')
+        ax.set_ylabel('grad')
+        ax.set_xlabel('$\Delta s$')
+        ax.grid()
+        ax.legend()
+
+        fig.tight_layout()
+
+        if save_plots:
+            plt.savefig(
+                make_filename(
+                    f'msd_dataset_conc={c:.2f}',
+                    args,
+                    excludes=['trial', 'frames', 'src'],
+                )
+            )
+        if show_plots:
+            plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
@@ -651,4 +813,5 @@ if __name__ == '__main__':
     # msd_active_particle()
     # msd_active_particles()
     # msd_confined_particle()
-    msd_dataset()
+    # msd_dataset()
+    msd_dataset_trials()
