@@ -6,7 +6,7 @@ from wormlab3d import CAMERA_IDXS, LOGS_PATH
 from wormlab3d.data.model.trial import Trial
 from wormlab3d.toolkit.util import parse_target_arguments
 
-show_imgs = False
+show_imgs = True
 save_imgs = True
 
 

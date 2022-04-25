@@ -18,7 +18,7 @@ MAX_ATTEMPTS = 10
 
 img_extension = 'svg'
 show_plots = True
-save_plots = True
+save_plots = False
 invert = True
 
 if save_plots:
@@ -44,7 +44,7 @@ def get_midline(attempt: int = 1) -> Midline3D:
         frame_num = args.frame_num
 
     frame = trial.get_frame(frame_num)
-    midlines = frame.get_midlines3d({'source': 'reconst'})
+    midlines = frame.get_midlines3d({'source': args.midline3d_source})
     logger.info(f'Found {len(midlines)} 3d midlines for trial_id = {trial.id}, frame_num = {frame_num}')
     if len(midlines) > 1:
         logger.info('Picking at random..')
@@ -56,7 +56,7 @@ def get_midline(attempt: int = 1) -> Midline3D:
         logger.warning(f'No midlines found for frame_num={frame_num}, trying again...')
         return get_midline(attempt + 1)
     else:
-        raise ValueError('No midlines found, try specifying a frame number of midline id.')
+        raise ValueError('No midlines found, try specifying a frame number or midline id.')
 
     return midline
 
@@ -229,6 +229,6 @@ if __name__ == '__main__':
     # interactive_plots()
     mid = get_midline()
     # plot_3d(mid)
-    plot_3d_with_pca(mid)
+    # plot_3d_with_pca(mid)
     # plot_reprojections(mid)
-    # plot_reprojection_singles(mid)
+    plot_reprojection_singles(mid)
