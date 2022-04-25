@@ -347,30 +347,28 @@ class TrialState:
         Return a slice of data for a given buffer/parameter key.
         """
         assert k in BUFFER_NAMES + PARAMETER_NAMES + TRANSIENTS_NAMES
+
+        if start_frame is None:
+            start_frame = self.start_frame
+        else:
+            assert self.end_frame > start_frame >= self.start_frame
+        if end_frame is None:
+            end_frame = self.end_frame + 1
+        else:
+            assert self.end_frame + 1 >= end_frame > self.start_frame
+
         if k in TRANSIENTS_NAMES:
             if k == 'points_3d_base':
                 centres_3d, _ = self.trial.get_tracking_data(
                     fixed=True,
                     start_frame=start_frame,
-                    end_frame=end_frame
+                    end_frame=end_frame - 1
                 )
                 return centres_3d
             else:
                 raise RuntimeError(f'Transient key = {k} not yet supported!')
 
         state = self.states[k]
-
-        if start_frame is None and end_frame is None:
-            return state
-
-        if start_frame is not None:
-            assert start_frame >= self.frame_nums[0]
-        else:
-            start_frame = self.start_frame
-        if end_frame is not None:
-            assert end_frame <= self.frame_nums[-1] + 1
-        else:
-            end_frame = self.end_frame + 1
 
         return state[start_frame:end_frame]
 

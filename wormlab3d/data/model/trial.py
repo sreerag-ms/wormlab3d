@@ -180,7 +180,7 @@ class Trial(Document):
 
         # Match this trial and restrict frame range.
         matches = {'trial': self.id}
-        frame_num_matches = []
+        frame_num_matches = {}
         if start_frame is not None:
             frame_num_matches['$gte'] = start_frame
         if end_frame is not None:

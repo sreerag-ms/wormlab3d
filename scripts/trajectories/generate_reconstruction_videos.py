@@ -182,7 +182,7 @@ def generate_reconstruction_video(reconstruction_id: int, missing_only: bool = T
         D = reconstruction.mf_parameters.depth  # todo - different depth videos
         D_min = reconstruction.mf_parameters.depth_min
         ts = TrialState(reconstruction=reconstruction)
-        from_idx = 2**(D - 1) - 2**(D_min)
+        from_idx = 2**(D - 1) - 2**D_min
         to_idx = from_idx + 2**(D - 1)
 
         # Get 3D postures
