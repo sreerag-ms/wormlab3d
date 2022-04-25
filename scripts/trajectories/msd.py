@@ -6,19 +6,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
-from wormlab3d.data.model import Dataset
-from wormlab3d.toolkit.plot_utils import tex_mode
+from wormlab3d.data.model import Dataset, Trial
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.brownian_particle import BrownianParticle, ActiveParticle, ConfinedParticle
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.displacement import calculate_msd, plot_msd, plot_msd_multiple, \
     calculate_displacements_parallel, DISPLACEMENT_AGGREGATION_SQUARED_SUM
+from wormlab3d.trajectories.util import get_deltas_from_args
 
-tex_mode()
+# tex_mode()
 
 show_plots = True
 save_plots = True
-img_extension = 'png'
+img_extension = 'svg'
 
 
 def make_filename(method: str, args: Namespace, excludes: List[str] = None, append: str = None) -> str:
@@ -801,6 +801,109 @@ def msd_dataset_trials():
             plt.show()
 
 
+def msd_multiple_trials():
+    """
+    MSD plot for all trials in a dataset.
+    """
+    args = get_args()
+    deltas, delta_ts = get_deltas_from_args(args)
+
+    # Define trial_ids
+    # trial_ids = [111, 72, 106, 110, 239, 112, 80, 103, 168]
+    # trial_ids = [111, 72, 106, 110, 239, 112, 80, 103, 168, 37]
+    trial_ids = [162, 73, 114, 103, 76, 35, 168, 37]
+
+    # Unset midline source args and use tracking data only (longer)
+    args.midline3d_source = None
+    args.midline3d_source_file = None
+    args.reconstruction = None
+    args.tracking_only = True
+
+    # Calculate the displacements for all trials
+    all_displacements = {delta: [] for delta in deltas}
+    trial_displacements = {}
+    trials = {}
+    for trial_id in trial_ids:
+        trial = Trial.objects.get(id=trial_id)
+        logger.info(f'Calculating displacements for trial={trial.id}.')
+        args.trial = trial.id
+        trials[trial.id] = trial
+        trial_displacements[trial.id] = {}
+
+        # Calculate displacements for trial
+        trajectory = get_trajectory_from_args(args)
+        d = calculate_displacements_parallel(trajectory, deltas, aggregation=DISPLACEMENT_AGGREGATION_SQUARED_SUM)
+        for delta in deltas:
+            trial_displacements[trial.id][delta] = d[delta]
+            all_displacements[delta].extend(d[delta])
+
+    # Sort the trials by concentration
+    trial_ids.sort(key=lambda tid: trials[tid].duration)
+    trial_ids.sort(key=lambda tid: trials[tid].experiment.concentration)
+
+    # Calculate msds
+    msds = {}
+    for trial_id, t_displacements in trial_displacements.items():
+        msds[trial_id] = {
+            delta: np.mean(t_displacements[delta])
+            for delta in deltas
+        }
+    msds_all_traj = {
+        delta: np.mean(all_displacements[delta])
+        for delta in deltas
+    }
+
+    # Set up plots and colours
+    fig, ax = plt.subplots(1, figsize=(8, 4))
+    cmap = plt.get_cmap('brg')
+    colours = cmap(np.linspace(0, 1, len(msds)))
+
+    # Plot MSD combined results
+    msd_vals_all_traj = np.array(list(msds_all_traj.values()))
+    ax.plot(delta_ts, msd_vals_all_traj, label='Average',
+            alpha=0.8, c='black', linestyle='--', linewidth=3, zorder=80)
+
+    # Plot MSD for each trial
+    for i, trial_id in enumerate(trial_ids):
+        msd_vals = np.array(list(msds[trial_id].values()))
+        ax.plot(
+            delta_ts,
+            msd_vals,
+            label=f'Trial #{trial_id} '
+                  f'(c={trials[trial_id].experiment.concentration:.2f}% '
+                  f'T={trials[trial_id].duration:%M:%S})',
+            alpha=0.5,
+            c=colours[i]
+        )
+
+    # Complete MSD plot
+    ax.set_ylabel('MSD$=<(x(t+\Delta)-x(t))^2>_t$')
+    ax.set_xlabel('$\Delta\ (s)$')
+    ax.set_yscale('log')
+    ax.set_xscale('log')
+    ax.grid()
+    ax.legend(bbox_to_anchor=(1.04, 1))
+
+    # Highlight flattening-off region
+    ylim = ax.get_ylim()[1] * 1.1
+    ax.set_ylim(top=ylim)
+    ax.fill_between(np.arange(30, 100), ylim, color='red', alpha=0.3, zorder=-1, linewidth=0)
+
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            make_filename(
+                f'msd_multiple_trials={",".join([str(tid) for tid in trial_ids])}',
+                args,
+                excludes=['trial', 'frames', 'src'],
+            ),
+            transparent=True
+        )
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
@@ -814,4 +917,5 @@ if __name__ == '__main__':
     # msd_active_particles()
     # msd_confined_particle()
     # msd_dataset()
-    msd_dataset_trials()
+    # msd_dataset_trials()
+    msd_multiple_trials()
