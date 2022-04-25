@@ -1328,10 +1328,10 @@ class Midline3DFinder:
                 for v in params:
                     v.data = v.clamp(**render_parameters_limits[sei])
 
-                # Camera scaling factors should average 1 and not be more than 20% from the mean
+                # Camera scaling factors should average 1 and not be more than 30% from the mean
                 v = self.master_frame_state.get_state(f'camera_{sei}')
                 v.data = v / v.mean()
-                sf = 0.2 / ((v - 1).abs()).amax()
+                sf = 0.3 / ((v - 1).abs()).amax()
                 if sf < 1:
                     v.data = (v - 1) * sf + 1
 

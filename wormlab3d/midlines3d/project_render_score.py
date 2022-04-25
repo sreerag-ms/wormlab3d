@@ -150,10 +150,10 @@ def _taper_parameter(param: torch.Tensor) -> torch.Tensor:
 @torch.jit.script
 def _normalise_scale_factor(v: torch.Tensor) -> torch.Tensor:
     """
-    Camera scaling factors should average 1 and not be more than 20% from the mean.
+    Camera scaling factors should average 1 and not be more than 30% from the mean.
     """
     v = v / v.mean()
-    sf = 0.2 / ((v - 1).abs()).amax()
+    sf = 0.3 / ((v - 1).abs()).amax()
     if sf < 1:
         v = (v - 1) * sf + 1
     return v
