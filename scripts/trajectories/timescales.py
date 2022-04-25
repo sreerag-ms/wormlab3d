@@ -766,7 +766,7 @@ def displacement_transition_rates_dataset_averages():
             lambda1_all[delta].append(l1cd)
 
     # Set up plots
-    fig, ax = plt.subplots(1, figsize=(6, 4))
+    fig, ax = plt.subplots(1, figsize=(4, 3))
     # ax.set_title(f'Dataset {ds.id}.')
     ax.set_ylabel(f'Transition probability')
     ax.set_xlabel('$\Delta\ (s)$')
@@ -1128,7 +1128,8 @@ def nonplanarity_and_displacement_over_time(x_label: str = 'time'):
     ts = np.arange(max_i)
     if x_label == 'time':
         ts = ts / 25
-    fig, axes = plt.subplots(2, 1 + len(deltas), figsize=(4 + 5 * len(deltas), 8))
+    # fig, axes = plt.subplots(2, 1 + len(deltas), figsize=(4 + 5 * len(deltas), 8))
+    fig, axes = plt.subplots(2, len(deltas), figsize=(4 + 4 * len(deltas), 8))
     for i, delta in enumerate(deltas):
         d = displacements[delta][:max_i]
         p = nonp[delta][:max_i]
@@ -1136,7 +1137,10 @@ def nonplanarity_and_displacement_over_time(x_label: str = 'time'):
         # Displacement trace over time
         ax = axes[0, i]
         ax.plot(ts, d, alpha=0.75, zorder=100)
-        ax.set_title(f'$\Delta={delta_ts[i]:.2f}s$')
+        if x_label == 'time':
+            ax.set_title(f'$\Delta={delta_ts[i]}s$')
+        else:
+            ax.set_title(f'$\Delta={delta_ts[i]}\ frames$')
         if args.aggregation == DISPLACEMENT_AGGREGATION_L2:
             ax.set_ylabel('$d=|x(t)-x(t+\Delta)|$')
         else:
@@ -1150,6 +1154,7 @@ def nonplanarity_and_displacement_over_time(x_label: str = 'time'):
             ax.set_xlabel('Time (s)')
         else:
             ax.set_xlabel('Frame')
+        ax.locator_params(axis='y', nbins=6)
 
         # Nonplanarity trace over time
         ax = axes[1, i]
@@ -1158,12 +1163,14 @@ def nonplanarity_and_displacement_over_time(x_label: str = 'time'):
         avg = p.mean()
         ax.axhline(y=avg, color='red')
         ax.set_xlim(left=0, right=ts[-1])
-        ax.set_ylim(bottom=0, top=max(p))
-        _add_dwell_regions(ax, dwells_nonp, max(p))
+        # ax.set_ylim(bottom=0, top=max(p))
+        ax.set_ylim(bottom=0, top=0.65)
+        _add_dwell_regions(ax, dwells_nonp, 0.65)
         if x_label == 'time':
             ax.set_xlabel('Time (s)')
         else:
             ax.set_xlabel('Frame')
+        ax.set_yticks([0, 0.2, 0.4, 0.6])
 
     # # Plot lambdas
     # for i, lambdas in enumerate([lambdas_displacements, lambdas_nonp]):
@@ -1304,15 +1311,15 @@ if __name__ == '__main__':
     # displacement_over_time()
     # angle_diffs_over_time()
     # nonplanarity_over_time()
-    # nonplanarity_and_displacement_over_time(x_label='frame')
+    nonplanarity_and_displacement_over_time(x_label='time')
     # if args_.dataset is not None:
     #     transition_rates_dataset()
     # else:
     #     transition_rates_trajectory()
     # transition_rates_angle_diffs_trajectory()
 
-    if args_.dataset is not None:
-        # transition_rates_dataset()
-        # transition_rates_dataset_simple()
-        # displacement_transition_rates_dataset_averages()
-        nonplanarity_transition_rates_dataset_averages()
+    # if args_.dataset is not None:
+    # transition_rates_dataset()
+    # transition_rates_dataset_simple()
+    # displacement_transition_rates_dataset_averages()
+    # nonplanarity_transition_rates_dataset_averages()
