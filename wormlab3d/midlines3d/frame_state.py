@@ -326,7 +326,7 @@ class FrameState(nn.Module):
         mp = self.parameters
 
         # Pick a random midpoint near the centre
-        X0 = torch.normal(mean=torch.zeros(3), std=1 / 0.1)
+        X0 = torch.normal(mean=torch.zeros(3), std=0.1)
         X0s = [nn.Parameter(X0, requires_grad=True) for _ in range(mp.depth - mp.depth_min)]
 
         # Pick a random tangent direction
