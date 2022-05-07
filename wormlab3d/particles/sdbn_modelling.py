@@ -15,10 +15,10 @@ from torch.distributions import LogNormal, Cauchy, Normal
 from simple_worm.frame import FrameNumpy
 from simple_worm.plot3d import FrameArtist
 from wormlab3d import logger
+from wormlab3d.particles.sdbn_explorer import PARTICLE_PARAMETER_KEYS
 from wormlab3d.toolkit.plot_utils import equal_aspect_ratio
 from wormlab3d.toolkit.util import orthogonalise, normalise
 from wormlab3d.trajectories.displacement import calculate_displacements, DISPLACEMENT_AGGREGATION_L2
-from wormlab3d.trajectories.particle_explorer import PARTICLE_PARAMETER_KEYS
 from wormlab3d.trajectories.pca import PCACache, calculate_pcas
 from wormlab3d.trajectories.util import calculate_speeds
 

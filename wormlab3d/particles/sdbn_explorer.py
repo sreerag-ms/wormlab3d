@@ -18,7 +18,7 @@ def orthogonalise(source: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
     return source - (torch.einsum('bs,bs->b', source, ref) / ref.norm(dim=-1, keepdim=False, p=2))[:, None] * ref
 
 
-class ParticleExplorer(nn.Module):
+class SDBNExplorer(nn.Module):
     state: torch.Tensor
     x: torch.Tensor
     e0: torch.Tensor

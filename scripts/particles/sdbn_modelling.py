@@ -6,14 +6,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
+from wormlab3d.particles.sdbn_explorer import SDBNExplorer
+from wormlab3d.particles.sdbn_modelling import calculate_pe_parameters_for_trajectory, plot_3d_trajectories, \
+    plot_states, plot_2d_trajectory, plot_3d_trajectory, plot_trajectory_with_frame, plot_displacements_and_states, \
+    plot_state_parameters
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.displacement import DISPLACEMENT_AGGREGATION_SQUARED_SUM, \
     calculate_msd, calculate_displacements
-from wormlab3d.trajectories.particle_explorer import ParticleExplorer
-from wormlab3d.trajectories.particle_modelling import calculate_pe_parameters_for_trajectory, plot_3d_trajectories, \
-    plot_states, plot_2d_trajectory, \
-    plot_3d_trajectory, plot_trajectory_with_frame, plot_displacements_and_states, plot_state_parameters
 from wormlab3d.trajectories.pca import get_pca_cache_from_args
 from wormlab3d.trajectories.util import get_deltas_from_args
 
@@ -245,7 +245,7 @@ def create_particle_model_for_trial():
     )
 
     # Create the model
-    pe = ParticleExplorer(
+    pe = SDBNExplorer(
         batch_size=20,
         transition_rates=transition_rates,
         state_parameters=state_parameters

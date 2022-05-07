@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 import torch
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
-from wormlab3d.trajectories.particle_explorer import ParticleExplorer
-from wormlab3d.trajectories.particle_modelling import plot_states, plot_2d_trajectory, plot_3d_trajectory, \
+from wormlab3d.particles.sdbn_explorer import SDBNExplorer
+from wormlab3d.particles.sdbn_modelling import plot_states, plot_2d_trajectory, plot_3d_trajectory, \
     plot_3d_trajectories
 
 plot_n_examples = 1
@@ -15,7 +15,7 @@ img_extension = 'png'
 
 
 def simulate():
-    pe = ParticleExplorer(
+    pe = SDBNExplorer(
         depth=3,
         batch_size=20,
         transition_rates=[
