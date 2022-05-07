@@ -68,6 +68,7 @@ def calculate_speeds(X: np.ndarray, signed: bool = False) -> np.ndarray:
     speeds = np.linalg.norm(directional_gradients, axis=1)
 
     if signed:
+        assert X.shape[1] > 1, 'Not enough information to calculate signed speeds!'
         ht_directions = X[:, 0] - X[:, -1]
         ht_dot_dir = np.einsum('ni,ni->n', ht_directions, directional_gradients)
         fwd_or_back = np.sign(ht_dot_dir)

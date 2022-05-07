@@ -3,6 +3,7 @@ from typing import List, Dict, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 from matplotlib.figure import Figure
 
 from wormlab3d import logger, N_WORKERS
@@ -14,7 +15,7 @@ DISPLACEMENT_AGGREGATION_OPTIONS = [DISPLACEMENT_AGGREGATION_SQUARED_SUM, DISPLA
 
 
 def calculate_displacements(
-        trajectory: np.ndarray,
+        trajectory: Union[np.ndarray,torch.Tensor],
         deltas: Union[int, List[int]],
         aggregation: str = DISPLACEMENT_AGGREGATION_L2
 ) -> Union[np.ndarray, Dict[int, np.ndarray]]:
@@ -29,8 +30,11 @@ def calculate_displacements(
         deltas = [deltas]
 
     if trajectory.ndim == 3:
-        logger.info('Using center of mass for displacement calculations.')
+        # logger.info('Using center of mass for displacement calculations.')
         trajectory = trajectory.mean(axis=1)
+
+    if type(trajectory) == torch.Tensor:
+        trajectory = trajectory.numpy()
 
     for delta in deltas:
         logger.info(f'Calculating displacements for delta = {delta}.')

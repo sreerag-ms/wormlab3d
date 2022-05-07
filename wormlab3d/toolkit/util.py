@@ -4,7 +4,9 @@ import json
 from argparse import ArgumentParser, Namespace
 from typing import Tuple, List, TYPE_CHECKING
 
+import numpy as np
 import torch
+from numpy.linalg import norm
 
 from wormlab3d import logger, CAMERA_IDXS
 
@@ -155,3 +157,16 @@ def to_dict(obj) -> dict:
 def str2bool(v: str) -> bool:
     """Converts truthy and falsey strings to their boolean values."""
     return bool(distutils.util.strtobool(v))
+
+
+def normalise(v: np.ndarray) -> np.ndarray:
+    """Normalise an array along its final dimension."""
+    return v / norm(v, axis=-1, keepdims=True)
+
+
+def orthogonalise(source: np.ndarray, ref: np.ndarray) -> np.ndarray:
+    """Orthogonalise a vector or set of vectors against another."""
+    assert source.ndim == ref.ndim
+    if source.ndim == 1:
+        return source - np.dot(source, ref) / norm(ref, axis=-1, keepdims=True) * ref
+    return source - (np.einsum('bs,bs->b', source, ref) / norm(ref, axis=-1, keepdims=False))[:, None] * ref

@@ -170,7 +170,7 @@ def generate_interactive_3d_clip_with_projections(
     fps = trial.fps
 
     # Load the camera image sequences
-    IS = np.zeros((FS.n_frames, 3, FS.trial.crop_size, FS.trial.crop_size))
+    IS = np.zeros((FS.n_frames, 3, trial.crop_size, trial.crop_size))
     for i, frame in enumerate(FS_db.frames):
         if not frame.is_ready():
             logger.warning(f'Frame #{frame.frame_num} is not ready! Preparing now...')

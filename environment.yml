@@ -19,12 +19,14 @@ dependencies:
   - numpy = 1.20
   - opencv = 4.5
   - pims = 0.5
+  - progress = 1.6
   - pymongo = 3.11
   - python-blosc = 1.10
   - python-dotenv = 0.16
   - pytorch = 1.10
   - scikit-image = 0.18
   - scikit-learn = 0.24
+  - scipy = 1.8
   - snakemake
   - tensorboard = 2.4
   - torchvision = 0.11
