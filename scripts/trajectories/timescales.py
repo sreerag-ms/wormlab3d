@@ -7,13 +7,15 @@ import numpy as np
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.data.model import Reconstruction, Trial, Dataset
-from wormlab3d.trajectories.angles import calculate_trajectory_angles_parallel, calculate_planar_angles_parallel
+from wormlab3d.trajectories.angles import calculate_trajectory_angles_parallel, calculate_planar_angles_parallel, \
+    calculate_angle
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.displacement import calculate_displacements, \
     calculate_transitions_and_dwells_multiple_deltas, DISPLACEMENT_AGGREGATION_L2
+from wormlab3d.trajectories.manoeuvres import get_manoeuvres
 from wormlab3d.trajectories.pca import get_pca_cache_from_args
-from wormlab3d.trajectories.util import get_deltas_from_args
+from wormlab3d.trajectories.util import get_deltas_from_args, calculate_speeds
 
 # tex_mode()
 
@@ -1054,6 +1056,65 @@ def nonplanarity_over_time():
         plt.show()
 
 
+def speed_over_time():
+    """
+    Plot traces of the speed along a trajectory highlighting regions above and below the average.
+    Show histograms of the dwell times spent in each state.
+    """
+    args = get_args()
+    speeds = {}
+    for delta in args.deltas:
+        if delta % 2 == 0:
+            delta += 1
+        logger.info(f'Calculating speeds with smoothing window = {int(delta)}.')
+        args.smoothing_window = int(delta)
+        X = get_trajectory_from_args(args)
+        speeds[delta] = calculate_speeds(X, signed=False)
+
+    dwells = calculate_transitions_and_dwells_multiple_deltas(speeds)
+    deltas = list(speeds.keys())
+    delta_ts = np.array(deltas) / 25
+
+    fig, axes = plt.subplots(len(deltas), 2, figsize=(12, 4 + 2 * len(deltas)))
+    for i, delta in enumerate(deltas):
+        s = speeds[delta]
+
+        # Trace over time
+        ax = axes[i, 0]
+        ax.plot(s, alpha=0.75)
+        ax.set_title(f'$\Delta={delta_ts[i]:.2f}s$')
+        ax.set_ylabel('Non-planarity')
+        ax.set_xlabel('$t$')
+
+        # Add average indicator
+        avg = s.mean()
+        ax.axhline(y=avg, color='red')
+
+        # Highlight regions where above/below average
+        for on_dwell in dwells[delta]['on']:
+            ax.fill_between(np.arange(on_dwell[0], on_dwell[1]), max(s), color='green', alpha=0.3, zorder=-1,
+                            linewidth=0)
+        for off_dwell in dwells[delta]['off']:
+            ax.fill_between(np.arange(off_dwell[0], off_dwell[1]), max(s), color='orange', alpha=0.3, zorder=-1,
+                            linewidth=0)
+
+        # Plot histogram of dwell times
+        ax = axes[i, 1]
+        ax.set_yscale('log')
+        ax.set_xscale('log')
+        ax.hist(dwells[delta]['on_durations'], bins=50, density=True, alpha=0.5, color='green')
+        ax.hist(dwells[delta]['off_durations'], bins=50, density=True, alpha=0.5, color='orange')
+
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            make_filename(f'traces_speed', args, excludes=['delta_range', 'delta_step'])
+        )
+    if show_plots:
+        plt.show()
+
+
 def nonplanarity_and_displacement_over_time(x_label: str = 'time'):
     """
     Plot traces of the nonplanarity/displacement changes along a trajectory highlighting regions above and below the average.
@@ -1302,6 +1363,129 @@ def nonplanarity_transition_rates_dataset_averages():
         plt.show()
 
 
+def displacement_over_time_with_stats():
+    """
+    Plot traces of the displacement values along a trajectory highlighting regions above and below the average.
+    Show inter-manoeuvre-intervals, changes in trajectory-angles, changes in planarity-angles and reversal durations.
+    """
+    args = get_args()
+    assert not args.tracking_only, 'Need full reconstruction for this!'
+    X_slice = get_trajectory_from_args(args)
+    args.trajectory_point = None
+    X_full = get_trajectory_from_args(args)
+    assert X_full.shape[1] != 1, 'Full reconstruction required to generate statistics!'
+    displacements = calculate_displacements(X_slice, args.deltas, args.aggregation)
+    dwells = calculate_transitions_and_dwells_multiple_deltas(displacements)
+
+    # Get manoeuvres
+    manoeuvres = get_manoeuvres(
+        X_full,
+        X_slice,
+        min_reversal_frames=args.min_reversal_frames,
+        window_size=args.manoeuvre_window,
+        cut_windows_at_manoeuvres=False
+    )
+
+    # Inter-Manoeuvre-Intervals
+    IMIs = []
+    for i in range(len(manoeuvres) - 1):
+        prev_m = manoeuvres[i]['centre_idx']
+        next_m = manoeuvres[i + 1]['centre_idx']
+        IMIs.append([(prev_m + next_m) / 2, next_m - prev_m])
+    IMIs = np.array(IMIs)
+
+    # Reversal durations
+    reversal_durations = []
+    for m in manoeuvres:
+        reversal_durations.append([m['centre_idx'], m['reversal_duration']])
+    reversal_durations = np.array(reversal_durations)
+
+    # Angle changes
+    planar_angles = []
+    nonplanar_angles = []
+    for m in manoeuvres:
+        n1 = m['pca_prev'].components_[0]
+        n2 = m['pca_next'].components_[0]
+        angle = calculate_angle(n1, n2)
+        planar_angles.append([m['centre_idx'], angle])
+        nonplanar_angles.append([m['centre_idx'], m['angle']])
+    planar_angles = np.array(planar_angles)
+    nonplanar_angles = np.array(nonplanar_angles)
+
+    deltas = list(displacements.keys())
+    delta_ts = np.array(deltas) / 25
+    fig, axes = plt.subplots(len(deltas) + 4, 2, figsize=(16, 8 + 2 * len(deltas)))
+    for i, delta in enumerate(deltas):
+        d = displacements[delta]
+
+        # Trace over time
+        ax = axes[i, 0]
+        ax.plot(d, alpha=0.75)
+        ax.set_title(f'$\Delta={delta_ts[i]:.2f}s$')
+        if args.aggregation == DISPLACEMENT_AGGREGATION_L2:
+            ax.set_ylabel('$d=|x(t)-x(t+\Delta)|$')
+        else:
+            ax.set_ylabel('$d=(x(t)-x(t+\Delta))^2$')
+        ax.set_xlabel('$t$')
+
+        # Add average indicator
+        avg = d.mean()
+        ax.axhline(y=avg, color='red')
+
+        # Highlight regions where above/below average
+        for on_dwell in dwells[delta]['on']:
+            ax.fill_between(np.arange(on_dwell[0], on_dwell[1]), max(d), color='green', alpha=0.3, zorder=-1,
+                            linewidth=0)
+        for off_dwell in dwells[delta]['off']:
+            ax.fill_between(np.arange(off_dwell[0], off_dwell[1]), max(d), color='orange', alpha=0.3, zorder=-1,
+                            linewidth=0)
+
+        # Plot histogram of dwell times
+        ax = axes[i, 1]
+        ax.set_yscale('log')
+        ax.set_xscale('log')
+        ax.hist(dwells[delta]['on_durations'], bins=50, density=True, alpha=0.5, color='green')
+        ax.hist(dwells[delta]['off_durations'], bins=50, density=True, alpha=0.5, color='orange')
+
+    # IMIs
+    ax = axes[i + 1, 0]
+    ax.scatter(IMIs[:, 0] / 25, IMIs[:, 1] / 25)
+    ax.set_title('IMIs')
+    ax = axes[i + 1, 1]
+    ax.hist(IMIs[:, 1] / 25, bins=50, density=True, alpha=0.5, color='green')
+
+    # Reversal durations
+    ax = axes[i + 2, 0]
+    ax.scatter(reversal_durations[:, 0] / 25, reversal_durations[:, 1] / 25)
+    ax.set_title('Reversal durations')
+    ax = axes[i + 2, 1]
+    ax.hist(reversal_durations[:, 1] / 25, bins=50, density=True, alpha=0.5, color='green')
+
+    # Planar angles
+    ax = axes[i + 3, 0]
+    ax.scatter(planar_angles[:, 0] / 25, planar_angles[:, 1])
+    ax.set_title('Planar angles')
+    ax = axes[i + 3, 1]
+    ax.hist(planar_angles[:, 1], bins=50, density=True, alpha=0.5, color='green')
+
+    # Non-planar angles
+    ax = axes[i + 4, 0]
+    ax.scatter(nonplanar_angles[:, 0] / 25, nonplanar_angles[:, 1])
+    ax.set_title('Non-planar angles')
+    ax = axes[i + 4, 1]
+    ax.hist(nonplanar_angles[:, 1], bins=50, density=True, alpha=0.5, color='green')
+
+    fig.suptitle(f'Trial={args.trial}')
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            make_filename('displacement_over_time_with_stats', args, excludes=['delta_range', 'delta_step'])
+        )
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     # from simple_worm.plot3d import interactive
     # interactive()
@@ -1311,7 +1495,11 @@ if __name__ == '__main__':
     # displacement_over_time()
     # angle_diffs_over_time()
     # nonplanarity_over_time()
-    nonplanarity_and_displacement_over_time(x_label='time')
+    # speed_over_time()
+
+    displacement_over_time_with_stats()
+
+    # nonplanarity_and_displacement_over_time(x_label='time')
     # if args_.dataset is not None:
     #     transition_rates_dataset()
     # else:
