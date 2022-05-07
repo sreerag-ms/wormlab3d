@@ -24,7 +24,7 @@ def an_orthonormal(X: torch.Tensor) -> torch.Tensor:
 
 @torch.jit.script
 def orthogonalise(source: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
-    return source - torch.einsum('bs,bs->b', source, ref) / source.norm(dim=-1, keepdim=True, p=2) * ref
+    return source - torch.einsum('bs,bs->b', source, ref) / ref.norm(dim=-1, keepdim=True, p=2) * ref
 
 
 @torch.jit.script
