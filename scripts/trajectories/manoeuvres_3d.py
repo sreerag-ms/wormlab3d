@@ -6,18 +6,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import animation
 from matplotlib.axes import Axes
-from mpl_toolkits.mplot3d.art3d import Line3DCollection, Poly3DCollection
-from scipy.signal import find_peaks
-from sklearn.decomposition import PCA
+from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
 from simple_worm.frame import FrameSequenceNumpy
 from simple_worm.plot3d import FrameArtist, Arrow3D, MidpointNormalize
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.data.model import Dataset, Reconstruction
 from wormlab3d.toolkit.plot_utils import equal_aspect_ratio, make_box_from_pca
-from wormlab3d.trajectories.angles import calculate_angle
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
+from wormlab3d.trajectories.manoeuvres import get_manoeuvres, get_forward_durations
 from wormlab3d.trajectories.util import calculate_speeds
 
 animate = False
@@ -33,9 +31,6 @@ arrow_colours = {
     'e1': 'blue',
     'e2': 'green',
 }
-
-
-# tex_mode()
 
 
 def get_trajectory(args: Namespace):
@@ -105,7 +100,7 @@ def plot_manoeuvre_3d(
     # Add worm
     if worm_idxs != -1:
         if type(worm_idxs) != list:
-            worm_idxs = [worm_idxs,]
+            worm_idxs = [worm_idxs, ]
         for worm_idx in worm_idxs:
             if worm_idx >= len(X_full):
                 worm_idx = len(X_full) - 1
@@ -181,69 +176,6 @@ def plot_manoeuvre_3d(
         plt.show()
 
     plt.close(fig)
-
-
-def get_manoeuvres(
-        X_full: np.ndarray,
-        X_slice: np.ndarray,
-        min_reversal_frames: int = 25,
-        window_size: int = 500
-) -> dict:
-    """
-    Get the manoeuvre sections, the parts prior and subsequent to a reversal.
-    """
-    signed_speeds = calculate_speeds(X_full, signed=True)
-    reversal_centre_idxs, reversal_props = find_peaks(signed_speeds < 0, width=min_reversal_frames)
-
-    manoeuvres = []
-
-    # Loop over reversal events
-    for i, reversal_centre_idx in enumerate(reversal_centre_idxs):
-        # Identify the plane of motion prior to the reversal
-        prev_end_idx = reversal_props['left_bases'][i]
-        prev_start_idx = max(0, prev_end_idx - window_size)
-        X_prev = X_slice[prev_start_idx:prev_end_idx]
-        if X_prev.shape[0] < 10:
-            continue
-        pca_prev = PCA(svd_solver='full', copy=True, n_components=3)
-        pca_prev.fit(X_prev)
-
-        # Identify the plane of motion subsequent to the reversal
-        next_start_idx = reversal_props['right_bases'][i] - 1
-        next_end_idx = next_start_idx + window_size
-        X_next = X_slice[next_start_idx:next_end_idx]
-        if X_next.shape[0] < 10:
-            continue
-        pca_next = PCA(svd_solver='full', copy=True, n_components=3)
-        pca_next.fit(X_next)
-
-        # Calculate the angle between planes
-        n1 = pca_prev.components_[2]
-        n2 = pca_next.components_[2]
-        angle = calculate_angle(n1, n2)
-
-        manoeuvres.append({
-            'centre_idx': reversal_centre_idx,
-            'start_idx': prev_start_idx,
-            'end_idx': next_end_idx,
-            'X_prev': X_prev,
-            'X_next': X_next,
-            'pca_prev': pca_prev,
-            'pca_next': pca_next,
-            'reversal_duration': reversal_props['widths'][i],
-            'angle': angle
-        })
-
-    return manoeuvres
-
-
-def get_forward_durations(
-        X_full: np.ndarray,
-        min_forward_frames: int = 25,
-) -> np.ndarray:
-    signed_speeds = calculate_speeds(X_full, signed=True)
-    _, forward_props = find_peaks(signed_speeds > 0, width=min_forward_frames)
-    return forward_props['widths']
 
 
 def plot_all_manoeuvres():
