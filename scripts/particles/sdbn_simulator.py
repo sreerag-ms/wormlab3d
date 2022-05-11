@@ -5,8 +5,7 @@ import torch
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d.particles.sdbn_explorer import SDBNExplorer
-from wormlab3d.particles.sdbn_modelling import plot_states, plot_2d_trajectory, plot_3d_trajectory, \
-    plot_3d_trajectories
+from wormlab3d.particles.util import plot_3d_trajectories, plot_states, plot_2d_trajectory, plot_3d_trajectory
 
 plot_n_examples = 1
 show_plots = True

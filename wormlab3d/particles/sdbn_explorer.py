@@ -5,20 +5,13 @@ from typing import List, Dict, Tuple, Optional, Union
 import numpy as np
 import torch
 from progress.bar import Bar
-from torch import nn
 from torch.distributions import Distribution, LogNormal, Cauchy, Normal
 
 from wormlab3d import logger
-from wormlab3d.midlines3d.mf_methods import normalise
-
-PARTICLE_PARAMETER_KEYS = ['speeds', 'planar_angles', 'nonplanar_angles']
+from wormlab3d.particles.particle_explorer import ParticleExplorer, PARTICLE_PARAMETER_KEYS
 
 
-def orthogonalise(source: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
-    return source - (torch.einsum('bs,bs->b', source, ref) / ref.norm(dim=-1, keepdim=False, p=2))[:, None] * ref
-
-
-class SDBNExplorer(nn.Module):
+class SDBNExplorer(ParticleExplorer):
     state: torch.Tensor
     x: torch.Tensor
     e0: torch.Tensor
@@ -39,14 +32,11 @@ class SDBNExplorer(nn.Module):
             state0: torch.Tensor = None,
             state_parameters: Dict[str, Dict[str, Dict[str, Union[str, float]]]] = None
     ):
-        super().__init__()
+        super().__init__(batch_size, x0, state0)
         if transition_rates is not None:
             depth = len(transition_rates)
         self.depth = depth
-        self.batch_size = batch_size
         self._init_transition_rates(transition_rates)
-        self._init_particle(x0)
-        self._init_state(state0)
         self._init_distributions(state_parameters)
 
     def _init_transition_rates(self, transition_rates: Optional[List[Union[torch.Tensor, np.ndarray]]] = None):
@@ -117,33 +107,6 @@ class SDBNExplorer(nn.Module):
         self.state_parameters = state_parameters
         self.dists = dists
 
-    def _init_particle(self, x0: Optional[torch.Tensor] = None):
-        """
-        Initialise the particle position and orientation.
-        """
-
-        # Starting position
-        if x0 is None:
-            x0 = torch.zeros((self.batch_size, 3), dtype=torch.float32)
-        else:
-            assert x0.shape == (self.batch_size, 3)
-            x0 = x0.to(torch.float32)
-        self.register_buffer('x', x0)
-
-        # Heading
-        e0 = normalise(torch.rand(self.batch_size, 3))
-        self.register_buffer('e0', e0)
-
-        # Orientation
-        e1 = normalise(orthogonalise(torch.rand(self.batch_size, 3), self.e0))
-        self.register_buffer('e1', e1)
-        e2 = normalise(torch.cross(e0, e1))
-        self.register_buffer('e2', e2)
-
-        # Previously sampled parameter values
-        for k in PARTICLE_PARAMETER_KEYS:
-            self.register_buffer(k, torch.zeros(self.batch_size))
-
     def forward(
             self,
             T: int,
@@ -179,13 +142,6 @@ class SDBNExplorer(nn.Module):
 
         return ts, X, states, speeds, planar_angles, nonplanar_angles
 
-    def step(self, dt: float = 1.):
-        """
-        Take a single time step forward.
-        """
-        self._update_state(dt)
-        self._update_particle(dt)
-
     def _update_state(self, dt: float = 1.):
         """
         Update the state.
@@ -207,21 +163,6 @@ class SDBNExplorer(nn.Module):
                 rand < tr[:, 0] * dt,
             ).to(torch.uint8)
 
-    def _update_particle(self, dt: float = 1.):
-        """
-        Update the particle position and orientation.
-        """
-
-        # Sample new parameters
-        self._sample_parameters(dt)
-
-        # Update the frame
-        self._rotate_frames(self.planar_angles, 'planar')
-        self._rotate_frames(self.nonplanar_angles, 'nonplanar')
-
-        # Take a step
-        self.x += self.speeds[:, None] * self.e0
-
     def _sample_parameters(self, dt: float = 1.):
         """
         Sample parameters from the distributions associated with the current states.
@@ -233,33 +174,3 @@ class SDBNExplorer(nn.Module):
                 if pk in ['planar_angles', 'nonplanar_angles']:
                     val = torch.fmod(val, torch.pi)
                 self.get_buffer(pk)[i] = val
-
-    def _rotate_frames(self, angles: torch.Tensor, which: str):
-        """
-        Rotate the frames in a planar or non-planar direction.
-        """
-        if which == 'planar':
-            u = self.e2
-        else:
-            u = self.e1
-
-        # Convert rotation axis and angle to 3x3 rotation matrix
-        # (See https://en.wikipedia.org/wiki/Rotation_matrix#Rotation_matrix_from_axis_and_angle)
-        I = torch.eye(3)[None, ...].repeat(self.batch_size, 1, 1)
-        cosA = torch.cos(angles)[:, None, None]
-        sinA = torch.sin(angles)[:, None, None]
-        outer = torch.einsum('bi,bj->bij', u, u)
-        cross = torch.cross(u[..., None].repeat(1, 1, 3), I)
-
-        R = cosA * I \
-            + sinA * cross \
-            + (1 - cosA) * outer
-
-        # Rotate frame vectors
-        self.e0 = normalise(torch.einsum('bij,bj->bi', R, self.e0))
-        if which == 'planar':
-            self.e1 = normalise(torch.einsum('bij,bj->bi', R, self.e1))
-
-        # Recalculate frame
-        self.e1 = normalise(orthogonalise(self.e1, self.e0))
-        self.e2 = normalise(torch.cross(self.e0, self.e1))

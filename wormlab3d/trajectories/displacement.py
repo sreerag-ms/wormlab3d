@@ -15,7 +15,7 @@ DISPLACEMENT_AGGREGATION_OPTIONS = [DISPLACEMENT_AGGREGATION_SQUARED_SUM, DISPLA
 
 
 def calculate_displacements(
-        trajectory: Union[np.ndarray,torch.Tensor],
+        trajectory: Union[np.ndarray, torch.Tensor],
         deltas: Union[int, List[int]],
         aggregation: str = DISPLACEMENT_AGGREGATION_L2
 ) -> Union[np.ndarray, Dict[int, np.ndarray]]:

@@ -23,6 +23,7 @@ def get_args(
     parser.add_argument('--dataset', type=str, help='Dataset id.', required=False)
     parser.add_argument('--reconstruction', type=str, help='Reconstruction id.', required=False)
     parser.add_argument('--trial', type=int, help='Trial id.', required=False)
+    parser.add_argument('--trials', type=lambda s: [int(item) for item in s.split(',')], help='Trial ids.', required=False)
     parser.add_argument('--midline3d-source', type=str, default=M3D_SOURCE_RECONST, choices=M3D_SOURCES,
                         help='Midline3D source.')
     parser.add_argument('--midline3d-source-file', type=str, help='Midline3D source file.')
@@ -83,7 +84,7 @@ def get_args(
         assert args.trajectory_point == -1 or 0 <= args.trajectory_point <= 1, 'trajectory-point must be -1 for centre of mass or between 0 and 1.'
 
     # Dataset, reconstruction id or trial id is always required
-    assert sum([getattr(args, k) is not None for k in ['dataset', 'reconstruction', 'trial']]) == 1, \
-        'Specify just one of dataset, reconstruction OR trial.'
+    assert sum([getattr(args, k) is not None for k in ['dataset', 'reconstruction', 'trial', 'trials']]) == 1, \
+        'Specify just one of dataset, reconstruction, trial OR trials.'
 
     return args

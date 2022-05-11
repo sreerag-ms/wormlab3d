@@ -5,17 +5,14 @@ from typing import Dict, Any, Union, List
 import matplotlib.pyplot as plt
 import numpy as np
 
-from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
+from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d.particles.sdbn_explorer import SDBNExplorer
-from wormlab3d.particles.sdbn_modelling import calculate_pe_parameters_for_trajectory, plot_3d_trajectories, \
-    plot_states, plot_2d_trajectory, plot_3d_trajectory, plot_trajectory_with_frame, plot_displacements_and_states, \
-    plot_state_parameters
+from wormlab3d.particles.sdbn_modelling import calculate_pe_parameters_for_trajectory
+from wormlab3d.particles.util import plot_3d_trajectories, plot_states, plot_2d_trajectory, plot_3d_trajectory, \
+    plot_trajectory_with_frame, plot_displacements_and_states, plot_state_parameters, plot_msd
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
-from wormlab3d.trajectories.displacement import DISPLACEMENT_AGGREGATION_SQUARED_SUM, \
-    calculate_msd, calculate_displacements
 from wormlab3d.trajectories.pca import get_pca_cache_from_args
-from wormlab3d.trajectories.util import get_deltas_from_args
 
 show_plots = True
 save_plots = True
@@ -146,65 +143,7 @@ def _make_msd_plot(
     """
     if not show_plots and not save_plots:
         return
-    deltas, delta_ts = get_deltas_from_args(args)
-
-    # Calculate the displacements for all simulation runs
-    all_sim_displacements = {delta: [] for delta in deltas}
-    sim_displacements = {}
-    for i, X in enumerate(Xs_sim):
-        logger.info(f'Calculating displacements for simulation {i + 1}/{len(Xs_sim)}.')
-        sim_displacements[i] = {}
-        # d = calculate_displacements_parallel(X, deltas, aggregation=DISPLACEMENT_AGGREGATION_SQUARED_SUM)
-        d = calculate_displacements(X, deltas, aggregation=DISPLACEMENT_AGGREGATION_SQUARED_SUM)
-        for delta in deltas:
-            all_sim_displacements[delta].extend(d[delta])
-            sim_displacements[i][delta] = d[delta]
-
-    # Calculate msd for real trajectory
-    msds_real = calculate_msd(X_real, deltas)
-
-    # Calculate simulation msds
-    msds_sim = {}
-    for idx, s_displacements in sim_displacements.items():
-        msds_sim[idx] = {
-            delta: np.mean(s_displacements[delta])
-            for delta in deltas
-        }
-    msds_all_sim = {
-        delta: np.mean(all_sim_displacements[delta])
-        for delta in deltas
-    }
-
-    # Set up plots and colours
-    fig, ax = plt.subplots(1, figsize=(12, 10))
-    cmap = plt.get_cmap('brg')
-    colours = cmap(np.linspace(0, 1, len(msds_sim)))
-
-    # Plot real MSD
-    msd_vals_real = np.array(list(msds_real.values()))
-    ax.plot(delta_ts, msd_vals_real, label=f'Trial {args.trial}',
-            alpha=0.8, c='black', linestyle='--', linewidth=3, zorder=80)
-
-    # Plot MSD combined results
-    msd_vals_all_sim = np.array(list(msds_all_sim.values()))
-    ax.plot(delta_ts, msd_vals_all_sim, label='Simulation average',
-            alpha=0.8, c='darkgray', linestyle=':', linewidth=3, zorder=60)
-
-    # Plot MSD for each simulation
-    for i, (idx, msd_vals_sim) in enumerate(msds_sim.items()):
-        msd_vals = np.array(list(msd_vals_sim.values()))
-        ax.plot(delta_ts, msd_vals, alpha=0.5, c=colours[i])
-
-    # Complete MSD plot
-    ax.set_ylabel('MSD$=<(x(t+\Delta)-x(t))^2>_t$')
-    ax.set_xlabel('$\Delta\ (s)$')
-    ax.set_yscale('log')
-    ax.set_xscale('log')
-    ax.grid()
-    ax.legend()
-
-    fig.tight_layout()
-
+    plot_msd(args, X_real, Xs_sim)
     if save_plots:
         plt.savefig(LOGS_PATH / f'{START_TIMESTAMP}_msd.{img_extension}')
     if show_plots:
