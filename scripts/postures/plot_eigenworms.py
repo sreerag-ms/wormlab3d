@@ -19,7 +19,7 @@ from wormlab3d.trajectories.cache import get_trajectory
 
 plot_n_components = 10
 show_plots = True
-save_plots = False
+save_plots = True
 img_extension = 'svg'
 eigenworm_length = 1
 eigenworm_scale = 64
@@ -244,6 +244,8 @@ def _plot_eigenvalues_basic(
     ax.set_xticks([2, 4, 6, 8, 10])
     ax.set_xlabel('Component')
     ax.set_ylabel('Cumulative variance')
+    ax.set_yticks([0, 0.4, 0.8])
+    ax.set_yticklabels([0, 0.4, 0.8])
     ax.hlines(y=0.95, xmin=-1, xmax=8, color='red', linewidth=2, zorder=9)
     ax.vlines(x=8, ymin=-1, ymax=0.95, color='red', linewidth=2, zorder=9)
     ax.text(-1.3, 0.93, '0.95', color='red')
@@ -252,6 +254,8 @@ def _plot_eigenvalues_basic(
     ax2.set_ylabel('Non-planarity', rotation=270, labelpad=15)
     ax2.scatter(xs[1:], NPs, zorder=8, s=80, alpha=0.7, color='orange', marker='x')
     ax2.plot(xs[1:], NPs, zorder=4, alpha=0.3, color='orange', linestyle='--')
+    ax2.set_yticks([0, 0.01, 0.02])
+    ax2.set_yticklabels([0, 0.01, 0.02])
 
     fig.tight_layout()
 
