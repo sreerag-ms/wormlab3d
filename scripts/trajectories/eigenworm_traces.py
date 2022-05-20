@@ -22,8 +22,8 @@ from wormlab3d.trajectories.util import calculate_speeds, calculate_rotation_mat
 
 # tex_mode()
 
-show_plots = True
-save_plots = False
+show_plots = False
+save_plots = True
 img_extension = 'svg'
 
 
@@ -184,35 +184,35 @@ def traces_condensed(x_label: str = 'time'):
             'start': 13700,
             'end': 14135,
             'y1': 0.,
-            'y2': 0.008,
+            'y2': 0.008 * 25,
             'color': 'green'
         },
         'reversal': {
             'start': 14135,
             'end': 14185,
-            'y1': -0.008,
-            'y2': 0.008,
+            'y1': -0.008 * 25,
+            'y2': 0.008 * 25,
             'color': 'skyblue'
         },
         'backwards': {
             'start': 14185,
             'end': 14375,
-            'y1': -0.008,
+            'y1': -0.008 * 25,
             'y2': 0.,
             'color': 'red'
         },
         'reorientation': {
             'start': 14375,
             'end': 14550,
-            'y1': -0.008,
-            'y2': 0.008,
+            'y1': -0.008 * 25,
+            'y2': 0.008 * 25,
             'color': 'violet'
         },
         'forwards_2': {
             'start': 14550,
             'end': 14750,
             'y1': 0.,
-            'y2': 0.008,
+            'y2': 0.008 * 25,
             'color': 'green'
         },
     }
@@ -227,7 +227,7 @@ def traces_condensed(x_label: str = 'time'):
 
     # Speed
     logger.info('Calculating speeds.')
-    speeds = calculate_speeds(X, signed=True)
+    speeds = calculate_speeds(X, signed=True) * reconstruction.trial.fps
 
     # Planarity
     logger.info('Fetching planarities.')
@@ -267,11 +267,15 @@ def traces_condensed(x_label: str = 'time'):
     ax.set_ylabel('Speed (mm/s)')
     # ax.grid()
 
+    # ax.set_yticks([])
+
     # Planarities
     ax2 = ax.twinx()
     ax2.plot(ts, nonp, color='orange', alpha=0.6, linestyle='--')
     ax2.set_ylabel('Non-planarity', rotation=270, labelpad=15)
     ax2.axhline(y=0, color='darkgrey')
+    ax2.set_yticks([0, 0.1, 0.2])
+    ax2.set_yticklabels([0, 0.1, 0.2])
 
     # Eigenworms - absolute values
     prop_cycle = plt.rcParams['axes.prop_cycle']
@@ -319,6 +323,9 @@ def traces_condensed(x_label: str = 'time'):
     ax.legend()
     # ax.grid()
 
+    ax.set_yticks([0, 40, 80])
+    ax.set_yticklabels([0, 40, 80])
+
     if x_label == 'time':
         ax.set_xlabel('Time (s)')
     else:
@@ -332,7 +339,7 @@ def traces_condensed(x_label: str = 'time'):
                            f'f={args.start_frame}-{args.end_frame}_' \
                            f'nc={",".join([str(c) for c in args.plot_components])}.{img_extension}'
         logger.info(f'Saving plot to {path}.')
-        plt.savefig(path)
+        plt.savefig(path, transparent=True)
 
     if show_plots:
         plt.show()
@@ -583,8 +590,8 @@ if __name__ == '__main__':
         os.makedirs(LOGS_PATH, exist_ok=True)
     from simple_worm.plot3d import interactive
     interactive()
-    traces(x_label='frames')
-    # traces_condensed(x_label='frames')
+    # traces(x_label='frames')
+    # traces_condensed(x_label='time')
     # heatmap()
-    # heatmap_basic()
+    heatmap_basic()
     # animate()
