@@ -5,11 +5,9 @@ from typing import Dict, Any, List
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.stats
-import scipy.stats
-import scipy.stats
 import torch
 from matplotlib.gridspec import GridSpec
-from scipy.stats import rv_continuous
+from scipy.stats import rv_continuous, norm
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.particles.three_state_explorer import ThreeStateExplorer
@@ -18,7 +16,7 @@ from wormlab3d.toolkit.plot_utils import equal_aspect_ratio
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 
-plot_n_examples = 5
+plot_n_examples = 20
 show_plots = False
 save_plots = True
 img_extension = 'png'
@@ -49,22 +47,48 @@ def _plot_angle_pdfs(pe: ThreeStateExplorer):
     """
     p_strs = _get_p_strs(pe, include_names=False)
 
-    def _plot_pdf(ax_, params: Dict[str, Any], label: str):
+    def _plot_pdf(ax_, params: Dict[str, Any], label: str, colour: str = None, zorder: int = None):
         # Plot the scipy distribution
         dist_cls: rv_continuous = getattr(scipy.stats, params['type'])
         dist = dist_cls(*params['params'])
-        x = np.linspace(-np.pi, np.pi, 100)
-        ax_.plot(x, dist.pdf(x), linestyle='--', alpha=0.9, label=label)
 
-    fig, ax = plt.subplots(1, figsize=(8, 6))
-    _plot_pdf(ax, pe.planar_angles_dist_params, 'Planar\n' + p_strs[0])
-    _plot_pdf(ax, pe.nonplanar_angles_dist_params, 'Non-planar\n' + p_strs[1])
+        N = 501
+        vals = np.zeros(N)
+        for i in range(-9, 8, 2):
+            x = np.linspace(i*np.pi, (i+2)*np.pi, N)
+            vals += dist.pdf(x)
+
+        print(vals.sum() * 2 * np.pi / N)
+
+        # x = np.linspace(dist.ppf(0.01), dist.ppf(0.99), 501)
+        # ax_.plot(x, dist.pdf(x), linestyle='--', alpha=0.9, label=label, color=colour)
+        # ax_.plot(x, dist.pdf(x), alpha=0.9, label=label, color=colour)
+        x = np.linspace(-np.pi, np.pi, N)
+        ax_.plot(x, vals, alpha=0.9, label=label, color=colour, zorder=zorder)
+
+
+
+
+    # fig, ax = plt.subplots(1, figsize=(8, 6))
+    # _plot_pdf(ax, pe.planar_angles_dist_params, 'Planar\n' + p_strs[0])
+    # _plot_pdf(ax, pe.nonplanar_angles_dist_params, 'Non-planar\n' + p_strs[1])
+    fig, ax = plt.subplots(1, figsize=(3,3))
+    _plot_pdf(ax, pe.planar_angles_dist_params, '$\\theta$', colour='red', zorder=2)
+    _plot_pdf(ax, pe.nonplanar_angles_dist_params, '$\phi$', colour='green', zorder=1)
+
+    ax.set_xlim(left=-np.pi - 0.1, right=np.pi + 0.1)
+    ax.set_xticks([-np.pi, 0, np.pi])
+    ax.set_xticklabels(['$-\pi$', '0', '$\pi$'])
+    ax.set_yticks([0, 0.3, 0.6])
+    ax.set_yticklabels([0, 0.3, 0.6])
+
+
     ax.set_title('Angle distributions')
     ax.legend()
     fig.tight_layout()
 
     if save_plots:
-        plt.savefig(LOGS_PATH / f'{START_TIMESTAMP}_angle_pdfs.{img_extension}')
+        plt.savefig(LOGS_PATH / f'{START_TIMESTAMP}_angle_pdfs.{img_extension}', transparent=True)
     if show_plots:
         plt.show()
 
@@ -177,15 +201,14 @@ def _plot_simulations(
     for i in range(min(pe.batch_size, plot_n_examples)):
         title = f'Simulation run {i}.'
         logger.info(f'Plotting {title}')
-        n_tumbles = len(tumble_ts[i])
         _plot_simulation(
             ts,
             tumble_ts[i],
             Xs[i],
             durations[0][i],
             durations[1][i],
-            planar_angles[i, :n_tumbles],
-            nonplanar_angles[i, :n_tumbles],
+            planar_angles[i],
+            nonplanar_angles[i],
             intervals[i],
             i
         )
@@ -200,9 +223,10 @@ def _plot_simulations(
 def _plot_histograms(
         pe: ThreeStateExplorer,
         durations: Dict[int, List[torch.Tensor]],
-        planar_angles: torch.Tensor,
-        nonplanar_angles: torch.Tensor,
-        intervals: List[torch.Tensor]
+        planar_angles: List[torch.Tensor],
+        nonplanar_angles: List[torch.Tensor],
+        intervals: List[torch.Tensor],
+        speeds: List[torch.Tensor],
 ):
     """
     Plot histograms of the sampled parameters.
@@ -210,7 +234,7 @@ def _plot_histograms(
     logger.info('Plotting histograms.')
     p_strs = _get_p_strs(pe, include_names=False)
 
-    fig, axes = plt.subplots(5, figsize=(10, 10))
+    fig, axes = plt.subplots(7, figsize=(10, 14))
 
     ax = axes[0]
     ax.set_title(f'Run durations (intervals between tumbles)')
@@ -231,20 +255,32 @@ def _plot_histograms(
     ax.set_yscale('log')
 
     ax = axes[3]
+    ax.set_title(f'Speeds')
+    s = torch.cat(speeds).numpy()
+    ax.hist(s, bins=30, density=True, facecolor='green', alpha=0.75)
+    ax.set_yscale('log')
+
+    ax = axes[4]
+    ax.set_title(f'Speeds (weighted)')
+    ax.hist(s, weights=dr, bins=30, density=True, facecolor='green', alpha=0.75)
+    ax.set_yscale('log')
+
+    ax = axes[5]
     ax.set_title(f'Planar Angles\n{p_strs[0]}')
-    ax.hist(planar_angles.numpy().flatten(), bins=31, density=True, facecolor='green', alpha=0.75)
+    pa = torch.cat(planar_angles).numpy()
+    ax.hist(pa, bins=31, density=True, facecolor='green', alpha=0.75)
     ax.set_xlim(left=-np.pi - 0.1, right=np.pi + 0.1)
     ax.set_xticks([-np.pi, 0, np.pi])
     ax.set_xticklabels(['$-\pi$', '0', '$\pi$'])
     ax.set_yscale('log')
 
-    ax = axes[4]
+    ax = axes[6]
     ax.set_title(f'Non-planar Angles\n{p_strs[1]}')
-    ax.hist(nonplanar_angles.numpy().flatten(), bins=31, density=True, facecolor='green',
-            alpha=0.75)
-    ax.set_xlim(left=-np.pi - 0.1, right=np.pi + 0.1)
-    ax.set_xticks([-np.pi, 0, np.pi])
-    ax.set_xticklabels(['$-\pi$', '0', '$\pi$'])
+    na = torch.cat(nonplanar_angles).numpy()
+    ax.hist(na, bins=31, density=True, facecolor='green', alpha=0.75)
+    ax.set_xlim(left=-np.pi / 2 - 0.1, right=np.pi / 2 + 0.1)
+    ax.set_xticks([-np.pi / 2, 0, np.pi / 2])
+    ax.set_xticklabels(['$-\\frac{\pi}{2}$', '0', '$\\frac{\pi}{2}$'])
     ax.set_yscale('log')
 
     fig.tight_layout()
@@ -282,34 +318,115 @@ def _plot_msd(
         plt.show()
 
 
+def _plot_trajectories(
+        pe: ThreeStateExplorer,
+        Xs: torch.Tensor,
+):
+    """
+    Plot some simulation trajectories.
+    """
+    if plot_n_examples == 0:
+        return
+
+    # Construct colours
+    colours = np.linspace(0, 1, Xs.shape[1])
+    cmap = plt.get_cmap('viridis_r')
+    c = [cmap(c_) for c_ in colours]
+
+    for i in range(min(pe.batch_size, plot_n_examples)):
+        logger.info(f'Plotting sim run {i}.')
+
+        # Plot the trajectory
+        fig = plt.figure(figsize=(10, 10))
+        ax = fig.add_subplot(projection='3d')
+        x, y, z = Xs[i].T
+        ax.scatter(x, y, z, c=c, s=100, alpha=1, zorder=1)
+        equal_aspect_ratio(ax)
+        ax.grid(False)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_zticks([])
+        ax.axis('off')
+        fig.tight_layout()
+
+        if save_plots:
+            plt.savefig(LOGS_PATH / f'{START_TIMESTAMP}_sim_{i}.{img_extension}', transparent=True)
+            np.savez(LOGS_PATH / f'{START_TIMESTAMP}_sim_{i}', X=Xs[i])
+
+        if show_plots:
+            plt.show()
+
+
 def simulate(batch_size: int):
-    T = 50000 / 25
+    T = 10000 / 25
     dt = 1 / 25
 
+    speeds_0_mu = 0.
+    speeds_0_sig = 0.0002
+    speeds_1_mu = 0.0055
+    speeds_1_sig = 0.003
+    speeds_0_dist = norm(loc=speeds_0_mu, scale=speeds_0_sig)
+    speeds_1_dist = norm(loc=speeds_1_mu, scale=speeds_1_sig)
+    speeds0 = np.abs(speeds_0_dist.rvs(batch_size))
+    speeds1 = np.abs(speeds_1_dist.rvs(batch_size))
+
+    # pe = ThreeStateExplorer(
+    #     batch_size=batch_size,
+    #     rate_01=0.05,
+    #     rate_10=0.1,
+    #     rate_02=0.005,
+    #     rate_20=0.8,  # not really a rate!
+    #     speed_0=0.0001,
+    #     speed_1=0.007,
+    #     planar_angle_dist_params={
+    #         'type': 'norm',
+    #         'params': (0, 7)
+    #         # 'type': 'levy_stable',
+    #         # 'params': (2, 0, 0, 2)
+    #         # 'params': (0.5, 0, 0, 0.1)
+    #     },
+    #     nonplanar_angle_dist_params={
+    #         'type': 'norm',
+    #         'params': (0, 0.6)
+    #         # 'type': 'levy_stable',
+    #         # 'params': (2, 0, 0, 2)
+    #         # 'params': (0.2, 0, 0, 0.01)
+    #     },
+    # )
     pe = ThreeStateExplorer(
         batch_size=batch_size,
-        rate_01=0.01,
-        rate_10=0.01,
-        rate_02=0.05,
-        rate_20=0.9,  # not really a rate!
-        speed_0=0.002,
-        speed_1=0.004,
+        rate_01=0.05,
+        rate_10=0.1,
+        rate_02=0.005,
+        rate_20=0.8,  # not really a rate!
+        speed_0=speeds0,  #0.0001,
+        speed_1=speeds1,  #0.007,
         planar_angle_dist_params={
-            'type': 'levy_stable',
-            'params': (2, 0, 0, 2)
+            'type': 'norm',
+            'params': (0, 7)
+            # 'type': 'levy_stable',
+            # 'params': (2, 0, 0, 2)
+            # 'params': (0.5, 0, 0, 0.1)
         },
         nonplanar_angle_dist_params={
-            'type': 'levy_stable',
-            'params': (0.2, 0, 0, 0.1)
+            'type': 'norm',
+            'params': (0, 0.6)
+            # 'type': 'levy_stable',
+            # 'params': (2, 0, 0, 2)
+            # 'params': (0.2, 0, 0, 0.01)
         }
     )
+
+
     # _plot_angle_pdfs(pe)
+    # exit()
 
-    ts, tumble_ts, Xs, states, durations, planar_angles, nonplanar_angles, intervals = pe.forward(T, dt)
+    ts, tumble_ts, Xs, states, durations, planar_angles, nonplanar_angles, intervals, speeds = pe.forward(T, dt)
 
-    _plot_simulations(pe, ts, tumble_ts, Xs, durations, planar_angles, nonplanar_angles, intervals)
-    _plot_histograms(pe, durations, planar_angles, nonplanar_angles, intervals)
-    _plot_msd(pe, Xs)
+    # _plot_simulations(pe, ts, tumble_ts, Xs, durations, planar_angles, nonplanar_angles, intervals)
+    # _plot_histograms(pe, durations, planar_angles, nonplanar_angles, intervals, speeds)
+    # _plot_msd(pe, Xs)
+    _plot_trajectories(pe, Xs)
 
 
 if __name__ == '__main__':
@@ -318,4 +435,4 @@ if __name__ == '__main__':
 
     # from simple_worm.plot3d import interactive
     # interactive()
-    simulate(batch_size=50)
+    simulate(batch_size=20)

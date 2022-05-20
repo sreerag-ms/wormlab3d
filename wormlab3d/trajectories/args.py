@@ -1,4 +1,4 @@
-from argparse import ArgumentParser
+from argparse import ArgumentParser, Namespace
 
 from simple_worm.material_parameters import MP_DEFAULT_K
 from wormlab3d.data.model.midline3d import M3D_SOURCES, M3D_SOURCE_RECONST
@@ -12,7 +12,7 @@ def get_args(
         include_K_options: bool = True,
         include_planarity_options: bool = True,
         include_manoeuvre_options: bool = True,
-):
+) -> Namespace:
     """
     Parse command line arguments for the trajectory scripts.
     Not all arguments are used for all scripts, but this saves duplication.

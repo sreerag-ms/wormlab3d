@@ -96,7 +96,7 @@ def calculate_pe_parameters_for_trajectory(
     for t in range(T - 1):
         prev_frame = np.stack([e0[t], e1[t], e2[t]])
         next_frame = np.stack([e0[t + 1], e1[t + 1], e2[t + 1]])
-        R, rmsd = Rotation.align_vectors(next_frame, prev_frame)
+        R, rmsd = Rotation.align_vectors(prev_frame, next_frame)
         R = R.as_matrix()
 
         # Decompose rotation matrix R into the axes of A
@@ -107,8 +107,8 @@ def calculate_pe_parameters_for_trajectory(
         # yp = A @ Rotation.from_rotvec(a1 * np.array([0, 1, 0])).as_matrix() @ A.T
         # zp = A @ Rotation.from_rotvec(a2 * np.array([0, 0, 1])).as_matrix() @ A.T
         # assert np.allclose(xp @ yp @ zp, R)
-        planar_angles[t] = a1
-        nonplanar_angles[t] = a2
+        planar_angles[t] = a2
+        nonplanar_angles[t] = a1
 
     # Calculate the aligned displacements
     displacements = calculate_displacements(X, deltas, displacement_aggregation)

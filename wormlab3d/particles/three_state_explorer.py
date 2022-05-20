@@ -1,8 +1,8 @@
 import time
 from datetime import timedelta
-from typing import Dict, Optional, Any
-from typing import Tuple
+from typing import Dict, Optional, Any, Union, Tuple
 
+import numpy as np
 import torch
 from progress.bar import Bar
 from scipy.signal import find_peaks
@@ -24,8 +24,8 @@ class ThreeStateExplorer(nn.Module):
             rate_10: float = 0.001,
             rate_02: float = 0.001,
             rate_20: float = 0.001,
-            speed_0: float = 0.001,
-            speed_1: float = 0.005,
+            speed_0: Union[float, np.ndarray] = 0.001,
+            speed_1: Union[float, np.ndarray] = 0.005,
             planar_angle_dist_params: Optional[Dict[str, Any]] = None,
             nonplanar_angle_dist_params: Optional[Dict[str, Any]] = None,
             x0: torch.Tensor = None,
@@ -41,7 +41,21 @@ class ThreeStateExplorer(nn.Module):
         self.rate_20 = rate_20
 
         # Speeds
+        if type(speed_0) == np.ndarray:
+            assert speed_0.shape == (batch_size,)
+            speed_0 = torch.from_numpy(speed_0)
+        elif type(speed_0) == float:
+            speed_0 = torch.ones(batch_size) * speed_0
+        else:
+            raise TypeError(f'Unrecognised speed_0 type: "{type(speed_0)}"')
         self.speed_0 = speed_0
+        if type(speed_1) == np.ndarray:
+            assert speed_1.shape == (batch_size,)
+            speed_1 = torch.from_numpy(speed_1)
+        elif type(speed_1) == float:
+            speed_1 = torch.ones(batch_size) * speed_1
+        else:
+            raise TypeError(f'Unrecognised speed_1 type: "{type(speed_1)}"')
         self.speed_1 = speed_1
 
         self._init_particle(x0)
@@ -130,7 +144,7 @@ class ThreeStateExplorer(nn.Module):
         # Generate the state transitions
         logger.info('Generating state transitions.')
         states = torch.zeros((self.batch_size, n_steps))
-        bar = Bar('Simulating', max=n_steps)
+        bar = Bar('Generating', max=n_steps)
         bar.check_tty = False
         for i in range(n_steps):
             self._update_state()
@@ -139,11 +153,15 @@ class ThreeStateExplorer(nn.Module):
         bar.finish()
 
         # Calculate the sequences
+        logger.info('Calculating sequences.')
         sequences = []
         for i in range(self.batch_size):
             sequences.append(torch.unique_consecutive(states[i]))
 
         # Calculate the run durations
+        logger.info('Calculating durations.')
+        bar = Bar('Calculating', max=self.batch_size * 2)
+        bar.check_tty = False
         run_starts = {s: [[] for _ in range(self.batch_size)] for s in [0, 1]}
         durations = {s: [[] for _ in range(self.batch_size)] for s in [0, 1]}
         for s in [0, 1]:
@@ -159,6 +177,8 @@ class ThreeStateExplorer(nn.Module):
                     w = section_props['widths'][j]
                     run_starts[s][i].append(int(start))
                     durations[s][i].append(int(w))
+                bar.next()
+        bar.finish()
 
         # Generate the tumbles
         logger.info('Generating tumbles.')
@@ -168,7 +188,7 @@ class ThreeStateExplorer(nn.Module):
         e0s = [self.e0, ]
         planar_angles = []
         nonplanar_angles = []
-        bar = Bar('Simulating', max=max_tumbles)
+        bar = Bar('Generating', max=max_tumbles)
         bar.check_tty = False
         for _ in range(max_tumbles):
             self._sample_parameters()
@@ -189,7 +209,7 @@ class ThreeStateExplorer(nn.Module):
         bar = Bar('Simulating', max=self.batch_size)
         bar.check_tty = False
         for i in range(self.batch_size):
-            step = 1
+            step = 0
             j = [0, 0]
             k = 0
             e0 = e0s[i, 0]
@@ -207,15 +227,15 @@ class ThreeStateExplorer(nn.Module):
                 # Run
                 else:
                     run_steps = durations[s][i][j[s]]
-                    speed = [self.speed_0, self.speed_1][s]
+                    speed = [self.speed_0[i], self.speed_1[i]][s]
                     e0_exp[i, step:step + run_steps] = e0[None, :] * speed
                     j[s] += 1
 
                 step += run_steps
 
-            X = torch.cumsum(e0_exp, dim=1)
-
             bar.next()
+
+        X = torch.cumsum(e0_exp, dim=1)
         bar.finish()
 
         # Convert durations into seconds
@@ -231,7 +251,19 @@ class ThreeStateExplorer(nn.Module):
         for i in range(self.batch_size):
             intervals.append(tumble_ts[i][1:] - tumble_ts[i][:-1])
 
-        return ts, tumble_ts, X, states, durations, planar_angles, nonplanar_angles, intervals
+        # Calculate average speeds between turns
+        speeds = []
+        for i in range(self.batch_size):
+            vertex_idxs = tumble_idxs[tumble_idxs[:, 0] == i][:, 1]
+            vertices = X[i, vertex_idxs]
+            distances = (vertices[1:] - vertices[:-1]).norm(dim=-1)
+            speeds.append(distances / intervals[i])
+
+        # Prune the angles to those actually used in each run
+        planar_angles = [planar_angles[i, :len(tumble_ts[i])] for i in range(self.batch_size)]
+        nonplanar_angles = [nonplanar_angles[i, :len(tumble_ts[i])] for i in range(self.batch_size)]
+
+        return ts, tumble_ts, X, states, durations, planar_angles, nonplanar_angles, intervals, speeds
 
     def _update_state(self):
         """
@@ -300,7 +332,10 @@ class ThreeStateExplorer(nn.Module):
 
             if pk in ['planar_angles', 'nonplanar_angles']:
                 val[val.isnan() | val.isinf()] = 0
-                val = torch.fmod(val, torch.pi)
+                if pk == 'planar_angles':
+                    val = torch.fmod(val, torch.pi)
+                else:
+                    val = torch.fmod(val, torch.pi / 2)
             else:
                 val = torch.abs(val)
 

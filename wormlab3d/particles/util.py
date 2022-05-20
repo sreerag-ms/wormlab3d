@@ -1,14 +1,14 @@
 from argparse import Namespace
-from typing import List, Dict, Union
+from typing import List, Dict, Union, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-import scipy.stats
 import scipy.stats
 import torch
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from progress.bar import Bar
+from scipy.spatial.transform import Rotation
 from scipy.stats import rv_continuous
 from torch.distributions import LogNormal, Cauchy, Normal
 
@@ -17,7 +17,9 @@ from simple_worm.plot3d import FrameArtist
 from wormlab3d import logger
 from wormlab3d.particles.sdbn_explorer import PARTICLE_PARAMETER_KEYS
 from wormlab3d.toolkit.plot_utils import equal_aspect_ratio
-from wormlab3d.trajectories.util import get_deltas_from_args
+from wormlab3d.toolkit.util import normalise, orthogonalise
+from wormlab3d.trajectories.pca import PCACache, calculate_pcas
+from wormlab3d.trajectories.util import get_deltas_from_args, calculate_speeds
 
 
 def _centre_select(X: np.ndarray, T: int) -> np.ndarray:
@@ -25,6 +27,8 @@ def _centre_select(X: np.ndarray, T: int) -> np.ndarray:
     Take the central T portion of an array X.
     """
     assert len(X) >= T
+    if len(X) == T:
+        return X
     Xc = X[int(np.ceil((len(X) - T) / 2)):-int(np.floor((len(X) - T) / 2))]
     assert len(Xc) == T
     return Xc
@@ -385,3 +389,95 @@ def plot_msd(
     fig.tight_layout()
 
     return fig
+
+
+def calculate_trajectory_frame(
+        X: np.ndarray,
+        pcas: PCACache = None,
+        pca_window: int = 25,
+):
+    """
+    Calculate the frame for a trajectory.
+    """
+    X_com = X.mean(axis=1)
+    X_com_centred = X_com - X_com.mean(axis=0, keepdims=True)
+    T = len(X)
+
+    # Calculate speeds
+    logger.info('Calculating speeds.')
+    speeds = calculate_speeds(X, signed=X.shape[1] > 1)
+    speeds = _centre_select(speeds, T)
+
+    # If the pcas are not provided then calculate them
+    if pcas is None:
+        pcas = calculate_pcas(X, window_size=pca_window)
+        pcas = PCACache(pcas)
+
+    # Pad the PCAs if shorter than the sequence
+    components = pcas.components.copy()
+    if components.shape[0] < T:
+        diff = T - components.shape[0]
+        components = np.concatenate([
+            np.repeat(components[0][None, ...], repeats=np.ceil(diff / 2), axis=0),
+            components,
+            np.repeat(components[-1][None, ...], repeats=np.floor(diff / 2), axis=0)
+        ], axis=0)
+
+    # Calculate e0 (the tangent to the trajectory curve)
+    logger.info('Calculating frame components.')
+    e0 = normalise(np.gradient(X_com_centred, axis=0))
+    e0 = _centre_select(e0, T)
+
+    # Flip e0 where the speed is negative
+    e0[speeds < 0] *= -1
+
+    # e1 is the frame vector pointing out into the principal plane of the curve
+    v1 = components[:, 1].copy()
+
+    # Correct sign flips
+    v1dotv1p = np.einsum('bi,bi->b', v1[:-1], v1[1:])
+    flip_idxs = (v1dotv1p < 0).nonzero()[0]
+    sign = 1
+    for i in range(len(v1)):
+        if i - 1 in flip_idxs:
+            sign = -sign
+        v1[i] = sign * v1[i]
+    v1 = _centre_select(v1, T)
+
+    # Orthogonalise the pca planar direction vector against the trajectory to get e1
+    e1 = normalise(orthogonalise(v1, e0))
+
+    # e2 is the remaining cross product
+    e2 = normalise(np.cross(e0, e1))
+
+    return e0, e1, e2
+
+
+def calculate_rotation_angles(e0: np.ndarray, e1: np.ndarray, e2: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Calculate the rotation angles to trace out the curve defined by the frame e0/e1/e2.
+    """
+    T = len(e0)
+    assert len(e0) == len(e1) == len(e2)
+
+    logger.info('Calculating rotation angles.')
+    planar_angles = np.zeros(T)
+    nonplanar_angles = np.zeros(T)
+    for t in range(T - 1):
+        prev_frame = np.stack([e0[t], e1[t], e2[t]])
+        next_frame = np.stack([e0[t + 1], e1[t + 1], e2[t + 1]])
+        R, rmsd = Rotation.align_vectors(prev_frame, next_frame)
+        R = R.as_matrix()
+
+        # Decompose rotation matrix R into the axes of A
+        A = prev_frame
+        rp = Rotation.from_matrix(A.T @ R @ A)
+        a2, a1, a0 = rp.as_euler('zyx')
+        # xp = A @ Rotation.from_rotvec(a0 * np.array([1, 0, 0])).as_matrix() @ A.T
+        # yp = A @ Rotation.from_rotvec(a1 * np.array([0, 1, 0])).as_matrix() @ A.T
+        # zp = A @ Rotation.from_rotvec(a2 * np.array([0, 0, 1])).as_matrix() @ A.T
+        # assert np.allclose(xp @ yp @ zp, R)
+        planar_angles[t] = a2
+        nonplanar_angles[t] = a1
+
+    return planar_angles, nonplanar_angles
