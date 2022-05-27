@@ -337,6 +337,7 @@ def traces_condensed(x_label: str = 'time'):
         path = LOGS_PATH / f'{START_TIMESTAMP}_traces_condensed_' \
                            f'r={reconstruction.id}_' \
                            f'f={args.start_frame}-{args.end_frame}_' \
+                           f'ew={ew.id}.{img_extension}' \
                            f'nc={",".join([str(c) for c in args.plot_components])}.{img_extension}'
         logger.info(f'Saving plot to {path}.')
         plt.savefig(path, transparent=True)
@@ -521,7 +522,10 @@ def heatmap_basic():
     fig.tight_layout()
 
     if save_plots:
-        path = LOGS_PATH / f'{START_TIMESTAMP}_heatmap_basic_r={reconstruction.id}_f={args.start_frame}-{args.end_frame}.{img_extension}'
+        path = LOGS_PATH / f'{START_TIMESTAMP}_heatmap_basic' \
+                           f'_r={reconstruction.id}' \
+                           f'_f={args.start_frame}-{args.end_frame}' \
+                           f'_ew={ew.id}.{img_extension}'
         logger.info(f'Saving plot to {path}.')
         plt.savefig(path, transparent=True)
 
@@ -591,7 +595,7 @@ if __name__ == '__main__':
     from simple_worm.plot3d import interactive
     interactive()
     # traces(x_label='frames')
-    # traces_condensed(x_label='time')
+    traces_condensed(x_label='time')
     # heatmap()
-    heatmap_basic()
+    # heatmap_basic()
     # animate()

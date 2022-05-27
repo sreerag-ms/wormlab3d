@@ -15,11 +15,11 @@ def save_trajectory():
 
 
 def load_trajectory():
-    X = np.load(LOGS_PATH / '20220502_1650_37_5335-5583_reconst.npy')
+    X = np.load(LOGS_PATH / '20220517_1022_trial=303_frames=10450-10850_WT3D.npy')
     return
 
 
 
 if __name__=='__main__':
-    save_trajectory()
-    # load_trajectory()
+    # save_trajectory()
+    load_trajectory()
