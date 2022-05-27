@@ -62,7 +62,8 @@ def calculate_speeds(X: np.ndarray, signed: bool = False) -> np.ndarray:
     If signed speed requested, use the head-tail vector to determine direction.
     """
     assert X.shape[-1] == 3
-    assert X.ndim == 3
+    if X.ndim == 2:
+        X = X[:, None, :]
     com = X.mean(axis=1)
     directional_gradients = np.gradient(com, axis=0)
     speeds = np.linalg.norm(directional_gradients, axis=1)

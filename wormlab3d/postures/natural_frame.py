@@ -72,7 +72,6 @@ class NaturalFrame:
         self.threshold = threshold
 
         if X.shape[-1] == 3:
-            assert X.shape[-1] == 3
             self.X = X.astype(np.float64)
             self.X_pos = X - self.X.min(axis=0)
             self._calculate_tangent_and_curvature()

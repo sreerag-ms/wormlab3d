@@ -1,7 +1,7 @@
 import time
 from abc import ABC, abstractmethod
 from datetime import timedelta
-from typing import Dict, Tuple, Optional, Any
+from typing import Dict, Tuple, Optional, Any, List, Union
 
 import torch
 from progress.bar import Bar
@@ -11,6 +11,7 @@ from torch.distributions import Distribution, LogNormal, Cauchy, Normal
 
 from wormlab3d import logger
 from wormlab3d.midlines3d.mf_methods import normalise
+from wormlab3d.particles.gaussian_mixture import GaussianMixtureTorch
 
 PARTICLE_PARAMETER_KEYS = ['speeds', 'planar_angles', 'nonplanar_angles']
 
@@ -19,7 +20,7 @@ def orthogonalise(source: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
     return source - (torch.einsum('bs,bs->b', source, ref) / ref.norm(dim=-1, keepdim=False, p=2))[:, None] * ref
 
 
-def init_dist(params: Dict[str, Any]) -> Distribution:
+def init_dist(params: Dict[str, Any]) -> Union[Distribution, Tuple[List[float], List[Distribution]]]:
     """
     Initialise a Torch Distribution instance.
     """
@@ -35,6 +36,15 @@ def init_dist(params: Dict[str, Any]) -> Distribution:
     elif params['type'] == 'levy_stable':
         alpha, beta, loc, scale = params['params']
         return Stable(stability=alpha, skew=beta, loc=loc, scale=scale)
+    elif params['type'] == '2norm':
+        w1, mu1, sigma1 = params['params'][:3]
+        w2, mu2, sigma2 = params['params'][3:]
+        return GaussianMixtureTorch(
+            weights=torch.tensor([w1, w2]),
+            loc=torch.tensor([mu1, mu2]),
+            scale=torch.tensor([sigma1, sigma2]),
+        )
+
     else:
         raise RuntimeError(f'Unsupported distribution "{params["type"]}"!')
 

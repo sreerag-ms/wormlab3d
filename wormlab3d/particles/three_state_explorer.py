@@ -69,18 +69,18 @@ class ThreeStateExplorer(nn.Module):
 
         # Starting position
         if x0 is None:
-            x0 = torch.zeros((self.batch_size, 3), dtype=torch.float32)
+            x0 = torch.zeros((self.batch_size, 3))
         else:
             assert x0.shape == (self.batch_size, 3)
-            x0 = x0.to(torch.float32)
+            x0 = x0.to(torch.float64)
         self.register_buffer('x', x0)
 
         # Heading
-        e0 = normalise(torch.rand(self.batch_size, 3))
+        e0 = normalise(torch.rand(self.batch_size, 3, dtype=torch.float64))
         self.register_buffer('e0', e0)
 
         # Orientation
-        e1 = normalise(orthogonalise(torch.rand(self.batch_size, 3), self.e0))
+        e1 = normalise(orthogonalise(torch.rand(self.batch_size, 3, dtype=torch.float64), self.e0))
         self.register_buffer('e1', e1)
         e2 = normalise(torch.cross(e0, e1))
         self.register_buffer('e2', e2)
@@ -241,7 +241,7 @@ class ThreeStateExplorer(nn.Module):
         # Convert durations into seconds
         for s in [0, 1]:
             for i in range(self.batch_size):
-                durations[s][i] = torch.tensor(durations[s][i], dtype=torch.float32) * dt
+                durations[s][i] = torch.tensor(durations[s][i], dtype=torch.float64) * dt
 
         sim_time = time.time() - start_time
         logger.info(f'Time: {timedelta(seconds=sim_time)}')
@@ -333,9 +333,11 @@ class ThreeStateExplorer(nn.Module):
             if pk in ['planar_angles', 'nonplanar_angles']:
                 val[val.isnan() | val.isinf()] = 0
                 if pk == 'planar_angles':
-                    val = torch.fmod(val, torch.pi)
+                    # Put into range +/- pi
+                    val = torch.atan2(torch.sin(val), torch.cos(val))
                 else:
-                    val = torch.fmod(val, torch.pi / 2)
+                    # Put into range +/- pi/2
+                    val = torch.atan(torch.tan(val))
             else:
                 val = torch.abs(val)
 
@@ -352,7 +354,7 @@ class ThreeStateExplorer(nn.Module):
 
         # Convert rotation axis and angle to 3x3 rotation matrix
         # (See https://en.wikipedia.org/wiki/Rotation_matrix#Rotation_matrix_from_axis_and_angle)
-        I = torch.eye(3)[None, ...].repeat(self.batch_size, 1, 1)
+        I = torch.eye(3, dtype=torch.float64)[None, ...].repeat(self.batch_size, 1, 1)
         cosA = torch.cos(angles)[:, None, None]
         sinA = torch.sin(angles)[:, None, None]
         outer = torch.einsum('bi,bj->bij', u, u)

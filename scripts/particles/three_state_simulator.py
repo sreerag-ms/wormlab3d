@@ -10,14 +10,16 @@ from matplotlib.gridspec import GridSpec
 from scipy.stats import rv_continuous, norm
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
+from wormlab3d.particles.gaussian_mixture import GaussianMixtureScipy
 from wormlab3d.particles.three_state_explorer import ThreeStateExplorer
 from wormlab3d.particles.util import plot_msd
 from wormlab3d.toolkit.plot_utils import equal_aspect_ratio
+from wormlab3d.toolkit.util import normalise
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 
-plot_n_examples = 20
-show_plots = False
+plot_n_examples = 2
+show_plots = True
 save_plots = True
 img_extension = 'png'
 
@@ -49,13 +51,22 @@ def _plot_angle_pdfs(pe: ThreeStateExplorer):
 
     def _plot_pdf(ax_, params: Dict[str, Any], label: str, colour: str = None, zorder: int = None):
         # Plot the scipy distribution
-        dist_cls: rv_continuous = getattr(scipy.stats, params['type'])
-        dist = dist_cls(*params['params'])
+        if params['type'] == '2norm':
+            w1, mu1, sigma1 = params['params'][:3]
+            w2, mu2, sigma2 = params['params'][3:]
+            dist = GaussianMixtureScipy(
+                np.array([w1, w2]),
+                np.array([mu1, mu2]),
+                np.array([sigma1, sigma2])
+            )
+        else:
+            dist_cls: rv_continuous = getattr(scipy.stats, params['type'])
+            dist = dist_cls(*params['params'])
 
         N = 501
         vals = np.zeros(N)
         for i in range(-9, 8, 2):
-            x = np.linspace(i*np.pi, (i+2)*np.pi, N)
+            x = np.linspace(i * np.pi, (i + 2) * np.pi, N)
             vals += dist.pdf(x)
 
         print(vals.sum() * 2 * np.pi / N)
@@ -66,22 +77,24 @@ def _plot_angle_pdfs(pe: ThreeStateExplorer):
         x = np.linspace(-np.pi, np.pi, N)
         ax_.plot(x, vals, alpha=0.9, label=label, color=colour, zorder=zorder)
 
-
-
-
     # fig, ax = plt.subplots(1, figsize=(8, 6))
     # _plot_pdf(ax, pe.planar_angles_dist_params, 'Planar\n' + p_strs[0])
     # _plot_pdf(ax, pe.nonplanar_angles_dist_params, 'Non-planar\n' + p_strs[1])
-    fig, ax = plt.subplots(1, figsize=(3,3))
+    fig, ax = plt.subplots(1, figsize=(3, 3))
     _plot_pdf(ax, pe.planar_angles_dist_params, '$\\theta$', colour='red', zorder=2)
+    t_samples = pe.planar_angles_dist.sample((2000,)).squeeze()
+    t_samples = torch.atan2(torch.sin(t_samples), torch.cos(t_samples)).numpy()
+    ax.hist(t_samples, bins=51, density=True, facecolor='pink', alpha=0.5)
     _plot_pdf(ax, pe.nonplanar_angles_dist_params, '$\phi$', colour='green', zorder=1)
+    p_samples = pe.nonplanar_angles_dist.sample((2000,)).squeeze()
+    p_samples = torch.atan(torch.tan(p_samples)).numpy()
+    ax.hist(p_samples, bins=25, density=True, facecolor='lightgreen', alpha=0.5)
 
     ax.set_xlim(left=-np.pi - 0.1, right=np.pi + 0.1)
     ax.set_xticks([-np.pi, 0, np.pi])
     ax.set_xticklabels(['$-\pi$', '0', '$\pi$'])
     ax.set_yticks([0, 0.3, 0.6])
     ax.set_yticklabels([0, 0.3, 0.6])
-
 
     ax.set_title('Angle distributions')
     ax.legend()
@@ -300,15 +313,43 @@ def _plot_msd(
     """
     args = get_args()
     trial_ids = args.trials if args.trials is not None else [args.trial, ]
+
+    max_radius = 0
     Xs_real = []
     for trial_id in trial_ids:
         args.trial = trial_id
         X_real = get_trajectory_from_args(args)
+        X_real -= X_real.mean(axis=0)
+        dists = np.linalg.norm(X_real, axis=-1)
+        max_radius = max(dists.max(), max_radius)
         Xs_real.append(X_real)
-    fig = plot_msd(args, Xs_real, Xs)
+
+    logger.info(f'Maximum explored distance from centre of mass of trajectory = {max_radius:.2f}.')
+
+    confinement_radius = max_radius / 2
+    Xs_confined = []
+    for X in Xs:
+        pos_offset = normalise(X.mean(axis=0)) * confinement_radius / 2
+        X = X - pos_offset
+
+        dists = np.linalg.norm(X, axis=-1)
+        oob_idxs = (dists > confinement_radius).nonzero()[0]
+        if len(oob_idxs) > 0:
+            cut_idx = oob_idxs[0]
+            if cut_idx < 6000:  # discard trajectories which exited the area too quickly
+                continue
+            Xc = X[:cut_idx]
+        else:
+            Xc = X
+        Xs_confined.append(Xc)
+    if len(Xs_confined) == 0:
+        raise RuntimeError('All simulations exited the confinement area too quickly!')
+    logger.info(f'{len(Xs_confined)} simulations remained in the confinement area long enough.')
+
+    fig = plot_msd(args, Xs_real, Xs_confined)
     fig.suptitle(
         f'$r_{{01}}={pe.rate_01}$, $r_{{10}}={pe.rate_10}$, $r_{{02}}={pe.rate_02}$, $r_{{20}}={pe.rate_20}$\n'
-        + f'$s_0={pe.speed_0}$, $s_1={pe.speed_1}$\n'
+        # + f'$s_0={pe.speed_0}$, $s_1={pe.speed_1}$\n'
         + '\n'.join(_get_p_strs(pe))
     )
     fig.tight_layout()
@@ -358,13 +399,13 @@ def _plot_trajectories(
 
 
 def simulate(batch_size: int):
-    T = 10000 / 25
+    T = 50000 / 25
     dt = 1 / 25
 
-    speeds_0_mu = 0.
-    speeds_0_sig = 0.0002
-    speeds_1_mu = 0.0055
-    speeds_1_sig = 0.003
+    speeds_0_mu = 0.002
+    speeds_0_sig = 0.0005
+    speeds_1_mu = 0.007
+    speeds_1_sig = 0.001
     speeds_0_dist = norm(loc=speeds_0_mu, scale=speeds_0_sig)
     speeds_1_dist = norm(loc=speeds_1_mu, scale=speeds_1_sig)
     speeds0 = np.abs(speeds_0_dist.rvs(batch_size))
@@ -397,19 +438,22 @@ def simulate(batch_size: int):
         batch_size=batch_size,
         rate_01=0.05,
         rate_10=0.1,
-        rate_02=0.005,
+        rate_02=0.005,  # 0.005
         rate_20=0.8,  # not really a rate!
-        speed_0=speeds0,  #0.0001,
-        speed_1=speeds1,  #0.007,
+        speed_0=speeds0,  # 0.0001,
+        speed_1=speeds1,  # 0.007,
         planar_angle_dist_params={
-            'type': 'norm',
-            'params': (0, 7)
+            # 'type': 'norm',
+            # 'params': (0.5, 0.6)
+            'type': '2norm',
+            'params': (1, 0, 1.5, 0.2, np.pi, 0.5)
             # 'type': 'levy_stable',
             # 'params': (2, 0, 0, 2)
             # 'params': (0.5, 0, 0, 0.1)
         },
         nonplanar_angle_dist_params={
             'type': 'norm',
+            # 'params': (np.pi/2, 0.6)
             'params': (0, 0.6)
             # 'type': 'levy_stable',
             # 'params': (2, 0, 0, 2)
@@ -417,16 +461,15 @@ def simulate(batch_size: int):
         }
     )
 
-
     # _plot_angle_pdfs(pe)
     # exit()
 
     ts, tumble_ts, Xs, states, durations, planar_angles, nonplanar_angles, intervals, speeds = pe.forward(T, dt)
 
-    # _plot_simulations(pe, ts, tumble_ts, Xs, durations, planar_angles, nonplanar_angles, intervals)
     # _plot_histograms(pe, durations, planar_angles, nonplanar_angles, intervals, speeds)
-    # _plot_msd(pe, Xs)
-    _plot_trajectories(pe, Xs)
+    _plot_msd(pe, Xs)
+    # _plot_simulations(pe, ts, tumble_ts, Xs, durations, planar_angles, nonplanar_angles, intervals)
+    # _plot_trajectories(pe, Xs)
 
 
 if __name__ == '__main__':
@@ -435,4 +478,4 @@ if __name__ == '__main__':
 
     # from simple_worm.plot3d import interactive
     # interactive()
-    simulate(batch_size=20)
+    simulate(batch_size=500)

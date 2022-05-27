@@ -22,7 +22,7 @@ from wormlab3d.trajectories.pca import PCACache, calculate_pcas
 from wormlab3d.trajectories.util import get_deltas_from_args, calculate_speeds
 
 
-def _centre_select(X: np.ndarray, T: int) -> np.ndarray:
+def centre_select(X: np.ndarray, T: int) -> np.ndarray:
     """
     Take the central T portion of an array X.
     """
@@ -303,7 +303,7 @@ def plot_3d_trajectories(
 def plot_msd(
         args: Namespace,
         Xs_real: List[np.ndarray],
-        Xs_sim: torch.Tensor,
+        Xs_sim: List[torch.Tensor],
 ) -> Figure:
     """
     Make an MSD plot of the simulated results against real trajectories.
@@ -322,7 +322,7 @@ def plot_msd(
     Xs_real = tmp
 
     rs = len(Xs_real)
-    bs = Xs_sim.shape[0]
+    bs = len(Xs_sim)
     msds_all_real = {}
     msds_real = {i: {} for i in range(rs)}
     msds_all_sim = {}
@@ -334,18 +334,33 @@ def plot_msd(
     for delta in deltas:
 
         # Calculate MSD for real trajectories
-        d_all = []
-        for i, X_real in enumerate(Xs_real):
-            d = np.sum((X_real[delta:] - X_real[:-delta])**2, axis=-1)
-            d_all.append(d)
-            msds_real[i][delta] = d.mean()
-        msds_all_real[delta] = np.concatenate(d_all).mean()
+        if rs > 0:
+            d_all = []
+            for i, X_real in enumerate(Xs_real):
+                if delta > X_real.shape[0] / 3:
+                    continue
+                d = np.sum((X_real[delta:] - X_real[:-delta])**2, axis=-1)
+                d_all.append(d)
+                msds_real[i][delta] = d.mean()
+            if len(d_all):
+                msds_all_real[delta] = np.concatenate(d_all).mean()
 
         # Calculate MSD for simulated trajectories
-        d = torch.sum((Xs_sim[:, delta:] - Xs_sim[:, :-delta])**2, dim=-1)
-        msds_all_sim[delta] = d.mean()
-        for i in range(bs):
-            msds_sim[i][delta] = d[i].mean()
+        if bs > 0:
+            d_all = []
+            for i, X_sim in enumerate(Xs_sim):
+                if delta > X_sim.shape[0] / 3:
+                    continue
+                d = torch.sum((X_sim[delta:] - X_sim[:-delta])**2, dim=-1)
+                d_all.append(d)
+                msds_sim[i][delta] = d.mean()
+            if len(d_all):
+                msds_all_sim[delta] = np.concatenate(d_all).mean()
+
+            # d = torch.sum((Xs_sim[:, delta:] - Xs_sim[:, :-delta])**2, dim=-1)
+            # msds_all_sim[delta] = d.mean()
+            # for i in range(bs):
+            #     msds_sim[i][delta] = d[i].mean()
 
         bar.next()
     bar.finish()
@@ -358,25 +373,27 @@ def plot_msd(
     cmap = plt.get_cmap('autumn')
     colours_sim = cmap(np.linspace(0, 1, bs))
 
-    # Plot average of the real MSDs
-    msd_vals_all_real = np.array(list(msds_all_real.values()))
-    ax.plot(delta_ts, msd_vals_all_real, label='Trajectory average',
-            alpha=0.8, c='black', linestyle='--', linewidth=3, zorder=60)
+    if rs > 0:
+        # Plot MSD for each real trajectory
+        for i, (idx, msd_vals_real) in enumerate(msds_real.items()):
+            msd_vals = np.array(list(msd_vals_real.values()))
+            ax.plot(delta_ts[:len(msd_vals)], msd_vals, alpha=0.5, c=colours_real[i])
 
-    # Plot MSD for each real trajectory
-    for i, (idx, msd_vals_real) in enumerate(msds_real.items()):
-        msd_vals = np.array(list(msd_vals_real.values()))
-        ax.plot(delta_ts, msd_vals, alpha=0.5, c=colours_real[i])
+        # Plot average of the real MSDs
+        msd_vals_all_real = np.array(list(msds_all_real.values()))
+        ax.plot(delta_ts[:len(msd_vals_all_real)], msd_vals_all_real, label='Trajectory average',
+                alpha=0.8, c='black', linestyle='--', linewidth=3, zorder=60)
 
-    # Plot MSD for each simulation
-    for i, (idx, msd_vals_sim) in enumerate(msds_sim.items()):
-        msd_vals = np.array(list(msd_vals_sim.values()))
-        ax.plot(delta_ts, msd_vals, alpha=0.5, c=colours_sim[i])
+    if bs > 0:
+        # Plot MSD for each simulation
+        for i, (idx, msd_vals_sim) in enumerate(msds_sim.items()):
+            msd_vals = np.array(list(msd_vals_sim.values()))
+            ax.plot(delta_ts[:len(msd_vals)], msd_vals, alpha=0.5, c=colours_sim[i])
 
-    # Plot average of the simulation MSDs
-    msd_vals_all_sim = np.array(list(msds_all_sim.values()))
-    ax.plot(delta_ts, msd_vals_all_sim, label='Simulation average',
-            alpha=0.9, c='black', linestyle=':', linewidth=3, zorder=80)
+        # Plot average of the simulation MSDs
+        msd_vals_all_sim = np.array(list(msds_all_sim.values()))
+        ax.plot(delta_ts[:len(msd_vals_all_sim)], msd_vals_all_sim, label='Simulation average',
+                alpha=0.9, c='black', linestyle=':', linewidth=3, zorder=80)
 
     # Complete MSD plot
     ax.set_ylabel('MSD$=<(x(t+\Delta)-x(t))^2>_t$')
@@ -406,7 +423,7 @@ def calculate_trajectory_frame(
     # Calculate speeds
     logger.info('Calculating speeds.')
     speeds = calculate_speeds(X, signed=X.shape[1] > 1)
-    speeds = _centre_select(speeds, T)
+    speeds = centre_select(speeds, T)
 
     # If the pcas are not provided then calculate them
     if pcas is None:
@@ -426,7 +443,7 @@ def calculate_trajectory_frame(
     # Calculate e0 (the tangent to the trajectory curve)
     logger.info('Calculating frame components.')
     e0 = normalise(np.gradient(X_com_centred, axis=0))
-    e0 = _centre_select(e0, T)
+    e0 = centre_select(e0, T)
 
     # Flip e0 where the speed is negative
     e0[speeds < 0] *= -1
@@ -442,7 +459,7 @@ def calculate_trajectory_frame(
         if i - 1 in flip_idxs:
             sign = -sign
         v1[i] = sign * v1[i]
-    v1 = _centre_select(v1, T)
+    v1 = centre_select(v1, T)
 
     # Orthogonalise the pca planar direction vector against the trajectory to get e1
     e1 = normalise(orthogonalise(v1, e0))
