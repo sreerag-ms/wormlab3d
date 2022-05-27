@@ -1,6 +1,6 @@
+import gc
 import os
 from argparse import Namespace
-from typing import Tuple, List, Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,8 +8,6 @@ import torch
 from matplotlib.gridspec import GridSpec
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from progress.bar import Bar
-from scipy.signal import find_peaks
-from scipy.spatial.transform import Rotation
 from scipy.stats import norm, expon
 
 from simple_worm.frame import FrameNumpy
@@ -17,153 +15,18 @@ from simple_worm.plot3d import FrameArtist
 from wormlab3d import START_TIMESTAMP, LOGS_PATH, logger
 from wormlab3d.data.model import Trial, Dataset
 from wormlab3d.particles.three_state_explorer import ThreeStateExplorer
+from wormlab3d.particles.tumble_run import calculate_curvature, get_approximate, find_approximation, \
+    generate_or_load_ds_statistics, generate_or_load_ds_msds
 from wormlab3d.particles.util import calculate_trajectory_frame
 from wormlab3d.toolkit.plot_utils import equal_aspect_ratio
-from wormlab3d.toolkit.util import normalise, orthogonalise
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
-from wormlab3d.trajectories.pca import get_pca_cache_from_args, calculate_pcas, PCACache
-from wormlab3d.trajectories.util import smooth_trajectory, get_deltas_from_args
+from wormlab3d.trajectories.pca import get_pca_cache_from_args
+from wormlab3d.trajectories.util import get_deltas_from_args
 
-show_plots = True
+show_plots = False
 save_plots = True
 img_extension = 'svg'
-
-
-def _calculate_curvature(
-        e0: np.ndarray,
-        smooth_e0: int = 101,
-        smooth_K: int = 101
-) -> np.ndarray:
-    # Identify tumbles as large changes in direction over a short period of time - ie, high curvature
-    # e0 = normalised tangent to curve => d/dt(e0) = K(t) = curvature vector
-    e0 = smooth_trajectory(e0, window_len=smooth_e0)
-    K = np.gradient(e0, 1 / (len(e0) - 1), axis=0, edge_order=1)
-
-    # Smooth the curvature
-    K = smooth_trajectory(K, window_len=smooth_K)
-
-    # Curvature magnitude
-    k = np.linalg.norm(K, axis=-1)
-
-    return k
-
-
-def get_approximate(
-        X: np.ndarray,
-        k: np.ndarray,
-        distance: int,
-        height: int = 50
-):
-    """
-    Calculate a tumble-and-run approximation to a trajectory X with curvature k.
-    The distance parameter sets a minimum distance that subsequent curvature peaks must be.
-    """
-    logger.info(f'Calculating approximation to X at distance {distance}, height={height}.')
-    T = len(X)
-
-    # Take centre of mass
-    if X.ndim == 3:
-        X = X.mean(axis=1)
-    X -= X.mean(axis=0)
-
-    # Find peaks in curvature
-    tumble_idxs, section_props = find_peaks(k, distance=distance, height=height)
-    N = len(tumble_idxs)
-    if N <= 1:
-        raise RuntimeError('Too few peaks found! Try decreasing distance / height.')
-
-    # Build the approximation and calculate run durations
-    run_durations = np.zeros(N - 1)
-    X_approx = np.zeros_like(X)
-    X_approx[0] = X[0]
-    x = X[0]
-    start_idx = 0
-    for i, tumble_idx in enumerate(tumble_idxs):
-        end_idx = tumble_idx
-        run_start = x[None, :]
-        run_end = X[tumble_idx]
-        run_steps = end_idx - start_idx
-        if i > 0:
-            run_durations[i - 1] = run_steps
-        y = np.linspace(0, 1, run_steps)[:, None]
-        X_approx[start_idx:end_idx] = (1 - y) * run_start + y * run_end
-        x = run_end
-        start_idx = tumble_idx
-
-    # Add final run
-    end_idx = T
-    run_start = x[None, :]
-    run_end = X[-1]
-    run_steps = end_idx - start_idx
-    # run_durations[-1] = run_steps
-    y = np.linspace(0, 1, run_steps)[:, None]
-    X_approx[start_idx:end_idx] = (1 - y) * run_start + y * run_end
-
-    # Add vertices for start and end points
-    vertices = np.concatenate([
-        X[0][None, :],
-        X[tumble_idxs],
-        X[-1][None, :],
-    ], axis=0)
-
-    # Calculate run speeds
-    # run_distances = np.linalg.norm(vertices[1:] - vertices[:-1], axis=-1)
-    run_distances = np.linalg.norm(vertices[2:-1] - vertices[1:-2], axis=-1)
-    run_speeds = run_distances / run_durations
-
-    # Calculate PCA along the vertices
-    planarity_window = 3
-    pcas = calculate_pcas(vertices, window_size=planarity_window)
-    pcas = PCACache(pcas)
-
-    # Pad the PCAs to match the number of tumbles/vertices
-    components = pcas.components.copy()
-    diff = N - components.shape[0] + 1
-    components = np.concatenate([
-        np.repeat(components[0][None, ...], repeats=np.ceil(diff / 2), axis=0),
-        components,
-        np.repeat(components[-1][None, ...], repeats=np.floor(diff / 2), axis=0)
-    ], axis=0)
-
-    # Calculate e0 as normalised line segments between tumbles
-    e0 = normalise(vertices[1:] - vertices[:-1])
-
-    # e1 is the frame vector pointing out into the principal plane of the curve
-    v1 = components[:, 1].copy()
-
-    # Orthogonalise the pca planar direction vector against the trajectory to get e1
-    e1 = normalise(orthogonalise(v1, e0))
-
-    # e2 is the remaining cross product
-    e2 = normalise(np.cross(e0, e1))
-
-    # Duplicate final frame to line things up
-    e0 = np.r_[e0, e0[-1][None, ...]]
-    e1 = np.r_[e1, e1[-1][None, ...]]
-    e2 = np.r_[e2, e2[-1][None, ...]]
-
-    # Calculate the angles
-    planar_angles = np.zeros(N)
-    nonplanar_angles = np.zeros(N)
-    for i in range(N):
-        prev_frame = np.stack([e0[i], e1[i], e2[i]])
-        next_frame = np.stack([e0[i + 1], e1[i + 1], e2[i + 1]])
-        R, rmsd = Rotation.align_vectors(prev_frame, next_frame)
-        R = R.as_matrix()
-
-        # Decompose rotation matrix R into the axes of A
-        A = prev_frame
-        rp = Rotation.from_matrix(A.T @ R @ A)
-        a2, a1, a0 = rp.as_euler('zyx')
-        # xp = A @ Rotation.from_rotvec(a0 * np.array([1, 0, 0])).as_matrix() @ A.T
-        # yp = A @ Rotation.from_rotvec(a1 * np.array([0, 1, 0])).as_matrix() @ A.T
-        # zp = A @ Rotation.from_rotvec(a2 * np.array([0, 0, 1])).as_matrix() @ A.T
-        # assert np.allclose(xp @ yp @ zp, R)
-        planar_angles[i] = a2  # Rotation about e2
-        nonplanar_angles[i] = a1  # Rotation about e1
-
-    return X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles, nonplanar_angles, e0, e1, e2
 
 
 def _plot_trial_approximation(
@@ -181,6 +44,7 @@ def _plot_trial_approximation(
         run_speeds: np.ndarray,
         planar_angles: np.ndarray,
         nonplanar_angles: np.ndarray,
+        twist_angles: np.ndarray,
 ):
     """
     Plot a simulation output.
@@ -199,7 +63,7 @@ def _plot_trial_approximation(
 
     # Set up plot
     fig = plt.figure(figsize=(18, 14))
-    gs = GridSpec(7, 8)
+    gs = GridSpec(5, 6)
 
     fig.suptitle(f'Trial {trial.id}. Min. tumble distance={distance * dt:.2f}. CV={cv:.2f}. MSE={mse:.4f}.')
 
@@ -208,13 +72,13 @@ def _plot_trial_approximation(
     ax.set_title('Run trace')
     vertex_ts = np.r_[[0, ], tumble_ts, ts[-1]]
     duration_ts = (vertex_ts[1:] + vertex_ts[:-1]) / 2
-    l1 = ax.plot(duration_ts, run_durations, c='green', marker='+', alpha=0.5, label='Duration')
+    l1 = ax.plot(duration_ts[1:-1], run_durations, c='green', marker='+', alpha=0.5, label='Duration')
     ax.set_ylabel('Run duration (s)')
     ax.set_xlabel('Time (s)')
     ax.set_xlim(left=ts[0], right=ts[-1])
     ax2 = ax.twinx()
     ax2.set_ylabel('Run speed (mm/s)')
-    l2 = ax2.plot(duration_ts, run_speeds, c='red', marker='x', alpha=0.5, label='Speed')
+    l2 = ax2.plot(duration_ts[1:-1], run_speeds, c='red', marker='x', alpha=0.5, label='Speed')
     lines = l1 + l2
     labels = [l.get_label() for l in lines]
     ax.legend(lines, labels, loc=1)
@@ -223,8 +87,9 @@ def _plot_trial_approximation(
     ax = fig.add_subplot(gs[1, :])
     ax.set_title('Tumble trace')
     ax.axhline(y=0, color='darkgrey')
-    ax.scatter(tumble_ts, planar_angles, label='$\\theta_P$', marker='x')
-    ax.scatter(tumble_ts, nonplanar_angles, label='$\\theta_{NP}$', marker='o')
+    ax.scatter(tumble_ts, planar_angles, label='$\\theta$', marker='x')
+    ax.scatter(tumble_ts, nonplanar_angles, label='$\phi$', marker='o')
+    ax.scatter(tumble_ts, twist_angles, label='$\psi$', marker='2')
     ax.set_xlim(left=ts[0], right=ts[-1])
     ax.set_xlabel('Time (s)')
     ax.set_ylabel('$\\theta$')
@@ -240,19 +105,25 @@ def _plot_trial_approximation(
                 'Run durations': run_durations,
                 'Speeds': run_speeds,
                 'Speeds (weighted)': run_speeds,
-                'Planar angles': planar_angles,
-                'Non-planar angles': nonplanar_angles,
             }.items()):
-        ax = fig.add_subplot(gs[2 + i, :2])
+        ax = fig.add_subplot(gs[2 + i, 0])
         ax.set_title(param_name)
-        if param_name not in ['Speeds', 'Speeds (weighted)']:
-            ax.set_yscale('log')
         if param_name == 'Speeds (weighted)':
             weights = run_durations
         else:
             weights = np.ones_like(param)
         ax.hist(param, weights=weights, bins=21, density=True, facecolor='green', alpha=0.75)
-        if param_name == 'Planar angles':
+    for i, (param_name, param) in enumerate(
+            {
+                'Planar angles': planar_angles,
+                'Non-planar angles': nonplanar_angles,
+                'Twist angles': twist_angles,
+            }.items()):
+        ax = fig.add_subplot(gs[2 + i, 1])
+        ax.set_title(param_name)
+        # ax.set_yscale('log')
+        ax.hist(param, bins=21, density=True, facecolor='green', alpha=0.75)
+        if param_name in ['Planar angles', 'Twist angles']:
             ax.set_xlim(left=-np.pi - 0.1, right=np.pi + 0.1)
             ax.set_xticks([-np.pi, 0, np.pi])
             ax.set_xticklabels(['$-\pi$', '0', '$\pi$'])
@@ -263,7 +134,7 @@ def _plot_trial_approximation(
 
     # 3D trajectory of approximation
     T = len(vertices)
-    ax = fig.add_subplot(gs[2:, 2:5], projection='3d')
+    ax = fig.add_subplot(gs[2:, 2:4], projection='3d')
     x, y, z = vertices[:T].T
     ax.scatter(x, y, z, color='blue', marker='x', s=50, alpha=0.6, zorder=1)
 
@@ -284,7 +155,7 @@ def _plot_trial_approximation(
     equal_aspect_ratio(ax)
 
     # Actual 3D trajectory
-    ax = fig.add_subplot(gs[2:, 5:8], projection='3d')
+    ax = fig.add_subplot(gs[2:, 4:6], projection='3d')
     x, y, z = X.T
     ax.scatter(x, y, z, c=k, cmap='Reds', s=10, alpha=0.4, zorder=-1)
     x, y, z = vertices[:T].T
@@ -299,18 +170,30 @@ def _plot_trial_approximation(
     if show_plots:
         plt.show()
 
+    plt.close(fig)
+
 
 def _plot_trial_approximations(
         trial: Trial,
-        distances: np.ndarray,
         X: np.ndarray,
+        e0_raw: np.ndarray,
         k: np.ndarray,
+        distances: np.ndarray = None,
+        error_limits: np.ndarray = None,
 ):
-    for distance in distances:
+    assert not (distances is None and error_limits is None)
+    assert not (distances is not None and error_limits is not None)
+    iter_var = distances if distances is not None else error_limits
+
+    for loop_var in iter_var:
         # Calculate the approximation, tumbles and runs
-        X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles, nonplanar_angles, e0, e1, e2 = get_approximate(
-            X, k, distance=distance
-        )
+        if distances is not None:
+            X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles, nonplanar_angles, twist_angles, e0, e1, e2 \
+                = get_approximate(X, k, distance=loop_var)
+        else:
+            approx, distance, height, smooth_e0, smooth_K \
+                = find_approximation(X, e0_raw, loop_var, max_attempts=50)
+            X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles, nonplanar_angles, twist_angles, e0, e1, e2 = approx
 
         # Plot approximation
         _plot_trial_approximation(
@@ -328,6 +211,7 @@ def _plot_trial_approximations(
             run_speeds=run_speeds,
             planar_angles=planar_angles,
             nonplanar_angles=nonplanar_angles,
+            twist_angles=twist_angles,
         )
 
 
@@ -342,9 +226,8 @@ def _plot_mse(
     """
     mse = np.zeros(len(distances))
     for i, distance in enumerate(distances):
-        X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles, nonplanar_angles, e0, e1, e2 = get_approximate(
-            X, k, distance=distance
-        )
+        X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles, nonplanar_angles, twist_angles, e0, e1, e2 \
+            = get_approximate(X, k, distance=distance)
         mse[i] = np.mean(np.sum((X - X_approx)**2, axis=-1))
 
     fig, axes = plt.subplots(1, figsize=(12, 10))
@@ -377,19 +260,21 @@ def convert_trajectory_to_tumble_run(
     X = get_trajectory_from_args(args)
     pcas = get_pca_cache_from_args(args)
     e0, e1, e2 = calculate_trajectory_frame(X, pcas, args.planarity_window)
-    k = _calculate_curvature(e0)
+    k = calculate_curvature(e0)
 
     # distances = [10, 20, 50, 100, 200]
     # distances = np.array([60, 120, 250, 315, 375, 500])
-    distances = np.array([25, 50, 100, 200])
-    # distances = np.arange(5, 500, 5)
+    # distances = np.array([25, 50, 100, 200])
+    # distances = np.arange(5, 500, 5)#
+    distances = None
+    error_limits = np.array([0.1, 0.05, 0.01])
 
     # Take centre of mass
     if X.ndim == 3:
         X = X.mean(axis=1)
     X -= X.mean(axis=0)
 
-    _plot_trial_approximations(trial, distances, X, k)
+    _plot_trial_approximations(trial, X, e0, k, distances, error_limits)
     # _plot_mse(trial, distances, X, k)
 
 
@@ -410,6 +295,7 @@ def plot_dataset_trajectories():
         logger.info(f'Computing tumble-run model for trial={trial.id}.')
         args.trial = trial.id
         convert_trajectory_to_tumble_run(args)
+        gc.collect()
 
 
 def plot_coefficients_of_variation():
@@ -451,37 +337,9 @@ def plot_coefficients_of_variation():
         smooth_K = 101
 
         for j, error_limit in enumerate(error_limits):
-            logger.info(f'Finding approximation at error limit={error_limit:.3f}.')
-
-            mse = np.inf
-            attempts = 0
-
-            while mse > error_limit and attempts < 10:
-                k = _calculate_curvature(e0, smooth_e0=smooth_e0, smooth_K=smooth_K)
-
-                # Calculate the approximation, tumbles and runs
-                X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles, nonplanar_angles, _, _, _ = get_approximate(
-                    X, k, distance=distance
-                )
-                mse = np.mean(np.sum((X - X_approx)**2, axis=-1))
-
-                attempts += 1
-
-                # if mse < error_limit:
-                #     distance = int(distance * 2)
-                #     # distance += 10
-                #     height += 1
-                #     smooth_e0 += 4
-                #     smooth_K += 4
-                # else:
-                if mse > error_limit:
-                    distance = max(3, int(distance / 2))
-                    # distance -= 10
-                    height -= 1
-                    smooth_e0 -= 6
-                    smooth_K -= 6
-
-            logger.info(f'Final approximation error={mse:.4f}.')
+            approx, distance, height, smooth_e0, smooth_K \
+                = find_approximation(X, e0, error_limit, distance, height, smooth_e0, smooth_K, max_attempts=10)
+            X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles, nonplanar_angles, twist_angles, _, _, _ = approx
 
             # cov[:, i, j] = [
             #     run_durations.std() / run_durations.mean(),
@@ -494,6 +352,7 @@ def plot_coefficients_of_variation():
             run_speeds_diff = np.abs(run_speeds[1:] - run_speeds[:-1])
             planar_angles_diff = np.abs(planar_angles[1:] - planar_angles[:-1])
             nonplanar_angles_diff = np.abs(nonplanar_angles[1:] - nonplanar_angles[:-1])
+            twist_angles_diff = np.abs(twist_angles[1:] - twist_angles[:-1])
 
             dt = 1 / trial.fps
             run_durations_ts = run_durations * dt
@@ -547,7 +406,7 @@ def single_trial_approximation():
     X = get_trajectory_from_args(args)
     pcas = get_pca_cache_from_args(args)
     e0, e1, e2 = calculate_trajectory_frame(X, pcas, args.planarity_window)
-    k = _calculate_curvature(e0)
+    k = calculate_curvature(e0)
     distance = int(8 / dt)
 
     # Take centre of mass
@@ -556,9 +415,8 @@ def single_trial_approximation():
     X -= X.mean(axis=0)
 
     # Calculate the approximation, tumbles and runs
-    X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles, nonplanar_angles, e0, e1, e2 = get_approximate(
-        X, k, distance=distance
-    )
+    X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles, nonplanar_angles, twist_angles, e0, e1, e2 \
+        = get_approximate(X, k, distance=distance)
 
     if 0:
         np.savez(
@@ -640,134 +498,6 @@ def single_trial_approximation():
         plt.show()
 
 
-def _calculate_dataset_values(
-        error_limits: List[float]
-) -> Tuple[np.ndarray, Dict[int, np.ndarray], Dict[int, np.ndarray], Dict[int, np.ndarray], Dict[int, np.ndarray]]:
-    """
-    Calculate the tumble/run approximation values across a dataset.
-    """
-    args = get_args()
-    assert args.planarity_window is not None
-
-    # Get dataset
-    assert args.dataset is not None
-    ds = Dataset.objects.get(id=args.dataset)
-
-    # Unset midline source args
-    args.midline3d_source = None
-    args.midline3d_source_file = None
-    args.tracking_only = True
-
-    # Values
-    trajectory_lengths = np.zeros(len(ds.include_trials), dtype=np.uint32)
-    durations = {i: [] for i in range(len(error_limits))}
-    speeds = {i: [] for i in range(len(error_limits))}
-    planar_angles = {i: [] for i in range(len(error_limits))}
-    nonplanar_angles = {i: [] for i in range(len(error_limits))}
-
-    # Calculate the model for all trials
-    for i, trial in enumerate(ds.include_trials):
-        logger.info(f'Computing tumble-run model for trial={trial.id}.')
-        args.trial = trial.id
-        dt = 1 / trial.fps
-
-        X = get_trajectory_from_args(args)
-        pcas = get_pca_cache_from_args(args)
-        e0, e1, e2 = calculate_trajectory_frame(X, pcas, args.planarity_window)
-        trajectory_lengths[i] = X.shape[0]
-        continue
-
-        # Take centre of mass
-        if X.ndim == 3:
-            X = X.mean(axis=1)
-        X -= X.mean(axis=0)
-
-        # Calculate coefficients of variation for all params for all trials at all distances
-        distance = 500
-        height = 100
-        smooth_e0 = 201
-        smooth_K = 201
-
-        for j, error_limit in enumerate(error_limits):
-            logger.info(f'Finding approximation at error limit={error_limit:.4f}.')
-            mse = np.inf
-            attempts = 0
-
-            while mse > error_limit and attempts < 50:
-                k = _calculate_curvature(e0, smooth_e0=smooth_e0, smooth_K=smooth_K)
-
-                # Calculate the approximation, tumbles and runs
-                try:
-                    X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles_j, nonplanar_angles_j, _, _, _ = get_approximate(
-                        X, k, distance=distance, height=height
-                    )
-                    mse = np.mean(np.sum((X - X_approx)**2, axis=-1))
-                except RuntimeError:
-                    mse = np.inf
-
-                attempts += 1
-                if mse > error_limit:
-                    # distance = max(3, int(distance / 2))
-                    distance = max(3, distance - 10)
-                    height = max(10, height - 2)
-                    smooth_e0 = max(11, smooth_e0 - 6)
-                    smooth_K = max(11, smooth_K - 6)
-
-            logger.info(f'Final approximation error={mse:.5f}.')
-            durations[j].extend((run_durations * dt).tolist())
-            speeds[j].extend((run_speeds / dt).tolist())
-            planar_angles[j].extend(planar_angles_j.tolist())
-            nonplanar_angles[j].extend(nonplanar_angles_j.tolist())
-
-    return trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles
-
-
-def _calculate_dataset_msds():
-    """
-    Calculate the MSDs for trials in a dataset.
-    """
-    args = get_args()
-    deltas, delta_ts = get_deltas_from_args(args)
-
-    # Get dataset
-    assert args.dataset is not None
-    ds = Dataset.objects.get(id=args.dataset)
-
-    # Unset midline source args
-    args.midline3d_source = None
-    args.midline3d_source_file = None
-    args.tracking_only = True
-
-    msds_all = np.zeros(len(deltas))
-    msds = {}
-    d_all = {delta: [] for delta in deltas}
-
-    logger.info(f'Calculating displacements.')
-    for i, trial in enumerate(ds.include_trials):
-        logger.info(f'Calculating MSD for trial={trial.id} ({i + 1}/{len(ds.include_trials)}).')
-        msds_i = []
-        args.trial = trial.id
-        X = get_trajectory_from_args(args)
-        if X.ndim == 3:
-            X = X.mean(axis=1)
-        X -= X.mean(axis=0)
-        if X.shape[0] < 9 * 60 * 25:
-            continue
-        for delta in deltas:
-            if delta > X.shape[0] / 3:
-                continue
-            d = np.sum((X[delta:] - X[:-delta])**2, axis=-1)
-            d_all[delta].append(d)
-            msds_i.append(d.mean())
-
-        msds[trial.id] = np.array(msds_i)
-
-    for i, delta in enumerate(deltas):
-        msds_all[i] = np.concatenate(d_all[delta]).mean()
-
-    return msds, msds_all
-
-
 def dataset_distributions():
     """
     Plot the distributions of values across a dataset at different error limits.
@@ -780,18 +510,21 @@ def dataset_distributions():
     # error_limits = np.array([0.016, 0.008, 0.004, 0.002, 0.001])
     # error_limits = np.array([0.01,0.001,0.0001])
     error_limits = [0.5, 0.2, 0.1, 0.05, 0.01]
-    durations, speeds, planar_angles, nonplanar_angles = _calculate_dataset_values(error_limits)
+    planarity_window = 5
+    trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles \
+        = generate_or_load_ds_statistics(ds, error_limits, planarity_window)
 
     # Plot
-    fig, axes = plt.subplots(len(error_limits), 5, figsize=(14, 2 + 2 * len(error_limits)), squeeze=False)
-    fig.suptitle(f'Dataset={ds.id}.')
+    fig, axes = plt.subplots(len(error_limits), 6, figsize=(14, 2 + 2 * len(error_limits)), squeeze=False)
+    fig.suptitle(f'Dataset={ds.id}. Planarity window={planarity_window}.')
 
     for i, (param_name, values) in enumerate({
                                                  'Durations': durations,
                                                  'Speeds': speeds,
                                                  'Speeds (weighted)': speeds,
                                                  'Planar angles': planar_angles,
-                                                 'Non-planar angles': nonplanar_angles
+                                                 'Non-planar angles': nonplanar_angles,
+                                                 'Twist angles': twist_angles,
                                              }.items()):
         for j, error_limit in enumerate(error_limits):
             ax = axes[j, i]
@@ -803,7 +536,7 @@ def dataset_distributions():
             values_j = np.array(values[j])
 
             # if param_name not in ['Speeds', 'Speeds (weighted)']:
-            if param_name not in ['Planar angles', 'Non-planar angles']:
+            if param_name not in ['Planar angles', 'Non-planar angles', 'Twist angles']:
                 ax.set_yscale('log')
             if param_name == 'Speeds (weighted)':
                 weights = np.array(durations[j])
@@ -813,7 +546,7 @@ def dataset_distributions():
             ax.hist(values_j, weights=weights, bins=21, density=True, facecolor='green', alpha=0.75)
             ax.set_title(param_name)
 
-            if param_name == 'Planar angles':
+            if param_name in ['Planar angles', 'Twist angles']:
                 ax.set_xlim(left=-np.pi - 0.1, right=np.pi + 0.1)
                 ax.set_xticks([-np.pi, 0, np.pi])
                 ax.set_xticklabels(['$-\pi$', '0', '$\pi$'])
@@ -821,6 +554,62 @@ def dataset_distributions():
                 ax.set_xlim(left=-np.pi / 2 - 0.1, right=np.pi / 2 + 0.1)
                 ax.set_xticks([-np.pi / 2, 0, np.pi / 2])
                 ax.set_xticklabels(['$-\\frac{\pi}{2}$', '0', '$\\frac{\pi}{2}$'])
+
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            LOGS_PATH / f'{START_TIMESTAMP}_histograms_ds={ds.id}_err={error_limit:.2f}.{img_extension}',
+            transparent=True
+        )
+
+    if show_plots:
+        plt.show()
+
+
+def plot_dataset_angle_comparisons():
+    """
+    Plot the P vs NP angles as scatter plots
+    """
+    args = get_args()
+    assert args.dataset is not None
+    ds = Dataset.objects.get(id=args.dataset)
+    error_limits = np.array([0.5, 0.2, 0.1, 0.05, 0.01])
+    trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles \
+        = generate_or_load_ds_statistics(ds, error_limits, planarity_window=5, rebuild_cache=False)
+
+    fig, axes = plt.subplots(len(error_limits), 3, figsize=(4, 3 * len(error_limits)))
+
+    for i, lim in enumerate(error_limits):
+        ax = axes[i, 0]
+        ax.set_title(f'Error limit={lim:.2f}.')
+        ax.scatter(x=planar_angles[i], y=nonplanar_angles[i], s=1, alpha=0.5)
+        ax.set_xlabel('$\\theta$')
+        ax.set_xticks([-np.pi, 0, np.pi])
+        ax.set_xticklabels(['$-\pi$', '0', '$\pi$'])
+        ax.set_ylabel('$\\phi$')
+        ax.set_yticks([-np.pi / 2, 0, np.pi / 2])
+        ax.set_yticklabels(['$-\\frac{\pi}{2}$', '0', '$\\frac{\pi}{2}$'])
+
+        ax = axes[i, 1]
+        ax.set_title(f'Error limit={lim:.2f}.')
+        ax.scatter(x=planar_angles[i], y=twist_angles[i], s=1, alpha=0.5)
+        ax.set_xlabel('$\\theta$')
+        ax.set_xticks([-np.pi, 0, np.pi])
+        ax.set_xticklabels(['$-\pi$', '0', '$\pi$'])
+        ax.set_ylabel('$\\psi$')
+        ax.set_yticks([-np.pi, 0, np.pi])
+        ax.set_yticklabels(['$-\pi$', '0', '$\pi$'])
+
+        ax = axes[i, 2]
+        ax.set_title(f'Error limit={lim:.2f}.')
+        ax.scatter(x=nonplanar_angles[i], y=twist_angles[i], s=1, alpha=0.5)
+        ax.set_xlabel('$\\phi$')
+        ax.set_xticks([-np.pi / 2, 0, np.pi / 2])
+        ax.set_xticklabels(['$-\\frac{\pi}{2}$', '0', '$\\frac{\pi}{2}$'])
+        ax.set_ylabel('$\\psi$')
+        ax.set_yticks([-np.pi, 0, np.pi])
+        ax.set_yticklabels(['$-\pi$', '0', '$\pi$'])
 
     fig.tight_layout()
     plt.show()
@@ -844,47 +633,16 @@ def dataset_against_three_state_comparison():
     # error_limits = [0.05,]
 
     # Generate or load tumble/run values
-    # cache_path = LOGS_PATH / f'{START_TIMESTAMP}_ds={ds.id}_errors={",".join([str(err) for err in error_limits])}'
-    cache_path = LOGS_PATH / f'ds={ds.id}_errors={",".join([str(err) for err in error_limits])}'
-    cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
-    if cache_fn.exists():
-        data = np.load(cache_fn)
-        trajectory_lengths = data[f'trajectory_lengths'].astype(np.uint32)
-        durations = [data[f'durations_{i}'] for i in range(len(error_limits))]
-        speeds = [data[f'speeds_{i}'] for i in range(len(error_limits))]
-        planar_angles = [data[f'planar_angles_{i}'] for i in range(len(error_limits))]
-        nonplanar_angles = [data[f'nonplanar_angles_{i}'] for i in range(len(error_limits))]
-    else:
-        trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles = _calculate_dataset_values(error_limits)
-        save_arrs = {'trajectory_lengths': trajectory_lengths}
-        for i in range(len(error_limits)):
-            save_arrs[f'durations_{i}'] = durations[i]
-            save_arrs[f'speeds_{i}'] = speeds[i]
-            save_arrs[f'planar_angles_{i}'] = planar_angles[i]
-            save_arrs[f'nonplanar_angles_{i}'] = nonplanar_angles[i]
-        np.savez(cache_path, **save_arrs)
+    trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles \
+        = generate_or_load_ds_statistics(ds, error_limits, planarity_window=5, rebuild_cache=False)
 
     # Generate or load MSDs
-    msds_path = LOGS_PATH / f'ds={ds.id}_msds_d={args.min_delta}-{args.max_delta}_ds={args.delta_step}'
-    msds_fn = msds_path.with_suffix(msds_path.suffix + '.npz')
-    if 0 and msds_fn.exists():
-        data = np.load(msds_fn)
-        msds_all_real = data['msds_all']
-        msds_real = {}
-        for trial in ds.include_trials:
-            msds_real[trial.id] = data[f'msd_{trial.id}']
-    else:
-        msds_real, msds_all_real = _calculate_dataset_msds()
-        # save_arrs = {'msds_all': msds_all_real}
-        # for trial in ds.include_trials:
-        #     if trial.id in msds_real:
-        #         save_arrs[f'msd_{trial.id}'] = msds_real[trial.id]
-        # np.savez(msds_path, **save_arrs)
+    msds_all_real, msds_real = generate_or_load_ds_msds(ds, args, rebuild_cache=False)
 
     # Now make a simulator to match the results
     dt = 1 / 25
     T = max(trajectory_lengths) * dt
-    batch_size = 50
+    batch_size = 200
 
     speeds_0_mu = 0.
     # speeds_0_sig = 0.0001
@@ -924,27 +682,31 @@ def dataset_against_three_state_comparison():
         speed_0=speeds0,  # 0.0001,
         speed_1=speeds1,  # 0.007,
         planar_angle_dist_params={
-            'type': 'norm',
-            'params': (0, 7)
+            # 'type': 'norm',
+            # 'params': (0, 7),
+
+            'type': '2norm',
+            'params': (1, 0, 1.5, 0.2, np.pi, 0.6)
+
             # 'type': 'levy_stable',
             # 'params': (2, 0, 0, 2)
             # 'params': (0.5, 0, 0, 0.1)
         },
         nonplanar_angle_dist_params={
             'type': 'norm',
-            'params': (0, 0.6)
+            'params': (0, 0.65)
             # 'type': 'levy_stable',
             # 'params': (2, 0, 0, 2)
             # 'params': (0.2, 0, 0, 0.01)
         }
     )
 
-    ts, tumble_ts, Xs, states, durations_sim, planar_angles_sim, nonplanar_angles_sim, intervals_sim, speeds_sim = pe.forward(
-        T, dt)
+    ts, tumble_ts, Xs, states, durations_sim, planar_angles_sim, nonplanar_angles_sim, intervals_sim, speeds_sim \
+        = pe.forward(T, dt)
 
     # Plot histograms
-    if 0:
-        fig, axes = plt.subplots(len(error_limits), 5, figsize=(14, 2 + 2 * len(error_limits)), squeeze=False)
+    if 1:
+        fig, axes = plt.subplots(len(error_limits), 6, figsize=(14, 2 + 2 * len(error_limits)), squeeze=False)
         fig.suptitle(f'Dataset={ds.id}.')
 
         for i, (param_name, values) in enumerate({
@@ -952,7 +714,9 @@ def dataset_against_three_state_comparison():
                                                      'Speeds': [speeds, speeds_sim],
                                                      'Speeds (weighted)': [speeds, speeds_sim],
                                                      'Planar angles': [planar_angles, planar_angles_sim],
-                                                     'Non-planar angles': [nonplanar_angles, nonplanar_angles_sim]
+                                                     'Non-planar angles': [nonplanar_angles, nonplanar_angles_sim],
+                                                     'Twist angles': [twist_angles,
+                                                                      [torch.from_numpy(twist_angles[0]), ]],
                                                  }.items()):
             for j, error_limit in enumerate(error_limits):
                 ax = axes[j, i]
@@ -980,7 +744,7 @@ def dataset_against_three_state_comparison():
                 ax.hist([values_ds, values_sim], weights=weights, bins=21, density=True, alpha=0.75)
                 ax.set_title(param_name)
 
-                if param_name == 'Planar angles':
+                if param_name in ['Planar angles', 'Twist angles']:
                     ax.set_xlim(left=-np.pi - 0.1, right=np.pi + 0.1)
                     ax.set_xticks([-np.pi, 0, np.pi])
                     ax.set_xticklabels(['$-\pi$', '0', '$\pi$'])
@@ -1279,5 +1043,6 @@ if __name__ == '__main__':
 
     # single_trial_approximation()
 
-    # dataset_distributions()
-    dataset_against_three_state_comparison()
+    dataset_distributions()
+    # dataset_against_three_state_comparison()
+    plot_dataset_angle_comparisons()
