@@ -45,6 +45,8 @@ def get_args(
                                  'Leave empty (default) to return full trajectory.')
         parser.add_argument('--projection', type=str, choices=['3D', 'x', 'y', 'z', 'xy', 'yz', 'xz'], default='3D',
                             help='Use a projection of the midline, or not (default=3D).')
+        parser.add_argument('--smoothing-window-curvature', type=int,
+                            help='Smooth the curvature using average in a sliding window. Size defined in number of frames.')
 
     # MSD arguments
     if include_msd_options:
