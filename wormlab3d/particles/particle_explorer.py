@@ -26,6 +26,8 @@ def init_dist(params: Dict[str, Any]) -> Union[Distribution, Tuple[List[float], 
     """
     if params['type'] == 'norm':
         mu, sigma = params['params']
+        if sigma == 0:
+            sigma = 1e-30
         return Normal(loc=mu, scale=sigma)
     elif params['type'] == 'lognorm':
         mu, sigma = params['params']

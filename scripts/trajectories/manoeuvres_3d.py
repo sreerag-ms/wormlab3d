@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import animation
 from matplotlib.axes import Axes
-from mpl_toolkits.mplot3d.art3d import Line3DCollection
+from mpl_toolkits.mplot3d.art3d import Line3DCollection, Poly3DCollection
 
 from simple_worm.frame import FrameSequenceNumpy
 from simple_worm.plot3d import FrameArtist, Arrow3D, MidpointNormalize
@@ -76,7 +76,7 @@ def plot_manoeuvre_3d(
         ax: Axes = None,
         worm_idxs: Union[int, List[int]] = 0,
         arrows: List[Arrow3D] = None,
-        planes: List[Arrow3D] = None,
+        planes: List[Poly3DCollection] = None,
         azim: int = -60,
         elev: int = 30,
 ):

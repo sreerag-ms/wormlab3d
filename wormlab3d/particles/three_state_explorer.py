@@ -30,6 +30,7 @@ class ThreeStateExplorer(nn.Module):
             nonplanar_angle_dist_params: Optional[Dict[str, Any]] = None,
             x0: torch.Tensor = None,
             state0: torch.Tensor = None,
+            max_nonplanar_pause_duration: float = 0.,
     ):
         super().__init__()
         self.batch_size = batch_size
@@ -57,6 +58,9 @@ class ThreeStateExplorer(nn.Module):
         else:
             raise TypeError(f'Unrecognised speed_1 type: "{type(speed_1)}"')
         self.speed_1 = speed_1
+
+        # Should nonplanar turns induce a longer pause than planar turns
+        self.max_nonplanar_pause_duration = max_nonplanar_pause_duration
 
         self._init_particle(x0)
         self._init_state(state0)
@@ -138,6 +142,7 @@ class ThreeStateExplorer(nn.Module):
         """
         n_steps = int(T / dt)
         ts = torch.arange(n_steps) * dt
+        max_nonplanar_pause_steps = self.max_nonplanar_pause_duration / dt
 
         start_time = time.time()
 
@@ -211,18 +216,25 @@ class ThreeStateExplorer(nn.Module):
         for i in range(self.batch_size):
             step = 0
             j = [0, 0]
-            k = 0
+            k = 1
             e0 = e0s[i, 0]
             e0_exp[i, 0] = self.x[i]
+            pause_steps = 0
 
             while step < n_steps:
-                s = int(states[i, step])
+                s = int(states[i, step - pause_steps])
 
                 # Tumble - change heading but stay in the same place
                 if s == 2:
                     e0 = e0s[i, k]
+
+                    # Vary pause duration based on how extreme the nonplanar angle is
+                    phi = nonplanar_angles[i, k-1].abs()
+                    pause_steps_i = int(((phi / (torch.pi / 2)) * max_nonplanar_pause_steps).round())
+                    pause_steps += pause_steps_i
+                    run_steps = 1 + pause_steps_i
+
                     k += 1
-                    run_steps = 1
 
                 # Run
                 else:

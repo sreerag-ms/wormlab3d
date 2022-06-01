@@ -42,7 +42,7 @@ def tex_mode():
     plt.rcParams.update({
         'text.usetex': True,
         'font.family': 'sans-serif',
-        'font.sans-serif': ['Helvetica']})
+        'font.sans-serif': ['Arial']})
     plt.rc('text.latex', preamble=r'\usepackage{amsmath}')
 
 

@@ -348,7 +348,6 @@ class Midline3DFinder:
                     self.frame_batch[-1].frame_num,
                     threshold=self.parameters.window_image_diff_threshold,
                     direction=sa.direction
-
                 )
                 frame_num = diff_frame.frame_num
 

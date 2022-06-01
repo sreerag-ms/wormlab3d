@@ -18,8 +18,8 @@ from wormlab3d.toolkit.util import normalise
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 
-plot_n_examples = 2
-show_plots = True
+plot_n_examples = 5
+show_plots = False
 save_plots = True
 img_extension = 'png'
 
@@ -399,7 +399,7 @@ def _plot_trajectories(
 
 
 def simulate(batch_size: int):
-    T = 50000 / 25
+    T = 30 * 60
     dt = 1 / 25
 
     speeds_0_mu = 0.002
@@ -410,6 +410,9 @@ def simulate(batch_size: int):
     speeds_1_dist = norm(loc=speeds_1_mu, scale=speeds_1_sig)
     speeds0 = np.abs(speeds_0_dist.rvs(batch_size))
     speeds1 = np.abs(speeds_1_dist.rvs(batch_size))
+
+    speeds0 = 0.001
+    speeds1 = 0.007
 
     # pe = ThreeStateExplorer(
     #     batch_size=batch_size,
@@ -443,10 +446,10 @@ def simulate(batch_size: int):
         speed_0=speeds0,  # 0.0001,
         speed_1=speeds1,  # 0.007,
         planar_angle_dist_params={
-            # 'type': 'norm',
-            # 'params': (0.5, 0.6)
-            'type': '2norm',
-            'params': (1, 0, 1.5, 0.2, np.pi, 0.5)
+            'type': 'norm',
+            'params': (0, 10)
+            # 'type': '2norm',
+            # 'params': (1, 0, 1.5, 0.2, np.pi, 0.5)
             # 'type': 'levy_stable',
             # 'params': (2, 0, 0, 2)
             # 'params': (0.5, 0, 0, 0.1)
@@ -454,7 +457,7 @@ def simulate(batch_size: int):
         nonplanar_angle_dist_params={
             'type': 'norm',
             # 'params': (np.pi/2, 0.6)
-            'params': (0, 0.6)
+            'params': (0, 10)
             # 'type': 'levy_stable',
             # 'params': (2, 0, 0, 2)
             # 'params': (0.2, 0, 0, 0.01)
@@ -466,9 +469,9 @@ def simulate(batch_size: int):
 
     ts, tumble_ts, Xs, states, durations, planar_angles, nonplanar_angles, intervals, speeds = pe.forward(T, dt)
 
-    # _plot_histograms(pe, durations, planar_angles, nonplanar_angles, intervals, speeds)
+    _plot_histograms(pe, durations, planar_angles, nonplanar_angles, intervals, speeds)
     _plot_msd(pe, Xs)
-    # _plot_simulations(pe, ts, tumble_ts, Xs, durations, planar_angles, nonplanar_angles, intervals)
+    _plot_simulations(pe, ts, tumble_ts, Xs, durations, planar_angles, nonplanar_angles, intervals)
     # _plot_trajectories(pe, Xs)
 
 
@@ -478,4 +481,4 @@ if __name__ == '__main__':
 
     # from simple_worm.plot3d import interactive
     # interactive()
-    simulate(batch_size=500)
+    simulate(batch_size=100)

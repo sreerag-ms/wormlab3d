@@ -12,6 +12,7 @@ def get_args(
         include_K_options: bool = True,
         include_planarity_options: bool = True,
         include_manoeuvre_options: bool = True,
+        validate_source: bool = True
 ) -> Namespace:
     """
     Parse command line arguments for the trajectory scripts.
@@ -85,8 +86,9 @@ def get_args(
     if include_trajectory_options and args.trajectory_point is not None:
         assert args.trajectory_point == -1 or 0 <= args.trajectory_point <= 1, 'trajectory-point must be -1 for centre of mass or between 0 and 1.'
 
-    # Dataset, reconstruction id or trial id is always required
-    assert sum([getattr(args, k) is not None for k in ['dataset', 'reconstruction', 'trial', 'trials']]) == 1, \
-        'Specify just one of dataset, reconstruction, trial OR trials.'
+    # Dataset, reconstruction id or trial id is usually required
+    if validate_source:
+        assert sum([getattr(args, k) is not None for k in ['dataset', 'reconstruction', 'trial', 'trials']]) == 1, \
+            'Specify just one of dataset, reconstruction, trial OR trials.'
 
     return args
