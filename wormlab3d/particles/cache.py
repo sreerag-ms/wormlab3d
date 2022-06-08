@@ -274,19 +274,38 @@ class TrajectoryCache:
         finds = np.zeros(self.batch_size, dtype=np.int32)
         find_times = np.ones((self.batch_size, n_targets)) * -1
         finds_pop = np.zeros(n_targets, dtype=np.bool)
-
         targets = self._get_targets(n_targets)
-        for i, X in enumerate(self.X):
-            X_tree = KDTree(X)
-            res = X_tree.query_ball_point(
-                targets * radius,
-                epsilon,
-                workers=N_WORKERS if parallel else 1,
-                return_sorted=True
-            )
-            found_targets = [int(len(idxs) > 0) for idxs in res]
+
+        # for i, X in enumerate(self.X):
+        #     X_tree = KDTree(X)
+        #     res = X_tree.query_ball_point(
+        #         targets * radius,
+        #         epsilon,
+        #         workers=N_WORKERS if parallel else 1,
+        #         return_sorted=True
+        #     )
+        #     found_targets = [int(len(idxs) > 0) for idxs in res]
+        #     finds[i] = sum(found_targets)
+        #     find_times[i] = [-1 if len(idxs) == 0 else idxs[0] * self.rt_args['dt'] for idxs in res]
+        #     finds_pop = finds_pop | found_targets
+
+        X_tree = KDTree(np.concatenate(self.X, axis=0))
+        res = X_tree.query_ball_point(
+            targets * radius,
+            epsilon,
+            workers=N_WORKERS if parallel else 1,
+            return_sorted=True
+        )
+        res = [np.array(r) for r in res]
+        T = len(self.ts)
+        for i in range(self.batch_size):
+            res_i = [
+                res[t][(res[t] >= i*T) & (res[t] < (i+1)*T)] - i*T
+                for t in range(n_targets)
+            ]
+            found_targets = [int(len(idxs) > 0) for idxs in res_i]
             finds[i] = sum(found_targets)
-            find_times[i] = [-1 if len(idxs) == 0 else idxs[0] * self.rt_args['dt'] for idxs in res]
+            find_times[i] = [-1 if len(idxs) == 0 else idxs[0] * self.rt_args['dt'] for idxs in res_i]
             finds_pop = finds_pop | found_targets
 
         self.finds[r_key][n_targets][e_key] = finds
@@ -322,6 +341,7 @@ def _unpack_cache_data(pe_args, rt_args) -> TrajectoryCache:
     """
     Load the disk cache into the object.
     """
+    logger.info('Unpacking cache data.')
     batch_size = pe_args['batch_size']
     arg_hash = hash_data({**pe_args, **rt_args})
     filename_meta = f'{arg_hash}.meta'
