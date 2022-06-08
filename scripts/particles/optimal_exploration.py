@@ -5,7 +5,9 @@ from typing import List
 import matplotlib.pyplot as plt
 import numpy as np
 from progress.bar import Bar
+from scipy.stats import ttest_ind
 
+from simple_worm.plot3d import MidpointNormalize
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.particles.cache import get_trajectories_from_args
 from wormlab3d.toolkit.plot_utils import tex_mode
@@ -13,7 +15,7 @@ from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.util import get_deltas_from_args
 
 plot_n_examples = 2
-show_plots = True
+show_plots = False
 save_plots = True
 img_extension = 'svg'
 
@@ -378,6 +380,153 @@ def search_scores():
         plt.show()
 
 
+def search_t_tests():
+    """
+    Simulate across a range of non-planarities and use t-statistics to assess if populations are significantly different.
+    """
+    args = get_args(validate_source=False)
+
+    # npa_sigmas = [1e-8, 10]
+    # npa_sigmas = [0.0001, 0.001, 0.01, 0.1, 1, 10]
+    # npa_sigmas = [0.00001, 0.0001, 0.001, 0.01, 0.1, 1, 10]
+    # npa_sigmas = np.linspace(0.00001, 10, 20)
+    # npa_sigmas = np.exp(-np.linspace(np.log(1/1e-6), np.log(1/10), 20))
+    npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-6), np.log(1 / 10), 8))
+    n_sigmas = len(npa_sigmas)
+
+    # targets_radii = np.linspace(0, 6, 25)
+    targets_radii = np.linspace(0, 10, 21)
+    n_radii = len(targets_radii)
+
+    n_targets = 1000  # number of targets at each radius
+    epsilon = 0.1  # distance below which trajectory has "found" target
+
+    # todo: this properly
+    args.npas = npa_sigmas
+    args.targets_radii = targets_radii
+    args.n_targets = n_targets
+    args.epsilon = epsilon
+
+    # Outputs
+    find_times = np.ones((n_sigmas, n_radii, args.batch_size, n_targets)) * -1
+    finds = np.zeros((n_sigmas, n_radii, args.batch_size))
+    finds_pop = np.zeros((n_sigmas, n_radii, n_targets), dtype=np.bool)
+
+    # Sweep over the nonplanarity angle sigmas
+    for i, npas in enumerate(npa_sigmas):
+        logger.info(f'Simulating exploration with nonplanar angles sigma = {npas:.2E} ({i + 1}/{n_sigmas}).')
+        args.phi_dist_params[1] = npas
+        pe, TC = get_trajectories_from_args(args)
+
+        logger.info('Finding targets.')
+        bar = Bar('Finding', max=n_radii)
+        bar.check_tty = False
+
+        for j, r in enumerate(targets_radii):
+            finds_ij = TC.get_finds(r, n_targets, epsilon)
+            finds[i, j] = finds_ij['finds']
+            find_times[i, j] = finds_ij['find_times']
+            finds_pop[i, j] = finds_ij['finds_pop']
+            bar.next()
+        bar.finish()
+        logger.info('----')
+        if TC.needs_save:
+            TC.save()
+
+    # Filter out not-found times
+    find_times_found = {}
+    for i in range(n_sigmas):
+        find_times_found[i] = {}
+        for r in range(n_radii):
+            ftir = find_times[i, r][find_times[i, r] > -1]
+            find_times_found[i][r] = ftir
+
+    # Calculate pairwise t-statistics
+    logger.info('Calculating t-statistics.')
+    t_stats_times = np.zeros((n_radii, n_sigmas, n_sigmas))
+    p_vals_times = np.zeros((n_radii, n_sigmas, n_sigmas))
+    t_stats_finds = np.zeros((n_radii, n_sigmas, n_sigmas))
+    p_vals_finds = np.zeros((n_radii, n_sigmas, n_sigmas))
+    for r in range(n_radii):
+        for i in range(n_sigmas):
+            for j in range(i, n_sigmas):
+                # Find times
+                try:
+                    rvs1 = find_times_found[i][r]
+                    rvs2 = find_times_found[j][r]
+                except IndexError:
+                    continue
+                res = ttest_ind(rvs1, rvs2, equal_var=False)
+                t_stats_times[r, i, j] = 0 if np.isnan(res.statistic) else res.statistic
+                t_stats_times[r, j, i] = 0 if np.isnan(res.statistic) else res.statistic
+                p_vals_times[r, i, j] = 0 if np.isnan(res.pvalue) else res.pvalue
+                p_vals_times[r, j, i] = 0 if np.isnan(res.pvalue) else res.pvalue
+
+                # Find counts
+                rvs1 = finds[i, r]
+                rvs2 = finds[j, r]
+                res = ttest_ind(rvs1, rvs2, equal_var=False)
+                t_stats_finds[r, i, j] = res.statistic
+                t_stats_finds[r, j, i] = res.statistic
+                p_vals_finds[r, i, j] = res.pvalue
+                p_vals_finds[r, j, i] = res.pvalue
+
+    # Plot results
+    logger.info('Plotting results.')
+    fig, axes = plt.subplots(4, n_radii, figsize=(n_radii * 2, 12))
+    fig.suptitle(f'T={args.sim_duration}s. '
+                 f'dt={args.sim_dt:.2f}. '
+                 f'Batch size={args.batch_size}. '
+                 f'Detection radius={epsilon}. '
+                 f'Num. targets={n_targets}. '
+                 f'Pause={args.nonp_pause_max}s.')
+
+    for r, radius in enumerate(targets_radii):
+        ax = axes[0, r]
+        if r == 0:
+            ax.set_ylabel('Finds t-statistics')
+        ax.set_title(f'r={radius:.2f}')
+        im = ax.imshow(t_stats_finds[r], aspect='auto', cmap='PRGn', norm=MidpointNormalize(midpoint=0))
+        fig.colorbar(im, ax=ax)
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        ax = axes[1, r]
+        if r == 0:
+            ax.set_ylabel('Finds p-values')
+        im = ax.imshow(p_vals_finds[r], aspect='auto', cmap='RdBu', norm=MidpointNormalize(midpoint=0.05))
+        fig.colorbar(im, ax=ax)
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        ax = axes[2, r]
+        if r == 0:
+            ax.set_ylabel('Times t-statistics')
+        im = ax.imshow(t_stats_times[r], aspect='auto', cmap='PRGn', norm=MidpointNormalize(midpoint=0))
+        fig.colorbar(im, ax=ax)
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        ax = axes[3, r]
+        if r == 0:
+            ax.set_ylabel('Times p-values')
+        im = ax.imshow(p_vals_times[r], aspect='auto', cmap='RdBu', norm=MidpointNormalize(midpoint=0.05))
+        fig.colorbar(im, ax=ax)
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            make_filename('search_t_tests', args, excludes=['voxel_sizes', 'deltas', 'delta_step']),
+            transparent=True
+        )
+
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
@@ -385,4 +534,5 @@ if __name__ == '__main__':
     # from simple_worm.plot3d import interactive
     # interactive()
     # coverage_scores()
-    search_scores()
+    # search_scores()
+    search_t_tests()
