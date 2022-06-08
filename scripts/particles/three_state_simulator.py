@@ -1,4 +1,5 @@
 import os
+from argparse import Namespace
 from decimal import Decimal
 from typing import Dict, Any, List
 
@@ -7,9 +8,10 @@ import numpy as np
 import scipy.stats
 import torch
 from matplotlib.gridspec import GridSpec
-from scipy.stats import rv_continuous, norm
+from scipy.stats import rv_continuous
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
+from wormlab3d.particles.cache import get_trajectories_from_args, TrajectoryCache
 from wormlab3d.particles.gaussian_mixture import GaussianMixtureScipy
 from wormlab3d.particles.three_state_explorer import ThreeStateExplorer
 from wormlab3d.particles.util import plot_msd
@@ -27,8 +29,8 @@ img_extension = 'png'
 def _get_p_strs(pe: ThreeStateExplorer, include_names: bool = True) -> List[str]:
     p_strs = []
     for name, params in {
-        'Planar angles': pe.planar_angles_dist_params,
-        'Non-planar angles': pe.nonplanar_angles_dist_params,
+        'Planar angles': pe.theta_dist_params,
+        'Non-planar angles': pe.phi_dist_params,
     }.items():
         p_vals = []
         for p in params['params']:
@@ -81,12 +83,12 @@ def _plot_angle_pdfs(pe: ThreeStateExplorer):
     # _plot_pdf(ax, pe.planar_angles_dist_params, 'Planar\n' + p_strs[0])
     # _plot_pdf(ax, pe.nonplanar_angles_dist_params, 'Non-planar\n' + p_strs[1])
     fig, ax = plt.subplots(1, figsize=(3, 3))
-    _plot_pdf(ax, pe.planar_angles_dist_params, '$\\theta$', colour='red', zorder=2)
-    t_samples = pe.planar_angles_dist.sample((2000,)).squeeze()
+    _plot_pdf(ax, pe.theta_dist_params, '$\\theta$', colour='red', zorder=2)
+    t_samples = pe.theta_dist.sample((2000,)).squeeze()
     t_samples = torch.atan2(torch.sin(t_samples), torch.cos(t_samples)).numpy()
     ax.hist(t_samples, bins=51, density=True, facecolor='pink', alpha=0.5)
-    _plot_pdf(ax, pe.nonplanar_angles_dist_params, '$\phi$', colour='green', zorder=1)
-    p_samples = pe.nonplanar_angles_dist.sample((2000,)).squeeze()
+    _plot_pdf(ax, pe.phi_dist_params, '$\phi$', colour='green', zorder=1)
+    p_samples = pe.phi_dist.sample((2000,)).squeeze()
     p_samples = torch.atan(torch.tan(p_samples)).numpy()
     ax.hist(p_samples, bins=25, density=True, facecolor='lightgreen', alpha=0.5)
 
@@ -107,19 +109,21 @@ def _plot_angle_pdfs(pe: ThreeStateExplorer):
 
 
 def _plot_simulation(
-        ts: torch.Tensor,
-        tumble_ts: torch.Tensor,
-        X: torch.Tensor,
-        s0_durations: torch.Tensor,
-        s1_durations: torch.Tensor,
-        planar_angles: torch.Tensor,
-        nonplanar_angles: torch.Tensor,
-        intervals: torch.Tensor,
-        run_idx: int = None
+        TC: TrajectoryCache,
+        run_idx: int = 0
 ):
     """
     Plot a simulation output.
     """
+    ts = TC.ts
+    tumble_ts = TC.tumble_ts[run_idx]
+    X = TC.X[run_idx]
+    s0_durations = TC.durations[0][run_idx]
+    s1_durations = TC.durations[1][run_idx]
+    thetas = TC.thetas[run_idx]
+    phis = TC.phis[run_idx]
+    intervals = TC.intervals[run_idx]
+
     fig = plt.figure(figsize=(16, 10))
     gs = GridSpec(5, 5)
     fig.suptitle(f'Simulation run {run_idx}')
@@ -133,8 +137,8 @@ def _plot_simulation(
     ax = fig.add_subplot(gs[0, :])
     ax.set_title('Tumble trace')
     ax.axhline(y=0, color='darkgrey')
-    ax.scatter(tumble_ts, planar_angles, label='$\\theta_P$', marker='x')
-    ax.scatter(tumble_ts, nonplanar_angles, label='$\\theta_{NP}$', marker='o')
+    ax.scatter(tumble_ts, thetas, label='$\\theta_P$', marker='x')
+    ax.scatter(tumble_ts, phis, label='$\\theta_{NP}$', marker='o')
     ax.set_xlim(left=ts[0], right=ts[-1])
     ax.set_xlabel('Time (s)')
     ax.set_ylabel('$\\theta$')
@@ -157,12 +161,12 @@ def _plot_simulation(
                 'Run durations': intervals,
                 'State0 durations': s0_durations,
                 'State1 durations': s1_durations,
-                'Planar angles': planar_angles,
-                'Non-planar angles': nonplanar_angles,
+                'Planar angles': thetas,
+                'Non-planar angles': phis,
             }.items()):
         ax = fig.add_subplot(gs[1, i])
         ax.set_title(param_name)
-        ax.hist(param.numpy(), bins=21, density=True, facecolor='green', alpha=0.75)
+        ax.hist(param, bins=21, density=True, facecolor='green', alpha=0.75)
         ax.set_yscale('log')
         if param_name in ['Planar angles', 'Non-planar angles']:
             ax.set_xlim(left=-np.pi - 0.1, right=np.pi + 0.1)
@@ -197,13 +201,7 @@ def _plot_simulation(
 
 def _plot_simulations(
         pe: ThreeStateExplorer,
-        ts: torch.Tensor,
-        tumble_ts: List[torch.Tensor],
-        Xs: torch.Tensor,
-        durations: Dict[int, List[torch.Tensor]],
-        planar_angles: torch.Tensor,
-        nonplanar_angles: torch.Tensor,
-        intervals: List[torch.Tensor],
+        TC: TrajectoryCache,
 ):
     """
     Plot some simulation runs.
@@ -214,17 +212,7 @@ def _plot_simulations(
     for i in range(min(pe.batch_size, plot_n_examples)):
         title = f'Simulation run {i}.'
         logger.info(f'Plotting {title}')
-        _plot_simulation(
-            ts,
-            tumble_ts[i],
-            Xs[i],
-            durations[0][i],
-            durations[1][i],
-            planar_angles[i],
-            nonplanar_angles[i],
-            intervals[i],
-            i
-        )
+        _plot_simulation(TC, i)
 
         if save_plots:
             plt.savefig(LOGS_PATH / f'{START_TIMESTAMP}_sim_{i}.{img_extension}')
@@ -235,11 +223,7 @@ def _plot_simulations(
 
 def _plot_histograms(
         pe: ThreeStateExplorer,
-        durations: Dict[int, List[torch.Tensor]],
-        planar_angles: List[torch.Tensor],
-        nonplanar_angles: List[torch.Tensor],
-        intervals: List[torch.Tensor],
-        speeds: List[torch.Tensor],
+        TC: TrajectoryCache,
 ):
     """
     Plot histograms of the sampled parameters.
@@ -251,25 +235,25 @@ def _plot_histograms(
 
     ax = axes[0]
     ax.set_title(f'Run durations (intervals between tumbles)')
-    dr = torch.cat(intervals).numpy()
+    dr = np.concatenate(TC.intervals)
     ax.hist(dr, bins=30, density=True, facecolor='green', alpha=0.75)
     ax.set_yscale('log')
 
     ax = axes[1]
     ax.set_title(f'State0 durations')
-    d0 = torch.cat(durations[0]).numpy()
+    d0 = np.concatenate(TC.durations[0])
     ax.hist(d0, bins=30, density=True, facecolor='green', alpha=0.75)
     ax.set_yscale('log')
 
     ax = axes[2]
     ax.set_title(f'State1 durations')
-    d1 = torch.cat(durations[1]).numpy()
+    d1 = np.concatenate(TC.durations[1])
     ax.hist(d1, bins=30, density=True, facecolor='green', alpha=0.75)
     ax.set_yscale('log')
 
     ax = axes[3]
     ax.set_title(f'Speeds')
-    s = torch.cat(speeds).numpy()
+    s = np.concatenate(TC.speeds)
     ax.hist(s, bins=30, density=True, facecolor='green', alpha=0.75)
     ax.set_yscale('log')
 
@@ -279,18 +263,18 @@ def _plot_histograms(
     ax.set_yscale('log')
 
     ax = axes[5]
-    ax.set_title(f'Planar Angles\n{p_strs[0]}')
-    pa = torch.cat(planar_angles).numpy()
-    ax.hist(pa, bins=31, density=True, facecolor='green', alpha=0.75)
+    ax.set_title(f'$\\theta$ (Planar Angles)\n{p_strs[0]}')
+    thetas = np.concatenate(TC.thetas)
+    ax.hist(thetas, bins=31, density=True, facecolor='green', alpha=0.75)
     ax.set_xlim(left=-np.pi - 0.1, right=np.pi + 0.1)
     ax.set_xticks([-np.pi, 0, np.pi])
     ax.set_xticklabels(['$-\pi$', '0', '$\pi$'])
     ax.set_yscale('log')
 
     ax = axes[6]
-    ax.set_title(f'Non-planar Angles\n{p_strs[1]}')
-    na = torch.cat(nonplanar_angles).numpy()
-    ax.hist(na, bins=31, density=True, facecolor='green', alpha=0.75)
+    ax.set_title(f'$\\phi$ (Non-planar Angles)\n{p_strs[1]}')
+    phis = np.concatenate(TC.phis)
+    ax.hist(phis, bins=31, density=True, facecolor='green', alpha=0.75)
     ax.set_xlim(left=-np.pi / 2 - 0.1, right=np.pi / 2 + 0.1)
     ax.set_xticks([-np.pi / 2, 0, np.pi / 2])
     ax.set_xticklabels(['$-\\frac{\pi}{2}$', '0', '$\\frac{\pi}{2}$'])
@@ -305,13 +289,14 @@ def _plot_histograms(
 
 
 def _plot_msd(
+        args: Namespace,
         pe: ThreeStateExplorer,
-        Xs: torch.Tensor,
+        TC: TrajectoryCache
 ):
     """
     MSD plot against real trajectory.
     """
-    args = get_args()
+    Xs = TC.X
     trial_ids = args.trials if args.trials is not None else [args.trial, ]
 
     max_radius = 0
@@ -361,7 +346,7 @@ def _plot_msd(
 
 def _plot_trajectories(
         pe: ThreeStateExplorer,
-        Xs: torch.Tensor,
+        TC: TrajectoryCache,
 ):
     """
     Plot some simulation trajectories.
@@ -370,7 +355,7 @@ def _plot_trajectories(
         return
 
     # Construct colours
-    colours = np.linspace(0, 1, Xs.shape[1])
+    colours = np.linspace(0, 1, TC.X.shape[1])
     cmap = plt.get_cmap('viridis_r')
     c = [cmap(c_) for c_ in colours]
 
@@ -380,7 +365,7 @@ def _plot_trajectories(
         # Plot the trajectory
         fig = plt.figure(figsize=(10, 10))
         ax = fig.add_subplot(projection='3d')
-        x, y, z = Xs[i].T
+        x, y, z = TC.X[i].T
         ax.scatter(x, y, z, c=c, s=100, alpha=1, zorder=1)
         equal_aspect_ratio(ax)
         ax.grid(False)
@@ -392,87 +377,27 @@ def _plot_trajectories(
 
         if save_plots:
             plt.savefig(LOGS_PATH / f'{START_TIMESTAMP}_sim_{i}.{img_extension}', transparent=True)
-            np.savez(LOGS_PATH / f'{START_TIMESTAMP}_sim_{i}', X=Xs[i])
+            np.savez(LOGS_PATH / f'{START_TIMESTAMP}_sim_{i}', X=TC.X[i])
 
         if show_plots:
             plt.show()
 
 
-def simulate(batch_size: int):
-    T = 30 * 60
-    dt = 1 / 25
-
-    speeds_0_mu = 0.002
-    speeds_0_sig = 0.0005
-    speeds_1_mu = 0.007
-    speeds_1_sig = 0.001
-    speeds_0_dist = norm(loc=speeds_0_mu, scale=speeds_0_sig)
-    speeds_1_dist = norm(loc=speeds_1_mu, scale=speeds_1_sig)
-    speeds0 = np.abs(speeds_0_dist.rvs(batch_size))
-    speeds1 = np.abs(speeds_1_dist.rvs(batch_size))
-
-    speeds0 = 0.001
-    speeds1 = 0.007
-
-    # pe = ThreeStateExplorer(
-    #     batch_size=batch_size,
-    #     rate_01=0.05,
-    #     rate_10=0.1,
-    #     rate_02=0.005,
-    #     rate_20=0.8,  # not really a rate!
-    #     speed_0=0.0001,
-    #     speed_1=0.007,
-    #     planar_angle_dist_params={
-    #         'type': 'norm',
-    #         'params': (0, 7)
-    #         # 'type': 'levy_stable',
-    #         # 'params': (2, 0, 0, 2)
-    #         # 'params': (0.5, 0, 0, 0.1)
-    #     },
-    #     nonplanar_angle_dist_params={
-    #         'type': 'norm',
-    #         'params': (0, 0.6)
-    #         # 'type': 'levy_stable',
-    #         # 'params': (2, 0, 0, 2)
-    #         # 'params': (0.2, 0, 0, 0.01)
-    #     },
-    # )
-    pe = ThreeStateExplorer(
-        batch_size=batch_size,
-        rate_01=0.05,
-        rate_10=0.1,
-        rate_02=0.005,  # 0.005
-        rate_20=0.8,  # not really a rate!
-        speed_0=speeds0,  # 0.0001,
-        speed_1=speeds1,  # 0.007,
-        planar_angle_dist_params={
-            'type': 'norm',
-            'params': (0, 10)
-            # 'type': '2norm',
-            # 'params': (1, 0, 1.5, 0.2, np.pi, 0.5)
-            # 'type': 'levy_stable',
-            # 'params': (2, 0, 0, 2)
-            # 'params': (0.5, 0, 0, 0.1)
-        },
-        nonplanar_angle_dist_params={
-            'type': 'norm',
-            # 'params': (np.pi/2, 0.6)
-            'params': (0, 10)
-            # 'type': 'levy_stable',
-            # 'params': (2, 0, 0, 2)
-            # 'params': (0.2, 0, 0, 0.01)
-        }
+def simulate():
+    args = get_args(
+        include_trajectory_options=True,
+        include_msd_options=True,
+        include_K_options=False,
+        include_planarity_options=False,
+        include_manoeuvre_options=False,
+        validate_source=False,
+        include_pe_options=True
     )
-
-    # _plot_angle_pdfs(pe)
-    # exit()
-
-    ts, tumble_ts, Xs, states, durations, planar_angles, nonplanar_angles, intervals, speeds = pe.forward(T, dt)
-
-    _plot_histograms(pe, durations, planar_angles, nonplanar_angles, intervals, speeds)
-    _plot_msd(pe, Xs)
-    _plot_simulations(pe, ts, tumble_ts, Xs, durations, planar_angles, nonplanar_angles, intervals)
-    # _plot_trajectories(pe, Xs)
+    pe, TC, meta = get_trajectories_from_args(args)
+    _plot_histograms(pe, TC)
+    _plot_msd(args, pe, TC)
+    _plot_simulations(pe, TC)
+    _plot_trajectories(pe, TC)
 
 
 if __name__ == '__main__':
@@ -481,4 +406,4 @@ if __name__ == '__main__':
 
     # from simple_worm.plot3d import interactive
     # interactive()
-    simulate(batch_size=100)
+    simulate()

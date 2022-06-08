@@ -20,8 +20,10 @@ def calculate_curvature(
         smooth_e0: int = 101,
         smooth_K: int = 101
 ) -> np.ndarray:
-    # Identify tumbles as large changes in direction over a short period of time - ie, high curvature
-    # e0 = normalised tangent to curve => d/dt(e0) = K(t) = curvature vector
+    """
+    Identify tumbles as large changes in direction over a short period of time - ie, high curvature
+    e0 = normalised tangent to curve => d/dt(e0) = K(t) = curvature vector
+    """
     e0 = smooth_trajectory(e0, window_len=smooth_e0)
     K = np.gradient(e0, 1 / (len(e0) - 1), axis=0, edge_order=1)
 

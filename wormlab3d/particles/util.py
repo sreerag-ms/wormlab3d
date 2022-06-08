@@ -303,7 +303,7 @@ def plot_3d_trajectories(
 def plot_msd(
         args: Namespace,
         Xs_real: List[np.ndarray],
-        Xs_sim: List[torch.Tensor],
+        Xs_sim: List[np.ndarray],
 ) -> Figure:
     """
     Make an MSD plot of the simulated results against real trajectories.
@@ -351,16 +351,11 @@ def plot_msd(
             for i, X_sim in enumerate(Xs_sim):
                 if delta > X_sim.shape[0] / 3:
                     continue
-                d = torch.sum((X_sim[delta:] - X_sim[:-delta])**2, dim=-1)
+                d = np.sum((X_sim[delta:] - X_sim[:-delta])**2, axis=-1)
                 d_all.append(d)
                 msds_sim[i][delta] = d.mean()
             if len(d_all):
                 msds_all_sim[delta] = np.concatenate(d_all).mean()
-
-            # d = torch.sum((Xs_sim[:, delta:] - Xs_sim[:, :-delta])**2, dim=-1)
-            # msds_all_sim[delta] = d.mean()
-            # for i in range(bs):
-            #     msds_sim[i][delta] = d[i].mean()
 
         bar.next()
     bar.finish()

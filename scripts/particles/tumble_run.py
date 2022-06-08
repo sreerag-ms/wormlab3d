@@ -14,6 +14,7 @@ from simple_worm.frame import FrameNumpy
 from simple_worm.plot3d import FrameArtist
 from wormlab3d import START_TIMESTAMP, LOGS_PATH, logger
 from wormlab3d.data.model import Trial, Dataset
+from wormlab3d.particles.cache import get_trajectories_from_args
 from wormlab3d.particles.three_state_explorer import ThreeStateExplorer
 from wormlab3d.particles.tumble_run import calculate_curvature, get_approximate, find_approximation, \
     generate_or_load_ds_statistics, generate_or_load_ds_msds
@@ -640,69 +641,9 @@ def dataset_against_three_state_comparison():
     msds_all_real, msds_real = generate_or_load_ds_msds(ds, args, rebuild_cache=False)
 
     # Now make a simulator to match the results
-    dt = 1 / 25
-    T = max(trajectory_lengths) * dt
-    batch_size = 200
-
-    speeds_0_mu = 0.
-    # speeds_0_sig = 0.0001
-    speeds_0_sig = 0.0002
-    # speeds_0_mu = 0.01
-    # speeds_0_sig = 0.01
-    speeds_1_mu = 0.0055
-    # speeds_1_sig = 0.0001
-    speeds_1_sig = 0.003
-    # speeds_1_mu = 0.07
-    # speeds_1_sig = 0.01
-    # speeds_0_dist = lognorm(1, speeds_0_mu, speeds_0_sig)
-    # speeds_0_dist = lognorm(s=speeds_0_sig, loc=0, scale=np.exp(speeds_0_mu))
-    # speeds_1_dist = lognorm(1, speeds_1_mu, speeds_1_sig)
-    # speeds_1_dist = lognorm(s=speeds_1_sig, loc=0, scale=np.exp(speeds_1_mu))
-
-    speeds_0_dist = norm(loc=speeds_0_mu, scale=speeds_0_sig)
-    speeds_1_dist = norm(loc=speeds_1_mu, scale=speeds_1_sig)
-
-    # x = np.linspace(0, speeds_0_dist.ppf(0.99), 501)
-    # plt.plot(x, speeds_0_dist.pdf(x), linestyle='--', alpha=0.9, label='speeds_0')
-    # x = np.linspace(0, speeds_1_dist.ppf(0.99), 501)
-    # plt.plot(x, speeds_1_dist.pdf(x), linestyle='--', alpha=0.9, label='speeds_1')
-    # plt.legend()
-    # plt.show()
-    # exit()
-
-    speeds0 = np.abs(speeds_0_dist.rvs(batch_size))
-    speeds1 = np.abs(speeds_1_dist.rvs(batch_size))
-
-    pe = ThreeStateExplorer(
-        batch_size=batch_size,
-        rate_01=0.05,
-        rate_10=0.1,
-        rate_02=0.005,
-        rate_20=0.8,  # not really a rate!
-        speed_0=speeds0,  # 0.0001,
-        speed_1=speeds1,  # 0.007,
-        planar_angle_dist_params={
-            # 'type': 'norm',
-            # 'params': (0, 7),
-
-            'type': '2norm',
-            'params': (1, 0, 1.5, 0.2, np.pi, 0.6)
-
-            # 'type': 'levy_stable',
-            # 'params': (2, 0, 0, 2)
-            # 'params': (0.5, 0, 0, 0.1)
-        },
-        nonplanar_angle_dist_params={
-            'type': 'norm',
-            'params': (0, 0.65)
-            # 'type': 'levy_stable',
-            # 'params': (2, 0, 0, 2)
-            # 'params': (0.2, 0, 0, 0.01)
-        }
-    )
-
-    ts, tumble_ts, Xs, states, durations_sim, planar_angles_sim, nonplanar_angles_sim, intervals_sim, speeds_sim \
-        = pe.forward(T, dt)
+    args.sim_dt = 1 / 25
+    args.sim_duration = max(trajectory_lengths) * args.sim_dt
+    pe, TC, meta = get_trajectories_from_args(args)
 
     # Plot histograms
     if 1:
@@ -710,13 +651,12 @@ def dataset_against_three_state_comparison():
         fig.suptitle(f'Dataset={ds.id}.')
 
         for i, (param_name, values) in enumerate({
-                                                     'Durations': [durations, intervals_sim],
-                                                     'Speeds': [speeds, speeds_sim],
-                                                     'Speeds (weighted)': [speeds, speeds_sim],
-                                                     'Planar angles': [planar_angles, planar_angles_sim],
-                                                     'Non-planar angles': [nonplanar_angles, nonplanar_angles_sim],
-                                                     'Twist angles': [twist_angles,
-                                                                      [torch.from_numpy(twist_angles[0]), ]],
+                                                     'Durations': [durations, TC.intervals],
+                                                     'Speeds': [speeds, TC.speeds],
+                                                     'Speeds (weighted)': [speeds, TC.speeds],
+                                                     'Planar angles': [planar_angles, TC.thetas],
+                                                     'Non-planar angles': [nonplanar_angles, TC.phis],
+                                                     'Twist angles': [twist_angles, [twist_angles[0], ]],
                                                  }.items()):
             for j, error_limit in enumerate(error_limits):
                 ax = axes[j, i]
@@ -726,14 +666,14 @@ def dataset_against_three_state_comparison():
                     ax.set_ylabel(f'Error ~ {error_limit:.4f}')
 
                 values_ds = np.array(values[0][j])
-                values_sim = torch.cat(values[1]).numpy()
+                values_sim = np.concatenate(values[1])
 
                 if param_name not in ['Planar angles', 'Non-planar angles']:
                     ax.set_yscale('log')
                 if param_name == 'Speeds (weighted)':
                     weights = [
                         np.array(durations[j]),
-                        torch.cat(intervals_sim).numpy(),
+                        np.concatenate(TC.intervals),
                     ]
                 else:
                     weights = [
@@ -763,16 +703,16 @@ def dataset_against_three_state_comparison():
     T_dist = expon(*expon.fit(trajectory_lengths))
 
     # Sample some trajectory lengths
-    T_sim_lengths = T_dist.rvs(batch_size).round().astype(np.uint32)
+    T_sim_lengths = T_dist.rvs(args.batch_size).round().astype(np.uint32)
 
     msds_all_sim = np.zeros(len(deltas))
     msds_sim = {}
     d_all_sim = {delta: [] for delta in deltas}
 
     logger.info(f'Calculating MSDs for simulation runs.')
-    bar = Bar('Calculating', max=batch_size)
+    bar = Bar('Calculating', max=args.batch_size)
     bar.check_tty = False
-    for i, X in enumerate(Xs):
+    for i, X in enumerate(TC.X):
         # Pick a random length
         X = X[:T_sim_lengths[i]]
 
@@ -780,8 +720,8 @@ def dataset_against_three_state_comparison():
         for delta in deltas:
             if delta > X.shape[0] / 3:
                 continue
-            d = torch.sum((X[delta:] - X[:-delta])**2, dim=-1)
-            d_all_sim[delta].append(d.numpy())
+            d = np.sum((X[delta:] - X[:-delta])**2, axis=-1)
+            d_all_sim[delta].append(d)
             msds_i.append(d.mean())
         msds_sim[i] = np.array(msds_i)
         bar.next()
@@ -798,7 +738,7 @@ def dataset_against_three_state_comparison():
         cmap = plt.get_cmap('winter')
         colours_real = cmap(np.linspace(0, 1, rs))
         cmap = plt.get_cmap('autumn')
-        colours_sim = cmap(np.linspace(0, 1, batch_size))
+        colours_sim = cmap(np.linspace(0, 1, args.batch_size))
 
         # Plot average of the real MSDs
         ax.plot(delta_ts, msds_all_real, label='Trajectory average',
@@ -870,31 +810,10 @@ def dataset_against_three_state_comparison():
         fig.tight_layout()
         plt.show()
 
-    exit()
+    # exit()
 
     # Paper quality plots
     if 1:
-
-        # Save simulation data
-        if 0 and save_plots:
-            save_arrs = {
-                'states': states.numpy(),
-            }
-
-            for i in range(batch_size):
-                save_arrs[f'tumble_ts_{i}'] = tumble_ts[i]
-                save_arrs[f'durations_0_{i}'] = durations_sim[0][i]
-                save_arrs[f'durations_1_{i}'] = durations_sim[1][i]
-                save_arrs[f'planar_angles_{i}'] = planar_angles_sim[i]
-                save_arrs[f'nonplanar_angles_{i}'] = nonplanar_angles_sim[i]
-                save_arrs[f'intervals_{i}'] = intervals_sim[i]
-                save_arrs[f'speeds_{i}'] = speeds_sim[i]
-
-            np.savez_compressed(
-                LOGS_PATH / f'{START_TIMESTAMP}_sim_data',
-                **save_arrs
-            )
-
         error_limit = 0.05
         assert error_limit in error_limits
         j = np.argmin(np.abs(error_limits - error_limit))
@@ -907,10 +826,10 @@ def dataset_against_three_state_comparison():
         fig, axes = plt.subplots(1, 4, figsize=(12, 3))
 
         for i, (param_name, values) in enumerate({
-                                                     'Run durations': [durations, intervals_sim],
-                                                     'Run speeds': [speeds, speeds_sim],
-                                                     'Planar angles': [planar_angles, planar_angles_sim],
-                                                     'Non-planar angles': [nonplanar_angles, nonplanar_angles_sim]
+                                                     'Run durations': [durations, TC.intervals],
+                                                     'Run speeds': [speeds, TC.speeds],
+                                                     'Planar angles': [planar_angles, TC.thetas],
+                                                     'Non-planar angles': [nonplanar_angles, TC.phis]
                                                  }.items()):
             ax = axes[i]
             ax.set_title(param_name)
@@ -919,14 +838,14 @@ def dataset_against_three_state_comparison():
                 ax.set_ylabel(f'Error ~ {error_limit:.4f}')
 
             values_ds = np.array(values[0][j])
-            values_sim = torch.cat(values[1]).numpy()
+            values_sim = np.concatenate(values[1])
 
             if param_name not in ['Planar angles', 'Non-planar angles']:
                 ax.set_yscale('log')
             if param_name == 'Speeds':
                 weights = [
                     np.array(durations[j]),
-                    torch.cat(intervals_sim).numpy(),
+                    np.concatenate(TC.intervals),
                 ]
             else:
                 weights = [
@@ -977,7 +896,7 @@ def dataset_against_three_state_comparison():
         if show_plots:
             plt.show()
 
-        exit()
+        # exit()
 
         # Set up MSD plot
         logger.info('Plotting MSD ranges.')
@@ -1043,6 +962,6 @@ if __name__ == '__main__':
 
     # single_trial_approximation()
 
-    dataset_distributions()
-    # dataset_against_three_state_comparison()
-    plot_dataset_angle_comparisons()
+    # dataset_distributions()
+    # plot_dataset_angle_comparisons()
+    dataset_against_three_state_comparison()

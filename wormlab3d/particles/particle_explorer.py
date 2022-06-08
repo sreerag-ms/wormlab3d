@@ -14,6 +14,7 @@ from wormlab3d.midlines3d.mf_methods import normalise
 from wormlab3d.particles.gaussian_mixture import GaussianMixtureTorch
 
 PARTICLE_PARAMETER_KEYS = ['speeds', 'planar_angles', 'nonplanar_angles']
+DIST_TYPES = ['norm', 'lognorm', 'cauchy', 'levy_stable', '2norm']
 
 
 def orthogonalise(source: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
@@ -24,6 +25,7 @@ def init_dist(params: Dict[str, Any]) -> Union[Distribution, Tuple[List[float], 
     """
     Initialise a Torch Distribution instance.
     """
+    assert params['type'] in DIST_TYPES
     if params['type'] == 'norm':
         mu, sigma = params['params']
         if sigma == 0:

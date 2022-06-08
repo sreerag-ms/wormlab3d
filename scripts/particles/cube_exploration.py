@@ -118,7 +118,6 @@ def track_cube_exploration_for_trial():
         ax.add_collection(lc)
         equal_aspect_ratio(ax)
 
-    # fig.suptitle(f'Bishop frame components. Trial={trial.id}. Smooth X={smooth_X}. Smooth K={smooth_K}')
     fig.tight_layout()
     if save_plots:
         plt.savefig(

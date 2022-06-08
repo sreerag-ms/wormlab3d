@@ -19,6 +19,7 @@ __pycache__
 /data/K_estimates_cache
 /data/MF_outputs
 /data/pca_cache
+/data/pe_cache
 /data/posture_distances_cache
 /data/posture_clusters_cache
 /data/prepared_images

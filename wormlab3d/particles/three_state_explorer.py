@@ -1,6 +1,7 @@
 import time
 from datetime import timedelta
-from typing import Dict, Optional, Any, Union, Tuple
+from multiprocessing import Pool
+from typing import Dict, Optional, Any, Union
 
 import numpy as np
 import torch
@@ -8,14 +9,53 @@ from progress.bar import Bar
 from scipy.signal import find_peaks
 from torch import nn
 
-from wormlab3d import logger
+from wormlab3d import logger, N_WORKERS
 from wormlab3d.midlines3d.mf_methods import normalise
 from wormlab3d.particles.particle_explorer import orthogonalise, init_dist
 
-PARTICLE_PARAMETER_KEYS = ['planar_angles', 'nonplanar_angles']
+PARTICLE_PARAMETER_KEYS = ['thetas', 'phis']
+
+
+def calculate_durations(
+        cond_state: np.ndarray,
+) -> Union[np.ndarray, Dict[int, np.ndarray]]:
+    """
+    Calculate the durations stayed in state.
+    """
+    run_starts = []
+    durations = []
+    centre_idxs, section_props = find_peaks(cond_state, width=1)
+    for j in range(len(centre_idxs)):
+        start = section_props['left_bases'][j]
+        w = section_props['widths'][j]
+        run_starts.append(int(start))
+        durations.append(int(w))
+    return run_starts, durations
+
+
+def calculate_durations_parallel(
+        cond_state: np.ndarray,
+):
+    """
+    Calculate the durations in parallel.
+    """
+    bs = len(cond_state)
+    with Pool(processes=N_WORKERS) as pool:
+        res = pool.map(
+            calculate_durations,
+            [cond_state[i] for i in range(bs)]
+        )
+    run_starts = []
+    durations = []
+    for i in range(bs):
+        run_starts.append(res[i][0])
+        durations.append(res[i][1])
+    return run_starts, durations
 
 
 class ThreeStateExplorer(nn.Module):
+    thetas: torch.Tensor
+    phis: torch.Tensor
 
     def __init__(
             self,
@@ -26,11 +66,12 @@ class ThreeStateExplorer(nn.Module):
             rate_20: float = 0.001,
             speed_0: Union[float, np.ndarray] = 0.001,
             speed_1: Union[float, np.ndarray] = 0.005,
-            planar_angle_dist_params: Optional[Dict[str, Any]] = None,
-            nonplanar_angle_dist_params: Optional[Dict[str, Any]] = None,
+            theta_dist_params: Optional[Dict[str, Any]] = None,
+            phi_dist_params: Optional[Dict[str, Any]] = None,
             x0: torch.Tensor = None,
             state0: torch.Tensor = None,
-            max_nonplanar_pause_duration: float = 0.,
+            nonp_pause_type: Optional[str] = None,
+            nonp_pause_max: float = 0.,
     ):
         super().__init__()
         self.batch_size = batch_size
@@ -60,11 +101,12 @@ class ThreeStateExplorer(nn.Module):
         self.speed_1 = speed_1
 
         # Should nonplanar turns induce a longer pause than planar turns
-        self.max_nonplanar_pause_duration = max_nonplanar_pause_duration
+        self.nonp_pause_type = nonp_pause_type
+        self.nonp_pause_max = nonp_pause_max
 
         self._init_particle(x0)
         self._init_state(state0)
-        self._init_distributions(planar_angle_dist_params, nonplanar_angle_dist_params)
+        self._init_distributions(theta_dist_params, phi_dist_params)
 
     def _init_particle(self, x0: Optional[torch.Tensor] = None):
         """
@@ -108,41 +150,42 @@ class ThreeStateExplorer(nn.Module):
 
     def _init_distributions(
             self,
-            planar_angle_dist_params: Optional[Dict[str, Any]] = None,
-            nonplanar_angle_dist_params: Optional[Dict[str, Any]] = None,
+            theta_dist_params: Optional[Dict[str, Any]] = None,
+            phi_dist_params: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialise the angles distributions from which values are sampled.
         """
-        if planar_angle_dist_params is None:
-            planar_angle_dist_params = {
+        if theta_dist_params is None:
+            theta_dist_params = {
                 'type': 'cauchy',
                 'mu': 0,
                 'sigma': 0.1,
             }
-        if nonplanar_angle_dist_params is None:
-            nonplanar_angle_dist_params = {
+        if phi_dist_params is None:
+            phi_dist_params = {
                 'type': 'cauchy',
                 'mu': 0,
                 'sigma': 0.5,
             }
 
-        self.planar_angles_dist_params = planar_angle_dist_params
-        self.nonplanar_angles_dist_params = nonplanar_angle_dist_params
-        self.planar_angles_dist = init_dist(planar_angle_dist_params)
-        self.nonplanar_angles_dist = init_dist(nonplanar_angle_dist_params)
+        self.theta_dist_params = theta_dist_params
+        self.phi_dist_params = phi_dist_params
+        self.theta_dist = init_dist(theta_dist_params)
+        self.phi_dist = init_dist(phi_dist_params)
 
     def forward(
             self,
-            T: int,
+            T: float,
             dt: float
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> 'TrajectoryCache':
         """
         Simulate a batch of particle explorers.
         """
+        from wormlab3d.particles.cache import TrajectoryCache
         n_steps = int(T / dt)
         ts = torch.arange(n_steps) * dt
-        max_nonplanar_pause_steps = self.max_nonplanar_pause_duration / dt
+        nonp_pause_max = self.nonp_pause_max / dt
 
         start_time = time.time()
 
@@ -165,25 +208,35 @@ class ThreeStateExplorer(nn.Module):
 
         # Calculate the run durations
         logger.info('Calculating durations.')
-        bar = Bar('Calculating', max=self.batch_size * 2)
-        bar.check_tty = False
         run_starts = {s: [[] for _ in range(self.batch_size)] for s in [0, 1]}
         durations = {s: [[] for _ in range(self.batch_size)] for s in [0, 1]}
-        for s in [0, 1]:
-            cond_state = torch.cat([
-                torch.zeros(self.batch_size, 1),
-                states == s,
-                torch.zeros(self.batch_size, 1)
-            ], dim=1)
-            for i in range(self.batch_size):
-                centre_idxs, section_props = find_peaks(cond_state[i], width=1)
-                for j in range(len(centre_idxs)):
-                    start = section_props['left_bases'][j]
-                    w = section_props['widths'][j]
-                    run_starts[s][i].append(int(start))
-                    durations[s][i].append(int(w))
-                bar.next()
-        bar.finish()
+
+        if N_WORKERS > 1:
+            for s in [0, 1]:
+                cond_state = torch.cat([
+                    torch.zeros(self.batch_size, 1),
+                    states == s,
+                    torch.zeros(self.batch_size, 1)
+                ], dim=1)
+                run_starts[s], durations[s] = calculate_durations_parallel(cond_state)
+        else:
+            bar = Bar('Calculating', max=self.batch_size * 2)
+            bar.check_tty = False
+            for s in [0, 1]:
+                cond_state = torch.cat([
+                    torch.zeros(self.batch_size, 1),
+                    states == s,
+                    torch.zeros(self.batch_size, 1)
+                ], dim=1)
+                for i in range(self.batch_size):
+                    centre_idxs, section_props = find_peaks(cond_state[i], width=1)
+                    for j in range(len(centre_idxs)):
+                        start = section_props['left_bases'][j]
+                        w = section_props['widths'][j]
+                        run_starts[s][i].append(int(start))
+                        durations[s][i].append(int(w))
+                    bar.next()
+            bar.finish()
 
         # Generate the tumbles
         logger.info('Generating tumbles.')
@@ -191,22 +244,22 @@ class ThreeStateExplorer(nn.Module):
         tumble_ts = [tumble_idxs[tumble_idxs[:, 0] == i][:, 1] * dt for i in range(self.batch_size)]
         max_tumbles = max((states == 2).sum(dim=1))
         e0s = [self.e0, ]
-        planar_angles = []
-        nonplanar_angles = []
+        thetas = []
+        phis = []
         bar = Bar('Generating', max=max_tumbles)
         bar.check_tty = False
         for _ in range(max_tumbles):
             self._sample_parameters()
-            self._rotate_frames(self.planar_angles, 'planar')
-            self._rotate_frames(self.nonplanar_angles, 'nonplanar')
-            planar_angles.append(self.planar_angles.clone())
-            nonplanar_angles.append(self.nonplanar_angles.clone())
+            self._rotate_frames(self.thetas, 'planar')
+            self._rotate_frames(self.phis, 'nonplanar')
+            thetas.append(self.thetas.clone())
+            phis.append(self.phis.clone())
             e0s.append(self.e0)
             bar.next()
         bar.finish()
         e0s = torch.stack(e0s, dim=1)
-        planar_angles = torch.stack(planar_angles, dim=1)
-        nonplanar_angles = torch.stack(nonplanar_angles, dim=1)
+        thetas = torch.stack(thetas, dim=1)
+        phis = torch.stack(phis, dim=1)
 
         # Simulate the particle exploration
         e0_exp = torch.zeros((self.batch_size, n_steps, 3))
@@ -229,10 +282,13 @@ class ThreeStateExplorer(nn.Module):
                     e0 = e0s[i, k]
 
                     # Vary pause duration based on how extreme the nonplanar angle is
-                    phi = nonplanar_angles[i, k-1].abs()
-                    pause_steps_i = int(((phi / (torch.pi / 2)) * max_nonplanar_pause_steps).round())
-                    pause_steps += pause_steps_i
-                    run_steps = 1 + pause_steps_i
+                    if self.nonp_pause_type == 'linear':
+                        phi = phis[i, k - 1].abs()
+                        pause_steps_i = int(((phi / (torch.pi / 2)) * nonp_pause_max).round())
+                        pause_steps += pause_steps_i
+                        run_steps = 1 + pause_steps_i
+                    else:
+                        run_steps = 1
 
                     k += 1
 
@@ -272,10 +328,21 @@ class ThreeStateExplorer(nn.Module):
             speeds.append(distances / intervals[i])
 
         # Prune the angles to those actually used in each run
-        planar_angles = [planar_angles[i, :len(tumble_ts[i])] for i in range(self.batch_size)]
-        nonplanar_angles = [nonplanar_angles[i, :len(tumble_ts[i])] for i in range(self.batch_size)]
+        thetas = [thetas[i, :len(tumble_ts[i])] for i in range(self.batch_size)]
+        phis = [phis[i, :len(tumble_ts[i])] for i in range(self.batch_size)]
 
-        return ts, tumble_ts, X, states, durations, planar_angles, nonplanar_angles, intervals, speeds
+        return TrajectoryCache(
+            batch_size=self.batch_size,
+            ts=ts,
+            tumble_ts=tumble_ts,
+            X=X,
+            states=states,
+            durations=durations,
+            thetas=thetas,
+            phis=phis,
+            intervals=intervals,
+            speeds=speeds
+        )
 
     def _update_state(self):
         """
@@ -334,17 +401,17 @@ class ThreeStateExplorer(nn.Module):
         Sample parameters from the distributions associated with the current states.
         """
         for pk in PARTICLE_PARAMETER_KEYS:
-            if pk == 'planar_angles':
-                dist = self.planar_angles_dist
-            elif pk == 'nonplanar_angles':
-                dist = self.nonplanar_angles_dist
+            if pk == 'thetas':
+                dist = self.theta_dist
+            elif pk == 'phis':
+                dist = self.phi_dist
             else:
                 continue
             val = dist.sample((self.batch_size,))
 
-            if pk in ['planar_angles', 'nonplanar_angles']:
+            if pk in ['thetas', 'phis']:
                 val[val.isnan() | val.isinf()] = 0
-                if pk == 'planar_angles':
+                if pk == 'thetas':
                     # Put into range +/- pi
                     val = torch.atan2(torch.sin(val), torch.cos(val))
                 else:

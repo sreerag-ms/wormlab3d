@@ -42,6 +42,7 @@ POSTURE_DISTANCES_CACHE_PATH = _load_env_path('POSTURE_DISTANCES_CACHE_PATH', DA
 POSTURE_CLUSTERS_CACHE_PATH = _load_env_path('POSTURE_CLUSTERS_CACHE_PATH', DATA_PATH / 'posture_clusters_cache')
 RECONSTRUCTION_VIDEOS_PATH = _load_env_path('RECONSTRUCTION_VIDEOS_PATH', DATA_PATH / 'reconstruction_videos')
 PCA_CACHE_PATH = _load_env_path('PCA_CACHE_PATH', DATA_PATH / 'pca_cache')
+PE_CACHE_PATH = _load_env_path('PE_CACHE_PATH', DATA_PATH / 'pe_cache')
 
 # When fetching annexed files on demand, ensure that this much space is always kept free
 MIN_FREE_DISK_SPACE = os.getenv('MIN_FREE_DISK_SPACE', '100G')

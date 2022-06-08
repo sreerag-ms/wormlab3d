@@ -2,6 +2,7 @@ from argparse import ArgumentParser, Namespace
 
 from simple_worm.material_parameters import MP_DEFAULT_K
 from wormlab3d.data.model.midline3d import M3D_SOURCES, M3D_SOURCE_RECONST
+from wormlab3d.particles.particle_explorer import DIST_TYPES
 from wormlab3d.toolkit.util import str2bool
 from wormlab3d.trajectories.displacement import DISPLACEMENT_AGGREGATION_OPTIONS, DISPLACEMENT_AGGREGATION_SQUARED_SUM
 
@@ -12,6 +13,7 @@ def get_args(
         include_K_options: bool = True,
         include_planarity_options: bool = True,
         include_manoeuvre_options: bool = True,
+        include_pe_options: bool = True,
         validate_source: bool = True
 ) -> Namespace:
     """
@@ -24,7 +26,8 @@ def get_args(
     parser.add_argument('--dataset', type=str, help='Dataset id.', required=False)
     parser.add_argument('--reconstruction', type=str, help='Reconstruction id.', required=False)
     parser.add_argument('--trial', type=int, help='Trial id.', required=False)
-    parser.add_argument('--trials', type=lambda s: [int(item) for item in s.split(',')], help='Trial ids.', required=False)
+    parser.add_argument('--trials', type=lambda s: [int(item) for item in s.split(',')], help='Trial ids.',
+                        required=False)
     parser.add_argument('--midline3d-source', type=str, default=M3D_SOURCE_RECONST, choices=M3D_SOURCES,
                         help='Midline3D source.')
     parser.add_argument('--midline3d-source-file', type=str, help='Midline3D source file.')
@@ -79,6 +82,29 @@ def get_args(
                             help='Minimum number of reversal frames to use to identify a manoeuvre.')
         parser.add_argument('--manoeuvre-window', type=int, default=500,
                             help='Number of frames to include either side of a detected manoeuvre.')
+
+    # Particle explorer arguments
+    if include_pe_options:
+        parser.add_argument('--batch-size', type=int, help='Batch size.')
+        parser.add_argument('--rate-01', type=float, help='Transition rate from slow speed to fast speed.')
+        parser.add_argument('--rate-10', type=float, help='Transition rate from fast speed to slow speed.')
+        parser.add_argument('--rate-02', type=float, help='Transition rate from slow speed to turn.')
+        parser.add_argument('--rate-20', type=float, help='Transition rate from turn to slow speed.')
+        parser.add_argument('--speeds-0-mu', type=float, help='Slow speed average.')
+        parser.add_argument('--speeds-0-sig', type=float, help='Slow speed standard deviation.')
+        parser.add_argument('--speeds-1-mu', type=float, help='Fast speed average.')
+        parser.add_argument('--speeds-1-sig', type=float, help='Fast speed standard deviation.')
+        parser.add_argument('--theta-dist-type', type=str, choices=DIST_TYPES, help='Planar angle distribution type.')
+        parser.add_argument('--theta-dist-params', type=lambda s: [float(item) for item in s.split(',')],
+                            help='Planar angle distribution parameters.')
+        parser.add_argument('--phi-dist-type', type=str, choices=DIST_TYPES, help='Non-planar angle distribution type.')
+        parser.add_argument('--phi-dist-params', type=lambda s: [float(item) for item in s.split(',')],
+                            help='Non-planar angle distribution parameters.')
+        parser.add_argument('--nonp-pause-type', type=str, choices=[None, 'linear'],
+                            help='Non-planar turn pause penalty type.')
+        parser.add_argument('--nonp-pause-max', type=float, help='Maximum non-planar turn pause penalty.')
+        parser.add_argument('--sim-duration', type=float, help='Simulation time.')
+        parser.add_argument('--sim-dt', type=float, help='Simulation timestep.')
 
     args = parser.parse_args()
 
