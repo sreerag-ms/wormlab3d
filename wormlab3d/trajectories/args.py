@@ -100,7 +100,7 @@ def get_args(
         parser.add_argument('--phi-dist-type', type=str, choices=DIST_TYPES, help='Non-planar angle distribution type.')
         parser.add_argument('--phi-dist-params', type=lambda s: [float(item) for item in s.split(',')],
                             help='Non-planar angle distribution parameters.')
-        parser.add_argument('--nonp-pause-type', type=str, choices=[None, 'linear'],
+        parser.add_argument('--nonp-pause-type', type=str, choices=[None, 'linear', 'quadratic'],
                             help='Non-planar turn pause penalty type.')
         parser.add_argument('--nonp-pause-max', type=float, help='Maximum non-planar turn pause penalty.')
         parser.add_argument('--sim-duration', type=float, help='Simulation time.')

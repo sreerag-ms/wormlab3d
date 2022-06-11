@@ -287,6 +287,11 @@ class ThreeStateExplorer(nn.Module):
                         pause_steps_i = int(((phi / (torch.pi / 2)) * nonp_pause_max).round())
                         pause_steps += pause_steps_i
                         run_steps = 1 + pause_steps_i
+                    elif self.nonp_pause_type == 'quadratic':
+                        phi = phis[i, k - 1].abs()
+                        pause_steps_i = int(((phi / (torch.pi / 2))**2 * nonp_pause_max).round())
+                        pause_steps += pause_steps_i
+                        run_steps = 1 + pause_steps_i
                     else:
                         run_steps = 1
 
