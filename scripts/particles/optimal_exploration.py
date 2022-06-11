@@ -35,7 +35,7 @@ def make_filename(
     fn = f'{timestamp}_{method}'
 
     for k in ['npas', 'voxel_sizes', 'duration', 'dt', 'batch_size', 'deltas', 'delta_step',
-              'targets_radii', 'n_targets', 'epsilon', 'max_nonplanar_pause_duration']:
+              'targets_radii', 'n_targets', 'epsilon', 'max_nonplanar_pause_duration', 'detection_area']:
         if k in excludes:
             continue
         if k == 'npas':
@@ -60,18 +60,20 @@ def make_filename(
             fn += f'_d={args.min_delta}-{args.max_delta}'
         elif k == 'delta_step':
             fn += f'_ds={args.delta_step}'
-        elif k == 'targets_radii':
+        elif k == 'targets_radii' and hasattr(args, 'targets_radii'):
             if len(args.targets_radii) > 5:
                 targets_radii = f'{args.targets_radii[0]:.1E}-{args.targets_radii[-1]:.1E}'
             else:
                 targets_radii = ','.join(f'{r:.1E}' for r in args.targets_radii)
             fn += f'_r={targets_radii}'
-        elif k == 'n_targets':
+        elif k == 'n_targets' and hasattr(args, 'n_targets'):
             fn += f'_targets={args.n_targets}'
-        elif k == 'epsilon':
+        elif k == 'epsilon' and hasattr(args, 'epsilon'):
             fn += f'_eps={args.epsilon}'
         elif k == 'max_nonplanar_pause_duration':
             fn += f'_p={args.nonp_pause_max:.1f}'
+        elif k == 'detection_area' and hasattr(args, 'detection_area'):
+            fn += f'_da={args.detection_area:.2f}'
 
     return LOGS_PATH / (fn + '.' + extension)
 
@@ -244,10 +246,10 @@ def search_scores():
     # npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-6), np.log(1 / 10), 12))
     n_sigmas = len(npa_sigmas)
 
-    targets_radii = np.linspace(0, 10, 21)
+    targets_radii = np.linspace(0, 20, 21)
     n_radii = len(targets_radii)
 
-    n_targets = 1000  # number of targets at each radius
+    n_targets = 100  # number of targets at each radius
     epsilon = 0.1  # distance below which trajectory has "found" target
 
     # todo: this properly
@@ -527,6 +529,364 @@ def search_t_tests():
         plt.show()
 
 
+def surface_coverage_scores():
+    """
+    Simulate across a range of non-planarities and count frequency of trajectories crossing different radii.
+    """
+    args = get_args(validate_source=False)
+
+    # npa_sigmas = [1e-8, 10]
+    # npa_sigmas = [0.0001, 0.001, 0.01, 0.1, 1, 10]
+    # npa_sigmas = [0.00001, 0.0001, 0.001, 0.01, 0.1, 1, 10]
+    # npa_sigmas = np.linspace(0.00001, 10, 20)
+    # npa_sigmas = np.exp(-np.linspace(np.log(1/1e-6), np.log(1/10), 20))
+    npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-6), np.log(1 / 10), 8))
+    # npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-6), np.log(1 / 10), 12))
+    n_sigmas = len(npa_sigmas)
+
+    targets_radii = np.linspace(0, 50, 51)
+    n_radii = len(targets_radii)
+
+    # todo: this properly
+    args.npas = npa_sigmas
+    args.targets_radii = targets_radii
+
+    # Outputs
+    crossings = np.ones((n_sigmas, n_radii, args.batch_size))
+
+    # Sweep over the nonplanarity angle sigmas
+    for i, npas in enumerate(npa_sigmas):
+        logger.info(f'Simulating exploration with nonplanar angles sigma = {npas:.2E} ({i + 1}/{n_sigmas}).')
+        args.phi_dist_params[1] = npas
+        pe, TC = get_trajectories_from_args(args)
+
+        logger.info('Counting crossings.')
+        bar = Bar('Counting', max=n_radii)
+        bar.check_tty = False
+
+        for j, r in enumerate(targets_radii):
+            crossings[i, j] = TC.get_crossings(r)
+            bar.next()
+        bar.finish()
+        logger.info('----')
+        if TC.needs_save:
+            TC.save()
+
+    # Plot results
+    logger.info('Plotting results.')
+    fig, axes = plt.subplots(2, figsize=(14, 12))
+    fig.suptitle(f'T={args.sim_duration}s. dt={args.sim_dt:.2f}. Batch size={args.batch_size}. '
+                 f'Pause={args.nonp_pause_max}s.')
+    cmap = plt.get_cmap('jet')
+    colours = cmap(np.linspace(0, 1, n_sigmas))
+
+    # Set up axes
+    ax_traj = axes[0]
+    ax_traj.set_title('Crossings per trajectory.')
+    ax_pop = axes[1]
+    ax_pop.set_title('Crossings per population.')
+
+    for i, npas in enumerate(npa_sigmas):
+        # Number of targets found by trajectories
+        ci = crossings[i]
+        ci_mean = ci.mean(axis=-1)
+        ax_traj.errorbar(
+            targets_radii + i * 0.005,
+            ci_mean,
+            yerr=[ci_mean - ci.min(axis=-1), ci.max(axis=-1) - ci_mean],
+            marker='x',
+            capsize=5,
+            color=colours[i],
+            label=f'$\sigma_{{\phi}}=${npas:.1E}',
+            alpha=0.7,
+            )
+
+        # Number of crossings by the population
+        cpi = crossings[i].sum(axis=-1)
+        ax_pop.plot(
+            targets_radii,
+            cpi,
+            marker='x',
+            color=colours[i],
+            label=f'$\sigma_{{\phi}}=${npas:.1E}',
+            alpha=0.7,
+        )
+
+    ax_traj.legend(bbox_to_anchor=(1.12, 1))
+    ax_traj.set_xlabel('$r$')
+    ax_pop.set_xlabel('$r$')
+    ax_traj.set_xticks(targets_radii)
+    ax_pop.set_xticks(targets_radii)
+    ax_traj.set_xticklabels([f'{r:.2f}' for r in targets_radii])
+    ax_pop.set_xticklabels([f'{r:.2f}' for r in targets_radii])
+    ax_traj.set_ylabel('Crossings')
+    ax_pop.set_ylabel('Crossings')
+    ax_traj.grid()
+    ax_pop.grid()
+    ax_traj.set_yscale('log')
+    ax_pop.set_yscale('log')
+    # ax_times.set_yscale('log')
+
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            make_filename('crossings', args, excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon']),
+            transparent=True
+        )
+
+    if show_plots:
+        plt.show()
+
+
+def crossings_nonp():
+    """
+    Non-planarities of crossing points relative to principal plane.
+    """
+    args = get_args(validate_source=False)
+
+    # npa_sigmas = [1e-8, 10]
+    # npa_sigmas = [0.0001, 0.001, 0.01, 0.1, 1, 10]
+    # npa_sigmas = [0.00001, 0.0001, 0.001, 0.01, 0.1, 1, 10]
+    # npa_sigmas = np.linspace(0.00001, 10, 20)
+    # npa_sigmas = np.exp(-np.linspace(np.log(1/1e-6), np.log(1/10), 20))
+    npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-6), np.log(1 / 10), 8))
+    # npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-6), np.log(1 / 10), 12))
+    n_sigmas = len(npa_sigmas)
+
+    targets_radii = np.linspace(0, 30, 31)
+    n_radii = len(targets_radii)
+
+    # todo: this properly
+    args.npas = npa_sigmas
+    args.targets_radii = targets_radii
+
+    # Outputs
+    nonp_counts = np.zeros((n_sigmas, n_radii))
+    nonp_mins = np.zeros((n_sigmas, n_radii))
+    nonp_maxs = np.zeros((n_sigmas, n_radii))
+    nonp_means = np.zeros((n_sigmas, n_radii))
+
+    # Sweep over the nonplanarity angle sigmas
+    for i, npas in enumerate(npa_sigmas):
+        logger.info(f'Simulating exploration with nonplanar angles sigma = {npas:.2E} ({i + 1}/{n_sigmas}).')
+        args.phi_dist_params[1] = npas
+        pe, TC = get_trajectories_from_args(args)
+
+        logger.info('Calculating crossing non-planarities.')
+        bar = Bar('Counting', max=n_radii)
+        bar.check_tty = False
+
+        for j, r in enumerate(targets_radii):
+            nonp = TC.get_crossings_nonp(r)
+            nonp_counts[i, j] = len(nonp)
+            if len(nonp) > 0:
+                nonp_mins[i, j] = nonp.min()
+                nonp_maxs[i, j] = nonp.max()
+                nonp_means[i, j] = nonp.mean()
+            bar.next()
+        bar.finish()
+        logger.info('----')
+        if TC.needs_save:
+            TC.save()
+
+    # Plot results
+    logger.info('Plotting results.')
+    fig, axes = plt.subplots(2, figsize=(14, 12))
+    fig.suptitle(f'T={args.sim_duration}s. dt={args.sim_dt:.2f}. Batch size={args.batch_size}. '
+                 f'Pause={args.nonp_pause_max}s.')
+    cmap = plt.get_cmap('jet')
+    colours = cmap(np.linspace(0, 1, n_sigmas))
+
+    # Set up axes
+    ax = axes[0]
+    ax.set_title('Non-planarities of the crossing points.')
+
+    for i, npas in enumerate(npa_sigmas):
+        # Number of targets found by trajectories
+        ax.errorbar(
+            targets_radii + i * 0.005,
+            nonp_means[i],
+            yerr=[nonp_means[i] - nonp_mins[i], nonp_maxs[i] - nonp_means[i]],
+            marker='x',
+            capsize=5,
+            color=colours[i],
+            label=f'$\sigma_{{\phi}}=${npas:.1E}',
+            alpha=0.7,
+            )
+
+    ax.legend(bbox_to_anchor=(1.12, 1))
+    ax.set_xlabel('$r$')
+    ax.set_xticks(targets_radii)
+    ax.set_xticklabels([f'{r:.2f}' for r in targets_radii])
+    ax.set_ylabel('Crossing points non-planarities')
+    ax.grid()
+    ax.set_yscale('log')
+
+    # Plot metrics?
+    max_distances = (n_radii - (nonp_counts[:, ::-1] > 0).argmax(axis=1)) / n_radii
+    max_nonp = nonp_means.mean(axis=1)**(1/2)
+    metric = max_distances*max_nonp
+
+    ax = axes[1]
+    ax.set_title('max(dist)*mean(z)')
+    ax.plot(metric, marker='x')
+    ax.set_xticks(np.arange(n_sigmas))
+    ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
+    ax.grid()
+
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            make_filename('crossings_nonp', args, excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon']),
+            transparent=True
+        )
+
+    if show_plots:
+        plt.show()
+
+
+def volume_metric():
+    """
+    Estimate the volume explored by a typical trajectory.
+    """
+    args = get_args(validate_source=False)
+
+    # npa_sigmas = np.array([1e-4, 1])
+    # npa_sigmas = [0.0001, 0.001, 0.01, 0.1, 1, 10]
+    # npa_sigmas = [0.00001, 0.0001, 0.001, 0.01, 0.1, 1, 10]
+    # npa_sigmas = np.linspace(0.00001, 10, 20)
+    # npa_sigmas = np.exp(-np.linspace(np.log(1/1e-6), np.log(1/10), 20))
+    npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-6), np.log(1 / 10), 8))
+    # npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-6), np.log(1 / 10), 12))
+    n_sigmas = len(npa_sigmas)
+
+    # todo: this properly
+    args.npas = npa_sigmas
+
+    # Outputs
+    r_values = np.zeros((n_sigmas, 3))
+    z_values = np.zeros((n_sigmas, 3))
+    y_values = np.zeros((n_sigmas, 3))
+    r2_values = np.zeros((n_sigmas, 3))
+
+    # Sweep over the nonplanarity angle sigmas
+    for i, npas in enumerate(npa_sigmas):
+        logger.info(f'Simulating exploration with nonplanar angles sigma = {npas:.2E} ({i + 1}/{n_sigmas}).')
+        args.phi_dist_params[1] = npas
+        pe, TC = get_trajectories_from_args(args)
+
+        # Find the maximums in each relative directions
+        Xt = TC.get_Xt()
+        Xt_max = np.abs(Xt).max(axis=1)
+
+        # Use first component as radius and third as height of explored disk
+        r_values[i] = [Xt_max[:, 0].mean(), Xt_max[:, 0].min(), Xt_max[:, 0].max()]
+        z_values[i] = [Xt_max[:, 2].mean(), Xt_max[:, 2].min(), Xt_max[:, 2].max()]
+
+        # Use second component to validate against a cuboid metric
+        y_values[i] = [Xt_max[:, 1].mean(), Xt_max[:, 1].min(), Xt_max[:, 1].max()]
+
+        # Validation r2 is close to the non-rotated frame
+        r2 = np.linalg.norm(TC.X, axis=-1).max(axis=1)
+        r2_values[i] = [r2.mean(), r2.min(), r2.max()]
+
+        if TC.needs_save:
+            TC.save()
+
+    # Calculate the volumes
+    sphere_vols = 4/3 * np.pi * r_values**3
+    cap_vols = 1/3 * np.pi * (r_values - z_values) ** 2 * (2*r_values + z_values)
+    disk_vols = sphere_vols - 2 * cap_vols
+    cuboid_vols = r_values * z_values * y_values
+
+    # Plot results
+    logger.info('Plotting results.')
+    fig, axes = plt.subplots(3, figsize=(14, 12))
+    fig.suptitle(f'T={args.sim_duration}s. dt={args.sim_dt:.2f}. Batch size={args.batch_size}. '
+                 f'Pause={args.nonp_pause_max}s.')
+
+    # Plot radii
+    ax = axes[0]
+    ax.set_title('Maximum radius reached.')
+    # ax.plot(r_values, marker='x')
+    ax.errorbar(
+        np.arange(n_sigmas),
+        r_values[:, 0],
+        yerr=[r_values[:, 0] - r_values[:, 1], r_values[:, 2] - r_values[:, 0]],
+        marker='x',
+        capsize=5,
+        label='Along v1'
+    )
+    ax.errorbar(
+        np.arange(n_sigmas),
+        r2_values[:, 0],
+        yerr=[r2_values[:, 0] - r2_values[:, 1], r2_values[:, 2] - r2_values[:, 0]],
+        marker='x',
+        capsize=5,
+        label='norm'
+    )
+    ax.legend()
+    ax.set_xticks(np.arange(n_sigmas))
+    ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
+    ax.grid()
+    ax.set_yscale('log')
+
+    # Plot z values
+    ax = axes[1]
+    ax.set_title('Maximum z-values.')
+    # ax.plot(z_values, marker='x')
+    ax.errorbar(
+        np.arange(n_sigmas),
+        z_values[:, 0],
+        yerr=[z_values[:, 0] - z_values[:, 1], z_values[:, 2] - z_values[:, 0]],
+        marker='x',
+        capsize=5,
+    )
+    ax.set_xticks(np.arange(n_sigmas))
+    ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
+    ax.grid()
+    ax.set_yscale('log')
+
+    # Plot volumes
+    ax = axes[2]
+    ax.set_title('Volumes explored.')
+    # ax.plot(disk_vols, marker='x')
+    ax.errorbar(
+        np.arange(n_sigmas),
+        disk_vols[:, 0],
+        yerr=[disk_vols[:, 0] - disk_vols[:, 1], disk_vols[:, 2] - disk_vols[:, 0]],
+        marker='x',
+        capsize=5,
+        label='Disks'
+    )
+    ax.errorbar(
+        np.arange(n_sigmas),
+        cuboid_vols[:, 0],
+        yerr=[cuboid_vols[:, 0] - cuboid_vols[:, 1], cuboid_vols[:, 2] - cuboid_vols[:, 0]],
+        marker='x',
+        capsize=5,
+        label='Cuboids'
+    )
+    ax.legend()
+    ax.set_xticks(np.arange(n_sigmas))
+    ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
+    ax.grid()
+    ax.set_yscale('log')
+
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            make_filename('volume_metric', args, excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon']),
+            transparent=True
+        )
+
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
@@ -535,4 +895,8 @@ if __name__ == '__main__':
     # interactive()
     # coverage_scores()
     # search_scores()
-    search_t_tests()
+    # search_t_tests()
+    # surface_coverage_scores()
+    # crossings_nonp()
+    volume_metric()
+

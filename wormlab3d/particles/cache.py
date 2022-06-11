@@ -75,6 +75,11 @@ class TrajectoryCache:
         self.finds = None
         self.find_times = None
         self.finds_pop = None
+        self.crossings = None
+        self.crossings_nonp = None
+        self.dists = None
+        self.pcas = None
+        self.Xt = None
         self.needs_save = False
 
     @property
@@ -136,6 +141,18 @@ class TrajectoryCache:
             meta['finds_r_keys'] = list(set(r_keys))
             meta['finds_n_keys'] = list(set(n_keys))
             meta['finds_e_keys'] = list(set(e_keys))
+        if self.crossings is not None:
+            r_keys = list(self.crossings.keys())
+            meta['crossings_r_keys'] = list(set(r_keys))
+            for r_key, crossings_r in self.crossings.items():
+                data[f'crossings_r{r_key}'] = crossings_r
+        if self.crossings_nonp is not None:
+            r_keys = list(self.crossings_nonp.keys())
+            meta['crossings_nonp_r_keys'] = list(set(r_keys))
+            for r_key, crossings_nonp_r in self.crossings_nonp.items():
+                data[f'crossings_nonp_r{r_key}'] = crossings_nonp_r
+        if self.Xt is not None:
+            data['Xt'] = self.Xt
 
         np.savez_compressed(self.path_data, **data)
         with open(self.path_meta, 'w') as f:
@@ -152,8 +169,7 @@ class TrajectoryCache:
         logger.info('Calculating non-planarity of trajectories.')
         nonp = np.zeros(self.batch_size)
         for i, X in enumerate(self.X):
-            pca = PCA(svd_solver='full', copy=True, n_components=3)
-            pca.fit(X)
+            pca = self._get_pca(i)
             r = pca.explained_variance_ratio_.T
             nonp[i] = r[2] / np.sqrt(r[1] * r[0])
         self.nonp = nonp
@@ -300,7 +316,7 @@ class TrajectoryCache:
         T = len(self.ts)
         for i in range(self.batch_size):
             res_i = [
-                res[t][(res[t] >= i*T) & (res[t] < (i+1)*T)] - i*T
+                res[t][(res[t] >= i * T) & (res[t] < (i + 1) * T)] - i * T
                 for t in range(n_targets)
             ]
             found_targets = [int(len(idxs) > 0) for idxs in res_i]
@@ -335,6 +351,105 @@ class TrajectoryCache:
         ], axis=1)
         self.targets[n_targets] = targets
         return targets
+
+    def get_crossings(self, radius: float) -> np.ndarray:
+        """
+        Get the number of times each trajectory has crossed the sphere of given radius.
+        """
+        if self.crossings is None and 'crossings_r_keys' in self.meta:
+            r_keys = self.meta['crossings_r_keys']
+            self.crossings = {r_key: self.data[f'crossings_r{r_key}'] for r_key in r_keys}
+        r_key = f'{radius:.3f}'
+        if self.crossings is not None and r_key in self.crossings:
+            return self.crossings[r_key]
+        if self.crossings is None:
+            self.crossings = {}
+
+        # Calculate crossings
+        outside = np.c_[np.zeros((self.batch_size, 1), dtype=bool), self._get_dists() > radius]
+        crossings = outside[:, 1:] ^ outside[:, :-1]
+        self.crossings[r_key] = crossings.sum(axis=-1)
+        self.needs_save = True
+
+        return self.crossings[r_key]
+
+    def get_crossings_nonp(self, radius: float) -> np.ndarray:
+        """
+        Calculate the non-planarity for all crossing points at given radius relative to the principal plane of the trajectory.
+        """
+        if self.crossings_nonp is None and 'crossings_nonp_r_keys' in self.meta:
+            r_keys = self.meta['crossings_nonp_r_keys']
+            self.crossings_nonp = {r_key: self.data[f'crossings_nonp_r{r_key}'] for r_key in r_keys}
+        r_key = f'{radius:.3f}'
+        if self.crossings_nonp is not None and r_key in self.crossings_nonp:
+            return self.crossings_nonp[r_key]
+        if self.crossings_nonp is None:
+            self.crossings_nonp = {}
+
+        # Calculate crossings
+        outside = np.c_[np.zeros((self.batch_size, 1), dtype=bool), self._get_dists() > radius]
+        crossings = outside[:, 1:] ^ outside[:, :-1]
+
+        # Loop over the trajectories
+        nonp = []
+        for i, X in enumerate(self.X):
+            crossing_idxs = crossings[i].nonzero()
+            cc = self.X[i][crossing_idxs]
+            if len(cc) > 0:
+                pca = self._get_pca(i)
+                R = np.stack(pca.components_, axis=1)
+                cct = np.einsum('ij,bj->bi', R.T, cc)
+                nonp.append(np.abs(cct[:, 2]))
+        if len(nonp) > 0:
+            nonp = np.concatenate(nonp)
+        else:
+            nonp = np.zeros((0,))
+
+        self.crossings_nonp[r_key] = nonp
+        self.needs_save = True
+
+        return self.crossings_nonp[r_key]
+
+    def get_Xt(self) -> np.ndarray:
+        """
+        Transform the coordinates relative to the principal components of the trajectory.
+        """
+        if self.Xt is None and 'Xt' in self.data:
+            self.Xt = self.data['Xt']
+        if self.Xt is not None:
+            return self.Xt
+
+        # Loop over the trajectories, calculate the PCA and transform into the basis vectors.
+        Xt = np.zeros_like(self.X)
+        for i, X in enumerate(self.X):
+            pca = self._get_pca(i)
+            R = np.stack(pca.components_, axis=1)
+            Xt[i] = np.einsum('ij,bj->bi', R.T, X)
+
+        self.Xt = Xt
+        self.needs_save = True
+
+        return self.Xt
+
+    def _get_dists(self) -> np.ndarray:
+        """
+        Cache the norms.
+        """
+        if self.dists is None:
+            self.dists = np.linalg.norm(self.X, axis=-1)
+        return self.dists
+
+    def _get_pca(self, idx: int) -> PCA:
+        """
+        Cache the PCA calculations.
+        """
+        if self.pcas is None:
+            self.pcas = {}
+        if idx not in self.pcas:
+            pca = PCA(svd_solver='full', copy=True, n_components=3)
+            pca.fit(self.X[idx])
+            self.pcas[idx] = pca
+        return self.pcas[idx]
 
 
 def _unpack_cache_data(pe_args, rt_args) -> TrajectoryCache:
