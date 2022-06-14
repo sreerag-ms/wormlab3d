@@ -5,6 +5,7 @@ from typing import Tuple, Dict, Any, List, Union, Optional
 
 import numpy as np
 import torch
+from numpy.lib.npyio import NpzFile
 from progress.bar import Bar
 from scipy.spatial import KDTree
 from scipy.stats import norm
@@ -25,6 +26,8 @@ def _to_numpy(
         return [_to_numpy(ti) for ti in t]
     elif type(t) == np.ndarray:
         return t
+    elif t is None:
+        return t
     return t.detach().cpu().numpy()
 
 
@@ -32,18 +35,18 @@ class TrajectoryCache:
     def __init__(
             self,
             batch_size: int,
-            ts: Union[np.ndarray, torch.Tensor],
-            tumble_ts: List[Union[np.ndarray, torch.Tensor]],
-            X: Union[np.ndarray, torch.Tensor],
-            states: Union[np.ndarray, torch.Tensor],
-            durations: Dict[int, List[Union[np.ndarray, torch.Tensor]]],
-            thetas: List[Union[np.ndarray, torch.Tensor]],
-            phis: List[Union[np.ndarray, torch.Tensor]],
-            intervals: List[Union[np.ndarray, torch.Tensor]],
-            speeds: List[Union[np.ndarray, torch.Tensor]],
+            ts: Optional[Union[np.ndarray, torch.Tensor]] = None,
+            tumble_ts: Optional[List[Union[np.ndarray, torch.Tensor]]] = None,
+            X: Optional[Union[np.ndarray, torch.Tensor]] = None,
+            states: Optional[Union[np.ndarray, torch.Tensor]] = None,
+            durations: Optional[Dict[int, List[Union[np.ndarray, torch.Tensor]]]] = None,
+            thetas: Optional[List[Union[np.ndarray, torch.Tensor]]] = None,
+            phis: Optional[List[Union[np.ndarray, torch.Tensor]]] = None,
+            intervals: Optional[List[Union[np.ndarray, torch.Tensor]]] = None,
+            speeds: Optional[List[Union[np.ndarray, torch.Tensor]]] = None,
             pe_args: Optional[Dict[str, Any]] = None,
             rt_args: Optional[Dict[str, Any]] = None,
-            data: Optional[Dict[str, np.ndarray]] = None,
+            data: Optional[NpzFile] = None,
             meta: Optional[Dict[str, Any]] = None,
     ):
         self.batch_size = batch_size
@@ -82,6 +85,30 @@ class TrajectoryCache:
         self.Xt = None
         self.needs_save = False
 
+    def __getattribute__(self, k: str):
+        data_keys = ['ts', 'tumble_ts', 'X', 'states', 'durations', 'thetas', 'phis', 'intervals', 'speeds']
+        if k not in data_keys:
+            return super().__getattribute__(k)
+
+        # Check if the variable has been defined or loaded already
+        v = super().__getattribute__(k)
+        if v is not None:
+            return v
+
+        # Load from disk
+        if k in ['ts', 'Xs', 'states']:
+            v = self.data[k]
+        elif k in ['tumble_ts', 'thetas', 'phis', 'intervals', 'speeds']:
+            v = [self.data[f'{k}_{i:06d}'] for i in range(self.batch_size)]
+        elif k == 'durations':
+            v = {
+                0: [self.data[f'durations0_{i:06d}'] for i in range(self.batch_size)],
+                1: [self.data[f'durations1_{i:06d}'] for i in range(self.batch_size)]
+            }
+
+        setattr(self, k, v)
+        return v
+
     @property
     def arg_hash(self):
         return hash_data({**self.pe_args, **self.rt_args})
@@ -100,7 +127,7 @@ class TrajectoryCache:
         """
         logger.info(f'Saving trajectory data to {self.path_data}.')
         meta = {**self.pe_args, **self.rt_args}
-        data = self.data
+        data = dict(self.data)
         data['ts'] = self.ts
         data['X'] = self.X
         data['states'] = self.states
@@ -469,21 +496,9 @@ def _unpack_cache_data(pe_args, rt_args) -> TrajectoryCache:
 
     return TrajectoryCache(
         batch_size=batch_size,
-        ts=data['ts'],
-        tumble_ts=[data[f'tumble_ts_{i:06d}'] for i in range(batch_size)],
-        X=data['X'],
-        states=data['states'],
-        durations={
-            0: [data[f'durations0_{i:06d}'] for i in range(batch_size)],
-            1: [data[f'durations1_{i:06d}'] for i in range(batch_size)]
-        },
-        thetas=[data[f'thetas_{i:06d}'] for i in range(batch_size)],
-        phis=[data[f'phis_{i:06d}'] for i in range(batch_size)],
-        intervals=[data[f'intervals_{i:06d}'] for i in range(batch_size)],
-        speeds=[data[f'speeds_{i:06d}'] for i in range(batch_size)],
         rt_args=rt_args,
         pe_args=pe_args,
-        data=dict(data),
+        data=data,
         meta=meta,
     )
 
