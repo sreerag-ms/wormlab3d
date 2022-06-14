@@ -8,20 +8,25 @@ import numpy as np
 import scipy.stats
 import torch
 from matplotlib.gridspec import GridSpec
+from mpl_toolkits.mplot3d.art3d import Line3DCollection
+from scipy.signal import find_peaks
 from scipy.stats import rv_continuous
+from sklearn.decomposition import PCA
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.particles.cache import get_trajectories_from_args, TrajectoryCache
 from wormlab3d.particles.gaussian_mixture import GaussianMixtureScipy
 from wormlab3d.particles.three_state_explorer import ThreeStateExplorer
 from wormlab3d.particles.util import plot_msd
-from wormlab3d.toolkit.plot_utils import equal_aspect_ratio
+from wormlab3d.toolkit.plot_utils import equal_aspect_ratio, make_box_from_pca
 from wormlab3d.toolkit.util import normalise
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
+from wormlab3d.trajectories.displacement import calculate_displacements
+from wormlab3d.trajectories.util import smooth_trajectory
 
-plot_n_examples = 5
-show_plots = False
+plot_n_examples = 20
+show_plots = True
 save_plots = True
 img_extension = 'png'
 
@@ -393,11 +398,505 @@ def simulate():
         validate_source=False,
         include_pe_options=True
     )
-    pe, TC, meta = get_trajectories_from_args(args)
+    pe, TC = get_trajectories_from_args(args)
+    _plot_angle_pdfs(pe)
+    exit()
     _plot_histograms(pe, TC)
     _plot_msd(args, pe, TC)
     _plot_simulations(pe, TC)
     _plot_trajectories(pe, TC)
+
+
+def _check_trajectory_for_nice_regions(
+        X: np.ndarray,
+        timescale: int,
+        reject_s2_threshold: float
+):
+    """
+    Check the trajectory to see if it has nice regions.
+    """
+
+    # Find regions from displacement
+    d = calculate_displacements(X, deltas=timescale)
+    d_mean = d.mean()
+    state_up = np.r_[[0, ], d > d_mean, [0, ]]
+    up_idxs, up_section_props = find_peaks(state_up, height=0.5, distance=timescale / 10, width=timescale / 4)
+    state_down = np.r_[[0, ], d < d_mean, [0, ]]
+    down_idxs, down_section_props = find_peaks(state_down, height=0.5, distance=timescale / 10, width=timescale / 4)
+
+    # Plot the regions as boxes aligned with the trajectory
+    for colour, props in [('green', up_section_props), ('orange', down_section_props)]:
+        for i in range(len(props['left_bases'])):
+            X_region = X[props['left_bases'][i]:props['right_bases'][i] - 1]
+            pca = PCA()
+            pca.fit(X_region)
+            if colour == 'orange' and pca.explained_variance_ratio_[2] < reject_s2_threshold:
+                return False
+
+    return True
+
+
+def _get_niceness_scores(
+        Xs: np.ndarray,
+        timescale: int,
+):
+    """
+    Score the trajectories on the niceness of the regions.
+    """
+    # nonp = np.zeros(len(Xs))
+    scores = np.zeros(len(Xs))
+
+    for i, X in enumerate(Xs):
+        # Find regions from displacement
+        d = calculate_displacements(X, deltas=timescale)
+        d_mean = d.mean()
+        state_up = np.r_[[0, ], d > d_mean, [0, ]]
+        up_idxs, up_section_props = find_peaks(state_up, height=0.5, distance=timescale / 10, width=timescale / 4)
+        state_down = np.r_[[0, ], d < d_mean, [0, ]]
+        down_idxs, down_section_props = find_peaks(state_down, height=0.5, distance=timescale / 10, width=timescale / 4)
+
+        up_nonps = []
+        down_nonps = []
+
+        # Calculate the non-planarities of the regions
+        for colour, props in [('green', up_section_props), ('orange', down_section_props)]:
+            for j in range(len(props['left_bases'])):
+                X_region = X[props['left_bases'][j]:props['right_bases'][j] - 1]
+                pca = PCA()
+                pca.fit(X_region)
+                r = pca.explained_variance_ratio_
+                nonp = r[2] / np.sqrt(r[1] * r[2])
+                if colour == 'green':
+                    up_nonps.append(nonp)
+                else:
+                    down_nonps.append(nonp)
+
+        # Score the trajectory based on the non-planarities of the regions
+        scores[i] = sum(down_nonps)
+
+    return scores
+
+
+def _plot_trajectory_with_regions(
+        X: np.ndarray,
+        timescale: int,
+        index: int,
+        score: float = None,
+):
+    """
+    Draw the trajectory coloured by the time elapsed.
+    Draw boxes around the regions.
+    """
+
+    # Find regions from displacement
+    d = calculate_displacements(X, deltas=timescale)
+    d_mean = d.mean()
+    state_up = np.r_[[0, ], d > d_mean, [0, ]]
+    up_idxs, up_section_props = find_peaks(state_up, height=0.5, distance=timescale / 10, width=timescale / 4)
+    state_down = np.r_[[0, ], d < d_mean, [0, ]]
+    down_idxs, down_section_props = find_peaks(state_down, height=0.5, distance=timescale / 10, width=timescale / 4)
+
+    # Construct colours
+    colours = np.linspace(0, 1, X.shape[0])
+    cmap = plt.get_cmap('viridis_r')
+
+    # Set up plot
+    fig = plt.figure(figsize=(10, 10))
+    gs = GridSpec(6, 4)
+    fig.suptitle(f'Index={index}.' + ('' if score is None else f' Score={score:.3f}.'))
+
+    # Plot the state/displacement
+    ax = fig.add_subplot(gs[0, :])
+    ax.plot(d)
+    ax.axhline(y=d_mean, color='red')
+
+    # Highlight regions where above/below average
+    for colour, props in [('green', up_section_props), ('orange', down_section_props)]:
+        for i in range(len(props['left_bases'])):
+            ax.fill_between(
+                np.arange(props['left_bases'][i], props['right_bases'][i] - 1),
+                max(d),
+                color=colour,
+                alpha=0.3,
+                zorder=-1,
+                linewidth=0
+            )
+
+    # Plot the regions as boxes aligned with the trajectory
+    ax = fig.add_subplot(gs[1:, :], projection='3d', azim=-125, elev=35)
+    for colour, props in [('green', up_section_props), ('orange', down_section_props)]:
+        for i in range(len(props['left_bases'])):
+            X_region = X[props['left_bases'][i]:props['right_bases'][i] - 1]
+            pca = PCA()
+            pca.fit(X_region)
+
+            # Scatter the vertices
+            x, y, z = X_region[::5].T
+            ax.scatter(x, y, z, c=colour, s=10, alpha=0.4, zorder=-1)
+
+            # Add the region box
+            box = make_box_from_pca(X_region, pca, colour, scale=(1, 1, 2))
+            ax.add_collection3d(box)
+
+    # Draw lines connecting points
+    points = X[:, None, :]
+    segments = np.concatenate([points[:-1], points[1:]], axis=1)
+    lc = Line3DCollection(segments, array=colours, cmap=cmap, zorder=-2)
+    ax.add_collection(lc)
+
+    # Setup axis
+    equal_aspect_ratio(ax)
+    ax.grid(False)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_zticks([])
+    # ax.axis('off')
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(LOGS_PATH / f'{START_TIMESTAMP}_regions_ts={timescale}_sim_{i}.{img_extension}', transparent=True)
+        # np.savez(LOGS_PATH / f'{START_TIMESTAMP}_regions_sim_{i}', X=TC.X[i])
+
+    if show_plots:
+        plt.show()
+
+
+def _plot_trajectory_with_regions_from_turns(
+        X: np.ndarray,
+        tumble_ts: np.ndarray,
+        thetas: np.ndarray,
+        phis: np.ndarray,
+        timescale: int,
+        index: int,
+        score: float = None,
+):
+    """
+    Draw the trajectory coloured by the time elapsed.
+    Draw boxes around the regions.
+    """
+
+    # Find regions from tumble frequency
+    z = np.zeros(len(X))
+    z[tumble_ts.astype(np.int32)] = (1 + np.abs(thetas) + np.abs(phis))**2
+    k = 0
+    inc = 201
+    while k < timescale:
+        z = smooth_trajectory(z, window_len=inc)
+        k += inc
+    z = z.squeeze()
+
+    z_mean = z.mean()
+    state_up = np.r_[[0, ], z < z_mean, [0, ]]
+    up_idxs, up_section_props = find_peaks(state_up, height=0.5, distance=timescale / 10, width=timescale / 4)
+    state_down = np.r_[[0, ], z > z_mean, [0, ]]
+    down_idxs, down_section_props = find_peaks(state_down, height=0.5, distance=timescale / 10, width=timescale / 4)
+
+    # Construct colours
+    colours = np.linspace(0, 1, X.shape[0])
+    cmap = plt.get_cmap('viridis_r')
+
+    # Set up plot
+    fig = plt.figure(figsize=(10, 10))
+    gs = GridSpec(6, 4)
+    fig.suptitle(f'Index={index}.' + ('' if score is None else f' Score={score:.3f}.'))
+
+    # Plot the state/turn clustering
+    ax = fig.add_subplot(gs[0, :])
+    ax.plot(z)
+    ax.axhline(y=z_mean, color='red')
+
+    for tumble_t in tumble_ts:
+        ax.axvline(x=tumble_t, color='black', linestyle=':', alpha=0.2)
+
+    # Highlight regions where above/below average
+    for colour, props in [('green', up_section_props), ('orange', down_section_props)]:
+        for i in range(len(props['left_bases'])):
+            ax.fill_between(
+                np.arange(props['left_bases'][i], props['right_bases'][i] - 1),
+                max(z),
+                color=colour,
+                alpha=0.3,
+                zorder=-1,
+                linewidth=0
+            )
+
+    # Plot the regions as boxes aligned with the trajectory
+    ax = fig.add_subplot(gs[1:, :], projection='3d', azim=-125, elev=35)
+    for colour, props in [('green', up_section_props), ('orange', down_section_props)]:
+        for i in range(len(props['left_bases'])):
+            X_region = X[props['left_bases'][i]:props['right_bases'][i] - 1]
+            pca = PCA()
+            pca.fit(X_region)
+
+            # Scatter the vertices
+            x, y, z = X_region[::5].T
+            ax.scatter(x, y, z, c=colour, s=10, alpha=0.4, zorder=-1)
+
+            # Add the region box
+            box = make_box_from_pca(X_region, pca, colour, scale=(1, 1, 2))
+            ax.add_collection3d(box)
+
+    # Draw lines connecting points
+    points = X[:, None, :]
+    segments = np.concatenate([points[:-1], points[1:]], axis=1)
+    lc = Line3DCollection(segments, array=colours, cmap=cmap, zorder=-2)
+    ax.add_collection(lc)
+
+    # Setup axis
+    equal_aspect_ratio(ax)
+    ax.grid(False)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_zticks([])
+    # ax.axis('off')
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(LOGS_PATH / f'{START_TIMESTAMP}_regions_ts={timescale}_sim_{i}.{img_extension}', transparent=True)
+        # np.savez(LOGS_PATH / f'{START_TIMESTAMP}_regions_sim_{i}', X=TC.X[i])
+
+    if show_plots:
+        plt.show()
+
+
+def _plot_trajectory_with_fixed_regions(
+        X: np.ndarray,
+        timescale: int,
+        index: int,
+        score: float = None,
+):
+    """
+    Draw the trajectory coloured by the time elapsed.
+    Draw boxes around the regions.
+    """
+
+    regions = {
+        26: [
+            {
+                'start_idx': 0,
+                'end_idx': 2500,
+                'colour': 'orange'
+            },
+            {
+                'start_idx': 2600,
+                'end_idx': 8208,
+                'colour': 'green'
+            },
+            {
+                'start_idx': 8208,
+                'end_idx': 15550,
+                'colour': 'orange'
+            },
+            {
+                'start_idx': 15550,
+                'end_idx': 18350,
+                'colour': 'green'
+            },
+            {
+                'start_idx': 18500,
+                'end_idx': 20400,
+                'colour': 'orange'
+            },
+            {
+                'start_idx': 20400,
+                'end_idx': 22750,
+                'colour': 'green'
+            },
+            {
+                'start_idx': 22750,
+                'end_idx': 24000,
+                'colour': 'orange'
+            },
+            {
+                'start_idx': 24000,
+                'end_idx': 26750,
+                'colour': 'green'
+            },
+            {
+                'start_idx': 26750,
+                'end_idx': 29700,
+                'colour': 'orange'
+            },
+            {
+                'start_idx': 29700,
+                'end_idx': 32600,
+                'colour': 'green'
+            },
+            {
+                'start_idx': 32600,
+                'end_idx': 42000,
+                'colour': 'orange'
+            },
+        ],
+        7: [
+            {
+                'start_idx': 300,
+                'end_idx': 2000,
+                'colour': 'orange'
+            },
+            {
+                'start_idx': 2100,
+                'end_idx': 3000,
+                'colour': 'green'
+            },
+            {
+                'start_idx': 3100,
+                'end_idx': 5800,
+                'colour': 'orange'
+            },
+            {
+                'start_idx': 6000,
+                'end_idx': 7200,
+                'colour': 'green'
+            },
+            {
+                'start_idx': 7300,
+                'end_idx': 9200,
+                'colour': 'orange'
+            },
+            {
+                'start_idx': 9300,
+                'end_idx': 11200,
+                'colour': 'green'
+            },
+            {
+                'start_idx': 11100,
+                'end_idx': 12700,
+                'colour': 'orange'
+            },
+            {
+                'start_idx': 12800,
+                'end_idx': 14000,
+                'colour': 'green'
+            },
+            {
+                'start_idx': 14000,
+                'end_idx': 19600,
+                'colour': 'orange'
+            },
+            {
+                'start_idx': 19700,
+                'end_idx': 21000,
+                'colour': 'green'
+            },
+            {
+                'start_idx': 21100,
+                'end_idx': len(X) - 1,
+                'colour': 'orange'
+            },
+        ]
+    }
+
+    if index not in regions:
+        raise RuntimeError(f'Regions not defined for index={index}!')
+
+    # Find regions from displacement
+    d = calculate_displacements(X, deltas=timescale)
+    d_mean = d.mean()
+    state_up = np.r_[[0, ], d > d_mean, [0, ]]
+    up_idxs, up_section_props = find_peaks(state_up, height=0.5, distance=timescale / 10, width=timescale / 4)
+    state_down = np.r_[[0, ], d < d_mean, [0, ]]
+    down_idxs, down_section_props = find_peaks(state_down, height=0.5, distance=timescale / 10, width=timescale / 4)
+
+    # Construct colours
+    colours = np.linspace(0, 1, X.shape[0])
+    cmap = plt.get_cmap('viridis_r')
+
+    # Set up plot
+    fig = plt.figure(figsize=(10, 10))
+    gs = GridSpec(6, 4)
+    # fig.suptitle(f'Index={index}.' + ('' if score is None else f' Score={score:.3f}.'))
+
+    # # Plot the state/displacement
+    # ax = fig.add_subplot(gs[0, :])
+    # ax.plot(d)
+    # ax.axhline(y=d_mean, color='red')
+
+    # # Highlight regions where above/below average
+    # for region in regions[index]:
+    #     ax.fill_between(
+    #         np.arange(region['start_idx'], region['end_idx']),
+    #         max(d),
+    #         color=region['colour'],
+    #         alpha=0.3,
+    #         zorder=-1,
+    #         linewidth=0
+    #     )
+
+    # Plot the regions as boxes aligned with the trajectory
+    ax = fig.add_subplot(gs[:, :], projection='3d', azim=140, elev=-160)
+    for region in regions[index]:
+        X_region = X[region['start_idx']:region['end_idx']]
+        pca = PCA()
+        pca.fit(X_region)
+
+        # Scatter the vertices
+        x, y, z = X_region.T
+        ax.scatter(x, y, z, c=region['colour'], s=10, alpha=0.4, zorder=-1)
+
+        # Add the region box
+        if region['colour'] == 'green':
+            scale = (1, 2, 3)
+        else:
+            scale = (1, 2, 4)
+
+        box = make_box_from_pca(X_region, pca, region['colour'], scale=scale)
+        ax.add_collection3d(box)
+
+    # Draw lines connecting points
+    points = X[:, None, :]
+    segments = np.concatenate([points[:-1], points[1:]], axis=1)
+    lc = Line3DCollection(segments, array=colours, cmap=cmap, zorder=-2)
+    ax.add_collection(lc)
+
+    # Setup axis
+    equal_aspect_ratio(ax)
+    ax.grid(False)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_zticks([])
+    ax.axis('off')
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(LOGS_PATH / f'{START_TIMESTAMP}_regions_ts={timescale}_sim_{index}.{img_extension}',
+                    transparent=True)
+
+    if show_plots:
+        plt.show()
+
+
+def plot_trajectories_with_regions():
+    """
+   Draw the trajectory coloured by the time elapsed.
+   Draw boxes around the regions.
+   """
+    args = get_args()
+    pe, TC = get_trajectories_from_args(args)
+
+    if plot_n_examples == 0:
+        return
+
+    candidate_idxs = [0, 1, ]
+
+    plot_idxs = np.arange(args.batch_size)
+    timescale = int(100 / args.sim_dt)
+    s2_threshold = 0.01
+
+    i = 7
+    # # _plot_trajectory_with_regions(TC.X[i], timescale, i)
+    _plot_trajectory_with_fixed_regions(TC.X[i], timescale, i)
+    exit()
+
+    scores = _get_niceness_scores(TC.X, timescale)
+    plot_idxs = scores.argsort()[::-1][:plot_n_examples]
+
+    for i in plot_idxs:
+        logger.info(f'Plotting simulation idx {i}/{len(plot_idxs)}.')
+        # _plot_trajectory_with_regions(TC.X[i], timescale, i, scores[i])
+        _plot_trajectory_with_regions_from_turns(TC.X[i], TC.tumble_ts[i] / args.sim_dt, TC.thetas[i], TC.phis[i],
+                                                 timescale, i, scores[i])
+        # _plot_trajectory_with_fixed_regions(TC.X[i], timescale, i, scores[i])
 
 
 if __name__ == '__main__':
@@ -406,4 +905,5 @@ if __name__ == '__main__':
 
     # from simple_worm.plot3d import interactive
     # interactive()
-    simulate()
+    # simulate()
+    plot_trajectories_with_regions()
