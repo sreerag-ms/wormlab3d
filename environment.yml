@@ -15,6 +15,7 @@ dependencies:
   - gunicorn = 20.1
   - h5py = 3.2
   - matplotlib = 3.4
+  - mayavi = 4.7
   - mongoengine = 0.22
   - numpy = 1.20
   - opencv = 4.5

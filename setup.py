@@ -17,6 +17,7 @@ setup(
         'flask_wtf >= 1.0.0, < 1.1',
         'gunicorn >= 20.1, < 21',
         'h5py >= 3.2, < 3.3',
+        'mayavi >= 4.7, < 4.8',
         'matplotlib >= 3.4, < 3.5',
         'mongoengine >= 0.22, < 0.23',
         'numpy >= 1.20, < 1.21',

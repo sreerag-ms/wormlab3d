@@ -643,7 +643,7 @@ def dataset_against_three_state_comparison():
     # Now make a simulator to match the results
     args.sim_dt = 1 / 25
     args.sim_duration = max(trajectory_lengths) * args.sim_dt
-    pe, TC, meta = get_trajectories_from_args(args)
+    pe, TC = get_trajectories_from_args(args)
 
     # Plot histograms
     if 1:
@@ -695,6 +695,8 @@ def dataset_against_three_state_comparison():
 
         fig.tight_layout()
         plt.show()
+
+    exit()
 
     rs = len(ds.include_trials)
 

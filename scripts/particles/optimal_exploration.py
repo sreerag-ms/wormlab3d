@@ -15,9 +15,9 @@ from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.util import get_deltas_from_args
 
 plot_n_examples = 2
-show_plots = False
+show_plots = True
 save_plots = True
-img_extension = 'svg'
+img_extension = 'png'
 
 tex_mode()
 
@@ -599,7 +599,7 @@ def surface_coverage_scores():
             color=colours[i],
             label=f'$\sigma_{{\phi}}=${npas:.1E}',
             alpha=0.7,
-            )
+        )
 
         # Number of crossings by the population
         cpi = crossings[i].sum(axis=-1)
@@ -713,7 +713,7 @@ def crossings_nonp():
             color=colours[i],
             label=f'$\sigma_{{\phi}}=${npas:.1E}',
             alpha=0.7,
-            )
+        )
 
     ax.legend(bbox_to_anchor=(1.12, 1))
     ax.set_xlabel('$r$')
@@ -725,8 +725,8 @@ def crossings_nonp():
 
     # Plot metrics?
     max_distances = (n_radii - (nonp_counts[:, ::-1] > 0).argmax(axis=1)) / n_radii
-    max_nonp = nonp_means.mean(axis=1)**(1/2)
-    metric = max_distances*max_nonp
+    max_nonp = nonp_means.mean(axis=1)**(1 / 2)
+    metric = max_distances * max_nonp
 
     ax = axes[1]
     ax.set_title('max(dist)*mean(z)')
@@ -739,7 +739,8 @@ def crossings_nonp():
 
     if save_plots:
         plt.savefig(
-            make_filename('crossings_nonp', args, excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon']),
+            make_filename('crossings_nonp', args,
+                          excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon']),
             transparent=True
         )
 
@@ -796,8 +797,8 @@ def volume_metric():
             TC.save()
 
     # Calculate the volumes
-    sphere_vols = 4/3 * np.pi * r_values**3
-    cap_vols = 1/3 * np.pi * (r_values - z_values) ** 2 * (2*r_values + z_values)
+    sphere_vols = 4 / 3 * np.pi * r_values**3
+    cap_vols = 1 / 3 * np.pi * (r_values - z_values)**2 * (2 * r_values + z_values)
     disk_vols = sphere_vols - 2 * cap_vols
     cuboid_vols = r_values * z_values * y_values
 
@@ -879,7 +880,8 @@ def volume_metric():
 
     if save_plots:
         plt.savefig(
-            make_filename('volume_metric', args, excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon']),
+            make_filename('volume_metric', args,
+                          excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon']),
             transparent=True
         )
 
@@ -899,4 +901,3 @@ if __name__ == '__main__':
     # surface_coverage_scores()
     # crossings_nonp()
     volume_metric()
-

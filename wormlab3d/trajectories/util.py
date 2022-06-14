@@ -19,6 +19,9 @@ def smooth_trajectory(X: np.ndarray, window_len: int = 5, window_type: str = 'fl
     todo: remove for loops!
     """
     squeeze = False
+    if X.ndim == 1:
+        X = X[..., None]
+        squeeze = True
     if X.ndim == 2:
         X = X[..., None]
         squeeze = True
