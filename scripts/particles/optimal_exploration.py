@@ -34,8 +34,8 @@ def make_filename(
         timestamp = START_TIMESTAMP
     fn = f'{timestamp}_{method}'
 
-    for k in ['npas', 'voxel_sizes', 'duration', 'dt', 'batch_size', 'deltas', 'delta_step',
-              'targets_radii', 'n_targets', 'epsilon', 'max_nonplanar_pause_duration', 'detection_area']:
+    for k in ['npas', 'voxel_sizes', 'duration', 'durations', 'dt', 'batch_size', 'deltas', 'delta_step',
+              'targets_radii', 'n_targets', 'epsilon', 'max_nonplanar_pause_duration', 'detection_area', 'pauses']:
         if k in excludes:
             continue
         if k == 'npas':
@@ -52,6 +52,12 @@ def make_filename(
             fn += f'_vs={voxel_sizes}'
         elif k == 'duration':
             fn += f'_T={args.sim_duration:.1f}'
+        elif k == 'durations':
+            if len(args.durations) > 3:
+                durations = f'{args.durations[0]:.1E}-{args.durations[-1]:.1E}'
+            else:
+                durations = ','.join(f'{d:.1E}' for d in args.durations)
+            fn += f'_T={durations}'
         elif k == 'dt':
             fn += f'_dt={args.sim_dt}'
         elif k == 'batch_size':
@@ -74,6 +80,12 @@ def make_filename(
             fn += f'_p={args.nonp_pause_max:.1f}'
         elif k == 'detection_area' and hasattr(args, 'detection_area'):
             fn += f'_da={args.detection_area:.2f}'
+        elif k == 'pauses':
+            if len(args.pauses) > 3:
+                pauses = f'{args.pauses[0]:.1E}-{args.pauses[-1]:.1E}'
+            else:
+                pauses = ','.join(f'{p:.1E}' for d in args.pauses)
+            fn += f'_pauses={pauses}'
 
     return LOGS_PATH / (fn + '.' + extension)
 
@@ -889,6 +901,117 @@ def volume_metric():
         plt.show()
 
 
+def volume_metric_sweeps():
+    """
+    Estimate the volume explored by a typical trajectory.
+    """
+    args = get_args(validate_source=False)
+    npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-3), np.log(1 / 10), 40))
+    n_sigmas = len(npa_sigmas)
+    args.npas = npa_sigmas
+
+    # Sweep over sim durations
+    sim_durations = np.exp(-np.linspace(np.log(1 / (5*60)), np.log(1 / (60*60)), 10))
+    n_durations = len(sim_durations)
+    args.sim_durations = sim_durations
+
+    # Sweep over the pauses
+    pauses = np.r_[[0,], np.exp(-np.linspace(np.log(1 / 1), np.log(1 / 60), 9))]
+    n_pauses = len(pauses)
+    args.pauses = pauses
+
+    # Outputs
+    r_values = np.zeros((n_sigmas, n_durations, n_pauses, 3))
+    z_values = np.zeros((n_sigmas, n_durations, n_pauses, 3))
+    n_sims = n_sigmas * n_durations * n_pauses
+    sim_idx = 0
+
+    # Sweep over the combinations
+    for i, npas in enumerate(npa_sigmas):
+        for j, duration in enumerate(sim_durations):
+            for k, pause in enumerate(pauses):
+                logger.info(
+                    f'Simulating exploration with sigma={npas:.2E}, duration={duration:.2f}, pause={pause:.2f}. ({sim_idx + 1}/{n_sims}).')
+
+                args.phi_dist_params[1] = npas
+                args.sim_duration = duration
+                args.nonp_pause_max = pause
+                pe, TC = get_trajectories_from_args(args)
+
+                # Find the maximums in each relative directions
+                Xt = TC.get_Xt()
+                Xt_max = np.abs(Xt).max(axis=1)
+
+                # Use first component as radius and third as height of explored disk
+                r_values[i, j, k] = [Xt_max[:, 0].mean(), Xt_max[:, 0].min(), Xt_max[:, 0].max()]
+                z_values[i, j, k] = [Xt_max[:, 2].mean(), Xt_max[:, 2].min(), Xt_max[:, 2].max()]
+
+                if TC.needs_save:
+                    TC.save()
+                sim_idx += 1
+
+    # Calculate the volumes
+    sphere_vols = 4 / 3 * np.pi * r_values**3
+    cap_vols = 1 / 3 * np.pi * (r_values - z_values)**2 * (2 * r_values + z_values)
+    disk_vols = sphere_vols - 2 * cap_vols
+
+    # Plot volumes explored against sigmas
+    logger.info('Plotting volumes explored results.')
+    fig, axes = plt.subplots(n_durations, n_pauses, figsize=(3 + n_pauses * 2, 2 + n_durations * 2), sharex=True,
+                             sharey=True)
+    fig.suptitle(f'Batch size={args.batch_size}.')
+    for j, duration in enumerate(sim_durations):
+        for k, pause in enumerate(pauses):
+            ax = axes[j, k]
+            if k == 0:
+                ax.set_ylabel(f'Sim duration={duration:.2f}s')
+            if j == 0:
+                ax.set_title(f'Pause={pause:.2f}s')
+            vols = disk_vols[:, j, k].T
+            ax.errorbar(
+                np.arange(n_sigmas),
+                vols[0],
+                yerr=[vols[0] - vols[1], vols[2] - vols[0]],
+                marker='x',
+                capsize=5,
+            )
+            ax.set_xticks(np.arange(n_sigmas))
+            ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
+            ax.tick_params(axis='x', rotation=270)
+            ax.grid()
+            ax.set_yscale('log')
+    fig.tight_layout()
+    if save_plots:
+        plt.savefig(
+            make_filename('volume_sweep_volumes', args,
+                          excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon', 'duration']),
+            transparent=True
+        )
+    if show_plots:
+        plt.show()
+
+    # Plot the peak in sigma of each duration/pause combination as a surface plot
+    X, Y = np.meshgrid(sim_durations, pauses)
+    Z = npa_sigmas[disk_vols[..., 0].argmax(axis=0)]
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.add_subplot(projection='3d')
+    ax.set_title('Optimal sigmas.')
+    ax.scatter(X, Y, Z, c=Z, cmap='Reds', s=100, marker='x')
+    ax.plot_surface(X, Y, Z, cmap='coolwarm', alpha=0.5)
+    ax.set_xlabel('T')
+    ax.set_ylabel('$\delta$')
+    ax.set_zlabel('$\sigma_\phi$')
+    fig.tight_layout()
+    if save_plots:
+        plt.savefig(
+            make_filename('volume_sweep_volumes', args,
+                          excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon', 'duration']),
+            transparent=True
+        )
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
@@ -900,4 +1023,5 @@ if __name__ == '__main__':
     # search_t_tests()
     # surface_coverage_scores()
     # crossings_nonp()
-    volume_metric()
+    # volume_metric()
+    volume_metric_sweeps()
