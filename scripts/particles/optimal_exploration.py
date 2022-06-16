@@ -970,7 +970,7 @@ def volume_metric_sweeps():
     args.sim_durations = sim_durations
 
     # Sweep over the pauses
-    pauses = np.r_[[0, ], np.exp(-np.linspace(np.log(1 / 1), np.log(1 / 60), 2))]
+    pauses = np.r_[[0, ], np.exp(-np.linspace(np.log(1 / 1), np.log(1 / 60), 3))]
     n_pauses = len(pauses)
     args.pauses = pauses
 
@@ -1008,6 +1008,7 @@ def volume_metric_sweeps():
     sphere_vols = 4 / 3 * np.pi * r_values**3
     cap_vols = 1 / 3 * np.pi * (r_values - z_values)**2 * (2 * r_values + z_values)
     disk_vols = sphere_vols - 2 * cap_vols
+    optimal_sigmas = npa_sigmas[disk_vols[..., 0].argmax(axis=0)]
 
     # Plot volumes explored against sigmas
     logger.info('Plotting volumes explored results.')
@@ -1046,13 +1047,12 @@ def volume_metric_sweeps():
 
     # Plot the peak in sigma of each duration/pause combination as a surface plot
     X, Y = np.meshgrid(sim_durations, pauses)
-    Z = npa_sigmas[disk_vols[..., 0].argmax(axis=0)]
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_subplot(projection='3d')
     ax.view_init(azim=30, elev=25)
     ax.set_title('Optimal sigmas.')
-    ax.scatter(X, Y, Z, c=Z, cmap='Reds', s=100, marker='x')
-    ax.plot_surface(X, Y, Z, cmap='coolwarm', alpha=0.5)
+    ax.scatter(X, Y, optimal_sigmas, c=optimal_sigmas, cmap='Reds', s=100, marker='x')
+    ax.plot_surface(X, Y, optimal_sigmas, cmap='coolwarm', alpha=0.5)
     ax.set_xlabel('T')
     ax.set_ylabel('$\delta$')
     ax.set_zlabel('$\sigma_\phi$')
@@ -1060,6 +1060,38 @@ def volume_metric_sweeps():
     if save_plots:
         plt.savefig(
             make_filename('volume_sweep_surface', args,
+                          excludes=['voxel_sizes', 'deltas', 'delta_step',
+                                    'n_targets', 'epsilon', 'duration', 'max_nonplanar_pause_duration']),
+            transparent=True
+        )
+    if show_plots:
+        plt.show()
+
+    # Plot peaks on a 2D plot
+    fig, axes = plt.subplots(2, figsize=(10,10))
+    fig.suptitle(f'Optimal $\sigma_\phi$. Batch size={args.batch_size}.')
+    for i in range(2):
+        ax = axes[i]
+        ax.set_ylabel('$\sigma_\phi$')
+        if i == 0:
+            for j, duration in enumerate(sim_durations):
+                ax.plot(np.arange(n_pauses), optimal_sigmas[j], label=f'T={duration:.2f}')
+            ax.set_xlabel('$\delta$')
+            ax.set_xticks(np.arange(n_pauses))
+            ax.set_xticklabels([f'{d:.1E}' for d in pauses])
+        else:
+            ax.set_xlabel('T')
+            for j, pause in enumerate(pauses):
+                ax.plot(np.arange(n_durations), optimal_sigmas[:, j], label=f'$\delta$={pause:.2E}')
+            ax.set_xticks(np.arange(n_durations))
+            ax.set_xticklabels([f'{T:.2f}' for T in sim_durations])
+        ax.legend()
+        ax.grid()
+        ax.set_yscale('log')
+    fig.tight_layout()
+    if save_plots:
+        plt.savefig(
+            make_filename('volume_sweep_peaks', args,
                           excludes=['voxel_sizes', 'deltas', 'delta_step',
                                     'n_targets', 'epsilon', 'duration', 'max_nonplanar_pause_duration']),
             transparent=True
@@ -1079,5 +1111,5 @@ if __name__ == '__main__':
     # search_t_tests()
     # surface_coverage_scores()
     # crossings_nonp()
-    volume_metric()
-    # volume_metric_sweeps()
+    # volume_metric()
+    volume_metric_sweeps()
