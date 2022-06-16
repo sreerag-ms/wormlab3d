@@ -196,7 +196,7 @@ class TrajectoryCache:
         logger.info('Calculating non-planarity of trajectories.')
         nonp = np.zeros(self.batch_size)
         for i, X in enumerate(self.X):
-            pca = self._get_pca(i)
+            pca = self.get_pca(i)
             r = pca.explained_variance_ratio_.T
             nonp[i] = r[2] / np.sqrt(r[1] * r[0])
         self.nonp = nonp
@@ -423,7 +423,7 @@ class TrajectoryCache:
             crossing_idxs = crossings[i].nonzero()
             cc = self.X[i][crossing_idxs]
             if len(cc) > 0:
-                pca = self._get_pca(i)
+                pca = self.get_pca(i)
                 R = np.stack(pca.components_, axis=1)
                 cct = np.einsum('ij,bj->bi', R.T, cc)
                 nonp.append(np.abs(cct[:, 2]))
@@ -449,7 +449,7 @@ class TrajectoryCache:
         # Loop over the trajectories, calculate the PCA and transform into the basis vectors.
         Xt = np.zeros_like(self.X)
         for i, X in enumerate(self.X):
-            pca = self._get_pca(i)
+            pca = self.get_pca(i)
             R = np.stack(pca.components_, axis=1)
             Xt[i] = np.einsum('ij,bj->bi', R.T, X)
 
@@ -466,7 +466,7 @@ class TrajectoryCache:
             self.dists = np.linalg.norm(self.X, axis=-1)
         return self.dists
 
-    def _get_pca(self, idx: int) -> PCA:
+    def get_pca(self, idx: int) -> PCA:
         """
         Cache the PCA calculations.
         """

@@ -52,7 +52,7 @@ def make_filename(
             fn += f'_vs={voxel_sizes}'
         elif k == 'duration':
             fn += f'_T={args.sim_duration:.1f}'
-        elif k == 'durations':
+        elif k == 'durations' and hasattr(args, 'sim_durations'):
             if len(args.sim_durations) > 3:
                 durations = f'{args.sim_durations[0]:.1E}-{args.sim_durations[-1]:.1E}'
             else:
@@ -80,7 +80,7 @@ def make_filename(
             fn += f'_p={args.nonp_pause_max:.1f}'
         elif k == 'detection_area' and hasattr(args, 'detection_area'):
             fn += f'_da={args.detection_area:.2f}'
-        elif k == 'pauses':
+        elif k == 'pauses' and hasattr(args, 'pauses'):
             if len(args.pauses) > 3:
                 pauses = f'{args.pauses[0]:.1E}-{args.pauses[-1]:.1E}'
             else:
@@ -788,6 +788,7 @@ def volume_metric():
     z_values = np.zeros((n_sigmas, 3))
     y_values = np.zeros((n_sigmas, 3))
     r2_values = np.zeros((n_sigmas, 3))
+    s_values = np.zeros((n_sigmas, 3, 3))
     sv_disk_vols = np.zeros((n_sigmas, 3))
     sv_cuboid_vols = np.zeros((n_sigmas, 3))
 
@@ -813,11 +814,13 @@ def volume_metric():
         r2_values[i] = [r2.mean(), r2.min(), r2.max()]
 
         # Compute singular value volumes
-        sv_i = np.zeros((len(TC.pcas), 3))
-        for j in range(len(TC.pcas)):
-            sv_i[j] = TC.pcas[j].singular_values_
-        disk_vols_i = _calculate_disk_volumes(sv_i[:, 0], sv_i[:, 1])
-        cuboid_vols_i = sv_i[:, 0] * sv_i[:, 1]* sv_i[:, 2]
+        logger.info('Computing singular value based volumes.')
+        sv_i = np.zeros((args.batch_size, 3))
+        for j in range(args.batch_size):
+            sv_i[j] = TC.get_pca(j).singular_values_
+        s_values[i] = np.stack([sv_i.mean(axis=0), sv_i.min(axis=0), sv_i.max(axis=0)], axis=1)
+        disk_vols_i = _calculate_disk_volumes(sv_i[:, 0], sv_i[:, 2])
+        cuboid_vols_i = sv_i[:, 0] * sv_i[:, 1] * sv_i[:, 2]
         sv_disk_vols[i] = [disk_vols_i.mean(), disk_vols_i.min(), disk_vols_i.max()]
         sv_cuboid_vols[i] = [cuboid_vols_i.mean(), cuboid_vols_i.min(), cuboid_vols_i.max()]
 
@@ -857,6 +860,14 @@ def volume_metric():
         capsize=5,
         label='norm'
     )
+    ax.errorbar(
+        np.arange(n_sigmas),
+        s_values[:, 0, 0],
+        yerr=[s_values[:, 0, 0] - s_values[:, 0, 1], s_values[:, 0, 2] - s_values[:, 0, 0]],
+        marker='x',
+        capsize=5,
+        label='s0'
+    )
     ax.legend()
     ax.set_xticks(np.arange(n_sigmas))
     ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
@@ -873,7 +884,17 @@ def volume_metric():
         yerr=[z_values[:, 0] - z_values[:, 1], z_values[:, 2] - z_values[:, 0]],
         marker='x',
         capsize=5,
+        label='z'
     )
+    ax.errorbar(
+        np.arange(n_sigmas),
+        s_values[:, 2, 0],
+        yerr=[s_values[:, 2, 0] - s_values[:, 2, 1], s_values[:, 2, 2] - s_values[:, 2, 0]],
+        marker='x',
+        capsize=5,
+        label='s2'
+    )
+    ax.legend()
     ax.set_xticks(np.arange(n_sigmas))
     ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
     ax.grid()
