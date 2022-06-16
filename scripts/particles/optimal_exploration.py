@@ -778,11 +778,18 @@ def volume_metric():
     # todo: this properly
     args.npas = npa_sigmas
 
+    def _calculate_disk_volumes(r_, z_):
+        sphere_vols = 4 / 3 * np.pi * r_**3
+        cap_vols = 1 / 3 * np.pi * (r_ - z_)**2 * (2 * r_ + z_)
+        return sphere_vols - 2 * cap_vols
+
     # Outputs
     r_values = np.zeros((n_sigmas, 3))
     z_values = np.zeros((n_sigmas, 3))
     y_values = np.zeros((n_sigmas, 3))
     r2_values = np.zeros((n_sigmas, 3))
+    sv_disk_vols = np.zeros((n_sigmas, 3))
+    sv_cuboid_vols = np.zeros((n_sigmas, 3))
 
     # Sweep over the nonplanarity angle sigmas
     for i, npas in enumerate(npa_sigmas):
@@ -805,13 +812,23 @@ def volume_metric():
         r2 = np.linalg.norm(TC.X, axis=-1).max(axis=1)
         r2_values[i] = [r2.mean(), r2.min(), r2.max()]
 
+        # Compute singular value volumes
+        sv_i = np.zeros((len(TC.pcas), 3))
+        for j in range(len(TC.pcas)):
+            sv_i[j] = TC.pcas[j].singular_values_
+        disk_vols_i = _calculate_disk_volumes(sv_i[:, 0], sv_i[:, 1])
+        cuboid_vols_i = sv_i[:, 0] * sv_i[:, 1]* sv_i[:, 2]
+        sv_disk_vols[i] = [disk_vols_i.mean(), disk_vols_i.min(), disk_vols_i.max()]
+        sv_cuboid_vols[i] = [cuboid_vols_i.mean(), cuboid_vols_i.min(), cuboid_vols_i.max()]
+
         if TC.needs_save:
             TC.save()
 
     # Calculate the volumes
-    sphere_vols = 4 / 3 * np.pi * r_values**3
-    cap_vols = 1 / 3 * np.pi * (r_values - z_values)**2 * (2 * r_values + z_values)
-    disk_vols = sphere_vols - 2 * cap_vols
+    disk_vols = _calculate_disk_volumes(r_values, z_values)
+    # sphere_vols = 4 / 3 * np.pi * r_values**3
+    # cap_vols = 1 / 3 * np.pi * (r_values - z_values)**2 * (2 * r_values + z_values)
+    # disk_vols = sphere_vols - 2 * cap_vols
     cuboid_vols = r_values * z_values * y_values
 
     # Plot results
@@ -881,6 +898,22 @@ def volume_metric():
         marker='x',
         capsize=5,
         label='Cuboids'
+    )
+    ax.errorbar(
+        np.arange(n_sigmas),
+        sv_disk_vols[:, 0],
+        yerr=[sv_disk_vols[:, 0] - sv_disk_vols[:, 1], sv_disk_vols[:, 2] - sv_disk_vols[:, 0]],
+        marker='x',
+        capsize=5,
+        label='SV disks'
+    )
+    ax.errorbar(
+        np.arange(n_sigmas),
+        sv_cuboid_vols[:, 0],
+        yerr=[sv_cuboid_vols[:, 0] - sv_cuboid_vols[:, 1], sv_cuboid_vols[:, 2] - sv_cuboid_vols[:, 0]],
+        marker='x',
+        capsize=5,
+        label='SV cuboids'
     )
     ax.legend()
     ax.set_xticks(np.arange(n_sigmas))
@@ -1025,5 +1058,5 @@ if __name__ == '__main__':
     # search_t_tests()
     # surface_coverage_scores()
     # crossings_nonp()
-    # volume_metric()
-    volume_metric_sweeps()
+    volume_metric()
+    # volume_metric_sweeps()
