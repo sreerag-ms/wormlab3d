@@ -96,7 +96,7 @@ class TrajectoryCache:
             return v
 
         # Load from disk
-        if k in ['ts', 'Xs', 'states']:
+        if k in ['ts', 'X', 'states']:
             v = self.data[k]
         elif k in ['tumble_ts', 'thetas', 'phis', 'intervals', 'speeds']:
             v = [self.data[f'{k}_{i:06d}'] for i in range(self.batch_size)]

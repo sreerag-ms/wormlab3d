@@ -53,10 +53,10 @@ def make_filename(
         elif k == 'duration':
             fn += f'_T={args.sim_duration:.1f}'
         elif k == 'durations':
-            if len(args.durations) > 3:
-                durations = f'{args.durations[0]:.1E}-{args.durations[-1]:.1E}'
+            if len(args.sim_durations) > 3:
+                durations = f'{args.sim_durations[0]:.1E}-{args.sim_durations[-1]:.1E}'
             else:
-                durations = ','.join(f'{d:.1E}' for d in args.durations)
+                durations = ','.join(f'{d:.1E}' for d in args.sim_durations)
             fn += f'_T={durations}'
         elif k == 'dt':
             fn += f'_dt={args.sim_dt}'
@@ -84,7 +84,7 @@ def make_filename(
             if len(args.pauses) > 3:
                 pauses = f'{args.pauses[0]:.1E}-{args.pauses[-1]:.1E}'
             else:
-                pauses = ','.join(f'{p:.1E}' for d in args.pauses)
+                pauses = ','.join(f'{p:.1E}' for p in args.pauses)
             fn += f'_pauses={pauses}'
 
     return LOGS_PATH / (fn + '.' + extension)
@@ -906,17 +906,17 @@ def volume_metric_sweeps():
     Estimate the volume explored by a typical trajectory.
     """
     args = get_args(validate_source=False)
-    npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-3), np.log(1 / 10), 40))
+    npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-3), np.log(1 / 10), 4))
     n_sigmas = len(npa_sigmas)
     args.npas = npa_sigmas
 
     # Sweep over sim durations
-    sim_durations = np.exp(-np.linspace(np.log(1 / (5*60)), np.log(1 / (60*60)), 10))
+    sim_durations = np.exp(-np.linspace(np.log(1 / (1 * 60)), np.log(1 / (5 * 60)), 3))
     n_durations = len(sim_durations)
     args.sim_durations = sim_durations
 
     # Sweep over the pauses
-    pauses = np.r_[[0,], np.exp(-np.linspace(np.log(1 / 1), np.log(1 / 60), 9))]
+    pauses = np.r_[[0, ], np.exp(-np.linspace(np.log(1 / 1), np.log(1 / 60), 2))]
     n_pauses = len(pauses)
     args.pauses = pauses
 
@@ -957,16 +957,16 @@ def volume_metric_sweeps():
 
     # Plot volumes explored against sigmas
     logger.info('Plotting volumes explored results.')
-    fig, axes = plt.subplots(n_durations, n_pauses, figsize=(3 + n_pauses * 2, 2 + n_durations * 2), sharex=True,
+    fig, axes = plt.subplots(n_durations, n_pauses, figsize=(3 + n_pauses, 2 + n_durations), sharex=True,
                              sharey=True)
     fig.suptitle(f'Batch size={args.batch_size}.')
     for j, duration in enumerate(sim_durations):
         for k, pause in enumerate(pauses):
             ax = axes[j, k]
             if k == 0:
-                ax.set_ylabel(f'Sim duration={duration:.2f}s')
+                ax.set_ylabel(f'T={duration:.2f}s')
             if j == 0:
-                ax.set_title(f'Pause={pause:.2f}s')
+                ax.set_title(f'$\delta$={pause:.2f}s')
             vols = disk_vols[:, j, k].T
             ax.errorbar(
                 np.arange(n_sigmas),
@@ -995,6 +995,7 @@ def volume_metric_sweeps():
     Z = npa_sigmas[disk_vols[..., 0].argmax(axis=0)]
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_subplot(projection='3d')
+    ax.view_init(azim=30, elev=25)
     ax.set_title('Optimal sigmas.')
     ax.scatter(X, Y, Z, c=Z, cmap='Reds', s=100, marker='x')
     ax.plot_surface(X, Y, Z, cmap='coolwarm', alpha=0.5)
@@ -1004,8 +1005,9 @@ def volume_metric_sweeps():
     fig.tight_layout()
     if save_plots:
         plt.savefig(
-            make_filename('volume_sweep_volumes', args,
-                          excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon', 'duration']),
+            make_filename('volume_sweep_surface', args,
+                          excludes=['voxel_sizes', 'deltas', 'delta_step',
+                                    'n_targets', 'epsilon', 'duration', 'max_nonplanar_pause_duration']),
             transparent=True
         )
     if show_plots:

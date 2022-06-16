@@ -235,7 +235,7 @@ def _plot_eigenvalues_basic(
         NF = NaturalFrame(component * eigenworm_scale, length=eigenworm_length)
         NPs.append(NF.non_planarity())
 
-    fig, ax = plt.subplots(1, figsize=(4, 4))
+    fig, ax = plt.subplots(1, figsize=(4, 3))
     ax.grid()
     ax.scatter(xs[1:], vr[1:], zorder=10, s=100)
     ax.plot(xs, vr, zorder=5, alpha=0.5, linestyle=':')
