@@ -4,12 +4,14 @@ from typing import List
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.gridspec import GridSpec
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d import logger
-from wormlab3d.data.model import Dataset
+from wormlab3d.data.model import Dataset, Reconstruction
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.pca import get_pca_cache_from_args
+from wormlab3d.trajectories.statistics import calculate_trial_turn_statistics, calculate_trial_run_statistics
 from wormlab3d.trajectories.util import get_deltas_from_args
 
 # tex_mode()
@@ -196,11 +198,191 @@ def nonplanarity_dataset():
         plt.show()
 
 
+def nonplanarity_postures_vs_trajectories():
+    """
+    Plot the dataset turns vs runs.
+    """
+    args = get_args()
+    assert args.dataset is not None
+    ds = Dataset.objects.get(id=args.dataset)
+    args.tracking_only = False
+    args.trajectory_point = None
+    dt = 1 / 25
+    window_size = int(2 / dt)
+    min_run_duration = int(2 / dt)
+    min_run_distance = 1
+    min_run_speed = None  # 0.1
+    smooth_K = 201
+    k_threshold = 50
+
+    # Outputs
+    speeds_turns = []
+    distances_turns = []
+    nonp_trajectories_turns = []
+    nonp_postures_turns = []
+    nonp_postures_max_turns = []
+    speeds_runs = []
+    distances_runs = []
+    nonp_trajectories_runs = []
+    nonp_postures_runs = []
+    nonp_postures_max_runs = []
+
+    for r_ref in ds.reconstructions:
+        reconstruction = Reconstruction.objects.get(id=r_ref.id)
+        args.reconstruction = reconstruction.id
+        args.trial = reconstruction.trial.id
+
+        # Calculate turn statistics
+        try:
+            turn_stats = calculate_trial_turn_statistics(args, smooth_K, window_size, k_threshold)
+            speeds_turns.append(turn_stats['speeds'])
+            distances_turns.append(turn_stats['distances'])
+            nonp_trajectories_turns.append(turn_stats['nonp'])
+            nonp_postures_turns.append(turn_stats['nonp_postures'])
+            nonp_postures_max_turns.append(turn_stats['nonp_postures_max'])
+
+        except RuntimeError as e:
+            logger.warning(f'Failed to find approximation: "{e}"')
+
+        # Calculate runs statistics
+        try:
+            run_stats = calculate_trial_run_statistics(args, smooth_K, k_threshold, min_run_duration, min_run_distance,
+                                                       min_run_speed)
+            speeds_runs.append(run_stats['speeds'])
+            distances_runs.append(run_stats['distances'])
+            nonp_trajectories_runs.append(run_stats['nonp'])
+            nonp_postures_runs.append(run_stats['nonp_postures'])
+            nonp_postures_max_runs.append(run_stats['nonp_postures_max'])
+            # if (run_stats['nonp'] > 0.1).any():
+            #     for i in range(len(run_stats['nonp'])):
+            #         if run_stats['nonp'][i] > 0.1:
+            #             X = get_trajectory_from_args(args)
+            #             X_window = X[run_stats['start_idxs'][i]:run_stats['end_idxs'][i]]
+            #             Xs = X_window.transpose(0, 2, 1)
+            #             FS = FrameSequenceNumpy(x=Xs)
+            #             generate_interactive_scatter_clip(FS, fps=25)
+        except RuntimeError as e:
+            logger.warning(f'Failed to calculate run stats: "{e}"')
+
+    n_turn_trajectories = len(speeds_turns)
+    n_run_trajectories = len(speeds_runs)
+    logger.info(f'Calculated turn statistics for {n_turn_trajectories} '
+                f'and run statistics for {n_run_trajectories} '
+                f'out of a possible {len(ds.reconstructions)}.')
+
+    # Join outputs
+    speeds_turns = np.concatenate(speeds_turns)
+    distances_turns = np.concatenate(distances_turns)
+    nonp_trajectories_turns = np.concatenate(nonp_trajectories_turns)
+    nonp_postures_turns = np.concatenate(nonp_postures_turns)
+    nonp_postures_max_turns = np.concatenate(nonp_postures_max_turns)
+    speeds_runs = np.concatenate(speeds_runs)
+    distances_runs = np.concatenate(distances_runs)
+    nonp_trajectories_runs = np.concatenate(nonp_trajectories_runs)
+    nonp_postures_runs = np.concatenate(nonp_postures_runs)
+    nonp_postures_max_runs = np.concatenate(nonp_postures_max_runs)
+
+    # Plot
+    fig = plt.figure(figsize=(16, 10))
+    gs = GridSpec(2, 4)
+
+    # Scatter plot of NP-T vs NP-P during runs
+    ax = fig.add_subplot(gs[0, 0])
+    ax.set_title(f'Runs (min={min_run_duration * dt:.2f}s).')
+    ax.set_xlabel('NP-trajectories')
+    ax.set_ylabel('NP-postures')
+    s = ax.scatter(nonp_trajectories_runs, nonp_postures_runs, c=speeds_runs, s=2)
+    cb = fig.colorbar(s)
+    cb.ax.tick_params(labelsize=12)
+    cb.ax.set_ylabel('Speed (mm/s)', rotation=270)
+
+    # Scatter plot of NP-T vs NP-P during turns
+    ax = fig.add_subplot(gs[1, 0])
+    ax.set_title(f'Turns (window={window_size * dt:.2f}s).')
+    ax.set_xlabel('NP-trajectories')
+    ax.set_ylabel('NP-postures')
+    s = ax.scatter(nonp_trajectories_turns, nonp_postures_turns, c=speeds_turns, s=2)
+    cb = fig.colorbar(s)
+    cb.ax.tick_params(labelsize=12)
+    cb.ax.set_ylabel('Speed (mm/s)', rotation=270)
+
+    # Scatter plot of speed vs NP-P during runs
+    ax = fig.add_subplot(gs[0, 1])
+    ax.set_title(f'Runs (min={min_run_duration * dt:.2f}s).')
+    ax.set_xlabel('Speed (mm/s)')
+    ax.set_ylabel('NP-postures')
+    s = ax.scatter(speeds_runs, nonp_postures_runs, c=distances_runs, s=2)
+    cb = fig.colorbar(s)
+    cb.ax.tick_params(labelsize=12)
+    cb.ax.set_ylabel('Distance (mm)', rotation=270)
+
+    # Scatter plot of speed vs NP-P during turns
+    ax = fig.add_subplot(gs[1, 1])
+    ax.set_title(f'Turns (window={window_size * dt:.2f}s).')
+    ax.set_xlabel('Speed (mm/s)')
+    ax.set_ylabel('NP-postures')
+    s = ax.scatter(speeds_turns, nonp_postures_turns, c=distances_turns, s=2)
+    cb = fig.colorbar(s)
+    cb.ax.tick_params(labelsize=12)
+    cb.ax.set_ylabel('Distance (mm)', rotation=270)
+
+    # Scatter plot of NP-T vs MAX(NP-P) during runs
+    ax = fig.add_subplot(gs[0, 2])
+    ax.set_title(f'Runs (min={min_run_duration * dt:.2f}s).')
+    ax.set_xlabel('NP-trajectories')
+    ax.set_ylabel('MAX(NP-postures)')
+    s = ax.scatter(nonp_trajectories_runs, nonp_postures_max_runs, c=speeds_runs, s=2)
+    cb = fig.colorbar(s)
+    cb.ax.tick_params(labelsize=12)
+    cb.ax.set_ylabel('Speed (mm/s)', rotation=270)
+
+    # Scatter plot of NP-T vs MAX(NP-P) during turns
+    ax = fig.add_subplot(gs[1, 2])
+    ax.set_title(f'Turns (window={window_size * dt:.2f}s).')
+    ax.set_xlabel('NP-trajectories')
+    ax.set_ylabel('MAX(NP-postures)')
+    s = ax.scatter(nonp_trajectories_turns, nonp_postures_max_turns, c=speeds_turns, s=2)
+    cb = fig.colorbar(s)
+    cb.ax.tick_params(labelsize=12)
+    cb.ax.set_ylabel('Speed (mm/s)', rotation=270)
+
+    # Scatter plot of speed vs MAX(NP-P) during runs
+    ax = fig.add_subplot(gs[0, 3])
+    ax.set_title(f'Runs (min={min_run_duration * dt:.2f}s).')
+    ax.set_xlabel('Speed (mm/s)')
+    ax.set_ylabel('MAX(NP-postures)')
+    s = ax.scatter(speeds_runs, nonp_postures_max_runs, c=distances_runs, s=2)
+    cb = fig.colorbar(s)
+    cb.ax.tick_params(labelsize=12)
+    cb.ax.set_ylabel('Distance (mm)', rotation=270)
+
+    # Scatter plot of speed vs MAX(NP-P) during turns
+    ax = fig.add_subplot(gs[1, 3])
+    ax.set_title(f'Turns (window={window_size * dt:.2f}s).')
+    ax.set_xlabel('Speed (mm/s)')
+    ax.set_ylabel('MAX(NP-postures)')
+    s = ax.scatter(speeds_turns, nonp_postures_max_turns, c=distances_turns, s=2)
+    cb = fig.colorbar(s)
+    cb.ax.tick_params(labelsize=12)
+    cb.ax.set_ylabel('Distance (mm)', rotation=270)
+
+    fig.tight_layout()
+
+    if save_plots:
+        args.trial = None
+        args.reconstruction = None
+        plt.savefig(
+            make_filename('nonplanarity_postures_vs_trajectories', args, excludes=['trial', 'deltas'])
+        )
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
-    args_ = get_args()
-    if args_.dataset is not None:
-        nonplanarity_dataset()
-    else:
-        nonplanarity_trajectory()
+    # from simple_worm.plot3d import interactive
+    # interactive()
+    # nonplanarity_dataset()
+    # nonplanarity_trajectory()
+    nonplanarity_postures_vs_trajectories()
