@@ -4,18 +4,16 @@ from argparse import Namespace
 
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
 from matplotlib.gridspec import GridSpec
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from progress.bar import Bar
-from scipy.stats import norm, expon
+from scipy.stats import expon
 
 from simple_worm.frame import FrameNumpy
 from simple_worm.plot3d import FrameArtist
 from wormlab3d import START_TIMESTAMP, LOGS_PATH, logger
 from wormlab3d.data.model import Trial, Dataset
 from wormlab3d.particles.cache import get_trajectories_from_args
-from wormlab3d.particles.three_state_explorer import ThreeStateExplorer
 from wormlab3d.particles.tumble_run import calculate_curvature, get_approximate, find_approximation, \
     generate_or_load_ds_statistics, generate_or_load_ds_msds
 from wormlab3d.particles.util import calculate_trajectory_frame
@@ -621,6 +619,7 @@ def dataset_against_three_state_comparison():
     assert args.dataset is not None
     ds = Dataset.objects.get(id=args.dataset)
     deltas, delta_ts = get_deltas_from_args(args)
+    planarity_window = 7
 
     # Unset midline source args
     args.midline3d_source = None
@@ -635,7 +634,7 @@ def dataset_against_three_state_comparison():
 
     # Generate or load tumble/run values
     trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles \
-        = generate_or_load_ds_statistics(ds, error_limits, planarity_window=5, rebuild_cache=False)
+        = generate_or_load_ds_statistics(ds, error_limits, planarity_window=planarity_window, rebuild_cache=False)
 
     # Generate or load MSDs
     msds_all_real, msds_real = generate_or_load_ds_msds(ds, args, rebuild_cache=False)
@@ -648,7 +647,7 @@ def dataset_against_three_state_comparison():
     # Plot histograms
     if 1:
         fig, axes = plt.subplots(len(error_limits), 6, figsize=(14, 2 + 2 * len(error_limits)), squeeze=False)
-        fig.suptitle(f'Dataset={ds.id}.')
+        fig.suptitle(f'Dataset={ds.id}. Planarity windows={args.planarity_window} frames, {planarity_window} vertices.')
 
         for i, (param_name, values) in enumerate({
                                                      'Durations': [durations, TC.intervals],
@@ -668,7 +667,7 @@ def dataset_against_three_state_comparison():
                 values_ds = np.array(values[0][j])
                 values_sim = np.concatenate(values[1])
 
-                if param_name not in ['Planar angles', 'Non-planar angles']:
+                if param_name not in ['Planar angles', 'Non-planar angles', 'Twist angles']:
                     ax.set_yscale('log')
                 if param_name == 'Speeds (weighted)':
                     weights = [
@@ -694,7 +693,15 @@ def dataset_against_three_state_comparison():
                     ax.set_xticklabels(['$-\\frac{\pi}{2}$', '0', '$\\frac{\pi}{2}$'])
 
         fig.tight_layout()
-        plt.show()
+
+        if save_plots:
+            plt.savefig(
+                LOGS_PATH / f'{START_TIMESTAMP}_histograms_comparison_ds={ds.id}.{img_extension}',
+                transparent=True
+            )
+
+        if show_plots:
+            plt.show()
 
     exit()
 
