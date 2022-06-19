@@ -26,6 +26,9 @@ class PCACache:
         self.explained_variance = data[:, 12:15]
         self.explained_variance_ratio = data[:, 15:18]
 
+    def __len__(self):
+        return len(self.data)
+
 
 def _map_pcas_to_data(pcas: List[PCA]) -> np.ndarray:
     data = np.zeros((len(pcas), 3 * 3 + 3 + 3 + 3))
