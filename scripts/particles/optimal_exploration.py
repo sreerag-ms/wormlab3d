@@ -1,6 +1,6 @@
 import os
 from argparse import Namespace
-from typing import List
+from typing import List, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,6 +11,7 @@ from simple_worm.plot3d import MidpointNormalize
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.particles.cache import get_trajectories_from_args
 from wormlab3d.toolkit.plot_utils import tex_mode
+from wormlab3d.toolkit.util import hash_data
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.util import get_deltas_from_args
 
@@ -1068,7 +1069,7 @@ def volume_metric_sweeps():
         plt.show()
 
     # Plot peaks on a 2D plot
-    fig, axes = plt.subplots(2, figsize=(10,10))
+    fig, axes = plt.subplots(2, figsize=(10, 10))
     fig.suptitle(f'Optimal $\sigma_\phi$. Batch size={args.batch_size}.')
     for i in range(2):
         ax = axes[i]
@@ -1100,6 +1101,171 @@ def volume_metric_sweeps():
         plt.show()
 
 
+def _calculate_rz_values(
+        args: Namespace
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Calculate the r and z values across a range of sigmas, durations and pauses.
+    """
+    npa_sigmas = args.npas
+    n_sigmas = len(npa_sigmas)
+    sim_durations = args.sim_durations
+    n_durations = len(sim_durations)
+    pauses = args.pauses
+    n_pauses = len(pauses)
+
+    # Outputs
+    r_values = np.zeros((n_sigmas, n_durations, n_pauses, 4))
+    z_values = np.zeros((n_sigmas, n_durations, n_pauses, 4))
+    n_sims = n_sigmas * n_durations * n_pauses
+    sim_idx = 0
+
+    # Sweep over the combinations
+    for i, npas in enumerate(npa_sigmas):
+        for j, duration in enumerate(sim_durations):
+            for k, pause in enumerate(pauses):
+                logger.info(
+                    f'Simulating exploration with sigma={npas:.2E}, duration={duration:.2f}, pause={pause:.2f}. '
+                    f'({sim_idx + 1}/{n_sims}).'
+                )
+
+                args.phi_dist_params[1] = npas
+                args.sim_duration = duration
+                args.nonp_pause_max = pause
+                pe, TC = get_trajectories_from_args(args)
+
+                # Find the maximums in each relative directions
+                Xt = TC.get_Xt()
+                Xt_max = np.abs(Xt).max(axis=1)
+
+                # Use first component as radius and third as height of explored disk
+                r_values[i, j, k] = [Xt_max[:, 0].mean(), Xt_max[:, 0].min(), Xt_max[:, 0].max(), Xt_max[:, 0].std()]
+                z_values[i, j, k] = [Xt_max[:, 2].mean(), Xt_max[:, 2].min(), Xt_max[:, 2].max(), Xt_max[:, 2].std()]
+
+                if TC.needs_save:
+                    TC.save()
+                sim_idx += 1
+
+    return r_values, z_values
+
+
+def _generate_or_load_rz_values(
+        args: Namespace,
+        rebuild_cache: bool = False
+) -> Tuple[np.ndarray, np.ndarray]:
+    keys = {
+        'npas': [f'{s:.3E}' for s in args.npas],
+        'durations': [f'{d:.4f}' for d in args.sim_durations],
+        'pauses': [f'{p:.4f}' for p in args.pauses],
+    }
+    cache_path = LOGS_PATH / hash_data(keys)
+    cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
+    if not rebuild_cache and cache_fn.exists():
+        data = np.load(cache_fn)
+        r_values = data['r_values']
+        z_values = data['z_values']
+        logger.info('Loaded r and z values from cache.')
+    else:
+        logger.info('Generating r and z values.')
+        r_values, z_values = _calculate_rz_values(args)
+        save_arrs = {
+            'r_values': r_values,
+            'z_values': z_values,
+        }
+        logger.info(f'Saving r and z values to {cache_path}.')
+        np.savez(cache_path, **save_arrs)
+
+    return r_values, z_values
+
+
+def volume_metric_sweeps2():
+    """
+    Estimate the volume explored by a typical trajectory.
+    """
+    args = get_args(validate_source=False)
+
+    # Set parameter ranges
+    npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-3), np.log(1 / 10), 20))
+    n_sigmas = len(npa_sigmas)
+    args.npas = npa_sigmas
+    sim_durations = np.exp(-np.linspace(np.log(1 / (5 * 60)), np.log(1 / (60 * 60)), 8))
+    n_durations = len(sim_durations)
+    fix_pause = 1.
+    pauses = np.r_[[0, ], np.exp(-np.linspace(np.log(1 / 1), np.log(1 / 60), 7))]
+    # pauses = np.linspace(0, 10, 11)
+    n_pauses = len(pauses)
+    fix_duration = 60.
+
+    def _calculate_volumes(r_, z_):
+        sphere_vols = 4 / 3 * np.pi * r_**3
+        cap_vols = 1 / 3 * np.pi * (r_ - z_)**2 * (2 * r_ + z_)
+        return sphere_vols - 2 * cap_vols
+
+    # Fix the pause and sweep over the durations
+    args.sim_durations = sim_durations
+    args.pauses = [fix_pause]
+    r_values, z_values = _generate_or_load_rz_values(args, rebuild_cache=False)
+    disk_vols = _calculate_volumes(r_values, z_values)
+    optimal_sigmas = npa_sigmas[disk_vols[..., 0].argmax(axis=0)]
+
+    # Plot the volumes
+    fig, ax = plt.subplots(1, figsize=(10, 10))
+    cmap = plt.get_cmap('winter')
+    colours = cmap(np.linspace(0, 1, n_durations))
+    for j, duration in enumerate(sim_durations):
+        vols = disk_vols[:, j, 0].T
+        ax.plot(np.arange(n_sigmas), vols[0], label=f'T={duration:.0f}s', c=colours[j], marker='o', alpha=0.7)
+    ax.legend()
+    ax.set_title(f'$\delta$={fix_pause:.1f}s')
+    ax.set_xlabel(f'$\sigma_\psi$')
+    ax.set_xticks(np.arange(n_sigmas))
+    ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
+    ax.set_ylabel('V')
+    ax.tick_params(axis='x', rotation=270)
+    ax.grid()
+    fig.tight_layout()
+    if save_plots:
+        plt.savefig(
+            make_filename('volume_sweep_2a', args,
+                          excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon', 'duration']),
+            transparent=True
+        )
+    if show_plots:
+        plt.show()
+
+    # Fix the duration and sweep over the pauses
+    args.sim_durations = [fix_duration]
+    args.pauses = pauses
+    r_values, z_values = _generate_or_load_rz_values(args, rebuild_cache=False)
+    disk_vols = _calculate_volumes(r_values, z_values)
+    optimal_sigmas = npa_sigmas[disk_vols[..., 0].argmax(axis=0)]
+
+    # Plot the volumes
+    fig, ax = plt.subplots(1, figsize=(10, 10))
+    cmap = plt.get_cmap('winter')
+    colours = cmap(np.linspace(0, 1, n_pauses))
+    for k, pause in enumerate(pauses):
+        vols = disk_vols[:, 0, k].T
+        ax.plot(np.arange(n_sigmas), vols[0], label=f'$\delta$={pause:.1f}s', c=colours[k], marker='o', alpha=0.7)
+    ax.legend()
+    ax.set_title(f'T={fix_duration}s')
+    ax.set_xlabel(f'$\sigma_\psi$')
+    ax.set_xticks(np.arange(n_sigmas))
+    ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
+    ax.set_ylabel('V')
+    ax.tick_params(axis='x', rotation=270)
+    ax.grid()
+    fig.tight_layout()
+    if save_plots:
+        plt.savefig(
+            make_filename('volume_sweep_2b', args,
+                          excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon', 'duration']),
+            transparent=True
+        )
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
@@ -1112,4 +1278,5 @@ if __name__ == '__main__':
     # surface_coverage_scores()
     # crossings_nonp()
     # volume_metric()
-    volume_metric_sweeps()
+    # volume_metric_sweeps()
+    volume_metric_sweeps2()

@@ -224,7 +224,6 @@ def _generate_natural_frame_trajectory_cache_data(
     N = X.shape[1]
     if N == 1:
         raise RuntimeError('Trajectory returned only a single point. Eigenworms requires full postures!')
-    logger.info(f'Calculating eigenworms with {M} midlines of length {N}.')
 
     # Calculate the natural frame representations for all midlines
     logger.info('Calculating natural frame representations.')
