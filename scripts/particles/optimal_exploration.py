@@ -1190,80 +1190,94 @@ def volume_metric_sweeps2():
     args.npas = npa_sigmas
     sim_durations = np.exp(-np.linspace(np.log(1 / (5 * 60)), np.log(1 / (60 * 60)), 8))
     n_durations = len(sim_durations)
-    fix_pause = 1.
+    fix_pause = args.nonp_pause_max
     pauses = np.r_[[0, ], np.exp(-np.linspace(np.log(1 / 1), np.log(1 / 60), 7))]
     # pauses = np.linspace(0, 10, 11)
     n_pauses = len(pauses)
-    fix_duration = 60.
+    fix_duration = args.sim_duration
 
     def _calculate_volumes(r_, z_):
         sphere_vols = 4 / 3 * np.pi * r_**3
         cap_vols = 1 / 3 * np.pi * (r_ - z_)**2 * (2 * r_ + z_)
         return sphere_vols - 2 * cap_vols
 
-    # Fix the pause and sweep over the durations
-    args.sim_durations = sim_durations
-    args.pauses = [fix_pause]
-    r_values, z_values = _generate_or_load_rz_values(args, rebuild_cache=False)
-    disk_vols = _calculate_volumes(r_values, z_values)
-    optimal_sigmas = npa_sigmas[disk_vols[..., 0].argmax(axis=0)]
+    if 1:
+        # Fix the pause and sweep over the durations
+        args.sim_durations = sim_durations
+        args.pauses = [fix_pause]
+        r_values, z_values = _generate_or_load_rz_values(args, rebuild_cache=False)
+        disk_vols = _calculate_volumes(r_values, z_values)
+        optimal_sigmas_idxs = disk_vols[..., 0].argmax(axis=0).squeeze()
+        optimal_sigmas = npa_sigmas[optimal_sigmas_idxs]
+        optimal_vols = []
 
-    # Plot the volumes
-    fig, ax = plt.subplots(1, figsize=(10, 10))
-    cmap = plt.get_cmap('winter')
-    colours = cmap(np.linspace(0, 1, n_durations))
-    for j, duration in enumerate(sim_durations):
-        vols = disk_vols[:, j, 0].T
-        ax.plot(np.arange(n_sigmas), vols[0], label=f'T={duration:.0f}s', c=colours[j], marker='o', alpha=0.7)
-    ax.legend()
-    ax.set_title(f'$\delta$={fix_pause:.1f}s')
-    ax.set_xlabel(f'$\sigma_\psi$')
-    ax.set_xticks(np.arange(n_sigmas))
-    ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
-    ax.set_ylabel('V')
-    ax.tick_params(axis='x', rotation=270)
-    ax.grid()
-    fig.tight_layout()
-    if save_plots:
-        plt.savefig(
-            make_filename('volume_sweep_2a', args,
-                          excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon', 'duration']),
-            transparent=True
-        )
-    if show_plots:
-        plt.show()
+        # Plot the volumes
+        fig, ax = plt.subplots(1, figsize=(10, 10))
+        cmap = plt.get_cmap('winter')
+        colours = cmap(np.linspace(0, 1, n_durations))
+        for j, duration in enumerate(sim_durations):
+            vols = disk_vols[:, j, 0].T
+            optimal_vols.append(vols[0, optimal_sigmas_idxs[j]])
+            ax.plot(npa_sigmas, vols[0], label=f'T={duration:.0f}s', c=colours[j], marker='o', alpha=0.7)
+        ax.scatter(optimal_sigmas, optimal_vols, c='red', marker='o', zorder=100, s=50)
+        ax.axvline(x=args.phi_dist_params[1], c='orange', linestyle='--')
+        ax.legend()
+        ax.set_title(f'$\delta$={fix_pause:.1f}s')
+        ax.set_xlabel(f'$\sigma_\psi$')
+        ax.set_xticks(np.arange(n_sigmas))
+        ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
+        ax.set_ylabel('V')
+        # ax.tick_params(axis='x', rotation=270)
+        ax.set_xscale('log')
+        ax.grid()
+        fig.tight_layout()
+        if save_plots:
+            plt.savefig(
+                make_filename('volume_sweep_2a', args,
+                              excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon', 'duration']),
+                transparent=True
+            )
+        if show_plots:
+            plt.show()
 
-    # Fix the duration and sweep over the pauses
-    args.sim_durations = [fix_duration]
-    args.pauses = pauses
-    r_values, z_values = _generate_or_load_rz_values(args, rebuild_cache=False)
-    disk_vols = _calculate_volumes(r_values, z_values)
-    optimal_sigmas = npa_sigmas[disk_vols[..., 0].argmax(axis=0)]
+    if 1:
+        # Fix the duration and sweep over the pauses
+        args.sim_durations = [fix_duration]
+        args.pauses = pauses
+        r_values, z_values = _generate_or_load_rz_values(args, rebuild_cache=False)
+        disk_vols = _calculate_volumes(r_values, z_values)
+        optimal_sigmas_idxs = disk_vols[..., 0].argmax(axis=0).squeeze()
+        optimal_sigmas = npa_sigmas[optimal_sigmas_idxs]
+        optimal_vols = []
 
-    # Plot the volumes
-    fig, ax = plt.subplots(1, figsize=(10, 10))
-    cmap = plt.get_cmap('winter')
-    colours = cmap(np.linspace(0, 1, n_pauses))
-    for k, pause in enumerate(pauses):
-        vols = disk_vols[:, 0, k].T
-        ax.plot(np.arange(n_sigmas), vols[0], label=f'$\delta$={pause:.1f}s', c=colours[k], marker='o', alpha=0.7)
-    ax.legend()
-    ax.set_title(f'T={fix_duration}s')
-    ax.set_xlabel(f'$\sigma_\psi$')
-    ax.set_xticks(np.arange(n_sigmas))
-    ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
-    ax.set_ylabel('V')
-    ax.tick_params(axis='x', rotation=270)
-    ax.grid()
-    fig.tight_layout()
-    if save_plots:
-        plt.savefig(
-            make_filename('volume_sweep_2b', args,
-                          excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon', 'duration']),
-            transparent=True
-        )
-    if show_plots:
-        plt.show()
+        # Plot the volumes
+        fig, ax = plt.subplots(1, figsize=(10, 10))
+        cmap = plt.get_cmap('winter')
+        colours = cmap(np.linspace(0, 1, n_pauses))
+        for k, pause in enumerate(pauses):
+            vols = disk_vols[:, 0, k].T
+            optimal_vols.append(vols[0, optimal_sigmas_idxs[k]])
+            ax.plot(npa_sigmas, vols[0], label=f'$\delta$={pause:.1f}s', c=colours[k], marker='o', alpha=0.7)
+        ax.scatter(optimal_sigmas, optimal_vols, c='red', marker='o', zorder=100, s=50)
+        ax.axvline(x=args.phi_dist_params[1], c='orange', linestyle='--')
+        ax.legend()
+        ax.set_title(f'T={fix_duration}s')
+        ax.set_xlabel(f'$\sigma_\psi$')
+        ax.set_xticks(np.arange(n_sigmas))
+        ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
+        ax.set_ylabel('V')
+        # ax.tick_params(axis='x', rotation=270)
+        ax.set_xscale('log')
+        ax.grid()
+        fig.tight_layout()
+        if save_plots:
+            plt.savefig(
+                make_filename('volume_sweep_2b', args,
+                              excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon', 'duration']),
+                transparent=True
+            )
+        if show_plots:
+            plt.show()
 
 
 if __name__ == '__main__':
