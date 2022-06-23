@@ -12,6 +12,7 @@ from wormlab3d import logger
 from wormlab3d.data.model import MFParameters, MFCheckpoint, Reconstruction, Trial
 from wormlab3d.midlines3d.frame_state import FrameState, BUFFER_NAMES, PARAMETER_NAMES, BINARY_DATA_KEYS, \
     CURVATURE_PARAMETER_NAMES, TRANSIENTS_NAMES
+from wormlab3d.midlines3d.mf_methods import make_rotation_matrix
 from wormlab3d.toolkit.util import to_numpy
 
 
@@ -124,7 +125,6 @@ class TrialState:
 
                 state = np.memmap(path_state, dtype=np.float32, mode=mode, shape=tuple(meta['shapes'][k]))
                 states[k] = state
-                logger.info(f'Loaded data from {path_state}.')
             except Exception as e:
                 logger.warning(f'Could not load from {path_state}. {e}')
                 return False
@@ -141,6 +141,8 @@ class TrialState:
         self.states = states
         self.shapes = meta['shapes']
         self.stats = stats
+
+        logger.info(f'Loaded data from {self.path}.')
 
         return True
 
@@ -365,8 +367,39 @@ class TrialState:
                     end_frame=end_frame - 1
                 )
                 return centres_3d
+
+            elif k == 'points_2d_base':
+                centres_2d, _ = self.trial.get_tracking_data(
+                    fixed=True,
+                    start_frame=start_frame,
+                    end_frame=end_frame - 1,
+                    return_2d_points=True
+                )
+                return centres_2d
+
             else:
                 raise RuntimeError(f'Transient key = {k} not yet supported!')
+
+        if k == 'cam_rotations':
+            # Build camera rotation matrics
+            Rs = []
+            rotation_preangles = self.get('cam_rotation_preangles', start_frame, end_frame)
+            for i in range(3):
+                pre = rotation_preangles[:, i]
+                cos_phi, sin_phi = pre[:, 0, 0], pre[:, 0, 1]
+                cos_theta, sin_theta = pre[:, 1, 0], pre[:, 1, 1]
+                cos_psi, sin_psi = pre[:, 2, 0], pre[:, 2, 1]
+                Ri = make_rotation_matrix(
+                    torch.from_numpy(cos_phi),
+                    torch.from_numpy(sin_phi),
+                    torch.from_numpy(cos_theta),
+                    torch.from_numpy(sin_theta),
+                    torch.from_numpy(cos_psi),
+                    torch.from_numpy(sin_psi),
+                )
+                Rs.append(Ri.numpy().transpose(2, 0, 1).reshape(len(rotation_preangles), 9))
+            Rs = np.stack(Rs, axis=1)
+            return Rs
 
         state = self.states[k]
 

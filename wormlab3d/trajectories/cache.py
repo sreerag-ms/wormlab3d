@@ -254,18 +254,12 @@ def _generate_natural_frame_trajectory_cache_data(
 
 def _fetch_mf_trajectory(
         reconstruction: Reconstruction,
-        start_frame: int,
-        end_frame: int,
         depth: int = None
 ) -> Tuple[np.ndarray, dict]:
     """
     Fetch a MF trajectory from the corresponding TrialState.
     """
-    ts = TrialState(
-        reconstruction=reconstruction,
-        start_frame=start_frame,
-        end_frame=end_frame
-    )
+    ts = TrialState(reconstruction=reconstruction)
     XD = ts.get('points')
     if depth is None:
         X_full = XD
@@ -280,8 +274,37 @@ def _fetch_mf_trajectory(
         to_idx = from_idx + 2**(depth - 1)
         X_full = XD[:, from_idx:to_idx]
 
-    X_base = ts.get('points_3d_base')
+    # Add the base points
+    X_base = ts.get('points_3d_base').astype(np.float64)
     X_full = X_full + X_base[:, None, :]
+    meta = {'shape': X_full.shape, }
+
+    return X_full, meta
+
+
+def _fetch_mf_natural_frame(
+        reconstruction: Reconstruction,
+        depth: int = None
+) -> Tuple[np.ndarray, dict]:
+    """
+    Fetch a MF natural frame trajectory from the corresponding TrialState.
+    """
+    ts = TrialState(reconstruction=reconstruction)
+    K = ts.get('curvatures')
+    if depth is not None:
+        D = reconstruction.mf_parameters.depth
+        D_min = reconstruction.mf_parameters.depth_min
+        offset = 2**D_min - 1
+        if depth == -1:
+            depth = D
+        assert depth <= D
+        from_idx = sum([2**d for d in range(depth - 1)]) - offset
+        to_idx = from_idx + 2**(depth - 1)
+        K = K[:, from_idx:to_idx]
+
+    # Scale up curvature and convert to complex vector
+    K = K * (K.shape[1] - 1)
+    X_full = K[..., 0] + 1.j * K[..., 1]
     meta = {'shape': X_full.shape, }
 
     return X_full, meta
@@ -332,39 +355,42 @@ def generate_or_load_trajectory_cache(
         end_frame = min(end_frame, reconstruction.end_frame)
 
     if natural_frame:
-        # Generate or load a reconstruction trajectory in the natural frame representation.
-        filename_meta = f'{reconstruction.id}_nf.meta'
-        filename_Xnf = f'{reconstruction.id}_nf.npz'
-        path_meta = TRAJECTORY_CACHE_PATH / filename_meta
-        path_Xnf = TRAJECTORY_CACHE_PATH / filename_Xnf
-        X_full = None
-        if not rebuild_cache and path_meta.exists() and path_Xnf.exists():
-            try:
-                with open(path_meta, 'r') as f:
-                    meta = json.load(f)
-                X_full = np.memmap(path_Xnf, dtype=np.complex128, mode='r', shape=tuple(meta['shape']))
-                logger.info(f'Loaded natural frame trajectory data from {path_Xnf}.')
-            except Exception as e:
-                logger.warning(f'Could not load natural frame trajectory from {path_Xnf}. {e}')
-        elif not rebuild_cache:
-            logger.info('Natural frame trajectory file cache unavailable, building.')
+        if reconstruction.source == M3D_SOURCE_MF:
+            X_full, meta = _fetch_mf_natural_frame(reconstruction, depth)
         else:
-            logger.info('Rebuilding natural frame trajectory cache.')
+            # Generate or load a reconstruction trajectory in the natural frame representation.
+            filename_meta = f'{reconstruction.id}_nf.meta'
+            filename_Xnf = f'{reconstruction.id}_nf.npz'
+            path_meta = TRAJECTORY_CACHE_PATH / filename_meta
+            path_Xnf = TRAJECTORY_CACHE_PATH / filename_Xnf
+            X_full = None
+            if not rebuild_cache and path_meta.exists() and path_Xnf.exists():
+                try:
+                    with open(path_meta, 'r') as f:
+                        meta = json.load(f)
+                    X_full = np.memmap(path_Xnf, dtype=np.complex128, mode='r', shape=tuple(meta['shape']))
+                    logger.info(f'Loaded natural frame trajectory data from {path_Xnf}.')
+                except Exception as e:
+                    logger.warning(f'Could not load natural frame trajectory from {path_Xnf}. {e}')
+            elif not rebuild_cache:
+                logger.info('Natural frame trajectory file cache unavailable, building.')
+            else:
+                logger.info('Rebuilding natural frame trajectory cache.')
 
-        if X_full is None:
-            # Generate the natural frame trajectory data cache
-            Xnf_data = _generate_natural_frame_trajectory_cache_data(reconstruction, depth)
-            X_full = np.memmap(path_Xnf, dtype=np.complex128, mode='w+', shape=Xnf_data.shape)
-            X_full[:] = Xnf_data
+            if X_full is None:
+                # Generate the natural frame trajectory data cache
+                Xnf_data = _generate_natural_frame_trajectory_cache_data(reconstruction, depth)
+                X_full = np.memmap(path_Xnf, dtype=np.complex128, mode='w+', shape=Xnf_data.shape)
+                X_full[:] = Xnf_data
 
-            # Save the cache onto the hard drive
-            logger.debug(f'Saving natural frame trajectory file cache to {path_Xnf}.')
-            X_full.flush()
+                # Save the cache onto the hard drive
+                logger.debug(f'Saving natural frame trajectory file cache to {path_Xnf}.')
+                X_full.flush()
 
-            # Save the meta data
-            meta = {'shape': X_full.shape, }
-            with open(path_meta, 'w') as f:
-                json.dump(meta, f)
+                # Save the meta data
+                meta = {'shape': X_full.shape, }
+                with open(path_meta, 'w') as f:
+                    json.dump(meta, f)
 
     elif reconstruction is None:
         # If no reconstruction construct a trajectory from the tracking data
@@ -374,7 +400,7 @@ def generate_or_load_trajectory_cache(
         logger.info(f'Loaded tracking data from database.')
 
     elif reconstruction.source == M3D_SOURCE_MF:
-        X_full, meta = _fetch_mf_trajectory(reconstruction, start_frame, end_frame, depth)
+        X_full, meta = _fetch_mf_trajectory(reconstruction, depth)
 
     else:
         # Generate or load a reconstruction trajectory for the reconst or WT3D sources.

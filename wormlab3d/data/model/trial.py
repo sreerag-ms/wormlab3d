@@ -171,11 +171,12 @@ class Trial(Document):
             prune_missing: bool = False,
             start_frame: int = None,
             end_frame: int = None,
+            return_2d_points: bool = False
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Fetch the 3D tracking data.
         """
-        centres_3d = []
+        points = []
         timestamps = []
 
         # Match this trial and restrict frame range.
@@ -201,20 +202,26 @@ class Trial(Document):
 
         for res in cursor:
             if 'p3d' in res and res['p3d'] is not None:
-                pt = res['p3d']['point_3d']
+                if return_2d_points:
+                    pt = res['p3d']['reprojected_points_2d']
+                else:
+                    pt = res['p3d']['point_3d']
             elif not prune_missing:
-                pt = np.array([None, None, None])
-            elif len(centres_3d) == 0:
+                if return_2d_points:
+                    pt = np.array([[0, 0], [0, 0], [0, 0]])
+                else:
+                    pt = np.array([0, 0, 0])
+            elif len(points) == 0:
                 continue
             else:
                 break
-            centres_3d.append(pt)
+            points.append(pt)
             timestamps.append(res['frame_num'] / self.fps)
 
-        centres_3d = np.array(centres_3d)
+        points = np.array(points)
         timestamps = np.array(timestamps)
 
-        return centres_3d, timestamps
+        return points, timestamps
 
     @property
     def num_reconstructions(self) -> int:

@@ -9,6 +9,7 @@ import cv2
 import ffmpeg
 import matplotlib.pyplot as plt
 import numpy as np
+import torch
 from matplotlib.collections import LineCollection
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpec
@@ -19,13 +20,15 @@ from simple_worm.plot3d import FrameArtist, MIDLINE_CMAP_DEFAULT
 from wormlab3d import logger, PREPARED_IMAGES_PATH, START_TIMESTAMP, LOGS_PATH
 from wormlab3d.data.model import Frame, Reconstruction, Trial
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF, Midline3D
+from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
+from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.particles.tumble_run import calculate_curvature
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.toolkit.plot_utils import equal_aspect_ratio
 from wormlab3d.toolkit.util import print_args, str2bool, normalise, to_dict
 from wormlab3d.trajectories.cache import get_trajectory
 from wormlab3d.trajectories.pca import generate_or_load_pca_cache
-from wormlab3d.trajectories.util import calculate_speeds
+from wormlab3d.trajectories.util import calculate_speeds, smooth_trajectory
 
 
 def get_args() -> Namespace:
@@ -643,12 +646,25 @@ def generate_reconstruction_video():
     Z, _ = get_trajectory(**common_args, natural_frame=True)
     X_ew = ew.transform(Z)
 
-    if reconstruction.source == M3D_SOURCE_MF:
-        raise NotImplementedError()
-
     # Calculate parameters
-    logger.info('Calculating values.')
-    lengths = np.linalg.norm(Xc[:, 1:] - Xc[:, :-1], axis=-1).sum(axis=-1)
+    logger.info('Calculating/loading values.')
+    if reconstruction.source == M3D_SOURCE_MF:
+        ts = TrialState(reconstruction)
+        points_3d = ts.get('points')
+        if args.smoothing_window > 1:
+            points_3d = smooth_trajectory(points_3d, args.smoothing_window)
+        points_3d_base = ts.get('points_3d_base')
+        points_2d_base = ts.get('points_2d_base')
+        lengths = ts.get('length', args.start_frame, args.end_frame)[:, 0]
+        cam_coeffs = np.concatenate([
+            ts.get(f'cam_{k}')
+            for k in ['intrinsics', 'rotations', 'translations', 'distortions', 'shifts', ]
+        ], axis=2)
+        prs = ProjectRenderScoreModel(image_size=trial.crop_size)
+
+    else:
+        lengths = np.linalg.norm(Xc[:, 1:] - Xc[:, :-1], axis=-1).sum(axis=-1)
+
     X_com = Xc.mean(axis=1)
     speeds = calculate_speeds(Xc, signed=True) * trial.fps
     e0 = normalise(np.gradient(X_com, axis=0))
@@ -761,8 +777,14 @@ def generate_reconstruction_video():
 
         # Generate the annotated images
         if reconstruction.source == M3D_SOURCE_MF:
-            # todo: reproject smoothed points
-            points_2d = None
+            points_2d = prs._project_to_2d(
+                cam_coeffs=torch.from_numpy(cam_coeffs[n][None, ...]),
+                points_3d=torch.from_numpy(points_3d[n][None, ...]),
+                points_3d_base=torch.from_numpy(points_3d_base[n][None, ...].astype(np.float32)),
+                points_2d_base=torch.from_numpy(points_2d_base[n][None, ...].astype(np.float32)),
+            )
+            points_2d = points_2d[0].numpy().transpose(1, 0, 2)
+            points_2d = np.round(points_2d).astype(np.int32)
 
         else:
             m3d = Midline3D.objects.get(
