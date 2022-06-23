@@ -732,7 +732,9 @@ def generate_reconstruction_video():
     cursor = Frame.objects().aggregate(pipeline, allowDiskUse=True)
 
     # Initialise ffmpeg process
-    output_path = LOGS_PATH / f'{START_TIMESTAMP}_trial={trial.id}_r={reconstruction.id}_f={start_frame}-{end_frame}'
+    output_dir = LOGS_PATH / f'trial_{trial.id:03d}'
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = output_dir / f'{START_TIMESTAMP}_trial={trial.id}_r={reconstruction.id}_f={start_frame}-{end_frame}'
     output_args = {
         'pix_fmt': 'yuv444p',
         'vcodec': 'libx264',
