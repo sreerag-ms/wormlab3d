@@ -651,7 +651,7 @@ def generate_reconstruction_video():
     if reconstruction.source == M3D_SOURCE_MF:
         ts = TrialState(reconstruction)
         points_3d = ts.get('points')
-        if args.smoothing_window > 1:
+        if args.smoothing_window is not None and args.smoothing_window > 1:
             points_3d = smooth_trajectory(points_3d, args.smoothing_window)
         points_3d_base = ts.get('points_3d_base')
         points_2d_base = ts.get('points_2d_base')
