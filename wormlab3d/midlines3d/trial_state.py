@@ -24,6 +24,7 @@ class TrialState:
             end_frame: int = None,
             read_only: bool = True,
             load_only: bool = True,
+            partial_load_ok: bool = False,
             copy_state: 'TrialState' = None,
     ):
         self.reconstruction = reconstruction
@@ -52,7 +53,7 @@ class TrialState:
             self._copy_state(copy_state)
 
         # Load the state
-        loaded = self._load_state(read_only)
+        loaded = self._load_state(read_only, partial_load_ok)
         if not loaded and (load_only or read_only):
             raise RuntimeError('Could not load trial state.')
         if not loaded and not read_only:
@@ -71,7 +72,11 @@ class TrialState:
     def path(self) -> Path:
         return MF_DATA_PATH / f'trial_{self.trial.id}' / str(self.reconstruction.id)
 
-    def _load_state(self, read_only: bool = True) -> bool:
+    def _load_state(
+            self,
+            read_only: bool = True,
+            partial_load_ok: bool = False
+    ) -> bool:
         """
         Try to load the state.
         """
@@ -127,7 +132,8 @@ class TrialState:
                 states[k] = state
             except Exception as e:
                 logger.warning(f'Could not load from {path_state}. {e}')
-                return False
+                if not partial_load_ok:
+                    return False
 
         # Load statistics
         path_stats = self.path / 'stats.json'

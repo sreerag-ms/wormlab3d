@@ -23,11 +23,16 @@ def plot_natural_frame_3d(
         arrow_scale: float = 0.1,
         show_pca_arrows: bool = True,
         show_pca_arrow_labels: bool = True,
+        midline_cmap: str = None,
         ax: Axes = None,
-        zoom: float = 1.
+        zoom: float = 1.,
+        use_centred_midline: bool = True
 ) -> Union[Figure, Axes]:
     # Set up frame
-    F = FrameNumpy(x=NF.X_pos.T)
+    if use_centred_midline:
+        F = FrameNumpy(x=NF.X_pos.T)
+    else:
+        F = FrameNumpy(x=NF.X.T)
     F.e1 = NF.M1.T
     F.e2 = NF.M2.T
 
@@ -56,7 +61,7 @@ def plot_natural_frame_3d(
     )
     if show_frame_arrows:
         fa.add_component_vectors(ax)
-    fa.add_midline(ax)
+    fa.add_midline(ax, cmap_name=midline_cmap)
 
     # Add PCA component vectors
     if show_pca_arrows:

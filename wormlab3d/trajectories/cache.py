@@ -259,7 +259,7 @@ def _fetch_mf_trajectory(
     """
     Fetch a MF trajectory from the corresponding TrialState.
     """
-    ts = TrialState(reconstruction=reconstruction)
+    ts = TrialState(reconstruction=reconstruction, partial_load_ok=True)
     XD = ts.get('points')
     if depth is None:
         X_full = XD
@@ -289,7 +289,7 @@ def _fetch_mf_natural_frame(
     """
     Fetch a MF natural frame trajectory from the corresponding TrialState.
     """
-    ts = TrialState(reconstruction=reconstruction)
+    ts = TrialState(reconstruction=reconstruction, partial_load_ok=True)
     K = ts.get('curvatures')
     if depth is not None:
         D = reconstruction.mf_parameters.depth
