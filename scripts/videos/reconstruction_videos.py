@@ -16,12 +16,13 @@ from matplotlib.gridspec import GridSpec
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
 from simple_worm.frame import FrameSequenceNumpy
-from simple_worm.plot3d import FrameArtist, MIDLINE_CMAP_DEFAULT
+from simple_worm.plot3d import FrameArtist
 from wormlab3d import logger, PREPARED_IMAGES_PATH, START_TIMESTAMP, LOGS_PATH
 from wormlab3d.data.model import Frame, Reconstruction, Trial
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF, Midline3D
 from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
+from wormlab3d.midlines3d.util import generate_annotated_images
 from wormlab3d.particles.tumble_run import calculate_curvature
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.toolkit.plot_utils import equal_aspect_ratio
@@ -45,7 +46,7 @@ def get_args() -> Namespace:
     parser.add_argument('--reconstruction', type=str, help='Reconstruction by id.')
     parser.add_argument('--start-frame', type=int, help='Frame number to start from.')
     parser.add_argument('--end-frame', type=int, help='Frame number to end at.')
-    parser.add_argument('--smoothing-window', type=int, default=25,
+    parser.add_argument('--smoothing-window', type=int,
                         help='Smoothing window for the postures and trajectory.')
 
     # 3D plots
@@ -559,52 +560,22 @@ def _generate_annotated_images(
     """
     Prepare images with overlaid midlines as connecting lines between vertices.
     """
-    images = []
-    cmap_midline = plt.get_cmap(MIDLINE_CMAP_DEFAULT)
-    colours = np.array([cmap_midline(i) for i in np.linspace(0, 1, points_2d.shape[0])])
-    colours = np.round(colours * 255).astype(np.uint8)
-    for i, img_array in enumerate(image_triplet):
-        z = ((1 - img_array) * 255).astype(np.uint8)
-        z = cv2.cvtColor(z, cv2.COLOR_GRAY2BGR)
-
-        # Overlay 2d projection
-        p2d = points_2d[:, i]
-        for j, p in enumerate(p2d):
-            z = cv2.drawMarker(
-                z,
-                p,
-                color=colours[j].tolist(),
-                markerType=cv2.MARKER_CROSS,
-                markerSize=3,
-                thickness=1,
-                line_type=cv2.LINE_AA
-            )
-            if j > 0:
-                cv2.line(
-                    z,
-                    p2d[j - 1],
-                    p2d[j],
-                    color=colours[j].tolist(),
-                    thickness=2,
-                    lineType=cv2.LINE_AA
-                )
-        images.append(z)
-    images = np.fliplr(np.concatenate(images))
-    panel = np.ones((width, height, 3), dtype=np.uint8) * 255
-    rw = width / images.shape[0]
-    rh = height / images.shape[1]
-    if images.shape[1] * rw > height:
+    images = generate_annotated_images(image_triplet, points_2d)
+    panel = np.ones((height, width, 3), dtype=np.uint8) * 255
+    rh = height / images.shape[0]
+    rw = width / images.shape[1]
+    if images.shape[0] * rw > height:
         images = cv2.resize(images, None, fx=rh, fy=rh)
-        new_width = images.shape[0]
+        new_width = images.shape[1]
         offset = width - new_width
-        panel[offset:offset + new_width] = images
+        panel[:, offset:offset + new_width] = images
     else:
         images = cv2.resize(images, None, fx=rw, fy=rw)
-        new_height = images.shape[1]
+        new_height = images.shape[0]
         offset = height - new_height
-        panel[:, offset:offset + new_height] = images
+        panel[offset:offset + new_height] = images
 
-    return panel.transpose(1, 0, 2)
+    return panel
 
 
 def generate_reconstruction_video():
