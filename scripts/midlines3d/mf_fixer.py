@@ -2,7 +2,7 @@ import json
 import os
 from argparse import Namespace, ArgumentParser
 from pathlib import PosixPath
-from typing import List, Tuple
+from typing import List
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -52,7 +52,6 @@ def get_args() -> Namespace:
     print_args(args)
 
     return args
-
 
 
 def _check_bad_parameters(
@@ -247,6 +246,8 @@ def _check_bad_parameters(
             if show_plots:
                 plt.show()
 
+            plt.close(fig)
+
 
 def _verify_flipped_batch(
         trial: Trial,
@@ -412,6 +413,8 @@ def _verify_flipped_batch(
             if show_plots:
                 plt.show()
 
+            plt.close(fig)
+
     return errors
 
 
@@ -552,8 +555,8 @@ def fix():
     """
     Apply fixes to a MF result.
     """
-    from simple_worm.plot3d import interactive
-    interactive()
+    # from simple_worm.plot3d import interactive
+    # interactive()
 
     args = get_args()
     reconstruction = Reconstruction.objects.get(id=args.reconstruction)
