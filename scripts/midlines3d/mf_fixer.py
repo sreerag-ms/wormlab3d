@@ -618,7 +618,7 @@ def fix():
     # Set valid range
     if args.set_valid_range is not None:
         assert len(args.set_valid_range) == 2, 'Start and end frames needed for setting a valid range.'
-        _set_valid_range(ts, args, save_dir)
+        _set_valid_range(ts, args)
 
     # Flip frames
     if args.flip_frames is not None:
