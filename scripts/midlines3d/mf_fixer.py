@@ -509,7 +509,7 @@ def _flip_frames(
         lengths = ts.get('length', n)
 
         # Verify the flipped parameters are consistent
-        n_frames = ts.n_frames - n + ts.reconstruction.start_frame
+        n_frames = ts.n_frames - n + ts.reconstruction.start_frame - 1
         n_batches = int(n_frames / args.batch_size) + 1
         errors = np.zeros(n_frames)
         for i in range(n_batches):
