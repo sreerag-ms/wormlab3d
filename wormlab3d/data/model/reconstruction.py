@@ -16,6 +16,8 @@ class Reconstruction(Document):
     trial = ReferenceField('Trial', required=True)
     start_frame = IntField(required=True)
     end_frame = IntField(required=True)
+    start_frame_valid = IntField()
+    end_frame_valid = IntField()
     midlines = ListField(LazyReferenceField('Midline3D'))
     source = StringField(choices=M3D_SOURCES, required=True)
     source_file = StringField()

@@ -31,10 +31,16 @@ def get_args() -> Namespace:
     parser = ArgumentParser(description='Wormlab3D script to fix MF output.')
 
     parser.add_argument('--reconstruction', type=str, help='Reconstruction by id.')
+    parser.add_argument('--dry-run', type=str2bool, default=True,
+                        help='Don\'t update any parameters, just generate some output.')
     parser.add_argument('--check-parameters', type=str2bool, default=True,
                         help='Check the parameters for any which don\'t reproduce the points.')
+    parser.add_argument('--set-valid-range', type=lambda s: [int(item) for item in s.split(',')],
+                        help='Start and end frame numbers to trim reconstruction to.')
     parser.add_argument('--flip-frames', type=lambda s: [int(item) for item in s.split(',')],
                         help='Flip HT at these frames (and subsequent).')
+    parser.add_argument('--frame-idx-from', type=str, default='reconst', choices=['reconst', 'trial'],
+                        help='Frame indexing starts at 0=reconstruction.start_frame (reconst) or 0=0 (trial).')
     parser.add_argument('--batch-size', type=int, default=10,
                         help='Verification batch size.')
     parser.add_argument('--error-threshold', type=float, default=0.001,
@@ -62,7 +68,7 @@ def _check_bad_parameters(
     """
     Check for parameters which don't produce the target curves.
     """
-    logger.info(f'Fixing bad parameters.')
+    logger.info(f'Checking for bad parameters.')
     trial = ts.trial
     prs = ProjectRenderScoreModel(image_size=trial.crop_size)
 
@@ -249,6 +255,31 @@ def _check_bad_parameters(
             plt.close(fig)
 
 
+def _set_valid_range(
+        ts: TrialState,
+        args: Namespace,
+):
+    """
+    Trim the reconstruction to the given range.
+    """
+    reconstruction = ts.reconstruction
+    start_frame = args.set_valid_range[0]
+    end_frame = args.set_valid_range[1]
+    if args.frame_idx_from == 'reconst':
+        start_frame += reconstruction.start_frame
+        end_frame += reconstruction.start_frame
+    assert start_frame >= reconstruction.start_frame
+    assert end_frame <= reconstruction.end_frame
+    if args.dry_run:
+        logger.info(f'(DRY RUN) NOT-Setting valid range for reconstruction as {start_frame}-{end_frame}.')
+    else:
+        logger.info(f'Setting valid range for reconstruction as {start_frame}-{end_frame}.')
+        reconstruction.start_frame_valid = start_frame
+        reconstruction.end_frame_valid = end_frame
+        reconstruction.save()
+        logger.info('Saved.')
+
+
 def _verify_flipped_batch(
         trial: Trial,
         start_frame: int,
@@ -431,6 +462,8 @@ def _flip_frames(
     flip_frames: List[int] = args.flip_frames
 
     for n in flip_frames:
+        if args.frame_idx_from == 'reconst':
+            n += ts.reconstruction.start_frame
         logger.info(f'Flipping frames from {n} onwards.')
 
         # Make output directory
@@ -510,7 +543,7 @@ def _flip_frames(
 
         # Plot the errors
         def _plot_errors(ax_):
-            ax_.plot(np.arange(ts.n_frames), errors)
+            ax_.plot(n + np.arange(n_frames), errors)
             ax_.axhline(y=0, color='grey')
             ax_.axhline(y=errors.mean(), color='purple', linestyle='--')
             ax_.axhline(y=args.error_threshold, color='red')
@@ -535,16 +568,20 @@ def _flip_frames(
             plt.show()
 
         if errors.max() < args.error_threshold:
-            logger.info(
-                f'Maximum error ({errors.max():.5f}) < Error threshold ({args.error_threshold:.4f}) - Updating parameters.')
-            # ts.states['points'][n:] = points_flipped
-            # ts.states['X0'][n:] = X0_flipped
-            # ts.states['T0'][n:] = T0_flipped
-            # ts.states['M10'][n:] = M10_flipped
-            # ts.states['curvatures'][n:] = K_flipped
-            # ts.states['points_2d'][n:] = points_2d_flipped
-            # ts.states['scores'][n:] = scores_flipped
-            # ts.save()
+            logger.info(f'Maximum error ({errors.max():.5f}) < Error threshold ({args.error_threshold:.4f}')
+            if args.dry_run:
+                logger.info('(DRY RUN) NOT-Updating parameters.')
+            else:
+                logger.info('Updating parameters.')
+                ts.states['points'][n:] = points_flipped
+                ts.states['X0'][n:] = X0_flipped
+                ts.states['T0'][n:] = T0_flipped
+                ts.states['M10'][n:] = M10_flipped
+                ts.states['curvatures'][n:] = K_flipped
+                ts.states['points_2d'][n:] = points_2d_flipped
+                ts.states['scores'][n:] = scores_flipped
+                ts.save()
+                logger.info('Saved.')
         else:
             logger.warning(
                 f'Maximum error ({errors.max():.5f}) > Error threshold ({args.error_threshold:.4f}) - Aborting flips.')
@@ -575,6 +612,11 @@ def fix():
     # Check parameters
     if args.check_parameters:
         _check_bad_parameters(ts, args, save_dir)
+
+    # Set valid range
+    if args.set_valid_range is not None:
+        assert len(args.set_valid_range) == 2, 'Start and end frames needed for setting a valid range.'
+        _set_valid_range(ts, args, save_dir)
 
     # Flip frames
     if args.flip_frames is not None:

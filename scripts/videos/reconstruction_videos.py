@@ -46,6 +46,7 @@ def get_args() -> Namespace:
     parser.add_argument('--reconstruction', type=str, help='Reconstruction by id.')
     parser.add_argument('--start-frame', type=int, help='Frame number to start from.')
     parser.add_argument('--end-frame', type=int, help='Frame number to end at.')
+    parser.add_argument('--use-valid-range', type=str2bool, help='Use valid range if available.')
     parser.add_argument('--smoothing-window', type=int,
                         help='Smoothing window for the postures and trajectory.')
 
@@ -587,15 +588,21 @@ def generate_reconstruction_video():
     reconstruction = Reconstruction.objects.get(id=args.reconstruction)
     trial = reconstruction.trial
 
-    # Set frame range
+    # Set frame range - using valid range if set
+    if args.use_valid_range and reconstruction.start_frame_valid is not None:
+        r_start_frame = reconstruction.start_frame_valid
+        r_end_frame = reconstruction.end_frame_valid
+    else:
+        r_start_frame = reconstruction.start_frame
+        r_end_frame = reconstruction.end_frame
     if args.start_frame is None:
-        start_frame = reconstruction.start_frame
+        start_frame = r_start_frame
     else:
-        start_frame = max(args.start_frame, reconstruction.start_frame)
+        start_frame = max(args.start_frame, r_start_frame)
     if args.end_frame is None:
-        end_frame = reconstruction.end_frame
+        end_frame = r_end_frame
     else:
-        end_frame = min(args.end_frame, reconstruction.end_frame)
+        end_frame = min(args.end_frame, r_end_frame)
 
     # Fetch trajectory and postures
     common_args = {
