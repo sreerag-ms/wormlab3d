@@ -156,6 +156,7 @@ def _make_info_panel(
         width: int,
         height: int,
         trial: Trial,
+        start_frame_trial: int,
         X: np.ndarray,
         lengths: np.ndarray,
 ) -> Tuple[Figure, Callable]:
@@ -176,6 +177,7 @@ def _make_info_panel(
                f'Concentration: {trial.experiment.concentration}%\n' \
                f'Frame: {frame_idx + 1:,}/{len(X):,}\n' \
                f'Time: {curr_time:%M:%S}/{total_time:%M:%S}\n' \
+               f'Trial frame: {start_frame_trial + frame_idx:,}\n' \
                f'Length: {lengths[frame_idx]:.3f}'
 
     # Details
@@ -655,6 +657,7 @@ def generate_reconstruction_video():
         width=int(args.width / 4),
         height=int(args.height / 3),
         trial=trial,
+        start_frame_trial=start_frame,
         X=Xc,
         lengths=lengths
     )
