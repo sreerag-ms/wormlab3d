@@ -509,7 +509,7 @@ def _flip_frames(
         lengths = ts.get('length', n)
 
         # Verify the flipped parameters are consistent
-        n_frames = ts.n_frames - n
+        n_frames = ts.n_frames - n + ts.reconstruction.start_frame
         n_batches = int(n_frames / args.batch_size) + 1
         errors = np.zeros(n_frames)
         for i in range(n_batches):
@@ -568,7 +568,7 @@ def _flip_frames(
             plt.show()
 
         if errors.max() < args.error_threshold:
-            logger.info(f'Maximum error ({errors.max():.5f}) < Error threshold ({args.error_threshold:.4f}')
+            logger.info(f'Maximum error ({errors.max():.5f}) < Error threshold ({args.error_threshold:.4f}).')
             if args.dry_run:
                 logger.info('(DRY RUN) NOT-Updating parameters.')
             else:
@@ -584,7 +584,9 @@ def _flip_frames(
                 logger.info('Saved.')
         else:
             logger.warning(
-                f'Maximum error ({errors.max():.5f}) > Error threshold ({args.error_threshold:.4f}) - Aborting flips.')
+                f'Maximum error ({errors.max():.5f}) > Error threshold ({args.error_threshold:.4f})'
+                f' - Aborting flips.'
+            )
             break
 
 
