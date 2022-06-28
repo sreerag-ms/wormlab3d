@@ -108,6 +108,7 @@ def generate_pca_cache_data(
         midline_source_file: str = None,
         start_frame: int = None,
         end_frame: int = None,
+        use_valid_range: bool = True,
         smoothing_window: int = None,
         directionality: str = None,
         prune_slowest_ratio: float = None,
@@ -123,6 +124,7 @@ def generate_pca_cache_data(
         midline_source_file=midline_source_file,
         start_frame=start_frame,
         end_frame=end_frame,
+        use_valid_range=use_valid_range,
         smoothing_window=smoothing_window,
         directionality=directionality,
         prune_slowest_ratio=prune_slowest_ratio,
@@ -143,6 +145,7 @@ def generate_or_load_pca_cache(
         midline_source_file: str = None,
         start_frame: int = None,
         end_frame: int = None,
+        use_valid_range: bool = None,
         smoothing_window: int = None,
         directionality: str = None,
         window_size: int = 5,
@@ -169,6 +172,8 @@ def generate_or_load_pca_cache(
     }
     if trajectory_point is not None:
         args['trajectory_point'] = trajectory_point
+    if use_valid_range is not None:
+        args['use_valid_range'] = use_valid_range
     arg_hash = hash_data(args)
     filename_meta = f'{arg_hash}.meta'
     filename_pca = f'{arg_hash}.npz'

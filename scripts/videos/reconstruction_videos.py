@@ -79,6 +79,7 @@ def get_args() -> Namespace:
                         help='Time range to show on trace plots in seconds.')
     parser.add_argument('--planarity-windows', type=lambda s: [int(item) for item in s.split(',')],
                         default='1,2,5,10', help='Comma delimited list of planarity windows in seconds.')
+    parser.add_argument('--rebuild-planarity-cache', type=str2bool, default=False, help='Rebuild the planarity caches.')
     parser.add_argument('--eigenworms', type=str, help='Eigenworms by id.')
     parser.add_argument('--n-components', type=int, default=20, help='Number of eigenworms to use (basis dimension).')
     parser.add_argument('--plot-components', type=lambda s: [int(item) for item in s.split(',')],
@@ -370,7 +371,9 @@ def _make_traces_plots(
     # Planarities
     common_args = {
         'reconstruction_id': reconstruction.id,
-        'smoothing_window': args.smoothing_window
+        'use_valid_range': args.use_valid_range,
+        'smoothing_window': args.smoothing_window,
+        'rebuild_cache': args.rebuild_planarity_cache
     }
     logger.info('Fetching posture planarities.')
     pcas, meta = generate_or_load_pca_cache(**common_args, window_size=1)
@@ -609,8 +612,8 @@ def generate_reconstruction_video():
     # Fetch trajectory and postures
     common_args = {
         'reconstruction_id': reconstruction.id,
-        'start_frame': args.start_frame,
-        'end_frame': args.end_frame,
+        'start_frame': start_frame,
+        'end_frame': end_frame,
         'smoothing_window': args.smoothing_window,
     }
     X, _ = get_trajectory(**common_args)

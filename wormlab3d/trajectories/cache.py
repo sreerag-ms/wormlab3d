@@ -22,6 +22,7 @@ def get_trajectory(
         midline_source_file: str = None,
         start_frame: int = None,
         end_frame: int = None,
+        use_valid_range: bool = True,
         depth: int = -1,
         smoothing_window: int = None,
         directionality: str = None,
@@ -42,6 +43,7 @@ def get_trajectory(
         midline_source_file=midline_source_file,
         start_frame=start_frame,
         end_frame=end_frame,
+        use_valid_range=use_valid_range,
         depth=depth,
         tracking_only=tracking_only,
         natural_frame=natural_frame,
@@ -317,6 +319,7 @@ def generate_or_load_trajectory_cache(
         midline_source_file: str = None,
         start_frame: int = None,
         end_frame: int = None,
+        use_valid_range: bool = True,
         depth: int = -1,
         tracking_only: bool = False,
         natural_frame: bool = False,
@@ -350,9 +353,15 @@ def generate_or_load_trajectory_cache(
     if end_frame is None:
         end_frame = trial.n_frames_min
 
+    # Bind to reconstruction range, or valid range if requested and available
     if reconstruction is not None:
         start_frame = max(start_frame, reconstruction.start_frame)
         end_frame = min(end_frame, reconstruction.end_frame)
+        if use_valid_range \
+                and reconstruction.start_frame_valid is not None \
+                and reconstruction.end_frame_valid is not None:
+            start_frame = max(start_frame, reconstruction.start_frame_valid)
+            end_frame = min(end_frame, reconstruction.end_frame_valid)
 
     if natural_frame:
         if reconstruction.source == M3D_SOURCE_MF:
