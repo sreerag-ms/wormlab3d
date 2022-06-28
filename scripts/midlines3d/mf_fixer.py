@@ -599,7 +599,7 @@ def fix():
 
     args = get_args()
     reconstruction = Reconstruction.objects.get(id=args.reconstruction)
-    ts = TrialState(reconstruction, read_only=True, partial_load_ok=True)
+    ts = TrialState(reconstruction, read_only=args.dry_run, partial_load_ok=True)
 
     # Make output directory
     save_dir = LOGS_PATH / f'trial_{reconstruction.trial.id:03d}_r={reconstruction.id}'
