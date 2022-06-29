@@ -181,7 +181,11 @@ def _check_bad_parameters(
 
     above_threshold_idxs = (errors_3d > args.plot_error_threshold).nonzero()[0]
     if args.plot_n_examples > 0 and len(above_threshold_idxs) > 0:
-        idxs_at = np.random.choice(len(above_threshold_idxs), args.plot_n_examples, replace=False)
+        idxs_at = np.random.choice(
+            len(above_threshold_idxs),
+            min(len(above_threshold_idxs), args.plot_n_examples),
+            replace=False
+        )
         idxs = above_threshold_idxs[idxs_at]
 
         for idx in idxs:
