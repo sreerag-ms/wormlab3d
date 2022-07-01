@@ -12,11 +12,13 @@ from matplotlib.gridspec import GridSpec
 from torch import nn
 from torch.backends import cudnn
 from torch.optim import AdamW
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from wormlab3d import PREPARED_IMAGES_PATH, logger, LOGS_PATH, START_TIMESTAMP
 from wormlab3d.data.model import Reconstruction, Trial
 from wormlab3d.midlines3d.frame_state import CAM_PARAMETER_NAMES
-from wormlab3d.midlines3d.mf_methods import integrate_curvature, smooth_parameter, make_rotation_matrix
+from wormlab3d.midlines3d.mf_methods import integrate_curvature, smooth_parameter, make_rotation_matrix, normalise, \
+    orthogonalise
 from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.midlines3d.util import generate_annotated_images
@@ -68,6 +70,7 @@ def get_args() -> Namespace:
                         help='GPU id to use if using GPUs.')
     parser.add_argument('--train-steps', type=int, default=500)
     parser.add_argument('--learning-rate', type=float, default=1e-5)
+    parser.add_argument('--reg-weight', type=float, default=1e-1)
     parser.add_argument('--optimise-X0', type=str2bool, default=True)
     parser.add_argument('--optimise-T0', type=str2bool, default=True)
     parser.add_argument('--optimise-M10', type=str2bool, default=True)
@@ -648,7 +651,7 @@ def _init_cam_coeffs(
         ts: TrialState,
         args: Namespace,
         device,
-        as_parameters: bool = False,
+        fixed: bool = False
 ):
     """
     Initialise camera coefficients.
@@ -657,33 +660,22 @@ def _init_cam_coeffs(
     params = {}
     for k in CAM_PARAMETER_NAMES:
         v = torch.from_numpy(ts.get(f'cam_{k}', **f_range).copy()).to(device)
-        if not as_parameters:
-            params[k] = v
-        else:
-            if k == 'shifts':
-                params[k] = nn.Parameter(v, requires_grad=args.optimise_shifts)
-            else:
-                if getattr(args, f'use_mean_{k}'):
-                    v = v.mean(dim=0)
-                params[k] = nn.Parameter(v, requires_grad=False)
-
+        if fixed and hasattr(args, f'use_mean_{k}') and getattr(args, f'use_mean_{k}'):
+            v[:] = v.mean(axis=0, keepdim=True)
+        params[k] = v
     return params
 
 
 def _get_cam_coeffs_for_frame(
         cam_coeffs: Dict[str, torch.Tensor],
         idx: int,
-        args: Namespace,
-        force_index: bool = False
 ) -> torch.Tensor:
     """
     Build rotation matrices and collate all the camera coefficients together.
     """
     cc = []
     for k in CAM_PARAMETER_NAMES:
-        v = cam_coeffs[k]
-        if force_index or k == 'shifts' or not getattr(args, f'use_mean_{k}'):
-            v = v[idx]
+        v = cam_coeffs[k][idx]
         if k == 'rotation_preangles':
             Rs = []
             for i in range(3):
@@ -708,7 +700,8 @@ def _plot_camera_fix_examples(
         points_2d: torch.Tensor,
         points_f: torch.Tensor,
         points_2d_f: torch.Tensor,
-        losses_batch: torch.Tensor,
+        losses_p2d_batch: torch.Tensor,
+        losses_reg_batch: torch.Tensor,
         save_dir: PosixPath
 ):
     """
@@ -733,7 +726,9 @@ def _plot_camera_fix_examples(
 
         fig = plt.figure(figsize=(8, 6))
         gs = GridSpec(2, 2)
-        fig.suptitle(f'Trial={trial.id}. Frame={frame_num}. Error={losses_batch[idx]:.5f}. ')
+        fig.suptitle(f'Trial={trial.id}. Frame={frame_num}. '
+                     f'P2D loss={losses_p2d_batch[idx]:.5f}. '
+                     f'Reg loss={losses_reg_batch[idx]:.5f}. ')
 
         # Plot 3D
         ax = fig.add_subplot(gs[:, 0], projection='3d')
@@ -767,6 +762,70 @@ def _plot_camera_fix_examples(
         plt.close(fig)
 
 
+def _process_batch(
+        prs: ProjectRenderScoreModel,
+        X0: torch.Tensor,
+        T0: torch.Tensor,
+        M10: torch.Tensor,
+        K: torch.Tensor,
+        lengths: torch.Tensor,
+        cam_coeffs: torch.Tensor,
+        # cam_shifts: torch.Tensor,
+        points_3d_base: torch.Tensor,
+        points_2d_base: torch.Tensor,
+        points_2d_target: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Process a batch of curves.
+    """
+    device = X0.device
+    batch_size = len(X0)
+
+    # Build the 3D points from the static curvature and length but updated position and orientation
+    p3d_batch, tangents_r, M1_r = integrate_curvature(
+        X0,
+        T0,
+        lengths,
+        smooth_parameter(K, 15, mode='gaussian'),
+        M10,
+    )
+
+    # Build cam coefficients
+    cam_coeffs_flat = torch.stack([
+        _get_cam_coeffs_for_frame(cam_coeffs, idx)
+        for idx in range(batch_size)
+    ])
+    # cam_coeffs_flat[:, :, 21] = cam_shifts[..., 0]
+
+    # Project to 2D
+    p2d_batch = prs._project_to_2d(
+        points_3d=p3d_batch,
+        cam_coeffs=cam_coeffs_flat,
+        points_3d_base=points_3d_base,
+        points_2d_base=points_2d_base,
+        clamp=False
+    ).permute(0, 2, 1, 3)
+
+    # Calculate losses
+    losses_p2d = ((points_2d_target - p2d_batch)**2).mean(axis=(1, 2, 3))
+
+    # Regularisation
+    shifts_batch = cam_coeffs['shifts'][:, :, 0]
+    reg_X0 = ((X0[1:] - X0[:-1])**2).sum(dim=-1)
+    reg_T0 = ((T0[1:] - T0[:-1])**2).sum(dim=-1)
+    reg_M10 = ((M10[1:] - M10[:-1])**2).sum(dim=-1)
+    reg_shifts = ((shifts_batch[1:] - shifts_batch[:-1])**2).sum(dim=-1)
+    reg_loss_batch = reg_X0 + reg_T0 + reg_M10 + reg_shifts
+
+    # Spread the regularisation across the batch
+    reg_spread = torch.zeros(batch_size, device=device)
+    reg_spread[1:] = reg_loss_batch
+    reg_spread[:-1] = reg_spread[:-1] + reg_loss_batch
+    reg_spread[1:-1] = reg_spread[1:-1] / 2
+
+    return p3d_batch, p2d_batch, losses_p2d, reg_spread
+
+
 def _fix_camera_positions(
         ts: TrialState,
         args: Namespace,
@@ -787,7 +846,7 @@ def _fix_camera_positions(
 
     # Fetch parameters
     f_range = {'start_frame': ts.reconstruction.start_frame, 'end_frame': ts.reconstruction.end_frame}
-    cam_coeffs = _init_cam_coeffs(ts, args, device=device, as_parameters=False)
+    cam_coeffs = _init_cam_coeffs(ts, args, device=device, fixed=False)
     points = torch.from_numpy(ts.get('points', **f_range).copy()).to(device)
     points_2d = torch.from_numpy(ts.get('points_2d', **f_range).copy()).to(device)
     points_3d_base = torch.from_numpy(ts.get('points_3d_base', **f_range).copy()).to(torch.float32).to(device)
@@ -799,50 +858,20 @@ def _fix_camera_positions(
     K = torch.from_numpy(ts.get('curvatures', **f_range).copy()).to(device)
     n_frames = len(points)
 
-    # Initialise trainable parameters
-    X0f = nn.Parameter(torch.from_numpy(ts.get('X0', **f_range).copy())[:, 0].to(device), requires_grad=args.optimise_X0)
-    T0f = nn.Parameter(torch.from_numpy(ts.get('T0', **f_range).copy())[:, 0].to(device), requires_grad=args.optimise_T0)
-    M10f = nn.Parameter(torch.from_numpy(ts.get('M10', **f_range).copy())[:, 0].to(device), requires_grad=args.optimise_M10)
-    cam_coeffs_f = _init_cam_coeffs(ts, args, device=device, as_parameters=True)
+    # Initialise output placeholders
+    X0f = torch.zeros_like(X0)
+    T0f = torch.zeros_like(T0)
+    M10f = torch.zeros_like(M10)
+    cam_coeffs_f = _init_cam_coeffs(ts, args, device=device, fixed=True)
 
     # Initialise new 3D and 2D points
     points_f = torch.zeros_like(points, device=device)
     points_2d_f = torch.zeros_like(points_2d, device=device)
 
-    def process_batch(idxs) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        # Fetch camera coefficients for these frames
-        cam_coeffs_batch = torch.stack([
-            _get_cam_coeffs_for_frame(cam_coeffs_f, idx, args)
-            for idx in idxs
-        ])
-
-        # Build the 3D points from the static curvature and length but updated position and orientation
-        p3d_batch, tangents_r, M1_r = integrate_curvature(
-            X0f[idxs].clamp(min=-0.5, max=0.5),
-            T0f[idxs],
-            lengths[idxs],
-            smooth_parameter(K[idxs], 15, mode='gaussian'),
-            M10f[idxs],
-        )
-
-        # Project to 2D
-        p2d_batch = prs._project_to_2d(
-            points_3d=p3d_batch,
-            cam_coeffs=cam_coeffs_batch,
-            points_3d_base=points_3d_base[idxs],
-            points_2d_base=points_2d_base[idxs],
-            clamp=False
-        ).permute(0, 2, 1, 3)
-
-        # Calculate losses
-        losses_batch = ((points_2d[idxs] - p2d_batch)**2).mean(axis=(1, 2, 3))
-
-        return p3d_batch, p2d_batch, losses_batch
-
     # Initialise optimiser and outputs
-    optimiser = AdamW(params=list(cam_coeffs_f.values()) + [X0f, T0f, M10f], lr=args.learning_rate, weight_decay=0)
     n_batches = int(n_frames / args.batch_size) + 1
     losses = np.zeros((n_batches, args.train_steps))
+    lrs = np.zeros((n_batches, args.train_steps))
     train_steps = np.zeros(n_batches, dtype=np.int32)
 
     # Process batches at a time
@@ -853,23 +882,86 @@ def _fix_camera_positions(
         idxs = np.arange(start_idx, end_idx)
         batch_size = end_idx - start_idx
 
+        # Instantiate optimisable parameters
+        cam_shifts_batch = nn.Parameter(cam_coeffs['shifts'][idxs], requires_grad=args.optimise_shifts)
+        X0f_batch = nn.Parameter(X0[idxs].clamp(min=-0.5, max=0.5), requires_grad=args.optimise_X0)
+        T0f_batch = nn.Parameter(T0[idxs], requires_grad=args.optimise_T0)
+        M10f_batch = nn.Parameter(M10[idxs], requires_grad=args.optimise_M10)
+
+        optimiser = AdamW(
+            params=[cam_shifts_batch, X0f_batch, T0f_batch, M10f_batch],
+            lr=args.learning_rate,
+            weight_decay=0
+        )
+        scheduler = ReduceLROnPlateau(
+            optimiser,
+            mode='min',
+            factor=0.99,
+            patience=5,
+        )
+
+        # Build camera coefficients for these frames
+        cam_coeffs_f_batch = {
+            k: cam_coeffs_f[k][idxs]
+            for k in CAM_PARAMETER_NAMES
+        }
+        cam_coeffs_f_batch['shifts'] = cam_shifts_batch
+
         for step in range(args.train_steps):
             optimiser.zero_grad()
-            points_f_batch, points_2d_f_batch, losses_batch = process_batch(idxs)
-            batch_loss = losses_batch.mean()
+            points_f_batch, points_2d_f_batch, losses_p2d_batch, losses_reg_batch = _process_batch(
+                prs=prs,
+                X0=X0f_batch,
+                T0=T0f_batch,
+                M10=M10f_batch,
+                K=K[idxs],
+                lengths=lengths[idxs],
+                cam_coeffs=cam_coeffs_f_batch,
+                points_3d_base=points_3d_base[idxs],
+                points_2d_base=points_2d_base[idxs],
+                points_2d_target=points_2d[idxs]
+            )
+            batch_loss = (losses_p2d_batch + args.reg_weight * losses_reg_batch).mean()
             batch_loss.backward()
             optimiser.step()
+            lrs[i, step] = optimiser.param_groups[0]['lr']
+            scheduler.step(batch_loss.item())
             losses[i, step] = batch_loss.item()
 
+            # Clamp parameters
+            with torch.no_grad():
+                # T0 should be normalised
+                T0f_batch.data = normalise(T0f_batch)
+
+                # M10 should be orthogonal to T0 and normalised
+                M10f_batch = normalise(M10f_batch)
+                M10f_batch = orthogonalise(M10f_batch, T0f_batch)
+                M10f_batch.data = normalise(M10f_batch)
+
             if step > 0 and step % 10 == 0:
-                logger.info(f'Train step {step}/{args.train_steps}. Loss: {batch_loss.item():.4f}.')
+                logger.info(
+                    f'Train step {step}/{args.train_steps}. '
+                    f'\tLoss: {batch_loss.item():.4f}. '
+                    f'\tP2D: {losses_p2d_batch.mean().item():.4f}. '
+                    f'\tReg: {losses_reg_batch.mean().item():.4f}. '
+                    f'\tlr: {optimiser.param_groups[0]["lr"]:.3f}. '
+                )
 
             if batch_loss.item() < args.loss_batch_mean_threshold:
                 break
 
+        # Update parameters
+        for k in CAM_PARAMETER_NAMES:
+            if k == 'shifts':
+                cam_coeffs_f[k][idxs] = cam_shifts_batch
+            else:
+                cam_coeffs_f[k][idxs] = cam_coeffs_f_batch[k]
+        X0f[idxs] = X0f_batch
+        T0f[idxs] = T0f_batch
+        M10f[idxs] = M10f_batch
+        points_f[idxs] = points_f_batch
+        points_2d_f[idxs] = points_2d_f_batch
         train_steps[i] = step
-        points_f[start_idx:end_idx] = points_f_batch
-        points_2d_f[start_idx:end_idx] = points_2d_f_batch
 
         if args.plot_n_examples_per_batch > 0:
             _plot_camera_fix_examples(
@@ -882,7 +974,8 @@ def _fix_camera_positions(
                 points_2d=points_2d[idxs],
                 points_f=points_f_batch,
                 points_2d_f=points_2d_f_batch,
-                losses_batch=losses_batch,
+                losses_p2d_batch=losses_p2d_batch,
+                losses_reg_batch=losses_reg_batch,
                 save_dir=save_dir_n
             )
 
@@ -896,12 +989,11 @@ def _fix_camera_positions(
             ax.set_title('Batch loss')
             ax.plot(np.arange(step), losses[i, :step])
             ax.axhline(y=args.loss_batch_mean_threshold, linestyle='--', color='red', alpha=0.7)
+            ax.set_yscale('log')
             ax.grid()
             ax = fig.add_subplot(gs[0, 2:4])
-            ax.set_title('Batch loss')
-            ax.plot(np.arange(step), losses[i, :step])
-            ax.axhline(y=args.loss_batch_mean_threshold, linestyle='--', color='red', alpha=0.7)
-            ax.set_yscale('log')
+            ax.set_title('Learning rate')
+            ax.plot(np.arange(step), lrs[i, :step])
             ax.grid()
 
             for j in range(4):
@@ -978,11 +1070,11 @@ def _fix_camera_positions(
         batch_size = end_idx - start_idx
         p3d_batch = torch.zeros((batch_size, 1, 3), device=device)
         cam_coeffs_batch = torch.stack([
-            _get_cam_coeffs_for_frame(cam_coeffs, idx, args, force_index=True)
+            _get_cam_coeffs_for_frame(cam_coeffs, idx)
             for idx in idxs
         ])
         cam_coeffs_f_batch = torch.stack([
-            _get_cam_coeffs_for_frame(cam_coeffs_f, idx, args)
+            _get_cam_coeffs_for_frame(cam_coeffs_f, idx)
             for idx in idxs
         ])
         projection_parameters = dict(
