@@ -868,7 +868,9 @@ class Midline3DFinder:
         stats = None
 
         def closure():
-            nonlocal masks, detection_masks, points_2d, scores, curvatures_smoothed, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed, masks_target_residuals, loss, loss_global, losses_depths, stats
+            nonlocal masks, detection_masks, points_2d, scores, curvatures_smoothed, points_smoothed, \
+                sigmas_smoothed, exponents_smoothed, intensities_smoothed, masks_target_residuals, \
+                loss, loss_global, losses_depths, stats
             self.optimiser.zero_grad()
 
             # Collect parameters

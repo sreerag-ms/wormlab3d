@@ -193,9 +193,9 @@ class TrialState:
         D = mp.depth - mp.depth_min
         path_state = self.path / f'{k}.npz'
 
-        if k in ['masks_target', 'masks_target_residuals', 'masks_curve']:
-            shape = (T, 3, self.trial.crop_size, self.trial.crop_size)
-        elif k == 'cam_intrinsics':
+        # if k in ['masks_target', 'masks_target_residuals', 'masks_curve']:
+        #     shape = (T, 3, self.trial.crop_size, self.trial.crop_size)
+        if k == 'cam_intrinsics':
             shape = (T, 3, 4)
         elif k == 'cam_rotations':
             shape = (T, 3, 9)
@@ -263,16 +263,17 @@ class TrialState:
         assert self.start_frame <= frame_num <= self.end_frame, 'Requested frame is not available.'
         for k in BUFFER_NAMES + PARAMETER_NAMES:
             # Collate outputs generated at each depth
-            if k in ['points', 'points_2d', 'sigmas', 'exponents', 'intensities', 'scores', 'masks_target',
-                     'masks_target_residuals', 'masks_curve'] + CURVATURE_PARAMETER_NAMES:
+            if k in ['points', 'points_2d', 'sigmas', 'exponents', 'intensities', 'scores',
+                     # 'masks_target', 'masks_target_residuals', 'masks_curve'
+                     ] + CURVATURE_PARAMETER_NAMES:
                 p_ms = frame_state.get_state(k)
 
-                # Only store the deepest target and output masks
-                if k in ['masks_target', 'masks_target_residuals', 'masks_curve']:
-                    p = to_numpy(p_ms[-1])
+                # # Only store the deepest target and output masks
+                # if k in ['masks_target', 'masks_target_residuals', 'masks_curve']:
+                #     p = to_numpy(p_ms[-1])
 
                 # Stack parameters which do not change across depths
-                elif k in ['X0', 'T0', 'M10', 'length', 'sigmas', 'exponents', 'intensities']:
+                if k in ['X0', 'T0', 'M10', 'length', 'sigmas', 'exponents', 'intensities']:
                     p = np.array([to_numpy(p) for p in p_ms])
 
                 # Vectorise everything else
@@ -325,12 +326,12 @@ class TrialState:
             for k in BUFFER_NAMES + PARAMETER_NAMES:
                 v = torch.from_numpy(self.get(k)[frame_num])
 
-                # Only the deepest of these are stored so just duplicate them into lists first
-                if k in ['masks_target', 'masks_target_residuals', 'masks_curve']:
-                    v = [v] * (D - D_min)
+                # # Only the deepest of these are stored so just duplicate them into lists first
+                # if k in ['masks_target', 'masks_target_residuals', 'masks_curve']:
+                #     v = [v] * (D - D_min)
 
                 # Expand collapsed
-                elif k in ['curvatures', 'points', 'points_2d', 'scores']:
+                if k in ['curvatures', 'points', 'points_2d', 'scores']:
                     v = [v[2**d - idx_offset - 1:2**(d + 1) - idx_offset - 1] for d in range(D_min, D)]
                 elif k in ['X0', 'T0', 'M10', 'length', 'sigmas', 'exponents', 'intensities']:
                     v = [v[i] for i in range(D - D_min)]

@@ -48,11 +48,11 @@ CAM_PARAMETER_NAMES = [
 ]
 
 BUFFER_NAMES = [
-    'masks_target',
-    'masks_target_residuals',
+    # 'masks_target',
+    # 'masks_target_residuals',
     'cam_rotations',
     'points_2d',
-    'masks_curve',
+    # 'masks_curve',
     'scores',
 ]
 
@@ -65,6 +65,9 @@ TRANSIENTS_NAMES = [
     'sigmas_smoothed',
     'exponents_smoothed',
     'intensities_smoothed',
+    'masks_target',
+    'masks_target_residuals',
+    'masks_curve',
 ]
 
 BINARY_DATA_KEYS = []
