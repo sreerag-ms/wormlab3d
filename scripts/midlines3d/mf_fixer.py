@@ -1018,10 +1018,10 @@ def _fix_camera_positions(
 
     for i in range(3):
         # 2D drift, original vs fixed
-        px = p2d[:, i, 0]
-        py = p2d[:, i, 1]
-        pxf = p2d_f[:, i, 0]
-        pyf = p2d_f[:, i, 1]
+        px = to_numpy(p2d[:, i, 0])
+        py = to_numpy(p2d[:, i, 1])
+        pxf = to_numpy(p2d_f[:, i, 0])
+        pyf = to_numpy(p2d_f[:, i, 1])
 
         ax = fig.add_subplot(gs[i, 2])
         _plot_2d_drift(ax, px, py, cmap_original)
