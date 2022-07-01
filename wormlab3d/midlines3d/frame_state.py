@@ -88,6 +88,60 @@ def _extract_camera_coefficients(cameras: Cameras) -> torch.Tensor:
     return torch.from_numpy(cam_coeffs)
 
 
+def _extract_euler_angles(R: torch.Tensor) -> torch.Tensor:
+    """
+    Extract Euler rotation angles from the rotation matrices
+    """
+    assert R.shape == (3, 3, 3)
+    rotation_preangles = torch.zeros(3, 3, 2)
+    Rs = []
+
+    for i in range(3):
+        Ri = R[i]
+        if Ri[2, 0] != 1 and Ri[2, 0] != -1:
+            theta = -torch.arcsin(Ri[2, 0])
+            cos_theta = torch.cos(theta)
+            sin_theta = torch.sin(theta)
+
+            psi = torch.atan2(
+                Ri[2, 1] / cos_theta,
+                Ri[2, 2] / cos_theta
+            )
+
+            phi = torch.atan2(
+                Ri[1, 0] / cos_theta,
+                Ri[0, 0] / cos_theta,
+            )
+        else:
+            phi = 0
+            if Ri[2, 0] == -1:
+                theta = np.pi / 2
+                psi = phi + torch.atan2(Ri[0, 1], Ri[0, 2])
+            else:
+                theta = -np.pi / 2
+                psi = -phi + torch.atan2(-Ri[0, 1], -Ri[0, 2])
+
+            cos_theta = torch.cos(theta)
+            sin_theta = torch.sin(theta)
+
+        cos_psi = torch.cos(psi)
+        sin_psi = torch.sin(psi)
+        cos_phi = torch.cos(phi)
+        sin_phi = torch.sin(phi)
+
+        rotation_preangles[i] = torch.tensor([
+            [cos_phi, sin_phi],
+            [cos_theta, sin_theta],
+            [cos_psi, sin_psi],
+        ])
+
+        Ri2 = make_rotation_matrix(cos_phi, sin_phi, cos_theta, sin_theta, cos_psi, sin_psi)
+        assert torch.allclose(Ri, Ri2, atol=1e-3)
+        Rs.append(Ri2.flatten())
+
+    return rotation_preangles
+
+
 class FrameState(nn.Module):
     def __init__(
             self,
@@ -392,51 +446,7 @@ class FrameState(nn.Module):
 
         # Extract Euler rotation angles from the rotation matrices
         R = cc[:, 4:13].reshape((3, 3, 3))
-        rotation_preangles = torch.zeros(3, 3, 2)
-        Rs = []
-
-        for i in range(3):
-            Ri = R[i]
-            if Ri[2, 0] != 1 and Ri[2, 0] != -1:
-                theta = -torch.arcsin(Ri[2, 0])
-                cos_theta = torch.cos(theta)
-                sin_theta = torch.sin(theta)
-
-                psi = torch.atan2(
-                    Ri[2, 1] / cos_theta,
-                    Ri[2, 2] / cos_theta
-                )
-
-                phi = torch.atan2(
-                    Ri[1, 0] / cos_theta,
-                    Ri[0, 0] / cos_theta,
-                )
-            else:
-                phi = 0
-                if Ri[2, 0] == -1:
-                    theta = np.pi / 2
-                    psi = phi + torch.atan2(Ri[0, 1], Ri[0, 2])
-                else:
-                    theta = -np.pi / 2
-                    psi = -phi + torch.atan2(-Ri[0, 1], -Ri[0, 2])
-
-                cos_theta = torch.cos(theta)
-                sin_theta = torch.sin(theta)
-
-            cos_psi = torch.cos(psi)
-            sin_psi = torch.sin(psi)
-            cos_phi = torch.cos(phi)
-            sin_phi = torch.sin(phi)
-
-            rotation_preangles[i] = torch.tensor([
-                [cos_phi, sin_phi],
-                [cos_theta, sin_theta],
-                [cos_psi, sin_psi],
-            ])
-
-            Ri2 = make_rotation_matrix(cos_phi, sin_phi, cos_theta, sin_theta, cos_psi, sin_psi)
-            assert torch.allclose(Ri, Ri2, atol=1e-3)
-            Rs.append(Ri2.flatten())
+        rotation_preangles = _extract_euler_angles(R)
 
         # Optimise just the rotation angles, not the full rotation matrix.
         self.register_parameter(

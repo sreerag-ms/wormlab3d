@@ -541,6 +541,7 @@ class ProjectRenderScoreModel(nn.Module):
             points_3d: torch.Tensor,
             points_3d_base: torch.Tensor,
             points_2d_base: torch.Tensor,
+            clamp: bool = True
     ) -> torch.Tensor:
         bs = cam_coeffs.shape[0]
         device = cam_coeffs.device
@@ -556,6 +557,7 @@ class ProjectRenderScoreModel(nn.Module):
         points_2d = points_2d - points_2d_base[:, :, None] + image_centre_pt
 
         # Ensure points land inside image boundaries otherwise gradient breaks
-        points_2d = points_2d.clamp(min=1., max=self.image_size - 1)
+        if clamp:
+            points_2d = points_2d.clamp(min=1., max=self.image_size - 1)
 
         return points_2d
