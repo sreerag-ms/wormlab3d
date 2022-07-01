@@ -70,6 +70,7 @@ def get_args() -> Namespace:
                         help='GPU id to use if using GPUs.')
     parser.add_argument('--train-steps', type=int, default=500)
     parser.add_argument('--learning-rate', type=float, default=1e-5)
+    parser.add_argument('--learning-rate-decay', type=float, default=0.99)
     parser.add_argument('--reg-weight', type=float, default=1e-1)
     parser.add_argument('--optimise-X0', type=str2bool, default=True)
     parser.add_argument('--optimise-T0', type=str2bool, default=True)
@@ -896,8 +897,9 @@ def _fix_camera_positions(
         scheduler = ReduceLROnPlateau(
             optimiser,
             mode='min',
-            factor=0.99,
+            factor=args.learning_rate_decay,
             patience=5,
+            min_lr=1e-4
         )
 
         # Build camera coefficients for these frames
@@ -941,10 +943,10 @@ def _fix_camera_positions(
             if step > 0 and step % 10 == 0:
                 logger.info(
                     f'Train step {step}/{args.train_steps}. '
-                    f'\tLoss: {batch_loss.item():.4f}. '
-                    f'\tP2D: {losses_p2d_batch.mean().item():.4f}. '
-                    f'\tReg: {losses_reg_batch.mean().item():.4f}. '
-                    f'\tlr: {optimiser.param_groups[0]["lr"]:.3f}. '
+                    f'\tLoss: {batch_loss.item():.6f}. '
+                    f'\tP2D: {losses_p2d_batch.mean().item():.6f}. '
+                    f'\tReg: {losses_reg_batch.mean().item():.6f}. '
+                    f'\tlr: {optimiser.param_groups[0]["lr"]:.5f}. '
                 )
 
             if batch_loss.item() < args.loss_batch_mean_threshold:
