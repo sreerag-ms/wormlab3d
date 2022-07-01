@@ -800,12 +800,9 @@ def _fix_camera_positions(
     n_frames = len(points)
 
     # Initialise trainable parameters
-    X0f = nn.Parameter(torch.from_numpy(ts.get('X0', **f_range).copy())[:, 0], requires_grad=args.optimise_X0).to(
-        device)
-    T0f = nn.Parameter(torch.from_numpy(ts.get('T0', **f_range).copy())[:, 0], requires_grad=args.optimise_T0).to(
-        device)
-    M10f = nn.Parameter(torch.from_numpy(ts.get('M10', **f_range).copy())[:, 0], requires_grad=args.optimise_M10).to(
-        device)
+    X0f = nn.Parameter(torch.from_numpy(ts.get('X0', **f_range).copy())[:, 0].to(device), requires_grad=args.optimise_X0)
+    T0f = nn.Parameter(torch.from_numpy(ts.get('T0', **f_range).copy())[:, 0].to(device), requires_grad=args.optimise_T0)
+    M10f = nn.Parameter(torch.from_numpy(ts.get('M10', **f_range).copy())[:, 0].to(device), requires_grad=args.optimise_M10)
     cam_coeffs_f = _init_cam_coeffs(ts, args, device=device, as_parameters=True)
 
     # Initialise new 3D and 2D points
