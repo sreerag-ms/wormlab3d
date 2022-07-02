@@ -1168,7 +1168,7 @@ def _fix_camera_positions(
 
     # Updating parameters
     if final_losses.max() < args.error_threshold:
-        logger.info(f'Maximum error ({errors.max():.5f}) < Error threshold ({args.error_threshold:.4f}).')
+        logger.info(f'Maximum error ({final_losses.max():.5f}) < Error threshold ({args.error_threshold:.4f}).')
         if args.dry_run:
             logger.info('(DRY RUN) NOT-Updating parameters.')
         else:
@@ -1181,20 +1181,20 @@ def _fix_camera_positions(
                 ts.states[f'cam_{k}'][start_idx:end_idx] = to_numpy(cam_coeffs_f[k])
 
             # Update the curve parameters
-            ts.states['X0'][start_idx:end_idx] = X0f
-            ts.states['T0'][start_idx:end_idx] = T0f
-            ts.states['M10'][start_idx:end_idx] = M10f
-            ts.states['curvatures'][start_idx:end_idx] = Kf
+            ts.states['X0'][start_idx:end_idx] = to_numpy(X0f)
+            ts.states['T0'][start_idx:end_idx] = to_numpy(T0f)
+            ts.states['M10'][start_idx:end_idx] = to_numpy(M10f)
+            ts.states['curvatures'][start_idx:end_idx] = to_numpy(Kf)
 
             # Update the points
-            ts.states['points'][start_idx:end_idx] = points_f
-            ts.states['points_2d'][start_idx:end_idx] = points_2d_f
+            ts.states['points'][start_idx:end_idx] = to_numpy(points_f)
+            ts.states['points_2d'][start_idx:end_idx] = to_numpy(points_2d_f)
 
             ts.save()
             logger.info('Saved.')
     else:
         logger.warning(
-            f'Maximum error ({errors.max():.5f}) > Error threshold ({args.error_threshold:.4f})'
+            f'Maximum error ({final_losses.max():.5f}) > Error threshold ({args.error_threshold:.4f})'
             f' - Not updating parameters.'
         )
 
