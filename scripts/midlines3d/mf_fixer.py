@@ -75,6 +75,7 @@ def get_args() -> Namespace:
     parser.add_argument('--optimise-X0', type=str2bool, default=True)
     parser.add_argument('--optimise-T0', type=str2bool, default=True)
     parser.add_argument('--optimise-M10', type=str2bool, default=True)
+    parser.add_argument('--optimise-K', type=str2bool, default=False)
     parser.add_argument('--optimise-shifts', type=str2bool, default=True)
     for k in CAM_PARAMETER_NAMES:
         if k == 'shifts':
@@ -771,7 +772,6 @@ def _process_batch(
         K: torch.Tensor,
         lengths: torch.Tensor,
         cam_coeffs: torch.Tensor,
-        # cam_shifts: torch.Tensor,
         points_3d_base: torch.Tensor,
         points_2d_base: torch.Tensor,
         points_2d_target: torch.Tensor,
@@ -796,7 +796,6 @@ def _process_batch(
         _get_cam_coeffs_for_frame(cam_coeffs, idx)
         for idx in range(batch_size)
     ])
-    # cam_coeffs_flat[:, :, 21] = cam_shifts[..., 0]
 
     # Project to 2D
     p2d_batch = prs._project_to_2d(
@@ -815,8 +814,9 @@ def _process_batch(
     reg_X0 = ((X0[1:] - X0[:-1])**2).sum(dim=-1)
     reg_T0 = ((T0[1:] - T0[:-1])**2).sum(dim=-1)
     reg_M10 = ((M10[1:] - M10[:-1])**2).sum(dim=-1)
+    reg_K = 0 * ((K[1:] - K[:-1])**2).sum(dim=(-1, -2))
     reg_shifts = ((shifts_batch[1:] - shifts_batch[:-1])**2).sum(dim=-1)
-    reg_loss_batch = reg_X0 + reg_T0 + reg_M10 + reg_shifts
+    reg_loss_batch = reg_X0 + reg_T0 + reg_M10 + reg_shifts + reg_K
 
     # Spread the regularisation across the batch
     reg_spread = torch.zeros(batch_size, device=device)
@@ -863,6 +863,7 @@ def _fix_camera_positions(
     X0f = torch.zeros_like(X0)
     T0f = torch.zeros_like(T0)
     M10f = torch.zeros_like(M10)
+    Kf = torch.zeros_like(K)
     cam_coeffs_f = _init_cam_coeffs(ts, args, device=device, fixed=True)
 
     # Initialise new 3D and 2D points
@@ -888,9 +889,13 @@ def _fix_camera_positions(
         X0f_batch = nn.Parameter(X0[idxs].clamp(min=-0.5, max=0.5), requires_grad=args.optimise_X0)
         T0f_batch = nn.Parameter(T0[idxs], requires_grad=args.optimise_T0)
         M10f_batch = nn.Parameter(M10[idxs], requires_grad=args.optimise_M10)
+        Kf_batch = nn.Parameter(K[idxs], requires_grad=args.optimise_K)
 
         optimiser = AdamW(
-            params=[cam_shifts_batch, X0f_batch, T0f_batch, M10f_batch],
+            params=[
+                {'params': [cam_shifts_batch, X0f_batch, T0f_batch, M10f_batch], 'lr': args.learning_rate},
+                {'params': [Kf_batch], 'lr': args.learning_rate / 100}
+            ],
             lr=args.learning_rate,
             weight_decay=0
         )
@@ -916,7 +921,7 @@ def _fix_camera_positions(
                 X0=X0f_batch,
                 T0=T0f_batch,
                 M10=M10f_batch,
-                K=K[idxs],
+                K=Kf_batch,
                 lengths=lengths[idxs],
                 cam_coeffs=cam_coeffs_f_batch,
                 points_3d_base=points_3d_base[idxs],
@@ -961,6 +966,7 @@ def _fix_camera_positions(
         X0f[idxs] = X0f_batch
         T0f[idxs] = T0f_batch
         M10f[idxs] = M10f_batch
+        Kf[idxs] = Kf_batch
         points_f[idxs] = points_f_batch
         points_2d_f[idxs] = points_2d_f_batch
         train_steps[i] = step
@@ -983,32 +989,40 @@ def _fix_camera_positions(
 
         # Plot loss and parameter changes across the batch
         if 1:
-            fig = plt.figure(figsize=(16, 16))
-            gs = GridSpec(4, 4)
+            fig = plt.figure(figsize=(16, 14))
+            gs = GridSpec(4, 10)
             fig.suptitle(f'Batch {i + 1}/{n_batches}. Loss={batch_loss.item():.4f}. Steps={step}.')
 
-            ax = fig.add_subplot(gs[0, 0:2])
+            ax = fig.add_subplot(gs[0, 0:5])
             ax.set_title('Batch loss')
             ax.plot(np.arange(step), losses[i, :step])
             ax.axhline(y=args.loss_batch_mean_threshold, linestyle='--', color='red', alpha=0.7)
             ax.set_yscale('log')
             ax.grid()
-            ax = fig.add_subplot(gs[0, 2:4])
+            ax = fig.add_subplot(gs[0, 5:10])
             ax.set_title('Learning rate')
             ax.plot(np.arange(step), lrs[i, :step])
             ax.grid()
 
-            for j in range(4):
-                vo = to_numpy([X0, T0, M10, cam_coeffs['shifts']][j][idxs])
-                vf = to_numpy([X0f, T0f, M10f, cam_coeffs_f['shifts']][j][idxs])
+            for j in range(5):
+                vo = to_numpy([X0, T0, M10, K, cam_coeffs['shifts']][j][idxs])
+                vf = to_numpy([X0f, T0f, M10f, Kf, cam_coeffs_f['shifts']][j][idxs])
                 for k in range(3):
-                    ax = fig.add_subplot(gs[1 + k, j])
+                    ax = fig.add_subplot(gs[1 + k, j * 2:j * 2 + 2])
                     if k == 0:
-                        ax.set_title(['X0', 'T0', 'M10', 'shifts'][j])
-                    if j == 0:
+                        ax.set_title(['X0', 'T0', 'M10', 'K', 'shifts'][j])
+                    if j == 3:
+                        ax.set_ylabel(['m1', 'm2', 'k'][k])
+                        if k == 2:
+                            ax.plot(np.abs(vo).sum(axis=(-1, -2)), label='original')
+                            ax.plot(np.abs(vf).sum(axis=(-1, -2)), label='fixed')
+                        else:
+                            ax.plot(np.abs(vo[:, :, k]).sum(axis=-1), label='original')
+                            ax.plot(np.abs(vf[:, :, k]).sum(axis=-1), label='fixed')
+                    else:
                         ax.set_ylabel(['x', 'y', 'z'][k])
-                    ax.plot(vo[:, k], label='original')
-                    ax.plot(vf[:, k], label='fixed')
+                        ax.plot(vo[:, k], label='original')
+                        ax.plot(vf[:, k], label='fixed')
                     ax.legend()
 
             fig.tight_layout()
@@ -1166,10 +1180,11 @@ def _fix_camera_positions(
             for k in CAM_PARAMETER_NAMES:
                 ts.states[f'cam_{k}'][start_idx:end_idx] = to_numpy(cam_coeffs_f[k])
 
-            # Update the curve orientation and position
+            # Update the curve parameters
             ts.states['X0'][start_idx:end_idx] = X0f
             ts.states['T0'][start_idx:end_idx] = T0f
             ts.states['M10'][start_idx:end_idx] = M10f
+            ts.states['curvatures'][start_idx:end_idx] = Kf
 
             # Update the points
             ts.states['points'][start_idx:end_idx] = points_f
