@@ -1128,8 +1128,10 @@ def _fix_camera_positions(
         # Drift over time
         ax = fig.add_subplot(gs[i, 0:2])
         ax.set_title(f'Camera {i}')
-        ax.plot(p2d[:, i, 0], label='x')
-        ax.plot(p2d[:, i, 1], label='y')
+        ax.plot(px, label='x', color='blue', alpha=0.7)
+        ax.plot(pxf, label='xf', color='darkblue', linestyle='--', alpha=0.7)
+        ax.plot(py, label='y', color='green', alpha=0.7)
+        ax.plot(pyf, label='yf', color='darkgreen', linestyle='--', alpha=0.7)
         ax.legend()
 
         # Errors
