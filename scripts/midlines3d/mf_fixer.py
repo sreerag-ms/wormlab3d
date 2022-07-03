@@ -48,7 +48,7 @@ def get_args() -> Namespace:
                         help='Start and end frame numbers to trim reconstruction to.')
     parser.add_argument('--flip-frames', type=lambda s: [int(item) for item in s.split(',')],
                         help='Flip HT at these frames (and subsequent).')
-    parser.add_argument('--fix-camera-positions', type=str2bool, default=True,
+    parser.add_argument('--fix-camera-positions', type=str2bool, default=False,
                         help='Fix camera position drift.')
 
     # -- Generic arguments
@@ -1181,9 +1181,9 @@ def _fix_camera_positions(
                 ts.states[f'cam_{k}'][start_idx:end_idx] = to_numpy(cam_coeffs_f[k])
 
             # Update the curve parameters
-            ts.states['X0'][start_idx:end_idx] = to_numpy(X0f)
-            ts.states['T0'][start_idx:end_idx] = to_numpy(T0f)
-            ts.states['M10'][start_idx:end_idx] = to_numpy(M10f)
+            ts.states['X0'][start_idx:end_idx] = to_numpy(X0f)[:, None, :]
+            ts.states['T0'][start_idx:end_idx] = to_numpy(T0f)[:, None, :]
+            ts.states['M10'][start_idx:end_idx] = to_numpy(M10f)[:, None, :]
             ts.states['curvatures'][start_idx:end_idx] = to_numpy(Kf)
 
             # Update the points
