@@ -25,6 +25,7 @@ from wormlab3d.midlines3d.util import generate_annotated_images
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.postures.plot_utils import plot_natural_frame_3d
 from wormlab3d.toolkit.util import print_args, to_dict, str2bool, to_numpy
+from wormlab3d.trajectories.cache import get_trajectory
 
 show_plots = False
 save_plots = True
@@ -1161,6 +1162,58 @@ def _fix_camera_positions(
     if save_plots:
         path = save_dir_n / f'drift.{img_extension}'
         logger.info(f'Saving drift plot to {path}.')
+        plt.savefig(path)
+
+    if show_plots:
+        plt.show()
+
+    # Plot trajectory comparisons
+    X_tracking = get_trajectory(trial_id=trial.id, tracking_only=True, **f_range)[0][:, 0]
+    X_original = points.mean(dim=1) + points_3d_base
+    X_fixed = points_f.mean(dim=1) + points_3d_base
+    if len(X_tracking) < len(X_original):
+        X_original = X_original[:len(X_tracking)]
+        X_fixed = X_fixed[:len(X_tracking)]
+    elif len(X_tracking) > len(X_original):
+        X_tracking = X_tracking[:len(X_original)]
+
+    # Centre the trajectories
+    X_tracking -= X_tracking.mean(axis=0, keepdims=True)
+    X_original -= X_original.mean(axis=0, keepdims=True)
+    X_fixed -= X_fixed.mean(axis=0, keepdims=True)
+
+    # Plot 3D and 2D views
+    fig = plt.figure(figsize=(10,10))
+    gs = GridSpec(3, 3)
+    ax = fig.add_subplot(gs[:2, :], projection='3d')
+    ax.set_title('blue=tracking, green=original, red=fixed')
+    ax.scatter(*X_tracking.T, c='blue', alpha=0.6, s=1)
+    ax.scatter(*X_original.T, c='green', alpha=0.6, s=1)
+    ax.scatter(*X_fixed.T, c='red', alpha=0.6, s=1)
+    projections = ['xy', 'yz', 'xz']
+    for i, p in enumerate(projections):
+        if p == 'xy':
+            X_tracking_p = np.delete(X_tracking, 2, 1)
+            X_original_p = np.delete(X_original, 2, 1)
+            X_fixed_p = np.delete(X_fixed, 2, 1)
+        elif p == 'yz':
+            X_tracking_p = np.delete(X_tracking, 0, 1)
+            X_original_p = np.delete(X_original, 0, 1)
+            X_fixed_p = np.delete(X_fixed, 0, 1)
+        elif p == 'xz':
+            X_tracking_p = np.delete(X_tracking, 1, 1)
+            X_original_p = np.delete(X_original, 1, 1)
+            X_fixed_p = np.delete(X_fixed, 1, 1)
+        ax = fig.add_subplot(gs[2, i])
+        ax.set_title(p)
+        ax.scatter(X_tracking_p[:, 0], X_tracking_p[:, 1], c='blue', alpha=0.6, s=1)
+        ax.scatter(X_original_p[:, 0], X_original_p[:, 1], c='green', alpha=0.6, s=1)
+        ax.scatter(X_fixed_p[:, 0], X_fixed_p[:, 1], c='red', alpha=0.6, s=1)
+    fig.tight_layout()
+
+    if save_plots:
+        path = save_dir_n / f'trajectory_comparisons.{img_extension}'
+        logger.info(f'Saving trajectory comparisons plot to {path}.')
         plt.savefig(path)
 
     if show_plots:
