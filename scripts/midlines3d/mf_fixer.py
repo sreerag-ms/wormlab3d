@@ -1108,8 +1108,8 @@ def _fix_camera_positions(
         p2d_f[start_idx:end_idx] = p2d_f_batch.detach()
 
     # Calculate errors as distance from 2d points to centre of images
-    errors = torch.sum((p2d - p2d_target)**2, dim=-1)
-    errors_f = torch.sum((p2d_f - p2d_target)**2, dim=-1)
+    errors = to_numpy(torch.sum((p2d - p2d_target)**2, dim=-1))
+    errors_f = to_numpy(torch.sum((p2d_f - p2d_target)**2, dim=-1))
 
     # Plot the drift
     fig = plt.figure(figsize=(16, 10))
@@ -1169,8 +1169,8 @@ def _fix_camera_positions(
 
     # Plot trajectory comparisons
     X_tracking = get_trajectory(trial_id=trial.id, tracking_only=True, **f_range)[0][:, 0]
-    X_original = points.mean(dim=1) + points_3d_base
-    X_fixed = points_f.mean(dim=1) + points_3d_base
+    X_original = to_numpy(points.mean(dim=1) + points_3d_base)
+    X_fixed = to_numpy(points_f.mean(dim=1) + points_3d_base)
     if len(X_tracking) < len(X_original):
         X_original = X_original[:len(X_tracking)]
         X_fixed = X_fixed[:len(X_tracking)]
