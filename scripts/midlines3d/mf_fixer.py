@@ -958,6 +958,10 @@ def _fix_camera_positions(
             if batch_loss.item() < args.loss_batch_mean_threshold:
                 break
 
+        if not args.dry_run and batch_loss.item() > args.error_threshold:
+            logger.warning(f'Failed to reach error threshold ({args.error_threshold:.2f}), aborting.')
+            exit(1)
+
         # Update parameters
         for k in CAM_PARAMETER_NAMES:
             if k == 'shifts':
@@ -1183,7 +1187,7 @@ def _fix_camera_positions(
     X_fixed -= X_fixed.mean(axis=0, keepdims=True)
 
     # Plot 3D and 2D views
-    fig = plt.figure(figsize=(10,10))
+    fig = plt.figure(figsize=(10, 10))
     gs = GridSpec(3, 3)
     ax = fig.add_subplot(gs[:2, :], projection='3d')
     ax.set_title('blue=tracking, green=original, red=fixed')
