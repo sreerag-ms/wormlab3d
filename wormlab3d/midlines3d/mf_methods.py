@@ -300,7 +300,7 @@ def integrate_curvature(
         M10 = orthogonalise(M10, T0)
         M10 = normalise(M10)
     M1[:, start_idx] = M10
-    M2[:, start_idx] = torch.cross(T[:, start_idx].clone(), M1[:, start_idx].clone())
+    M2[:, start_idx] = torch.linalg.cross(T[:, start_idx].clone(), M1[:, start_idx].clone())
 
     # Calculate orthonormal frame from the middle-out
     for i in range(start_idx + 1, N):
@@ -362,7 +362,7 @@ def integrate_curvature_combined(
         M10 = orthogonalise(M10, T0)
         M10 = normalise(M10)
     M1[:, N2 - 1] = M10
-    M2[:, N2 - 1] = torch.cross(T[:, N2 - 1].clone(), M1[:, N2 - 1].clone())
+    M2[:, N2 - 1] = torch.linalg.cross(T[:, N2 - 1].clone(), M1[:, N2 - 1].clone())
 
     # Calculate orthonormal frame from the middle-out
     for i in range(N2, N):
