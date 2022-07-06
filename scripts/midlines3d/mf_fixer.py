@@ -785,7 +785,7 @@ def _process_batch(
 
     # Build the 3D points from the static curvature and length but updated position and orientation
     p3d_batch, tangents_r, M1_r = integrate_curvature(
-        X0,
+        X0.clamp(min=-0.5, max=0.5),
         T0,
         lengths,
         smooth_parameter(K, 15, mode='gaussian'),
@@ -897,6 +897,7 @@ def _fix_camera_positions(
                 {'params': [cam_shifts_batch, X0f_batch, T0f_batch, M10f_batch], 'lr': args.learning_rate},
                 {'params': [Kf_batch], 'lr': args.learning_rate / 100}
             ],
+            amsgrad=True,
             lr=args.learning_rate,
             weight_decay=0
         )
@@ -938,6 +939,10 @@ def _fix_camera_positions(
 
             # Clamp parameters
             with torch.no_grad():
+                # X0 should be in range
+                eps = 1e-5
+                X0f_batch.data = X0f_batch.clamp(min=-0.5 + eps, max=0.5 - eps)
+
                 # T0 should be normalised
                 T0f_batch.data = normalise(T0f_batch)
 
