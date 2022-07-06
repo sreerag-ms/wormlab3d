@@ -962,6 +962,31 @@ def _fix_camera_positions(
             logger.warning(f'Failed to reach error threshold ({args.error_threshold:.2f}), aborting.')
             exit(1)
 
+        # Get final output from updated parameters
+        points_f_batch, points_2d_f_batch, losses_p2d_batch, losses_reg_batch = _process_batch(
+            prs=prs,
+            X0=X0f_batch,
+            T0=T0f_batch,
+            M10=M10f_batch,
+            K=Kf_batch,
+            lengths=lengths[idxs],
+            cam_coeffs=cam_coeffs_f_batch,
+            points_3d_base=points_3d_base[idxs],
+            points_2d_base=points_2d_base[idxs],
+            points_2d_target=points_2d[idxs]
+        )
+
+        # Verify batch
+        points_r, tangents_r, M1_r = integrate_curvature(
+            X0f_batch.clamp(min=-0.5, max=0.5),
+            T0f_batch,
+            lengths[idxs],
+            smooth_parameter(Kf_batch, 15, mode='gaussian'),
+            M10f_batch,
+        )
+
+        assert torch.allclose(points_r, points_f_batch)
+
         # Update parameters
         for k in CAM_PARAMETER_NAMES:
             if k == 'shifts':
