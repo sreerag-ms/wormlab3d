@@ -996,9 +996,9 @@ def _fix_camera_positions(
                 T0f_batch.data = normalise(T0f_batch)
 
                 # M10 should be orthogonal to T0 and normalised
-                M10f_batch = normalise(M10f_batch)
-                M10f_batch = orthogonalise(M10f_batch, T0f_batch)
-                M10f_batch.data = normalise(M10f_batch)
+                M10f_batch2 = normalise(M10f_batch)
+                M10f_batch2 = orthogonalise(M10f_batch2, T0f_batch)
+                M10f_batch.data = normalise(M10f_batch2)
 
             if step > 0 and step % 10 == 0:
                 logger.info(
