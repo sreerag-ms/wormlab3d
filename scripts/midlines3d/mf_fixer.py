@@ -838,9 +838,10 @@ def _process_batch(
     reg_X0 = ((X0[1:] - X0[:-1])**2).sum(dim=-1)
     reg_T0 = ((T0[1:] - T0[:-1])**2).sum(dim=-1)
     reg_M10 = ((M10[1:] - M10[:-1])**2).sum(dim=-1)
-    reg_K = 0 * ((K[1:] - K[:-1])**2).sum(dim=(-1, -2))
+    reg_K = ((K[1:] - K[:-1])**2).sum(dim=(-1, -2))
+    reg_l = (lengths[1:] - lengths[:-1])**2
     reg_shifts = ((shifts_batch[1:] - shifts_batch[:-1])**2).sum(dim=-1)
-    reg_loss_batch = reg_X0 + reg_T0 + reg_M10 + reg_shifts + reg_K
+    reg_loss_batch = reg_X0 + reg_T0 + reg_M10 + reg_K + reg_l + reg_shifts
 
     # Spread the regularisation across the batch
     reg_spread = torch.zeros(batch_size, device=device)
