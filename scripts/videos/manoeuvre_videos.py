@@ -393,10 +393,10 @@ def _make_traces_plots(
     for i, ws in enumerate(args.planarity_windows):
         pcas, meta = generate_or_load_pca_cache(**common_args, window_size=round(ws * trial.fps))
         r = pcas.explained_variance_ratio.T
-        t0 = int(np.floor((N - len(pcas)) / 2))
         npt = r[2] / np.sqrt(r[1] * r[0])
-        nonp_trajectories[i, t0:t0 + len(pcas)] \
-            = npt[start_frame - meta['start_frame']:start_frame - meta['start_frame'] + N]
+        npt = npt[start_frame - meta['start_frame']:start_frame - meta['start_frame'] + N]
+        t0 = max(0, int(np.floor((N - len(pcas)) / 2)))
+        nonp_trajectories[i, t0:t0 + len(npt)] = npt
 
     # Plot
     fig, axes = plt.subplots(4, figsize=(width / 100, height / 100), gridspec_kw={
