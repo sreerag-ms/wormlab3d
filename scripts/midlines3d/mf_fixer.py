@@ -759,7 +759,7 @@ def _plot_camera_fix_examples(
                               midline_cmap='winter', use_centred_midline=False)
         lims2 = np.array([getattr(ax, f'get_{xyz}lim')() for xyz in 'xyz'])
         for j, xyz in enumerate('xyz'):
-            getattr(ax, f'set_{xyz}lim')(min(lims1[j][0], lims2[j][1]))
+            getattr(ax, f'set_{xyz}lim')(min(lims1[j][0], lims2[j][0]), max(lims1[j][1], lims2[j][1]))
 
         # Plot reprojections
         ax = fig.add_subplot(gs[0, 1])
@@ -919,7 +919,8 @@ def _fix_camera_positions(
 
         optimiser = AdamW(
             params=[
-                {'params': [cam_shifts_batch, X0f_batch, T0f_batch, M10f_batch, lengthsf_batch], 'lr': args.learning_rate},
+                {'params': [cam_shifts_batch, X0f_batch, T0f_batch, M10f_batch, lengthsf_batch],
+                 'lr': args.learning_rate},
                 {'params': [Kf_batch], 'lr': args.learning_rate / 100}
             ],
             amsgrad=True,
