@@ -710,7 +710,7 @@ def _plot_camera_fix_examples(
         batch: int,
         step: int,
         start_frame_num: int,
-        idxs: np.ndarray,
+        plot_n: int,
         points: torch.Tensor,
         points_2d: torch.Tensor,
         points_f: torch.Tensor,
@@ -722,6 +722,8 @@ def _plot_camera_fix_examples(
     """
     Plot some example frames comparing originals to updated.
     """
+    idxs = torch.argsort(losses_p2d_batch, descending=True)[:plot_n]
+
     for i, idx in enumerate(idxs):
         frame_num = start_frame_num + idx
 
@@ -750,8 +752,12 @@ def _plot_camera_fix_examples(
         ax.set_title('Original + reconst')
         plot_natural_frame_3d(NF_original, azim=60, show_frame_arrows=False, show_pca_arrows=False, ax=ax,
                               midline_cmap='autumn', use_centred_midline=False)
+        lims1 = np.array([getattr(ax, f'get_{xyz}lim')() for xyz in 'xyz'])
         plot_natural_frame_3d(NF_reconst, azim=60, show_frame_arrows=False, show_pca_arrows=False, ax=ax,
                               midline_cmap='winter', use_centred_midline=False)
+        lims2 = np.array([getattr(ax, f'get_{xyz}lim')() for xyz in 'xyz'])
+        for j, xyz in enumerate('xyz'):
+            getattr(ax, f'set_{xyz}lim')(min(lims1[j][0], lims2[j][1]))
 
         # Plot reprojections
         ax = fig.add_subplot(gs[0, 1])
@@ -822,8 +828,8 @@ def _process_batch(
         clamp=False
     ).permute(0, 2, 1, 3)
 
-    # Calculate losses
-    losses_p2d = ((points_2d_target - p2d_batch)**2).mean(axis=(1, 2, 3))
+    # Calculate losses - average pixel distance
+    losses_p2d = (points_2d_target - p2d_batch).norm(dim=-1).mean(dim=(1, 2))
 
     # Regularisation
     shifts_batch = cam_coeffs['shifts'][:, :, 0]
@@ -1030,7 +1036,7 @@ def _fix_camera_positions(
                 batch=i,
                 step=step,
                 start_frame_num=start_idx,
-                idxs=np.random.choice(batch_size, min(batch_size, args.plot_n_examples_per_batch)),
+                plot_n=min(batch_size, args.plot_n_examples_per_batch),
                 points=points[idxs],
                 points_2d=points_2d[idxs],
                 points_f=points_f_batch,
