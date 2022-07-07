@@ -77,7 +77,9 @@ def get_args() -> Namespace:
     parser.add_argument('--optimise-X0', type=str2bool, default=True)
     parser.add_argument('--optimise-T0', type=str2bool, default=True)
     parser.add_argument('--optimise-M10', type=str2bool, default=True)
-    parser.add_argument('--optimise-K', type=str2bool, default=False)
+    parser.add_argument('--optimise-K', type=str2bool, default=True)
+    parser.add_argument('--optimise-K-threshold', type=float, default=5.)
+    parser.add_argument('--optimise-lengths', type=str2bool, default=True)
     parser.add_argument('--optimise-shifts', type=str2bool, default=True)
     for k in CAM_PARAMETER_NAMES:
         if k == 'shifts':
@@ -886,6 +888,7 @@ def _fix_camera_positions(
     T0f = torch.zeros_like(T0)
     M10f = torch.zeros_like(M10)
     Kf = torch.zeros_like(K)
+    lengthsf = torch.zeros_like(lengths)
     cam_coeffs_f = _init_cam_coeffs(ts, args, device=device, fixed=True)
 
     # Initialise new 3D and 2D points
@@ -911,11 +914,12 @@ def _fix_camera_positions(
         X0f_batch = nn.Parameter(X0[idxs], requires_grad=args.optimise_X0)
         T0f_batch = nn.Parameter(T0[idxs], requires_grad=args.optimise_T0)
         M10f_batch = nn.Parameter(M10[idxs], requires_grad=args.optimise_M10)
-        Kf_batch = nn.Parameter(K[idxs], requires_grad=args.optimise_K)
+        Kf_batch = nn.Parameter(K[idxs], requires_grad=False)
+        lengthsf_batch = nn.Parameter(lengths[idxs], requires_grad=args.optimise_lengths)
 
         optimiser = AdamW(
             params=[
-                {'params': [cam_shifts_batch, X0f_batch, T0f_batch, M10f_batch], 'lr': args.learning_rate},
+                {'params': [cam_shifts_batch, X0f_batch, T0f_batch, M10f_batch, lengthsf_batch], 'lr': args.learning_rate},
                 {'params': [Kf_batch], 'lr': args.learning_rate / 100}
             ],
             amsgrad=True,
@@ -926,7 +930,8 @@ def _fix_camera_positions(
             optimiser,
             mode='min',
             factor=args.learning_rate_decay,
-            patience=5,
+            patience=10,
+            cooldown=5,
             min_lr=1e-4
         )
 
@@ -946,7 +951,7 @@ def _fix_camera_positions(
                 T0=T0f_batch,
                 M10=M10f_batch,
                 K=Kf_batch,
-                lengths=lengths[idxs],
+                lengths=lengthsf_batch,
                 cam_coeffs=cam_coeffs_f_batch,
                 points_3d_base=points_3d_base[idxs],
                 points_2d_base=points_2d_base[idxs],
@@ -958,6 +963,11 @@ def _fix_camera_positions(
             lrs[i, step] = optimiser.param_groups[0]['lr']
             scheduler.step(batch_loss.item())
             losses[i, step] = batch_loss.item()
+
+            # Enable curvature gradient only when the loss is small enough
+            if batch_loss < args.optimise_K_threshold and args.optimise_K and not Kf_batch.requires_grad:
+                logger.info('Enabling curvature optimisation.')
+                Kf_batch.requires_grad_(True)
 
             # Clamp parameters
             with torch.no_grad():
@@ -998,7 +1008,7 @@ def _fix_camera_positions(
             T0=T0f_batch,
             M10=M10f_batch,
             K=Kf_batch,
-            lengths=lengths[idxs],
+            lengths=lengthsf_batch,
             cam_coeffs=cam_coeffs_f_batch,
             points_3d_base=points_3d_base[idxs],
             points_2d_base=points_2d_base[idxs],
@@ -1009,7 +1019,7 @@ def _fix_camera_positions(
         points_r, tangents_r, M1_r = integrate_curvature(
             X0f_batch,
             T0f_batch,
-            lengths[idxs],
+            lengthsf_batch,
             smooth_parameter(Kf_batch, 15, mode='gaussian'),
             M10f_batch,
         )
@@ -1026,6 +1036,7 @@ def _fix_camera_positions(
         T0f[idxs] = T0f_batch
         M10f[idxs] = M10f_batch
         Kf[idxs] = Kf_batch
+        lengthsf[idxs] = lengthsf_batch
         points_f[idxs] = points_f_batch
         points_2d_f[idxs] = points_2d_f_batch
         train_steps[i] = step
@@ -1069,12 +1080,14 @@ def _fix_camera_positions(
                 for k in range(3):
                     ax = fig.add_subplot(gs[1 + k, j * 2:j * 2 + 2])
                     if k == 0:
-                        ax.set_title(['X0', 'T0', 'M10', 'K', 'shifts'][j])
+                        ax.set_title(['X0', 'T0', 'M10', 'K/l', 'shifts'][j])
                     if j == 3:
-                        ax.set_ylabel(['m1', 'm2', 'k'][k])
+                        ax.set_ylabel(['m1', 'm2', 'l'][k])
                         if k == 2:
-                            ax.plot(np.abs(vo).sum(axis=(-1, -2)), label='original')
-                            ax.plot(np.abs(vf).sum(axis=(-1, -2)), label='fixed')
+                            vo = to_numpy(lengths[idxs])
+                            vf = to_numpy(lengthsf[idxs])
+                            ax.plot(vo, label='original')
+                            ax.plot(vf, label='fixed')
                         else:
                             ax.plot(np.abs(vo[:, :, k]).sum(axis=-1), label='original')
                             ax.plot(np.abs(vf[:, :, k]).sum(axis=-1), label='fixed')
@@ -1296,6 +1309,7 @@ def _fix_camera_positions(
             ts.states['T0'][start_idx:end_idx] = to_numpy(T0f)[:, None, :]
             ts.states['M10'][start_idx:end_idx] = to_numpy(M10f)[:, None, :]
             ts.states['curvatures'][start_idx:end_idx] = to_numpy(Kf)
+            ts.states['length'][start_idx:end_idx] = to_numpy(lengthsf)[:, None]
 
             # Update the points
             ts.states['points'][start_idx:end_idx] = to_numpy(points_f)
