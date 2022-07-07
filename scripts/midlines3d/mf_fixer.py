@@ -72,8 +72,9 @@ def get_args() -> Namespace:
                         help='GPU id to use if using GPUs.')
     parser.add_argument('--train-steps', type=int, default=500)
     parser.add_argument('--learning-rate', type=float, default=1e-3)
-    parser.add_argument('--learning-rate-K', type=float, default=1e-5)
+    parser.add_argument('--learning-rate-K', type=float, default=1e-4)
     parser.add_argument('--learning-rate-decay', type=float, default=0.99)
+    parser.add_argument('--learning-rate-min', type=float, default=1e-5)
     parser.add_argument('--reg-weight', type=float, default=1e-1)
     parser.add_argument('--optimise-X0', type=str2bool, default=True)
     parser.add_argument('--optimise-T0', type=str2bool, default=True)
@@ -945,7 +946,7 @@ def _fix_camera_positions(
             factor=args.learning_rate_decay,
             patience=10,
             cooldown=5,
-            min_lr=1e-4
+            min_lr=args.learning_rate_min
         )
 
         # Build camera coefficients for these frames
