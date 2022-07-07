@@ -71,7 +71,8 @@ def get_args() -> Namespace:
     parser.add_argument('--gpu-id', type=int, default=-1,
                         help='GPU id to use if using GPUs.')
     parser.add_argument('--train-steps', type=int, default=500)
-    parser.add_argument('--learning-rate', type=float, default=1e-5)
+    parser.add_argument('--learning-rate', type=float, default=1e-3)
+    parser.add_argument('--learning-rate-K', type=float, default=1e-5)
     parser.add_argument('--learning-rate-decay', type=float, default=0.99)
     parser.add_argument('--reg-weight', type=float, default=1e-1)
     parser.add_argument('--optimise-X0', type=str2bool, default=True)
@@ -933,10 +934,9 @@ def _fix_camera_positions(
             params=[
                 {'params': [cam_shifts_batch, X0f_batch, T0f_batch, M10f_batch, lengthsf_batch],
                  'lr': args.learning_rate},
-                {'params': [Kf_batch], 'lr': args.learning_rate / 100}
+                {'params': [Kf_batch], 'lr': args.learning_rate_K}
             ],
             amsgrad=True,
-            lr=args.learning_rate,
             weight_decay=0
         )
         scheduler = ReduceLROnPlateau(
