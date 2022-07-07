@@ -77,6 +77,7 @@ def get_args() -> Namespace:
     parser.add_argument('--optimise-X0', type=str2bool, default=True)
     parser.add_argument('--optimise-T0', type=str2bool, default=True)
     parser.add_argument('--optimise-M10', type=str2bool, default=True)
+    parser.add_argument('--optimise-M10-threshold', type=float, default=5.)
     parser.add_argument('--optimise-K', type=str2bool, default=True)
     parser.add_argument('--optimise-K-threshold', type=float, default=5.)
     parser.add_argument('--optimise-lengths', type=str2bool, default=True)
@@ -924,7 +925,7 @@ def _fix_camera_positions(
         else:
             X0f_batch = nn.Parameter(X0[idxs], requires_grad=args.optimise_X0)
         T0f_batch = nn.Parameter(T0[idxs], requires_grad=args.optimise_T0)
-        M10f_batch = nn.Parameter(M10[idxs], requires_grad=args.optimise_M10)
+        M10f_batch = nn.Parameter(M10[idxs], requires_grad=False)
         Kf_batch = nn.Parameter(K[idxs], requires_grad=False)
         lengthsf_batch = nn.Parameter(lengths[idxs], requires_grad=args.optimise_lengths)
 
@@ -977,6 +978,9 @@ def _fix_camera_positions(
             losses[i, step] = batch_loss.item()
 
             # Enable curvature gradient only when the loss is small enough
+            if batch_loss < args.optimise_M10_threshold and args.optimise_M10 and not M10f_batch.requires_grad:
+                logger.info('Enabling M10 optimisation.')
+                M10f_batch.requires_grad_(True)
             if batch_loss < args.optimise_K_threshold and args.optimise_K and not Kf_batch.requires_grad:
                 logger.info('Enabling curvature optimisation.')
                 Kf_batch.requires_grad_(True)
