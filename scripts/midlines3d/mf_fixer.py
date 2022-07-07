@@ -911,8 +911,18 @@ def _fix_camera_positions(
         batch_size = end_idx - start_idx
 
         # Instantiate optimisable parameters
-        cam_shifts_batch = nn.Parameter(cam_coeffs['shifts'][idxs], requires_grad=args.optimise_shifts)
-        X0f_batch = nn.Parameter(X0[idxs], requires_grad=args.optimise_X0)
+        if args.optimise_shifts and i > 0:
+            csb = torch.ones_like(cam_coeffs['shifts'][idxs], device=device) \
+                  * cam_shifts_batch.detach().clone().mean(dim=0, keepdim=True)
+            cam_shifts_batch = nn.Parameter(csb, requires_grad=args.optimise_shifts)
+        else:
+            cam_shifts_batch = nn.Parameter(cam_coeffs['shifts'][idxs], requires_grad=args.optimise_shifts)
+        if args.optimise_X0 and i > 0:
+            xfb = torch.ones_like(X0[idxs], device=device) \
+                  * X0f_batch.detach().clone().mean(dim=0, keepdim=True)
+            X0f_batch = nn.Parameter(xfb, requires_grad=args.optimise_X0)
+        else:
+            X0f_batch = nn.Parameter(X0[idxs], requires_grad=args.optimise_X0)
         T0f_batch = nn.Parameter(T0[idxs], requires_grad=args.optimise_T0)
         M10f_batch = nn.Parameter(M10[idxs], requires_grad=args.optimise_M10)
         Kf_batch = nn.Parameter(K[idxs], requires_grad=False)
