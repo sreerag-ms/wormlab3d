@@ -596,7 +596,7 @@ def _generate_annotated_images(
 
 def generate_manoeuvre_video(
         args: Namespace,
-        save_dir: PosixPath = None,
+        output_dir: PosixPath = None,
         clip_idx: int = 0
 ):
     """
@@ -651,7 +651,7 @@ def generate_manoeuvre_video(
             points_3d = smooth_trajectory(points_3d, args.smoothing_window)
         points_3d_base = ts.get('points_3d_base')
         points_2d_base = ts.get('points_2d_base')
-        lengths = ts.get('length', args.start_frame, args.end_frame)[:, 0]
+        lengths = ts.get('length', start_frame, end_frame + 1)[:, 0]
         cam_coeffs = np.concatenate([
             ts.get(f'cam_{k}')
             for k in ['intrinsics', 'rotations', 'translations', 'distortions', 'shifts', ]
@@ -730,11 +730,10 @@ def generate_manoeuvre_video(
     cursor = Frame.objects().aggregate(pipeline, allowDiskUse=True)
 
     # Initialise ffmpeg process
-    if save_dir is None:
+    if output_dir is None:
         output_dir = LOGS_PATH / f'trial_{trial.id:03d}'
         output_path = output_dir / f'{START_TIMESTAMP}_trial={trial.id}_r={reconstruction.id}_f={start_frame}-{end_frame}'
     else:
-        output_dir = save_dir / START_TIMESTAMP
         output_path = output_dir / f'{clip_idx:03d}_trial={trial.id}_r={reconstruction.id}_f={start_frame}-{end_frame}'
     os.makedirs(output_dir, exist_ok=True)
 
@@ -760,7 +759,7 @@ def generate_manoeuvre_video(
     for i, res in enumerate(cursor):
         n = res['frame_num']
         if i > 0 and i % 100 == 0:
-            logger.info(f'Rendering frame {n} - {i}/{end_frame - start_frame}.')
+            logger.info(f'Rendering frame {n} - {i + 1}/{end_frame - start_frame + 1}.')
 
         # Check we don't miss any frames
         if i == 0:
@@ -850,11 +849,17 @@ def generate_from_spec(args: Namespace):
     with open(LOGS_PATH / args.spec / 'spec.yml') as f:
         spec = yaml.load(f, Loader=yaml.FullLoader)
 
-    for clip in spec['clips']:
+    clips = spec['clips']
+    for i, clip in enumerate(clips):
+        logger.info(f'Generating clip {i + 1}/{len(clips)}.')
         args.reconstruction = clip['reconstruction']
         args.start_frame = clip['start']
         args.end_frame = clip['end']
-        generate_manoeuvre_video(args)
+        generate_manoeuvre_video(
+            args,
+            output_dir=LOGS_PATH / args.spec / START_TIMESTAMP,
+            clip_idx=i
+        )
 
 
 if __name__ == '__main__':
