@@ -1194,16 +1194,18 @@ class Midline3DFinder:
 
         # Calculate relative loss weightings
         n_frames = abs(start_fs.frame_num - end_fs.frame_num)
-        target_weightings = torch.exp(-torch.arange(n_frames) / ra.fix_decay_rate)
-        loss_weighting = 1 - (target_weightings + target_weightings.flip(dims=(0,)))
+        decay = torch.exp(-torch.arange(n_frames) / ra.fix_decay_rate)
+        bi_decay = decay + decay.flip(dims=(0,))
+        bi_decay = bi_decay / bi_decay.max()
+        loss_weighting = 1 - bi_decay
         if self.source_args.direction == 1:
             idx = mfs.frame_num - start_fs.frame_num
         else:
             idx = start_fs.frame_num - mfs.frame_num
 
         # Weight and sum the losses
-        loss_start_weighted = target_weightings[idx] * loss_start
-        loss_end_weighted = target_weightings.flip(dims=(0,))[idx] * loss_end
+        loss_start_weighted = decay[idx] * loss_start
+        loss_end_weighted = decay.flip(dims=(0,))[idx] * loss_end
         loss_weighted = loss_weighting[idx] * loss
         loss_fix = loss_start_weighted + loss_end_weighted + loss_weighted
 
@@ -1214,8 +1216,8 @@ class Midline3DFinder:
         stats['loss_fix/end_weighted'] = loss_end_weighted.item()
         stats['loss_fix/total'] = loss_fix.item()
         if self.runtime_args.log_level > 0:
-            stats['loss_fix/weights_start'] = target_weightings[idx].item()
-            stats['loss_fix/weights_end'] = target_weightings.flip(dims=(0,))[idx].item()
+            stats['loss_fix/weights_start'] = decay[idx].item()
+            stats['loss_fix/weights_end'] = decay.flip(dims=(0,))[idx].item()
             stats['loss_fix/weights_loss'] = loss_weighting[idx].item()
 
         return loss_fix

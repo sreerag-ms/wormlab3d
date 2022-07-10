@@ -129,6 +129,7 @@ class TrialState:
                             raise RuntimeError('Filter shape invalid for loading!')
 
                 state = np.memmap(path_state, dtype=np.float32, mode=mode, shape=tuple(meta['shapes'][k]))
+                state[np.isnan(state)] = 0  # Don't know why, but seeing a lot of nans in the filters...
                 states[k] = state
             except Exception as e:
                 logger.warning(f'Could not load from {path_state}. {e}')
@@ -193,8 +194,6 @@ class TrialState:
         D = mp.depth - mp.depth_min
         path_state = self.path / f'{k}.npz'
 
-        # if k in ['masks_target', 'masks_target_residuals', 'masks_curve']:
-        #     shape = (T, 3, self.trial.crop_size, self.trial.crop_size)
         if k == 'cam_intrinsics':
             shape = (T, 3, 4)
         elif k == 'cam_rotations':
@@ -263,14 +262,9 @@ class TrialState:
         assert self.start_frame <= frame_num <= self.end_frame, 'Requested frame is not available.'
         for k in BUFFER_NAMES + PARAMETER_NAMES:
             # Collate outputs generated at each depth
-            if k in ['points', 'points_2d', 'sigmas', 'exponents', 'intensities', 'scores',
-                     # 'masks_target', 'masks_target_residuals', 'masks_curve'
-                     ] + CURVATURE_PARAMETER_NAMES:
+            if k in ['points', 'points_2d', 'sigmas', 'exponents', 'intensities', 'scores',] \
+                    + CURVATURE_PARAMETER_NAMES:
                 p_ms = frame_state.get_state(k)
-
-                # # Only store the deepest target and output masks
-                # if k in ['masks_target', 'masks_target_residuals', 'masks_curve']:
-                #     p = to_numpy(p_ms[-1])
 
                 # Stack parameters which do not change across depths
                 if k in ['X0', 'T0', 'M10', 'length', 'sigmas', 'exponents', 'intensities']:
@@ -325,10 +319,6 @@ class TrialState:
             idx_offset = 2**D_min - 1
             for k in BUFFER_NAMES + PARAMETER_NAMES:
                 v = torch.from_numpy(self.get(k)[frame_num])
-
-                # # Only the deepest of these are stored so just duplicate them into lists first
-                # if k in ['masks_target', 'masks_target_residuals', 'masks_curve']:
-                #     v = [v] * (D - D_min)
 
                 # Expand collapsed
                 if k in ['curvatures', 'points', 'points_2d', 'scores']:
