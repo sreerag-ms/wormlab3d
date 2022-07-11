@@ -129,7 +129,9 @@ class TrialState:
                             raise RuntimeError('Filter shape invalid for loading!')
 
                 state = np.memmap(path_state, dtype=np.float32, mode=mode, shape=tuple(meta['shapes'][k]))
-                state[np.isnan(state)] = 0  # Don't know why, but seeing a lot of nans in the filters...
+                if np.isnan(state).any():
+                    state = state.copy()
+                    state[np.isnan(state)] = 0  # Don't know why, but seeing a lot of nans in the filters...
                 states[k] = state
             except Exception as e:
                 logger.warning(f'Could not load from {path_state}. {e}')
