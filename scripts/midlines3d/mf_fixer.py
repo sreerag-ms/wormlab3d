@@ -384,6 +384,7 @@ def _verify_flipped_batch(
 
     # Calculate errors as maximum distance between flipped points and reconstructed flipped points
     errors = (points_flipped_r - points_flipped).norm(dim=-1).amax(dim=-1)
+    errors[errors.isnan()] = 0
     idxs_sorted = torch.argsort(errors, descending=True)
 
     # Plot examples above error threshold
