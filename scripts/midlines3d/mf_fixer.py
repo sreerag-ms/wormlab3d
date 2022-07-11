@@ -852,6 +852,10 @@ def _process_batch(
     reg_spread[:-1] = reg_spread[:-1] + reg_loss_batch
     reg_spread[1:-1] = reg_spread[1:-1] / 2
 
+    # Check for tracking failures and just zero the losses where it happens
+    tracking_failure_idxs = (points_3d_base.sum(dim=-1) == 0) | (points_2d_base.sum(dim=(-1, -2)) == 0)
+    losses_p2d[tracking_failure_idxs] = 0
+
     return p3d_batch, p2d_batch, losses_p2d, reg_spread
 
 
