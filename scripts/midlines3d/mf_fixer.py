@@ -108,7 +108,7 @@ def _check_bad_parameters(
     """
     logger.info(f'Checking for bad parameters.')
     trial = ts.trial
-    prs = ProjectRenderScoreModel(image_size=trial.crop_size)
+    prs = ProjectRenderScoreModel(image_size=trial.crop_size, clamp_X0=args.clamp_X0)
 
     # Make output directory
     save_dir_n = save_dir / f'{START_TIMESTAMP}_check_params'
@@ -356,7 +356,7 @@ def _verify_flipped_batch(
     """
     Verify that the flipped parameters are consistent.
     """
-    prs = ProjectRenderScoreModel(image_size=trial.crop_size)
+    prs = ProjectRenderScoreModel(image_size=trial.crop_size, clamp_X0=clamp_X0)
 
     # Reconstruct the 3D points from the parameters
     X0 = torch.from_numpy(X0)
@@ -866,7 +866,7 @@ def _fix_camera_positions(
     logger.info(f'Fix camera positions.')
     trial = ts.trial
     device = _init_devices(args)
-    prs = ProjectRenderScoreModel(image_size=trial.crop_size)
+    prs = ProjectRenderScoreModel(image_size=trial.crop_size, clamp_X0=args.clamp_X0)
     prs = prs.to(device)
 
     # Make output directory

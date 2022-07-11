@@ -183,6 +183,7 @@ class ProjectRenderScoreModel(nn.Module):
             dl_limit: float = None,
             dk_limit: float = None,
             dpsi_limit: float = None,
+            clamp_X0: bool = True,
     ):
         super().__init__()
         self.image_size = image_size
@@ -201,6 +202,7 @@ class ProjectRenderScoreModel(nn.Module):
         self.length_min = length_min
         self.length_max = length_max
         self.curvature_max = curvature_max
+        self.clamp_X0 = clamp_X0
 
         # The limits don't matter when not in delta-mode, but they need to be not-None for jit.
         if not curvature_deltas:
@@ -385,7 +387,8 @@ class ProjectRenderScoreModel(nn.Module):
                     )
 
                     # Keep X0 somewhere in the frame
-                    X0_d = X0_d.clamp(min=-0.5, max=0.5)
+                    if self.clamp_X0:
+                        X0_d = X0_d.clamp(min=-0.5, max=0.5)
 
                     # Integrate the curvature to get the midline coordinates
                     points_d, tangents_d, M1_d = integrate_curvature(X0_d, T0_d, length_d, curvatures_d, M10_d)

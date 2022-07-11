@@ -398,6 +398,7 @@ class Midline3DFinder:
             dl_limit=p.dl_limit,
             dk_limit=p.dk_limit,
             dpsi_limit=p.dpsi_limit,
+            clamp_X0=p.clamp_X0
         )
         model = torch.jit.script(model)
         model = model.to(self.device)

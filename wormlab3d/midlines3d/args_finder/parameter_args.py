@@ -41,6 +41,7 @@ class ParameterArgs(BaseArgs):
             dl_limit: float = None,
             dk_limit: float = None,
             dpsi_limit: float = None,
+            clamp_X0: bool = True,
 
             centre_shift_every_n_steps: int = None,
             centre_shift_threshold: float = None,
@@ -149,6 +150,7 @@ class ParameterArgs(BaseArgs):
         self.dl_limit = dl_limit
         self.dk_limit = dk_limit
         self.dpsi_limit = dpsi_limit
+        self.clamp_X0 = clamp_X0
 
         if not curvature_mode:
             centre_shift_every_n_steps = None
@@ -287,6 +289,8 @@ class ParameterArgs(BaseArgs):
                            help='Maximum allowable change in scalar curvature between batched frames (only used in delta-curvatures mode). Default=None.')
         group.add_argument('--dpsi-limit', type=float,
                            help='Maximum allowable change in curvature angle between batched frames (only used in delta-curvatures mode). Default=None.')
+        group.add_argument('--clamp-X0', type=str2bool,
+                           help='Clamp the X0 (midpoint) coordinate to [-0.5,+0.5] before integration. Default=True.')
 
         group.add_argument('--centre-shift-every-n-steps', type=int,
                            help='Shift the curve along the midline to centre the scores every n steps. Default=None (no shifting).')
