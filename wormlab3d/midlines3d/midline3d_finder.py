@@ -1182,10 +1182,19 @@ class Midline3DFinder:
         loss_start = 0.
         loss_end = 0.
         for k in PARAMETER_NAMES:
+            if k == 'M10':
+                # Trying to join M10 causes more trouble than it's worth
+                continue
             p_start = start_fs.get_state(k)
             p_end = end_fs.get_state(k)
             p_curr = mfs.get_state(k)
             if type(p_start) == list:
+                if k == 'curvatures':
+                    # Just try to match the absolute curvature, not the exact m1/m2 split
+                    p_start = [p_start[i].sum(dim=-1) for i in range(len(p_start))]
+                    p_end = [p_end[i].sum(dim=-1) for i in range(len(p_end))]
+                    p_curr = [p_curr[i].sum(dim=-1) for i in range(len(p_curr))]
+
                 for i in range(len(p_start)):
                     loss_start += torch.sum((p_start[i] - p_curr[i])**2)
                     loss_end += torch.sum((p_end[i] - p_curr[i])**2)
@@ -1194,7 +1203,7 @@ class Midline3DFinder:
                 loss_end += torch.sum((p_end - p_curr)**2)
 
         # Calculate relative loss weightings
-        n_frames = abs(start_fs.frame_num - end_fs.frame_num)
+        n_frames = abs(start_fs.frame_num - end_fs.frame_num) + 1
         decay = torch.exp(-torch.arange(n_frames) / ra.fix_decay_rate)
         bi_decay = decay + decay.flip(dims=(0,))
         bi_decay = bi_decay / bi_decay.max()
