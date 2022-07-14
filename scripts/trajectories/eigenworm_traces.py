@@ -18,7 +18,7 @@ from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.toolkit.util import print_args
 from wormlab3d.trajectories.cache import get_trajectory
 from wormlab3d.trajectories.pca import generate_or_load_pca_cache
-from wormlab3d.trajectories.util import calculate_speeds, calculate_rotation_matrix
+from wormlab3d.trajectories.util import calculate_speeds, calculate_rotation_matrix, calculate_chiralities
 
 # tex_mode()
 
@@ -85,8 +85,12 @@ def traces(x_label: str = 'time'):
     Z, meta = get_trajectory(**common_args, natural_frame=True, rebuild_cache=False)
     X_ew = ew.transform(np.array(Z))
 
+    # Chirality
+    logger.info('Calculating chiralities.')
+    c = calculate_chiralities(X)
+
     # Plot
-    fig, axes = plt.subplots(6, figsize=(16, 16), sharex=True)
+    fig, axes = plt.subplots(7, figsize=(16, 18), sharex=True)
 
     # Speeds
     ax = axes[0]
@@ -103,8 +107,15 @@ def traces(x_label: str = 'time'):
     ax.set_title('Non-Planarity.')
     ax.grid()
 
-    # Eigenworms - absolute values
+    # Chiralities
     ax = axes[2]
+    ax.plot(ts, c)
+    ax.set_ylabel('Chirality')
+    ax.set_title('Chirality.')
+    ax.grid()
+
+    # Eigenworms - absolute values
+    ax = axes[3]
     for i in args.plot_components:
         ax.plot(ts, np.abs(X_ew[:, i]), label=i, alpha=0.7)
     ax.set_ylabel('Component contribution')
@@ -113,7 +124,7 @@ def traces(x_label: str = 'time'):
     ax.grid()
 
     # Eigenworms - arguments
-    ax = axes[3]
+    ax = axes[4]
     for i in args.plot_components:
         ax.plot(ts, np.angle(X_ew[:, i]), label=i, alpha=0.7)
     ax.set_ylabel('Component contribution')
@@ -122,7 +133,7 @@ def traces(x_label: str = 'time'):
     ax.grid()
 
     # Eigenworms - reals
-    ax = axes[4]
+    ax = axes[5]
     for i in args.plot_components:
         ax.plot(ts, np.real(X_ew[:, i]), label=i, alpha=0.7)
     ax.set_ylabel('Component contribution')
@@ -131,7 +142,7 @@ def traces(x_label: str = 'time'):
     ax.grid()
 
     # Eigenworms - imag
-    ax = axes[5]
+    ax = axes[6]
     for i in args.plot_components:
         ax.plot(ts, np.imag(X_ew[:, i]), label=i, alpha=0.7)
     ax.set_ylabel('Component contribution')
@@ -592,10 +603,10 @@ def animate():
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
-    from simple_worm.plot3d import interactive
-    interactive()
-    # traces(x_label='frames')
-    traces_condensed(x_label='time')
+    # from simple_worm.plot3d import interactive
+    # interactive()
+    traces(x_label='frames')
+    # traces_condensed(x_label='time')
     # heatmap()
     # heatmap_basic()
     # animate()

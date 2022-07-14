@@ -93,7 +93,7 @@ def _plot_eigenworms(
             kappa_share_ax = ax
         else:
             ax.sharey(kappa_share_ax)
-        ax.set_title('$|\kappa|=|m_1|+|m_2|$')
+        ax.set_title('$|\kappa|=|M_1+M_2|$')
         for j in range(N - 1):
             ax.plot(ind[j:j + 2], NF.kappa[j:j + 2], c=fc[j])
         ax.set_xticks([0, ind[-1]])

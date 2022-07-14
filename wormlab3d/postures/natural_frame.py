@@ -88,6 +88,10 @@ class NaturalFrame:
 
         self._smooth_psi()
 
+    @property
+    def length(self) -> float:
+        return np.linalg.norm(self.X_pos[:-1] - self.X_pos[1:], axis=1).sum()
+
     def _calculate_tangent_and_curvature(self):
         """
         Calculate the tangent and the curvature from the midline coordinates.
@@ -246,10 +250,41 @@ class NaturalFrame:
         if below_threshold:
             self.psi[start_idx:] = start_psi
 
-    @property
-    def length(self) -> float:
-        return np.linalg.norm(self.X_pos[:-1] - self.X_pos[1:], axis=1).sum()
-
-    def non_planarity(self):
+    def non_planarity(self) -> float:
+        """
+        Compute the non-planarity of the curve.
+        """
         r = self.pca.explained_variance_ratio_
         return r[2] / np.sqrt(r[1] * r[0])
+
+    def chirality(self) -> float:
+        """
+        Compute the chirality of the curve.
+        """
+
+        # Try to align v1 with the direction of the curve
+        u = normalise(self.X_pos[-1] - self.X_pos[0])
+        v1, v2, v3 = self.pca.components_
+        if np.dot(u, v1) < 0:
+            v1 *= -1
+
+        # Rotate points to align with the principal components.
+        R = np.stack([v1, v2, v3], axis=1)
+        Xt = np.einsum('ij,bj->bi', R.T, self.X_pos)
+
+        # Use the difference vectors between adjacent points and ignore first coordinate.
+        diff = (Xt[1:] - Xt[:-1])[:, 1:]
+
+        # Convert into polar coordinates
+        r = np.linalg.norm(diff, axis=-1)
+        theta = np.unwrap(np.arctan2(*diff.T))
+
+        # Weight the angular changes by the radii and sum to give chirality measure.
+        r = (r[1:] + r[:-1]) / 2
+        c = np.sum(r * (theta[1:] - theta[:-1]))
+
+        # Correct for reflections
+        if np.allclose(np.linalg.det(R), -1):
+            c *= -1
+
+        return c
