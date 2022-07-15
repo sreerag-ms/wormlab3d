@@ -50,6 +50,7 @@ def get_args() -> Namespace:
     parser.add_argument('--use-valid-range', type=str2bool, help='Use valid range if available.')
     parser.add_argument('--smoothing-window-postures', type=int, help='Smoothing window for the postures.')
     parser.add_argument('--smoothing-window-components', type=int, help='Smoothing window for the components.')
+    parser.add_argument('--smoothing-window-speed', type=int, default=25, help='Smoothing window for the speed calculation.')
 
     # 3D plots
     parser.add_argument('--trajectory-colouring', type=str, choices=['time', 'speed', 'curvature'], default='time',
@@ -658,7 +659,11 @@ def generate_reconstruction_video():
         'start_frame': r_start_frame,
         'end_frame': r_end_frame,
     }
-    X, _ = get_trajectory(**common_args, smoothing_window=args.smoothing_window_postures)
+    X_raw, _ = get_trajectory(**common_args)
+    if args.smoothing_window_postures is not None and args.smoothing_window_postures > 1:
+        X = smooth_trajectory(X_raw, window_len=args.smoothing_window_postures)
+    else:
+        X = X_raw
     Xc = X - X.mean(axis=0)
 
     # Eigenworm projections
@@ -690,16 +695,22 @@ def generate_reconstruction_video():
     else:
         lengths = np.linalg.norm(Xc[:, 1:] - Xc[:, :-1], axis=-1).sum(axis=-1)
 
-    X_com = Xc.mean(axis=1)
-    if args.smoothing_window_components is not None and args.smoothing_window_components > 1:
-        Xc_smoothed = smooth_trajectory(Xc, window_len=args.smoothing_window_components)
+    # Calculate speed
+    if args.smoothing_window_speed is not None and args.smoothing_window_speed > 1:
+        Xc_raw = X_raw - X_raw.mean(axis=0)
+        Xc_smoothed = smooth_trajectory(Xc_raw, window_len=args.smoothing_window_speed)
         speeds = calculate_speeds(Xc_smoothed, signed=True) * trial.fps
     else:
         speeds = calculate_speeds(Xc, signed=True) * trial.fps
+
+    # Calculate curvatures of postures and trajectory
+    X_com = Xc.mean(axis=1)
     e0 = normalise(np.gradient(X_com, axis=0))
     e0[speeds < 0] *= -1
     curvature_traj = calculate_curvature(e0)
     curvature_postures = np.abs(Z)
+
+    # Calculate posture chiralities
     chiralities = calculate_chiralities(Xc)
 
     # Build plots
