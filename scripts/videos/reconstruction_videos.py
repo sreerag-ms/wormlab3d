@@ -680,7 +680,7 @@ def generate_reconstruction_video():
             points_3d = smooth_trajectory(points_3d, args.smoothing_window_postures)
         points_3d_base = ts.get('points_3d_base')
         points_2d_base = ts.get('points_2d_base')
-        lengths = ts.get('length', r_start_frame, r_end_frame)[:, 0]
+        lengths = ts.get('length', r_start_frame, r_end_frame + 1)[:, 0]
         cam_coeffs = np.concatenate([
             ts.get(f'cam_{k}')
             for k in ['intrinsics', 'rotations', 'translations', 'distortions', 'shifts', ]
