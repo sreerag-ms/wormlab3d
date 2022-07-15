@@ -24,6 +24,7 @@ from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.midlines3d.util import generate_annotated_images
 from wormlab3d.particles.tumble_run import calculate_curvature
+from wormlab3d.postures.chiralities import calculate_chiralities
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.toolkit.plot_utils import equal_aspect_ratio
 from wormlab3d.toolkit.util import print_args, str2bool, normalise, to_dict
@@ -47,8 +48,8 @@ def get_args() -> Namespace:
     parser.add_argument('--start-frame', type=int, help='Frame number to start from.')
     parser.add_argument('--end-frame', type=int, help='Frame number to end at.')
     parser.add_argument('--use-valid-range', type=str2bool, help='Use valid range if available.')
-    parser.add_argument('--smoothing-window', type=int,
-                        help='Smoothing window for the postures and trajectory.')
+    parser.add_argument('--smoothing-window-postures', type=int, help='Smoothing window for the postures.')
+    parser.add_argument('--smoothing-window-components', type=int, help='Smoothing window for the components.')
 
     # 3D plots
     parser.add_argument('--trajectory-colouring', type=str, choices=['time', 'speed', 'curvature'], default='time',
@@ -85,6 +86,8 @@ def get_args() -> Namespace:
     parser.add_argument('--plot-components', type=lambda s: [int(item) for item in s.split(',')],
                         default='0,1', help='Comma delimited list of component idxs to plot.')
     parser.add_argument('--x-label', type=str, default='time', help='Label x-axis with time or frame number.')
+    parser.add_argument('--n-chirality-fade-lines', type=int, default=100,
+                        help='Filled region fade resolution in chirality plot.')
 
     # Lambdas
     parser.add_argument('--time-range-lambdas', type=float, default=5,
@@ -351,6 +354,7 @@ def _make_traces_plots(
         X: np.ndarray,
         X_ew: np.ndarray,
         speeds: np.ndarray,
+        chiralities: np.ndarray,
         curvature: np.ndarray,
         args: Namespace,
 ) -> Tuple[Figure, Callable]:
@@ -372,7 +376,7 @@ def _make_traces_plots(
     common_args = {
         'reconstruction_id': reconstruction.id,
         'use_valid_range': args.use_valid_range,
-        'smoothing_window': args.smoothing_window,
+        'smoothing_window': args.smoothing_window_postures,
         'rebuild_cache': args.rebuild_planarity_cache
     }
     logger.info('Fetching posture planarities.')
@@ -389,7 +393,7 @@ def _make_traces_plots(
         nonp_trajectories[i, t0:t0 + len(pcas)] = r[2] / np.sqrt(r[1] * r[0])
 
     # Plot
-    fig, axes = plt.subplots(4, figsize=(width / 100, height / 100), gridspec_kw={
+    fig, axes = plt.subplots(5, figsize=(width / 100, height / 100), gridspec_kw={
         'hspace': 0,
         'top': 0.98,
         'bottom': 0.07,
@@ -420,12 +424,48 @@ def _make_traces_plots(
     ax_nonpt.set_ylabel('NP')
     ax_nonpt.axhline(y=0, color='darkgrey')
     ax_nonpt.legend(loc='upper left', bbox_to_anchor=(1.01, 0.99))
+    ax_nonpt.set_xticklabels([])
     ax_nonpt.spines['top'].set_visible(False)
     ax_nonpt.spines['bottom'].set_visible(False)
     ax_nonpt_marker = ax_nonpt.axvline(x=0, color='red')
 
+    # Chirality
+    ax_chir = axes[2]
+    ax_chir.axhline(y=0, color='darkgrey')
+    n_fade_lines = args.n_chirality_fade_lines
+    fade_lines_pos = np.linspace(0, chiralities.max(), n_fade_lines)
+    fade_lines_neg = np.linspace(0, chiralities.min(), n_fade_lines)
+    for i in range(n_fade_lines):
+        ax_chir.fill_between(
+            ts,
+            np.ones_like(chiralities) * fade_lines_pos[i],
+            chiralities,
+            where=chiralities > fade_lines_pos[i],
+            color='purple',
+            alpha=1 / n_fade_lines
+        )
+        ax_chir.fill_between(
+            ts,
+            chiralities,
+            np.ones_like(chiralities) * fade_lines_neg[i],
+            where=chiralities < fade_lines_neg[i],
+            color='green',
+            alpha=1 / n_fade_lines
+        )
+
+    label_args = dict(transform=ax_chir.transAxes, horizontalalignment='right', fontweight='bold', fontsize='large',
+                      fontfamily='Symbol')
+    ax_chir.text(-0.02, 0.94, '↻', verticalalignment='top', **label_args)
+    ax_chir.text(-0.02, 0.05, '↺', verticalalignment='bottom', **label_args)
+    ax_chir.set_yticks([0, ])
+    ax_chir.set_yticklabels([])
+    ax_chir.set_xticklabels([])
+    ax_chir.spines['top'].set_visible(False)
+    ax_chir.spines['bottom'].set_visible(False)
+    ax_chir_marker = ax_chir.axvline(x=0, color='red')
+
     # Curvature
-    ax_curvature = axes[2]
+    ax_curvature = axes[3]
     im = ax_curvature.imshow(curvature.T, aspect='auto', cmap='Reds', origin='lower', extent=(0, ts[-1], 0, 1))
     cax = ax_curvature.inset_axes([1.03, 0.1, 0.02, 0.8], transform=ax_curvature.transAxes)
     fig.colorbar(im, ax=ax_curvature, cax=cax)
@@ -435,12 +475,13 @@ def _make_traces_plots(
     ax_curvature.set_ylabel('$\kappa$', fontsize=12, labelpad=10)
     ax_curvature.set_yticks([0, 1])
     ax_curvature.set_yticklabels([])
+    ax_curvature.set_xticklabels([])
     ax_curvature.spines['top'].set_visible(False)
     ax_curvature.spines['bottom'].set_visible(False)
     ax_curvature_marker = ax_curvature.axvline(x=0, color='red')
 
     # Eigenworms - absolute values
-    ax_ew = axes[3]
+    ax_ew = axes[4]
     for i in args.plot_components:
         ax_ew.plot(
             ts,
@@ -465,12 +506,14 @@ def _make_traces_plots(
         # Update the axis limits
         ax_speed.set_xlim([ts[frame_idx] - t_range / 2, ts[frame_idx] + t_range / 2])
         ax_nonpt.set_xlim([ts[frame_idx] - t_range / 2, ts[frame_idx] + t_range / 2])
+        ax_chir.set_xlim([ts[frame_idx] - t_range / 2, ts[frame_idx] + t_range / 2])
         ax_curvature.set_xlim([ts[frame_idx] - t_range / 2, ts[frame_idx] + t_range / 2])
         ax_ew.set_xlim([ts[frame_idx] - t_range / 2, ts[frame_idx] + t_range / 2])
 
         # Move the markers
         ax_speed_marker.set_data([ts[frame_idx], ts[frame_idx]], [0, 1])
         ax_nonpt_marker.set_data([ts[frame_idx], ts[frame_idx]], [0, 1])
+        ax_chir_marker.set_data([ts[frame_idx], ts[frame_idx]], [0, 1])
         ax_curvature_marker.set_data([ts[frame_idx], ts[frame_idx]], [0, 1])
         ax_ew_marker.set_data([ts[frame_idx], ts[frame_idx]], [0, 1])
 
@@ -609,14 +652,13 @@ def generate_reconstruction_video():
     else:
         end_frame = min(args.end_frame, r_end_frame)
 
-    # Fetch trajectory and postures
+    # Fetch trajectory and postures for full sequence
     common_args = {
         'reconstruction_id': reconstruction.id,
-        'start_frame': start_frame,
-        'end_frame': end_frame,
-        'smoothing_window': args.smoothing_window,
+        'start_frame': r_start_frame,
+        'end_frame': r_end_frame,
     }
-    X, _ = get_trajectory(**common_args)
+    X, _ = get_trajectory(**common_args, smoothing_window=args.smoothing_window_postures)
     Xc = X - X.mean(axis=0)
 
     # Eigenworm projections
@@ -626,7 +668,7 @@ def generate_reconstruction_video():
         n_components=args.n_components,
         regenerate=False
     )
-    Z, _ = get_trajectory(**common_args, natural_frame=True)
+    Z, _ = get_trajectory(**common_args, natural_frame=True, smoothing_window=args.smoothing_window_components)
     X_ew = ew.transform(Z)
 
     # Calculate parameters
@@ -634,11 +676,11 @@ def generate_reconstruction_video():
     if reconstruction.source == M3D_SOURCE_MF:
         ts = TrialState(reconstruction)
         points_3d = ts.get('points')
-        if args.smoothing_window is not None and args.smoothing_window > 1:
-            points_3d = smooth_trajectory(points_3d, args.smoothing_window)
+        if args.smoothing_window_postures is not None and args.smoothing_window_postures > 1:
+            points_3d = smooth_trajectory(points_3d, args.smoothing_window_postures)
         points_3d_base = ts.get('points_3d_base')
         points_2d_base = ts.get('points_2d_base')
-        lengths = ts.get('length', args.start_frame, args.end_frame)[:, 0]
+        lengths = ts.get('length', r_start_frame, r_end_frame)[:, 0]
         cam_coeffs = np.concatenate([
             ts.get(f'cam_{k}')
             for k in ['intrinsics', 'rotations', 'translations', 'distortions', 'shifts', ]
@@ -654,6 +696,7 @@ def generate_reconstruction_video():
     e0[speeds < 0] *= -1
     curvature_traj = calculate_curvature(e0)
     curvature_postures = np.abs(Z)
+    chiralities = calculate_chiralities(Xc)
 
     # Build plots
     fig_info, update_info_plot = _make_info_panel(
@@ -687,6 +730,7 @@ def generate_reconstruction_video():
         X=Xc,
         X_ew=X_ew,
         speeds=speeds,
+        chiralities=chiralities,
         curvature=curvature_postures,
         args=args
     )
@@ -792,11 +836,12 @@ def generate_reconstruction_video():
         )
 
         # Update the plots and extract rendered image
-        update_info_plot(i)
-        update_traj_plot(i)
-        update_posture_plot(i)
-        update_traces_plot(i)
-        update_lambdas_plot(i)
+        idx = start_frame - r_start_frame + i
+        update_info_plot(idx)
+        update_traj_plot(idx)
+        update_posture_plot(idx)
+        update_traces_plot(idx)
+        update_lambdas_plot(idx)
         plot_info = np.asarray(fig_info.canvas.renderer._renderer).take([0, 1, 2], axis=2)
         plot_traj = np.asarray(fig_traj.canvas.renderer._renderer).take([0, 1, 2], axis=2)
         plot_posture = np.asarray(fig_posture.canvas.renderer._renderer).take([0, 1, 2], axis=2)
