@@ -691,7 +691,11 @@ def generate_reconstruction_video():
         lengths = np.linalg.norm(Xc[:, 1:] - Xc[:, :-1], axis=-1).sum(axis=-1)
 
     X_com = Xc.mean(axis=1)
-    speeds = calculate_speeds(Xc, signed=True) * trial.fps
+    if args.smoothing_window_components is not None and args.smoothing_window_components > 1:
+        Xc_smoothed = smooth_trajectory(Xc, window_len=args.smoothing_window_components)
+        speeds = calculate_speeds(Xc_smoothed, signed=True) * trial.fps
+    else:
+        speeds = calculate_speeds(Xc, signed=True) * trial.fps
     e0 = normalise(np.gradient(X_com, axis=0))
     e0[speeds < 0] *= -1
     curvature_traj = calculate_curvature(e0)
