@@ -130,7 +130,8 @@ class TrialState:
 
                 state = np.memmap(path_state, dtype=np.float32, mode=mode, shape=tuple(meta['shapes'][k]))
                 if np.isnan(state).any():
-                    state = state.copy()
+                    if read_only:
+                        state = state.copy()
                     state[np.isnan(state)] = 0  # Don't know why, but seeing a lot of nans in the filters...
                 states[k] = state
             except Exception as e:
