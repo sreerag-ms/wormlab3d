@@ -1185,6 +1185,9 @@ class Midline3DFinder:
             if k == 'M10':
                 # Trying to join M10 causes more trouble than it's worth
                 continue
+            if k == 'curvatures':
+                # Skip curvature matching for now...
+                continue
             p_start = start_fs.get_state(k)
             p_end = end_fs.get_state(k)
             p_curr = mfs.get_state(k)
