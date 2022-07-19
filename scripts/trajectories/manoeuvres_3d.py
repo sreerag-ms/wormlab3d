@@ -11,19 +11,19 @@ from mpl_toolkits.mplot3d.art3d import Line3DCollection, Poly3DCollection
 from simple_worm.frame import FrameSequenceNumpy
 from simple_worm.plot3d import FrameArtist, Arrow3D, MidpointNormalize
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
-from wormlab3d.data.model import Dataset, Reconstruction
+from wormlab3d.data.model import Dataset, Reconstruction, Trial
 from wormlab3d.toolkit.plot_utils import equal_aspect_ratio, make_box_from_pca
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.manoeuvres import get_manoeuvres, get_forward_durations
 from wormlab3d.trajectories.util import calculate_speeds
 
-animate = False
-show_plots = True
+animate = True
+show_plots = False
 save_plots = True
 img_extension = 'svg'
 fps_anim = 25
-playback_speed = 10
+playback_speed = 4
 n_revolutions = 0.5
 
 arrow_colours = {
@@ -129,8 +129,12 @@ def plot_manoeuvre_3d(
 
     if animate:
         # Aspects
-        azims = np.linspace(start=0, stop=360 * n_revolutions, num=len(X_slice))
-        ax.view_init(azim=azims[0])  # elev
+        azims = np.linspace(
+            start=azim - 360 * n_revolutions / 2,
+            stop=azim + 360 * n_revolutions / 2,
+            num=len(X_slice)
+        )
+        ax.view_init(azim=azims[0], elev=elev)  # elev
 
         def update(frame_num: int):
             # Rotate the view.
@@ -164,7 +168,7 @@ def plot_manoeuvre_3d(
                 title=title,
                 artist='WormLab Leeds'
             )
-            save_path = path.with_suffix('.mp4')
+            save_path = path.parent / (path.name + f'_speed={playback_speed}x.mp4')
             logger.info(f'Saving animation to {save_path}.')
             ani.save(save_path, writer='ffmpeg', fps=fps_anim, metadata=metadata)
         else:
@@ -512,13 +516,17 @@ def plot_dataset_distributions():
         plt.show()
 
 
-def plot_single_manoeuvre(index: int):
+def plot_single_manoeuvre(
+        index: int = None,
+        frame_num: int = None
+):
     """
     Plot a single manoeuvres detected in the trajectory.
     """
     args = get_args()
     X_full, X_slice = get_trajectory(args)
-    signed_speeds = calculate_speeds(X_full, signed=True)
+    trial = Trial.objects.get(id=args.trial)
+    signed_speeds = calculate_speeds(X_full, signed=True) * trial.fps
 
     manoeuvres = get_manoeuvres(
         X_full,
@@ -526,7 +534,16 @@ def plot_single_manoeuvre(index: int):
         min_reversal_frames=args.min_reversal_frames,
         window_size=args.manoeuvre_window
     )
-    m = manoeuvres[index]
+
+    if index is not None:
+        m = manoeuvres[index]
+    elif frame_num is not None:
+        frame_nums = np.array([m['centre_idx'] for m in manoeuvres])
+        idx = np.argmin(np.abs(frame_nums - frame_num))
+        m = manoeuvres[idx]
+        index = f'f{frame_num}'
+    else:
+        raise RuntimeError('index or frame_num must be specified!')
 
     filename = f'manoeuvre_{index}_trial={args.trial}_{args.midline3d_source}' \
                f'_rev={args.min_reversal_frames}' \
@@ -544,10 +561,10 @@ def plot_single_manoeuvre(index: int):
         colours=signed_speeds[m['start_idx']:m['end_idx']],
         cmap='PRGn',
         show_colourbar=True,
-        worm_idxs=[500, 900],
+        worm_idxs=592,  # 0,  # [500, 900],
         planes=[plane_prev, plane_next],
-        azim=55,
-        elev=-5
+        azim=-159,  # 55,
+        elev=-152,  # -5
     )
 
 
@@ -555,12 +572,15 @@ if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
     # from simple_worm.plot3d import interactive
-    #
     # interactive()
+
     # plot_all_manoeuvres()
     # plot_angles_and_durations()
     # plot_angles_and_durations_varying_parameters()
     # plot_manoeuvre_rate()
     # plot_dataset_distributions()
 
-    plot_single_manoeuvre(index=2)
+    # plot_single_manoeuvre(index=7)
+    # plot_single_manoeuvre(frame_num=11400)
+    # plot_single_manoeuvre(frame_num=15100)
+    plot_single_manoeuvre(frame_num=8858)
