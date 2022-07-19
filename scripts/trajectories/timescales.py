@@ -4,6 +4,7 @@ from typing import List
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.data.model import Reconstruction, Trial, Dataset
@@ -17,9 +18,7 @@ from wormlab3d.trajectories.manoeuvres import get_manoeuvres
 from wormlab3d.trajectories.pca import get_pca_cache_from_args
 from wormlab3d.trajectories.util import get_deltas_from_args, calculate_speeds
 
-# tex_mode()
-
-show_plots = True
+show_plots = False
 save_plots = True
 img_extension = 'svg'
 
@@ -303,8 +302,8 @@ def transition_rates_dataset():
             for r in dwd['on']:
                 t[r[0]:r[1]] = 1
             M = _calculate_transition_matrix(t)
-            l0cd = M[0, 1]
-            l1cd = M[1, 0]
+            l0cd = M[0, 1] * trial.fps
+            l1cd = M[1, 0] * trial.fps
             lambda0[c][delta].append(l0cd)
             lambda1[c][delta].append(l1cd)
             lambda0_all[delta].append(l0cd)
@@ -588,8 +587,8 @@ def transition_rates_dataset_simple():
             for r in dwd['on']:
                 t[r[0]:r[1]] = 1
             M = _calculate_transition_matrix(t)
-            l0cd = M[0, 1]
-            l1cd = M[1, 0]
+            l0cd = M[0, 1] * trial.fps
+            l1cd = M[1, 0] * trial.fps
             lambda0[c][delta].append(l0cd)
             lambda1[c][delta].append(l1cd)
             lambda0_all[delta].append(l0cd)
@@ -717,12 +716,15 @@ def transition_rates_dataset_simple():
         plt.show()
 
 
-def displacement_transition_rates_dataset_averages():
+def displacement_transition_rates_dataset_averages(
+        ax: Axes = None
+):
     """
     Show the average transition rates between above/below average mobility across a dataset.
     """
     args = get_args()
     deltas, delta_ts = get_deltas_from_args(args)
+    return_ax = ax is not None
 
     # Get dataset
     assert args.dataset is not None
@@ -733,6 +735,8 @@ def displacement_transition_rates_dataset_averages():
     args.midline3d_source_file = None
     args.reconstruction = None
     args.tracking_only = True
+    args.start_frame = None
+    args.end_frame = None
 
     # Calculate displacements and states for all trials
     lambda0_all = {delta: [] for delta in deltas}
@@ -762,15 +766,16 @@ def displacement_transition_rates_dataset_averages():
             for r in dwd['on']:
                 t[r[0]:r[1]] = 1
             M = _calculate_transition_matrix(t)
-            l0cd = M[0, 1]
-            l1cd = M[1, 0]
+            l0cd = M[0, 1] * trial.fps
+            l1cd = M[1, 0] * trial.fps
             lambda0_all[delta].append(l0cd)
             lambda1_all[delta].append(l1cd)
 
     # Set up plots
-    fig, ax = plt.subplots(1, figsize=(4, 3))
+    if ax is None:
+        fig, ax = plt.subplots(1, figsize=(4, 3))
     # ax.set_title(f'Dataset {ds.id}.')
-    ax.set_ylabel(f'Transition probability')
+    ax.set_ylabel(f'Transition rate')
     ax.set_xlabel('$\Delta\ (s)$')
     ax.set_yscale('log')
 
@@ -803,17 +808,24 @@ def displacement_transition_rates_dataset_averages():
         l1_ub = l1_mean_ + l1_std_
         ax_.fill_between(dts_, l0_lb, l0_ub, color='blue', alpha=0.2)
         ax_.fill_between(dts_, l1_lb, l1_ub, color='orange', alpha=0.2)
-        ax_.plot(dts_, l0_mean_, color='blue', label='$p_0 (s_0 \\rightarrow s_1)$')
-        ax_.plot(dts_, l1_mean_, color='orange', label='$p_1 (s_1 \\rightarrow s_0)$')
+        ax_.plot(dts_, l0_mean_, color='blue', label='$p_0(s_0\\rightarrow\ s_1)$')
+        ax_.plot(dts_, l1_mean_, color='orange', label='$p_1(s_1\\rightarrow\ s_0)$')
 
     # Plot averages across all trajectories
     _plot_data(ax, dts, l0_mean, l1_mean, l0_std, l1_std)
     ax.legend()
+    if return_ax:
+        return ax
+
     fig.tight_layout()
 
     if save_plots:
         plt.savefig(
-            make_filename('transition_rates_dataset_averages', args)
+            make_filename(
+                'displacement_transition_rates_dataset_averages',
+                args,
+                excludes=['trial', 'frames']
+            )
         )
     if show_plots:
         plt.show()
@@ -1256,12 +1268,15 @@ def nonplanarity_and_displacement_over_time(x_label: str = 'time'):
         plt.show()
 
 
-def nonplanarity_transition_rates_dataset_averages():
+def nonplanarity_transition_rates_dataset_averages(
+        ax: Axes = None
+):
     """
     Show the average transition rates between above/below average nonplanarity across a dataset.
     """
     args = get_args()
     deltas, delta_ts = get_deltas_from_args(args)
+    return_ax = ax is not None
 
     # Get dataset
     assert args.dataset is not None
@@ -1272,6 +1287,8 @@ def nonplanarity_transition_rates_dataset_averages():
     args.midline3d_source_file = None
     args.reconstruction = None
     args.tracking_only = True
+    args.start_frame = None
+    args.end_frame = None
 
     # Calculate nonplanarity for all trials
     lambda0_all = {delta: [] for delta in deltas}
@@ -1306,15 +1323,16 @@ def nonplanarity_transition_rates_dataset_averages():
             for r in dwd['on']:
                 t[r[0]:r[1]] = 1
             M = _calculate_transition_matrix(t)
-            l0cd = M[0, 1]
-            l1cd = M[1, 0]
+            l0cd = M[0, 1] * trial.fps
+            l1cd = M[1, 0] * trial.fps
             lambda0_all[delta].append(l0cd)
             lambda1_all[delta].append(l1cd)
 
     # Set up plots
-    fig, ax = plt.subplots(1, figsize=(6, 4))
+    if ax is None:
+        fig, ax = plt.subplots(1, figsize=(6, 4))
     # ax.set_title(f'Dataset {ds.id}.')
-    ax.set_ylabel(f'Transition probability')
+    ax.set_ylabel(f'Transition rate')
     ax.set_xlabel('$\Delta\ (s)$')
     ax.set_yscale('log')
 
@@ -1353,11 +1371,19 @@ def nonplanarity_transition_rates_dataset_averages():
     # Plot averages across all trajectories
     _plot_data(ax, dts, l0_mean, l1_mean, l0_std, l1_std)
     ax.legend()
+
+    if return_ax:
+        return ax
+
     fig.tight_layout()
 
     if save_plots:
         plt.savefig(
-            make_filename('nonplanarity_transition_rates_dataset_averages', args)
+            make_filename(
+                'nonplanarity_transition_rates_dataset_averages',
+                args,
+                excludes=['trial', 'frames']
+            )
         )
     if show_plots:
         plt.show()
@@ -1486,6 +1512,51 @@ def displacement_over_time_with_stats():
         plt.show()
 
 
+def transition_rates_dataset_averages():
+    """
+    Combine the displacements and non-planarity dataset averages plots.
+    """
+    plateaux_line_denom = 40
+
+    def add_plateaux_indicator(ax_):
+        ax_.axhline(y=1 / plateaux_line_denom, color='red', linestyle='--', alpha=0.8, linewidth=2)
+        ax_.text(
+            -12,
+            1 / plateaux_line_denom,
+            f'$\\frac{{1}}{{{plateaux_line_denom}s}}$',
+            color='red',
+            fontsize=14,
+            verticalalignment='center',
+            horizontalalignment='right'
+        )
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4), sharey=True)
+
+    ax = axes[0]
+    displacement_transition_rates_dataset_averages(ax)
+    ax.set_title('Displacements')
+    add_plateaux_indicator(ax)
+
+    ax = axes[1]
+    nonplanarity_transition_rates_dataset_averages(ax)
+    ax.set_title('Non-planarity')
+    add_plateaux_indicator(ax)
+
+    fig.tight_layout()
+
+    if save_plots:
+        args = get_args()
+        plt.savefig(
+            make_filename(
+                'transition_rates_dataset_averages',
+                args,
+                excludes=['trial', 'frames']
+            )
+        )
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     # from simple_worm.plot3d import interactive
     # interactive()
@@ -1497,7 +1568,7 @@ if __name__ == '__main__':
     # nonplanarity_over_time()
     # speed_over_time()
 
-    displacement_over_time_with_stats()
+    # displacement_over_time_with_stats()
 
     # nonplanarity_and_displacement_over_time(x_label='time')
     # if args_.dataset is not None:
@@ -1511,3 +1582,5 @@ if __name__ == '__main__':
     # transition_rates_dataset_simple()
     # displacement_transition_rates_dataset_averages()
     # nonplanarity_transition_rates_dataset_averages()
+
+    transition_rates_dataset_averages()
