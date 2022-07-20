@@ -105,7 +105,7 @@ def plot_manoeuvre_3d(
             if worm_idx >= len(X_full):
                 worm_idx = len(X_full) - 1
             FS = FrameSequenceNumpy(x=X_full.transpose(0, 2, 1))
-            fa = FrameArtist(F=FS[worm_idx], midline_opts={'zorder': 100, 's': 100})
+            fa = FrameArtist(F=FS[int(worm_idx)], midline_opts={'zorder': 100, 's': 100})
             fa.add_midline(ax)
 
     # Add arrows
@@ -552,19 +552,20 @@ def plot_single_manoeuvre(
                f'_frames={m["start_idx"]}-{m["end_idx"]}'
 
     plane_prev = make_box_from_pca(m['X_prev'], m['pca_prev'], 'orange', scale=(1, 2, 3))
-    plane_next = make_box_from_pca(m['X_next'], m['pca_next'], 'green', scale=(1, 3, 1))
+    plane_next = make_box_from_pca(m['X_next'], m['pca_next'], 'green', scale=(1, 1, 1))
 
     plot_manoeuvre_3d(
         X_slice=X_slice[m['start_idx']:m['end_idx']],
         X_full=X_full[m['start_idx']:m['end_idx']],
         filename=filename,
+        title=f'Trial={args.trial}. Frames={m["start_idx"]}-{m["end_idx"]}',
         colours=signed_speeds[m['start_idx']:m['end_idx']],
         cmap='PRGn',
         show_colourbar=True,
-        worm_idxs=592,  # 0,  # [500, 900],
+        worm_idxs=8700 - m['start_idx'],  # 0,  # [500, 900],
         planes=[plane_prev, plane_next],
-        azim=-159,  # 55,
-        elev=-152,  # -5
+        azim=-58,  # 55,
+        elev=30,  # -5
     )
 
 
@@ -583,4 +584,4 @@ if __name__ == '__main__':
     # plot_single_manoeuvre(index=7)
     # plot_single_manoeuvre(frame_num=11400)
     # plot_single_manoeuvre(frame_num=15100)
-    plot_single_manoeuvre(frame_num=8858)
+    plot_single_manoeuvre(frame_num=8700)
