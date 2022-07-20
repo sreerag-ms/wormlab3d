@@ -1223,7 +1223,7 @@ def volume_metric_sweeps2():
         ax.axvline(x=args.phi_dist_params[1], c='orange', linestyle='--')
         ax.legend()
         ax.set_title(f'$\delta$={fix_pause:.1f}s')
-        ax.set_xlabel(f'$\sigma_\psi$')
+        ax.set_xlabel(f'$\sigma_\phi$')
         ax.set_xticks(np.arange(n_sigmas))
         ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
         ax.set_ylabel('V')
@@ -1280,6 +1280,190 @@ def volume_metric_sweeps2():
             plt.show()
 
 
+def _calculate_voxel_scores(
+        args: Namespace
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Calculate the voxel scores across a range of sigmas, durations, pauses and voxel sizes.
+    """
+    npa_sigmas = args.npas
+    n_sigmas = len(npa_sigmas)
+    sim_durations = args.sim_durations
+    n_durations = len(sim_durations)
+    pauses = args.pauses
+    n_pauses = len(pauses)
+    voxel_sizes = args.voxel_sizes
+    n_voxel_sizes = len(voxel_sizes)
+
+    # Outputs
+    scores = np.zeros((n_sigmas, n_durations, n_pauses, n_voxel_sizes, 4))
+    n_sims = n_sigmas * n_durations * n_pauses
+    sim_idx = 0
+
+    # Sweep over the combinations
+    for i, npas in enumerate(npa_sigmas):
+        for j, duration in enumerate(sim_durations):
+            for k, pause in enumerate(pauses):
+                logger.info(
+                    f'{sim_idx + 1}/{n_sims}: '
+                    f'sigma={npas:.2E}, duration={duration:.2f}, pause={pause:.2f}.'
+                )
+                args.phi_dist_params[1] = npas
+                args.sim_duration = duration
+                args.nonp_pause_max = pause
+                pe, TC = get_trajectories_from_args(args)
+
+                # Calculate optimality
+                for l, vs in enumerate(voxel_sizes):
+                    vc = TC.get_coverage(vs) / vs
+                    scores[i, j, k, l] = [vc.mean(), vc.min(), vc.max(), vc.std()]
+                if TC.needs_save:
+                    TC.save()
+
+                sim_idx += 1
+
+    return scores
+
+
+def _generate_or_load_voxel_scores(
+        args: Namespace,
+        rebuild_cache: bool = False
+) -> Tuple[np.ndarray, np.ndarray]:
+    keys = {
+        'npas': [f'{s:.3E}' for s in args.npas],
+        'durations': [f'{d:.4f}' for d in args.sim_durations],
+        'pauses': [f'{p:.4f}' for p in args.pauses],
+        'vs': [f'{p:.3E}' for p in args.voxel_sizes],
+    }
+    cache_path = LOGS_PATH / hash_data(keys)
+    cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
+    if not rebuild_cache and cache_fn.exists():
+        data = np.load(cache_fn)
+        scores = data['scores']
+        logger.info('Loaded scores from cache.')
+    else:
+        logger.info('Generating voxel coverage values.')
+        scores = _calculate_voxel_scores(args)
+        save_arrs = {
+            'scores': scores,
+        }
+        logger.info(f'Saving voxel scores to {cache_path}.')
+        np.savez(cache_path, **save_arrs)
+
+    return scores
+
+
+def voxel_scores_sweeps():
+    """
+    Simulate across a range of non-planarities and count unique voxels visited.
+    """
+    args = get_args(validate_source=False)
+    model_phi = args.phi_dist_params[1]
+
+    # Set parameter ranges
+    npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-3), np.log(1 / 10), 20))
+    n_sigmas = len(npa_sigmas)
+    args.npas = npa_sigmas
+    sim_durations = np.exp(-np.linspace(np.log(1 / (5 * 60)), np.log(1 / (60 * 60)), 8))
+    n_durations = len(sim_durations)
+    fix_pause = args.nonp_pause_max
+    pauses = np.r_[[0, ], np.exp(-np.linspace(np.log(1 / 1), np.log(1 / 60), 7))]
+    # pauses = np.linspace(0, 10, 11)
+    n_pauses = len(pauses)
+    fix_duration = args.sim_duration
+
+    # voxel_sizes = np.exp(-np.linspace(np.log(1/1), np.log(1/0.01), 20))
+    voxel_sizes = np.exp(-np.linspace(np.log(1 / 0.1), np.log(1 / 0.01), 6))
+    args.voxel_sizes = voxel_sizes
+    n_vs = len(voxel_sizes)
+
+    if 1:
+        # Fix the pause and sweep over the durations
+        args.sim_durations = sim_durations
+        args.pauses = [fix_pause]
+        scores = _generate_or_load_voxel_scores(args, rebuild_cache=True)
+        optimal_sigmas_idxs = scores[..., 0].argmax(axis=0).squeeze()
+        optimal_sigmas = npa_sigmas[optimal_sigmas_idxs]
+        optimal_scores = []
+
+        # scores = np.zeros((n_sigmas, n_durations, n_pauses, n_voxel_sizes, 4))
+
+        # Plot the scores
+        fig, axes = plt.subplots(n_vs, figsize=(10, 5 * n_vs), squeeze=False)
+        cmap = plt.get_cmap('winter')
+        colours = cmap(np.linspace(0, 1, n_durations))
+
+        for l, vs in enumerate(voxel_sizes):
+            ax = axes[l, 0]
+            for j, duration in enumerate(sim_durations):
+                score = scores[:, j, 0, l, 0]
+                optimal_scores.append(score[optimal_sigmas_idxs[j]])
+                ax.plot(npa_sigmas, score, label=f'T={duration:.0f}s', c=colours[j], marker='o', alpha=0.7)
+            ax.scatter(optimal_sigmas, optimal_scores, c='red', marker='o', zorder=100, s=50)
+            ax.axvline(x=model_phi, c='orange', linestyle='--')
+            ax.legend()
+            ax.set_title(f'$\delta$={fix_pause:.1f}s. Voxel size={vs:.3E}mm.')
+            ax.set_xlabel(f'$\sigma_\phi$')
+            ax.set_xticks(np.arange(n_sigmas))
+            ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
+            ax.set_ylabel('Average voxels visited')
+            ax.set_xscale('log')
+            ax.grid()
+
+        fig.tight_layout()
+        if save_plots:
+            plt.savefig(
+                make_filename('voxels_sweep_a', args,
+                              excludes=['deltas', 'delta_step', 'n_targets', 'epsilon', 'duration']),
+                transparent=True
+            )
+        if show_plots:
+            plt.show()
+
+    if 1:
+        # Fix the duration and sweep over the pauses
+        args.sim_durations = [fix_duration]
+        args.pauses = pauses
+        scores = _generate_or_load_voxel_scores(args, rebuild_cache=False)
+        optimal_sigmas_idxs = scores[..., 0].argmax(axis=0).squeeze()
+        optimal_sigmas = npa_sigmas[optimal_sigmas_idxs]
+        optimal_scores = []
+
+        # scores = np.zeros((n_sigmas, n_durations, n_pauses, n_voxel_sizes, 4))
+
+        # Plot the scores
+        fig, axes = plt.subplots(n_vs, figsize=(10, 5 * n_vs), squeeze=False)
+        cmap = plt.get_cmap('winter')
+        colours = cmap(np.linspace(0, 1, n_pauses))
+
+        for l, vs in enumerate(voxel_sizes):
+            ax = axes[l, 0]
+            for k, pause in enumerate(pauses):
+                score = scores[:, 0, k, l, 0]
+                optimal_scores.append(score[optimal_sigmas_idxs[k]])
+                ax.plot(npa_sigmas, score, label=f'$\delta$={pause:.1f}s', c=colours[k], marker='o', alpha=0.7)
+            ax.scatter(optimal_sigmas, optimal_scores, c='red', marker='o', zorder=100, s=50)
+            ax.axvline(x=model_phi, c='orange', linestyle='--')
+            ax.legend()
+            ax.set_title(f'T={fix_duration}s. Voxel size={vs:.3E}mm.')
+            ax.set_xlabel(f'$\sigma_\psi$')
+            ax.set_xticks(np.arange(n_sigmas))
+            ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
+            ax.set_ylabel('Average voxels visited')
+            ax.set_xscale('log')
+            ax.grid()
+
+        fig.tight_layout()
+        if save_plots:
+            plt.savefig(
+                make_filename('voxel_sweep_b', args,
+                              excludes=['deltas', 'delta_step', 'n_targets', 'epsilon', 'duration']),
+                transparent=True
+            )
+        if show_plots:
+            plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
@@ -1293,4 +1477,5 @@ if __name__ == '__main__':
     # crossings_nonp()
     # volume_metric()
     # volume_metric_sweeps()
-    volume_metric_sweeps2()
+    # volume_metric_sweeps2()
+    voxel_scores_sweeps()
