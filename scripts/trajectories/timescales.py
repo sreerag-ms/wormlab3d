@@ -1521,7 +1521,7 @@ def transition_rates_dataset_averages():
     def add_plateaux_indicator(ax_):
         ax_.axhline(y=1 / plateaux_line_denom, color='red', linestyle='--', alpha=0.8, linewidth=2)
         ax_.text(
-            -12,
+            -14,
             1 / plateaux_line_denom,
             f'$\\frac{{1}}{{{plateaux_line_denom}s}}$',
             color='red',
@@ -1530,17 +1530,20 @@ def transition_rates_dataset_averages():
             horizontalalignment='right'
         )
 
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(6, 3), sharey=True)
 
     ax = axes[0]
     displacement_transition_rates_dataset_averages(ax)
     ax.set_title('Displacements')
     add_plateaux_indicator(ax)
+    ax.set_ylim(bottom=5e-3)
+    ax.set_yticks([1e-2, 1e-1, 1])
 
     ax = axes[1]
     nonplanarity_transition_rates_dataset_averages(ax)
     ax.set_title('Non-planarity')
     add_plateaux_indicator(ax)
+    ax.yaxis.set_tick_params(labelbottom=True)
 
     fig.tight_layout()
 
