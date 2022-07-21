@@ -1,6 +1,7 @@
-from typing import List, Callable
+from typing import List, Callable, Optional
 from typing import Tuple
 
+import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import animation
@@ -460,3 +461,58 @@ def make_box_from_pca(X: np.ndarray, pca: PCA, colour: str, scale: Tuple[float] 
 
     plane = Poly3DCollection(polygons, alpha=0.2, facecolors=colour, edgecolors='dark' + colour)
     return plane
+
+
+def overlay_image(
+        background: np.ndarray,
+        overlay: np.ndarray,
+        x_offset: Optional[int] = None,
+        y_offset: Optional[int] = None
+) -> np.ndarray:
+    """
+    Add an overlay to an image.
+    Adapted from https://stackoverflow.com/questions/40895785/using-opencv-to-overlay-transparent-image-onto-another-image
+    """
+    bg_h, bg_w, bg_channels = background.shape
+    fg_h, fg_w, fg_channels = overlay.shape
+
+    assert bg_channels == 3, f'Background image should have exactly 3 channels (RGB). found:{bg_channels}'
+
+    # Convert white to transparent if no alpha channel defined
+    if fg_channels == 3:
+        white = np.all(overlay == [255, 255, 255], axis=-1)
+        overlay = cv2.cvtColor(overlay, cv2.COLOR_BGR2BGRA)
+        overlay[white, -1] = 0
+
+    # center by default
+    if x_offset is None: x_offset = (bg_w - fg_w) // 2
+    if y_offset is None: y_offset = (bg_h - fg_h) // 2
+
+    w = min(fg_w, bg_w, fg_w + x_offset, bg_w - x_offset)
+    h = min(fg_h, bg_h, fg_h + y_offset, bg_h - y_offset)
+
+    if w < 1 or h < 1: return
+
+    # clip foreground and background images to the overlapping regions
+    bg_x = max(0, x_offset)
+    bg_y = max(0, y_offset)
+    fg_x = max(0, x_offset * -1)
+    fg_y = max(0, y_offset * -1)
+    overlay = overlay[fg_y:fg_y + h, fg_x:fg_x + w]
+    background_subsection = background[bg_y:bg_y + h, bg_x:bg_x + w]
+
+    # separate alpha and color channels from the foreground image
+    foreground_colors = overlay[:, :, :3]
+    alpha_channel = overlay[:, :, 3] / 255  # 0-255 => 0.0-1.0
+
+    # construct an alpha_mask that matches the image shape
+    alpha_mask = np.dstack((alpha_channel, alpha_channel, alpha_channel))
+
+    # combine the background with the overlay image weighted by alpha
+    composite = background_subsection * (1 - alpha_mask) + foreground_colors * alpha_mask
+
+    # overwrite the section of the background image that has been updated
+    combined = background.copy()
+    combined[bg_y:bg_y + h, bg_x:bg_x + w] = composite
+
+    return combined

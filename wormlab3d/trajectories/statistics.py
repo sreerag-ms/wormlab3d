@@ -45,11 +45,11 @@ def calculate_trial_turn_statistics(
     e0, e1, e2 = calculate_trajectory_frame(X, pcas, args.planarity_window)
 
     # Take centre of mass
+    X_full = None
     if X.ndim == 3:
-        X_full = X - X.mean(axis=0)
+        if X.shape[1] != 1:
+            X_full = X - X.mean(axis=0)
         X = X.mean(axis=1)
-    else:
-        X_full = None
     X -= X.mean(axis=0)
 
     # Calculate the approximation, tumbles and runs

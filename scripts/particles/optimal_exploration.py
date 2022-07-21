@@ -1189,10 +1189,14 @@ def volume_metric_sweeps2():
     npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-3), np.log(1 / 10), 20))
     n_sigmas = len(npa_sigmas)
     args.npas = npa_sigmas
-    sim_durations = np.exp(-np.linspace(np.log(1 / (1 * 60)), np.log(1 / (30 * 60)), 8))
+    # sim_durations = np.exp(-np.linspace(np.log(1 / (1 * 60)), np.log(1 / (30 * 60)), 8))
+    sim_durations = np.arange(1, 6)**2 * 60
+
     n_durations = len(sim_durations)
     fix_pause = args.nonp_pause_max
-    pauses = np.r_[[0, ], np.exp(-np.linspace(np.log(1 / 1), np.log(1 / 60), 7))]
+    # pauses = np.r_[[0, ], np.exp(-np.linspace(np.log(1 / 1), np.log(1 / 60), 7))]
+    pauses = np.arange(1, 6)**2
+
     # pauses = np.linspace(0, 10, 11)
     n_pauses = len(pauses)
     fix_duration = args.sim_duration
@@ -1202,19 +1206,19 @@ def volume_metric_sweeps2():
         cap_vols = 1 / 3 * np.pi * (r_ - z_)**2 * (2 * r_ + z_)
         return sphere_vols - 2 * cap_vols
 
-    if 1:
+    if 0:
         # Fix the pause and sweep over the durations
         args.sim_durations = sim_durations
         args.pauses = [fix_pause]
         r_values, z_values = _generate_or_load_rz_values(args, rebuild_cache=False)
 
-        # start_idx = 3
-        # end_idx = n_durations -1
-        # n_durations = end_idx - start_idx
-        # sim_durations = sim_durations[start_idx:end_idx]
-        # sim_durations = ['4 min', '7 min', '11 min', '18 min']
-        # r_values = r_values[:, start_idx:end_idx]
-        # z_values = z_values[:, start_idx:end_idx]
+        start_idx = 3
+        end_idx = n_durations -1
+        n_durations = end_idx - start_idx
+        sim_durations = sim_durations[start_idx:end_idx]
+        sim_durations = ['4 min', '7 min', '11 min', '18 min']
+        r_values = r_values[:, start_idx:end_idx]
+        z_values = z_values[:, start_idx:end_idx]
 
         disk_vols = _calculate_volumes(r_values, z_values)
         optimal_sigmas_idxs = disk_vols[..., 0].argmax(axis=0).squeeze()
@@ -1228,23 +1232,25 @@ def volume_metric_sweeps2():
         for j, duration in enumerate(sim_durations):
             vols = disk_vols[:, j, 0].T
             optimal_vols.append(vols[0, optimal_sigmas_idxs[j]])
-            ax.plot(npa_sigmas, vols[0], label=f'T={duration:.0f}s', c=colours[j], marker='o', alpha=0.7)
-            # ax.plot(npa_sigmas, vols[0], label=duration, c=colours[j], marker='o', alpha=0.7)
-        ax.scatter(optimal_sigmas, optimal_vols, marker='o', zorder=100, s=50, facecolors='none',
-                   edgecolors='red', linewidths=2)
+            # ax.plot(npa_sigmas, vols[0], label=f'T={duration:.0f}s', c=colours[j], marker='o', alpha=0.7)
+            ax.plot(npa_sigmas, vols[0], label=duration, c=colours[j], marker='o', alpha=0.7)
+            ax.axhline(y=vols[0, optimal_sigmas_idxs[j]], color='red', zorder=-2, linewidth=2, linestyle=':')
+        # ax.scatter(optimal_sigmas, optimal_vols, marker='o', zorder=100, s=50, facecolors='none',
+        #            edgecolors='red', linewidths=2)
 
         ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=3, zorder=-1)
         ax.legend(loc='upper left', bbox_to_anchor=(1, 1), bbox_transform=ax.transAxes)
-        ax.set_title(f'$\delta_{{max}}={fix_pause:.1f}$s')
+        ax.set_title(f'$\delta_\max={fix_pause:.0f}$s')
         ax.set_xlabel(f'$\sigma_\phi$')
         ax.set_xscale('log')
         # ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
         ax.set_xticks([1e-3, 1e-1, 1e1])
-        ax.text(model_phi, -1000, model_phi, color='orange', fontsize='large', fontweight='bold',
+        ax.text(model_phi, -700, model_phi, color='orange', fontsize='large', fontweight='bold',
                 horizontalalignment='center', verticalalignment='top')
         ax.set_ylabel('Volume explored')
-        ax.set_yticks([5000, 10000])
-        ax.grid()
+        # ax.set_yticks([0, 2500, 5000, 7500, 10000])
+        ax.set_yticks([0, 2000, 4000, 6000])
+        # ax.grid()
         fig.tight_layout()
         if save_plots:
             plt.savefig(
@@ -1265,6 +1271,15 @@ def volume_metric_sweeps2():
         optimal_sigmas = npa_sigmas[optimal_sigmas_idxs]
         optimal_vols = []
 
+        # r_values = np.zeros((n_sigmas, n_durations, n_pauses, 4))
+
+        start_idx = 0
+        end_idx = 3
+        n_pauses = end_idx - start_idx
+        pauses = pauses[start_idx:end_idx]
+        r_values = r_values[:, :, start_idx:end_idx]
+        z_values = z_values[:, :, start_idx:end_idx]
+
         # Plot the volumes
         fig, ax = plt.subplots(1, figsize=(5, 3))
         cmap = plt.get_cmap('winter')
@@ -1272,19 +1287,22 @@ def volume_metric_sweeps2():
         for k, pause in enumerate(pauses):
             vols = disk_vols[:, 0, k].T
             optimal_vols.append(vols[0, optimal_sigmas_idxs[k]])
-            ax.plot(npa_sigmas, vols[0], label=f'$\delta$={pause:.1f}s', c=colours[k], marker='o', alpha=0.7)
-        ax.scatter(optimal_sigmas, optimal_vols, marker='o', zorder=100, s=50, facecolors='none',
-                   edgecolors='red', linewidths=2)
+            ax.plot(npa_sigmas, vols[0], label=f'$\delta_\max={pause:.0f}$s', c=colours[k], marker='o', alpha=0.7)
+            if k == 1:
+                ax.axhline(y=vols[0, optimal_sigmas_idxs[k]], color='red', zorder=-2, linewidth=2, linestyle=':')
+        # ax.scatter(optimal_sigmas, optimal_vols, marker='o', zorder=100, s=50, facecolors='none',
+        #            edgecolors='red', linewidths=2)
         ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=3, zorder=-1)
         ax.legend(loc='upper left', bbox_to_anchor=(1, 1), bbox_transform=ax.transAxes)
-        ax.set_title(f'T={fix_duration}s')
+        # ax.set_title(f'T={fix_duration}s')
+        ax.set_title(f'5 minute simulation time')
         ax.set_xlabel(f'$\sigma_\phi$')
         ax.set_xscale('log')
         ax.set_xticks([1e-3, 1e-1, 1e1])
-        ax.text(model_phi, -1, model_phi, color='orange', fontsize='large', fontweight='bold',
+        ax.text(model_phi, -60, model_phi, color='orange', fontsize='large', fontweight='bold',
                 horizontalalignment='center', verticalalignment='top')
         ax.set_ylabel('Volume explored')
-        ax.set_yticks([0, 4, 8, 12])
+        ax.set_yticks([0, 200, 400])
 
         ax.grid()
         fig.tight_layout()
@@ -1298,7 +1316,7 @@ def volume_metric_sweeps2():
             plt.show()
 
     # Plot combined
-    if 1:
+    if 0:
         fig, axes = plt.subplots(2, figsize=(6, 6), gridspec_kw={
             'hspace': 0.4,
             'top': 0.93,
