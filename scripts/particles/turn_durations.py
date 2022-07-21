@@ -1,4 +1,6 @@
 import os
+from argparse import Namespace
+from typing import Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -6,15 +8,18 @@ import numpy as np
 from simple_worm.plot3d import Arrow3D
 from wormlab3d import START_TIMESTAMP, LOGS_PATH, logger
 from wormlab3d.data.model import Trial, Dataset
-from wormlab3d.toolkit.plot_utils import equal_aspect_ratio, make_box_from_pca, tex_mode
+from wormlab3d.toolkit.plot_utils import equal_aspect_ratio, make_box_from_pca
+from wormlab3d.toolkit.util import hash_data, to_dict
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.statistics import calculate_trial_run_statistics, calculate_trial_turn_statistics
 
 show_plots = True
-save_plots = False
+save_plots = True
 img_extension = 'svg'
-tex_mode()
+
+
+# tex_mode()
 
 
 def plot_trial_turns():
@@ -178,6 +183,53 @@ def plot_trial_turn_correlations():
         plt.show()
 
 
+def _generate_or_load_dataset_stats(
+        args: Namespace,
+        smooth_K: int,
+        window_size: int,
+        curvature_height: int,
+        ds: Dataset,
+        rebuild_cache: bool = False
+) -> Dict[str, np.ndarray]:
+    spec = to_dict(args)
+    spec['smooth_K'] = smooth_K
+    spec['window_size'] = window_size
+    spec['curvature_height'] = curvature_height
+    stat_keys = ['distances', 'speeds', 'thetas', 'phis', 'psis', 'nonp', 'etas']
+
+    cache_path = LOGS_PATH / hash_data(spec)
+    cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
+    if not rebuild_cache and cache_fn.exists():
+        data = np.load(cache_fn)
+        outputs = {k: data[k] for k in stat_keys}
+        logger.info('Loaded stats from cache.')
+    else:
+        logger.info('Generating dataset stats.')
+
+        # Calculate the model for all trials
+        outputs = {k: [] for k in stat_keys}
+        for trial in ds.include_trials:
+            args.trial = trial.id
+            try:
+                stats = calculate_trial_turn_statistics(args, smooth_K, window_size, curvature_height)
+            except RuntimeError as e:
+                logger.warning(f'Failed to find approximation: "{e}"')
+            for k in stat_keys:
+                outputs[k].append(stats[k])
+
+        n_trajectories = len(outputs['distances'])
+        logger.info(f'Calculated turn statistics for {n_trajectories} out of a possible {len(ds.include_trials)}.')
+
+        # Join outputs
+        for k in stat_keys:
+            outputs[k] = np.concatenate(outputs[k])
+
+        logger.info(f'Saving stats to {cache_path}.')
+        np.savez(cache_path, **outputs)
+
+    return outputs
+
+
 def plot_dataset_turn_correlations():
     """
     Plot the dataset turn durations.
@@ -191,41 +243,8 @@ def plot_dataset_turn_correlations():
     window_size = int(1 / dt)
     smooth_K = 101
     height = 50
-
     args.tracking_only = True
-
-    # Outputs
-    distances = []
-    thetas = []
-    phis = []
-    psis = []
-    etas = []
-    nonp = []
-
-    # Calculate the model for all trials
-    for trial in ds.include_trials:
-        args.trial = trial.id
-        try:
-            stats = calculate_trial_turn_statistics(args, smooth_K, window_size, height)
-        except RuntimeError as e:
-            logger.warning(f'Failed to find approximation: "{e}"')
-        distances.append(stats['distances'])
-        thetas.append(stats['thetas'])
-        phis.append(stats['phis'])
-        psis.append(stats['psis'])
-        etas.append(stats['etas'])
-        nonp.append(stats['nonp'])
-
-    n_trajectories = len(distances)
-    logger.info(f'Calculated turn statistics for {n_trajectories} out of a possible {len(ds.include_trials)}.')
-
-    # Join outputs
-    distances = np.concatenate(distances)
-    thetas = np.concatenate(thetas)
-    phis = np.concatenate(phis)
-    psis = np.concatenate(psis)
-    etas = np.concatenate(etas)
-    nonp = np.concatenate(nonp)
+    stats = _generate_or_load_dataset_stats(args, smooth_K, window_size, height, ds, rebuild_cache=False)
 
     # Plot correlations
     fig, axes = plt.subplots(2, 3, figsize=(12, 10))
@@ -239,32 +258,32 @@ def plot_dataset_turn_correlations():
     ax = axes[0, 0]
     ax.set_xlabel('$\\theta$')
     ax.set_ylabel('$d$')
-    ax.scatter(thetas, distances, s=2)
+    ax.scatter(stats['thetas'], stats['distances'], s=2)
 
     ax = axes[0, 1]
     ax.set_xlabel('$\phi$')
     ax.set_ylabel('$d$')
-    ax.scatter(phis, distances, s=2)
+    ax.scatter(stats['phis'], stats['distances'], s=2)
 
     ax = axes[1, 0]
     ax.set_xlabel('$\psi$')
     ax.set_ylabel('$d$')
-    ax.scatter(psis, distances, s=2)
+    ax.scatter(stats['psis'], stats['distances'], s=2)
 
     ax = axes[1, 1]
     ax.set_xlabel('$\\text{MIN}(\phi,\psi)$')
     ax.set_ylabel('$d$')
-    ax.scatter(np.min(np.stack([phis, psis]), axis=0), distances, s=2)
+    ax.scatter(np.min(np.stack([stats['phis'], stats['psis']]), axis=0), stats['distances'], s=2)
 
     ax = axes[0, 2]
     ax.set_xlabel('$\eta$')
     ax.set_ylabel('$d$')
-    ax.scatter(etas, distances, s=2)
+    ax.scatter(stats['etas'], stats['distances'], s=2)
 
     ax = axes[1, 2]
     ax.set_xlabel('$NP$')
     ax.set_ylabel('$d$')
-    ax.scatter(nonp, distances, s=2)
+    ax.scatter(stats['nonp'], stats['distances'], s=2)
 
     fig.tight_layout()
 
@@ -445,6 +464,57 @@ def plot_dataset_run_stats():
         plt.show()
 
 
+def plot_dataset_turn_nonp():
+    """
+    Plot the dataset turn non-planarities.
+    """
+    args = get_args()
+    assert args.dataset is not None
+    assert args.planarity_window is not None
+    ds = Dataset.objects.get(id=args.dataset)
+    args.dataset = None
+    dt = 1 / 25
+    window_size = int(1 / dt)
+    smooth_K = 101
+    height = 50
+
+    args.tracking_only = True
+    stats = _generate_or_load_dataset_stats(args, smooth_K, window_size, height, ds, rebuild_cache=False)
+
+    # Plot correlations
+    fig, ax = plt.subplots(1, figsize=(4, 3))
+    ax.set_title('Turn speeds')
+    #
+    ax.set_xlabel('Non-planarity')
+    ax.set_ylabel('Speed (mm/s)')
+
+    ax.scatter(stats['nonp'], stats['speeds'], s=2, alpha=0.4)
+
+    ax.set_yscale('log')
+    ax.set_xscale('log')
+
+    # Add fit line
+    def funcinv(x_, a_, b_, k_):
+        return a_ + k_ / (x_ + b_)
+
+    x = np.linspace(0.0001, 0.4, 1000)
+    ax.plot(x, funcinv(x, 0.02, 0.001, 0.001), color='red', linewidth=3, linestyle='--')
+
+    # ax.set_xlim(right=0.3)
+    # ax.set_ylim(top=0.6)
+
+    fig.tight_layout()
+
+    # Save / show
+    if save_plots:
+        plt.savefig(
+            LOGS_PATH / f'{START_TIMESTAMP}_speed_vs_nonp_ds={ds.id}_ws={window_size:.2f}_s={smooth_K}.{img_extension}',
+            transparent=True
+        )
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     # from simple_worm.plot3d import interactive
     # interactive()
@@ -453,7 +523,8 @@ if __name__ == '__main__':
 
     # plot_trial_turns()
     # plot_trial_turn_correlations()
-    plot_dataset_turn_correlations()
-    plot_dataset_turn_correlations_across_windows()
-    plot_dataset_run_stats()
+    # plot_dataset_turn_correlations()
+    # plot_dataset_turn_correlations_across_windows()
+    # plot_dataset_run_stats()
     # plot_dataset_turns_vs_runs()
+    plot_dataset_turn_nonp()
