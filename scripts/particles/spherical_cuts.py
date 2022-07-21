@@ -1,17 +1,21 @@
 import os
 import time
 from argparse import Namespace
-from typing import List, Union, Tuple
+from typing import List, Union, Tuple, Callable
 
+import cv2
 import ffmpeg
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
+from matplotlib.figure import Figure
 from mayavi import mlab
+from mayavi.core.scene import Scene
 from tvtk.tools import visual
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
+from wormlab3d.toolkit.plot_utils import overlay_image
 from wormlab3d.trajectories.args import get_args
 
 show_plots = False
@@ -107,6 +111,13 @@ z_values_paper = np.array([
 ])
 
 
+# Calculate the volumes
+def _calculate_volumes(r_, z_):
+    sphere_vols = 4 / 3 * np.pi * r_**3
+    cap_vols = 1 / 3 * np.pi * (r_ - z_)**2 * (2 * r_ + z_)
+    return sphere_vols - 2 * cap_vols
+
+
 def make_filename(
         method: str,
         args: Namespace, excludes: List[str] = None,
@@ -194,10 +205,11 @@ def _plot_sphere_slice_border(
         h: float,
         c: Union[str, np.ndarray],
         n_points: int,
-        alpha: float = 1.
+        alpha: float = 1.,
+        fig: Scene = None
 ):
     x, y, z = _get_sphere_slice_border_points(r, h, n_points)
-    return mlab.mesh(x, y, z, color=_get_rgb(c), opacity=alpha)
+    return mlab.mesh(x, y, z, color=_get_rgb(c), opacity=alpha, figure=fig)
 
 
 def _plot_sphere_slice_caps(
@@ -500,7 +512,7 @@ def spherical_cut_animation():
             'pix_fmt': 'yuv444p',
             'vcodec': 'libx264',
             'r': 25,
-            'metadata:g:0': f'title=Simulation output.',
+            'metadata:g:0': 'title=Simulation output.',
             'metadata:g:1': 'artist=Leeds Wormlab',
             'metadata:g:2': f'year={time.strftime("%Y")}',
         }
@@ -535,8 +547,301 @@ def spherical_cut_animation():
         mlab.show()
 
 
+def _make_label_overlay(
+        width: int,
+        height: int,
+        text: str
+) -> Figure:
+    """
+    Label overlay.
+    """
+    logger.info('Building label overlay plot.')
+    fig = plt.figure(figsize=(width / 100, height / 100))
+    ax = fig.add_subplot(111)
+    ax.axis('off')
+    fig.text(0.1, 0.9, text, ha='left', va='top', fontsize=12, linespacing=1.5)
+    fig.tight_layout()
+
+    # plt.close(fig)
+    return fig
+
+
+def _make_traces_plots(
+        width: int,
+        height: int,
+        sigma_labels: List[str],
+        rs: np.ndarray,
+        zs: np.ndarray,
+        vs: np.ndarray,
+        fps: int
+) -> Tuple[Figure, Callable]:
+    """
+    Build a traces plot.
+    Returns an update function to call which updates the axes.
+    """
+    logger.info('Building traces plot.')
+    n_sigmas = len(sigma_labels)
+    N = rs.shape[1]
+    ts = np.linspace(0, N / fps, N)
+
+    # Plot
+    fig, axes = plt.subplots(3, figsize=(width / 100, height / 100), gridspec_kw={
+        'hspace': 0.6,
+        'top': 0.93,
+        'bottom': 0.07,
+        'left': 0.1,
+        'right': 0.9,
+    })
+
+    r_plots = []
+    ax_r = axes[0]
+    ax_r.set_title('Radius (planar distance)')
+    for i, sigma in enumerate(sigma_labels):
+        p = ax_r.plot(rs[i][0], label=f'$\sigma$ = {sigma}')
+        r_plots.append(p[0])
+    # ax_r.legend(loc='upper left', bbox_to_anchor=(1, 1), bbox_transform=ax_r.transAxes, fontsize=18)
+    ax_r.legend(loc='upper left', fontsize=14)
+    ax_r.set_xlabel('Time (s)')
+
+    z_plots = []
+    ax_z = axes[1]
+    ax_z.set_title('Height (non-planar distance)')
+    for i, sigma in enumerate(sigma_labels):
+        p = ax_z.plot(zs[i][0], label=f'$\sigma$ = {sigma}')
+        z_plots.append(p[0])
+    # ax_z.legend(loc='upper left', bbox_to_anchor=(1, 1), bbox_transform=ax_z.transAxes)
+    ax_z.set_xlabel('Time (s)')
+
+    v_plots = []
+    ax_v = axes[2]
+    ax_v.set_title('Volume explored')
+    for i, sigma in enumerate(sigma_labels):
+        p = ax_v.plot(vs[i][0], label=f'$\sigma$ = {sigma}')
+        v_plots.append(p[0])
+    # ax_v.legend(loc='upper left', bbox_to_anchor=(1, 1), bbox_transform=ax_v.transAxes)
+    ax_v.set_xlabel('Time (s)')
+
+    def update(frame_idx: int):
+        # Update the data
+        for i in range(n_sigmas):
+            r_plots[i].set_data(ts[:frame_idx], rs[i, :frame_idx])
+            z_plots[i].set_data(ts[:frame_idx], zs[i, :frame_idx])
+            v_plots[i].set_data(ts[:frame_idx], vs[i, :frame_idx])
+
+        # Update the limits
+        for ax in axes:
+            ax.set_xlim(left=0, right=ts[frame_idx] + 5)
+        ax_r.set_ylim(bottom=0, top=np.max(rs[:, :frame_idx]) * 1.5)
+        ax_z.set_ylim(bottom=0, top=np.max(zs[:, :frame_idx]) * 1.5)
+        ax_v.set_ylim(bottom=0, top=np.max(vs[:, :frame_idx]) * 1.5)
+
+        # Redraw the canvas
+        fig.canvas.draw()
+
+    return fig, update
+
+
+def spherical_cut_stacked_animation():
+    """
+    3D stacked animation of spherical cuts explored by different trajectories.
+    """
+    args = get_args(validate_source=False)
+
+    # use_idxs = [4, 16, 28]
+    use_idxs = [4, 27, -1]
+    npa_sigmas = npa_sigmas_paper[use_idxs]
+    sigma_labels = ['0.003', '0.6', '10']
+    z_values = z_values_paper[use_idxs]
+    r_values = r_values_paper[use_idxs]
+    n_sigmas = len(npa_sigmas)
+    args.npas = npa_sigmas
+    args.sim_duration = 60 * 60
+
+    width = 1280
+    height = 720
+    n_points = 100
+    args.plot_n_trajectories_per_sigma = 5
+    traj_anim_rate = 100
+    Xs = np.load(LOGS_PATH / 'trajectories.npz', mmap_mode=True)['Xs']
+    T = Xs.shape[2]
+
+    # Set up plot
+    logger.info('Instantiating renderer.')
+    mlab.options.offscreen = save_plots
+    # visual.set_viewer(fig)
+    axis_colour = _get_rgb('red')
+
+    # Sphere and trajectory colours
+    colours = np.array([
+        [31, 119, 180, 1],
+        [255, 127, 13, 1],
+        [86, 179, 86, 1],
+    ]) / 255
+
+    figs = {}
+    trajectories = np.zeros((n_sigmas, args.plot_n_trajectories_per_sigma, T, 3))
+    paths = {i: [] for i in range(n_sigmas)}
+    vols = {}
+    alphas = [0.5, 0.5, 0.5]
+    z_arrows = {}
+    r_arrows = {}
+    label_overlays = {}
+
+    # Generate separate figures for each sigma
+    for i, npas in enumerate(npa_sigmas):
+        fig = mlab.figure(size=(width, height / n_sigmas * 2), bgcolor=(1, 1, 1))
+        fig.scene.anti_aliasing_frames = 20
+        figs[i] = fig
+
+        # Axis arrows
+        z_arrows[i] = _plot_arrow(dest=(0, 0, 1), c=axis_colour)
+        r_arrows[i] = _plot_arrow(dest=(1, 0, 0), c=axis_colour)
+
+        colour = tuple(colours[i][:3])
+
+        # Pick trajectories which come closest to the average r and z values
+        r_dist = np.abs(np.max(Xs[i][:, :, 0], axis=1) - r_values[i, 0])
+        z_dist = np.abs(np.max(Xs[i][:, :, 2], axis=1) - z_values[i, 0])
+        best_fit_idxs = np.argsort(r_dist * z_dist)[:args.plot_n_trajectories_per_sigma]
+        for j, idx in enumerate(best_fit_idxs):
+            traj = Xs[i][idx]
+            trajectories[i, j] = traj
+            x, y, z = traj[0].T
+            path = mlab.plot3d(x, y, z, color=colour, tube_radius=0.08, figure=figs[i])
+            paths[i].append(path)
+        vols[i] = _plot_sphere_slice_border(0.1, 0.1, colour, n_points, alphas[i], fig=figs[i])
+
+        # Build label overlays
+        label_overlays[i] = _make_label_overlay(width / 2, height / n_sigmas, f'$\sigma$ = {sigma_labels[i]}')
+
+    # Calculate the max r and z values over time
+    logger.info('Calculating r and z values over time.')
+    rs = np.maximum.accumulate(
+        np.max(np.linalg.norm(trajectories[..., :2], axis=-1), axis=1),
+        axis=-1
+    )
+    zs = np.maximum.accumulate(
+        np.max(np.abs(trajectories[..., 2]), axis=1),
+        axis=-1
+    )
+    vs = _calculate_volumes(rs, zs)
+
+    fig_traces, update_traces_plot = _make_traces_plots(
+        width=int(width / 2),
+        height=height,
+        sigma_labels=sigma_labels,
+        rs=rs,
+        zs=zs,
+        vs=vs,
+        fps=25
+    )
+
+    def update_scenes(t):
+        # Update paths
+        max_dist = 0
+        for i, npas in enumerate(npa_sigmas):
+            figs[i].scene.disable_render = True
+
+            for j, traj in enumerate(trajectories[i]):
+                X = traj[:t]
+                max_dist = max(max_dist, np.max(np.linalg.norm(X, axis=-1)))
+                x, y, z = X.T
+                paths[i][j].mlab_source.reset(x=x, y=y, z=z)
+
+            max_z = zs[i, t]
+            max_r = max(max_z, rs[i, t])
+
+            # Update vol
+            x, y, z = _get_sphere_slice_border_points(max_r, max_z, n_points)
+            vols[i].mlab_source.reset(x=x, y=y, z=z)
+
+            # Update arrows
+            z_arrows[i].actor.trait_set(scale=[max_z, max_z, max_z])
+            r_arrows[i].actor.trait_set(scale=[max_r, max_r, max_r])
+
+            figs[i].scene.disable_render = False
+
+            mlab.view(
+                figure=figs[i],
+                azimuth=np.fmod(t / traj_anim_rate / 2, 360),
+                elevation=np.sin(t / traj_anim_rate / 50) * 20 + 90,
+                distance=10 + max_dist * 3,
+                focalpoint=[0, 0, 0]
+            )
+
+            figs[i].scene.render()
+
+    if save_plots:
+        # Initialise ffmpeg process
+        output_path = make_filename(
+            'sim_animation_stacked',
+            args,
+            excludes=['voxel_sizes', 'deltas', 'delta_step', 'targets_radii',
+                      'n_targets', 'epsilon', 'max_nonplanar_pause_duration', 'detection_area'],
+            extension=None
+        )
+        output_args = {
+            'pix_fmt': 'yuv444p',
+            'vcodec': 'libx264',
+            'r': 25,
+            'metadata:g:0': 'title=Simulation output.',
+            'metadata:g:1': 'artist=Leeds Wormlab',
+            'metadata:g:2': f'year={time.strftime("%Y")}',
+        }
+
+        process = (
+            ffmpeg
+                .input('pipe:', format='rawvideo', pix_fmt='rgb24', s=f'{width}x{height}')
+                .output(str(output_path) + '.mp4', **output_args)
+                .overwrite_output()
+                .run_async(pipe_stdin=True)
+        )
+
+        # Overlay plot info on top of images panel
+        fig.scene._lift()
+        n_frames = int(T / traj_anim_rate)
+        for t in range(1, n_frames):
+            if t > 1 and t % 50 == 0:
+                logger.info(f'Rendering frame {t}/{n_frames}.')
+            update_scenes(t * traj_anim_rate)
+            update_traces_plot(t * traj_anim_rate)
+
+            # Stitch renders together
+            frames_t = []
+            for i, fig in figs.items():
+                screenshot = mlab.screenshot(mode='rgb', antialiased=True, figure=figs[i])
+                screenshot = cv2.resize(screenshot, dsize=(int(width / 2), int(height / n_sigmas)),
+                                        interpolation=cv2.INTER_AREA)
+                # label_overlay = np.asarray(label_overlays[i].canvas.renderer._renderer).take([0, 1, 2], axis=2)
+                fig_overlay = _make_label_overlay(int(width / 2), int(height / n_sigmas),
+                                                  f'$\sigma$ = {sigma_labels[i]}')
+                label_overlay = np.asarray(fig_overlay.canvas.renderer._renderer).take([0, 1, 2], axis=2)
+                screenshot = overlay_image(screenshot, label_overlay, x_offset=0, y_offset=0)
+                frames_t.append(screenshot)
+
+            plot_traces = np.asarray(fig_traces.canvas.renderer._renderer).take([0, 1, 2], axis=2)
+
+            frame = Image.fromarray(np.concatenate([np.concatenate(frames_t), plot_traces], axis=1), 'RGB')
+            process.stdin.write(frame.tobytes())
+
+        # Flush video
+        process.stdin.close()
+        process.wait()
+
+    if show_plots:
+        @mlab.animate(delay=50)
+        def animate():
+            for t in range(1, T):
+                update_scenes(t)
+                yield
+
+        animate()
+        mlab.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
     # spherical_cut_plot()
-    spherical_cut_animation()
+    # spherical_cut_animation()
+    spherical_cut_stacked_animation()
