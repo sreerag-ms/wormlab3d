@@ -2,6 +2,7 @@ import distutils.util
 import hashlib
 import json
 from argparse import ArgumentParser, Namespace
+from json import JSONEncoder
 from typing import Tuple, List, TYPE_CHECKING
 
 import numpy as np
@@ -126,9 +127,18 @@ def print_args(args: Namespace):
     logger.info(log)
 
 
+class NumpyCompatibleJSONEncoder(JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.generic):
+            return obj.tolist()
+        return JSONEncoder.default(self, obj)
+
+
 def hash_data(data) -> str:
     """Generates a generic md5 hash string for arbitrary data."""
-    return hashlib.md5(json.dumps(data, sort_keys=True).encode('utf-8')).hexdigest()
+    return hashlib.md5(
+        json.dumps(data, sort_keys=True, cls=NumpyCompatibleJSONEncoder).encode('utf-8')
+    ).hexdigest()
 
 
 def is_bad(t: torch.Tensor):
