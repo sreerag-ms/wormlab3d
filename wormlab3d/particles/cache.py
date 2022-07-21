@@ -1,6 +1,7 @@
 import json
 import os
 from argparse import Namespace
+from multiprocessing import Pool
 from typing import Tuple, Dict, Any, List, Union, Optional
 
 import numpy as np
@@ -13,7 +14,7 @@ from sklearn.decomposition import PCA
 
 from wormlab3d import logger, PE_CACHE_PATH, N_WORKERS
 from wormlab3d.particles.three_state_explorer import ThreeStateExplorer
-from wormlab3d.toolkit.util import hash_data
+from wormlab3d.toolkit.util import hash_data, NumpyCompatibleJSONEncoder
 
 
 def _to_numpy(
@@ -29,6 +30,10 @@ def _to_numpy(
     elif t is None:
         return t
     return t.detach().cpu().numpy()
+
+def _unique_X(X: np.ndarray):
+    """Just calculates the unique count along the first axis and returns the count."""
+    return np.unique(X, axis=0).shape[0]
 
 
 class TrajectoryCache:
@@ -183,7 +188,7 @@ class TrajectoryCache:
 
         np.savez_compressed(self.path_data, **data)
         with open(self.path_meta, 'w') as f:
-            json.dump(meta, f)
+            json.dump(meta, f, cls=NumpyCompatibleJSONEncoder)
 
     def get_nonp(self) -> np.ndarray:
         """
@@ -203,7 +208,7 @@ class TrajectoryCache:
         self.needs_save = True
         return nonp
 
-    def get_coverage(self, vs: float) -> np.ndarray:
+    def get_coverage(self, vs: float, parallel: bool = True) -> np.ndarray:
         """
         Calculate the trajectory voxel coverage at specified voxel size.
         """
@@ -220,10 +225,19 @@ class TrajectoryCache:
         Xd = np.round(self.X / vs).astype(np.int32)
 
         # Score the trajectories as the sum of unique voxels visited multiplied by voxel size
-        coverage_vs = np.zeros(self.batch_size)
-        for j, X in enumerate(Xd):
-            n_voxels = np.unique(X, axis=0).shape[0]
-            coverage_vs[j] = n_voxels * vs
+        if parallel and N_WORKERS > 1:
+            with Pool(processes=N_WORKERS) as pool:
+                res = pool.map(
+                    _unique_X,
+                    [X for X in Xd]
+                )
+            coverage_vs = np.array(res) * vs
+        else:
+            coverage_vs = np.zeros(self.batch_size)
+            for j, X in enumerate(Xd):
+                n_voxels = np.unique(X, axis=0).shape[0]
+                coverage_vs[j] = n_voxels * vs
+
         self.coverage[vs_key] = coverage_vs
         self.needs_save = True
         return coverage_vs
