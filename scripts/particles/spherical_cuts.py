@@ -176,7 +176,7 @@ def make_filename(
         elif k == 'plot_n_trajectories_per_sigma' and hasattr(args, 'plot_n_trajectories_per_sigma'):
             fn += f'_nt={args.plot_n_trajectories_per_sigma}'
         elif k == 'pick_trajectories_on' and hasattr(args, 'pick_trajectories_on'):
-            fn += f'_={args.pick_trajectories_on}'
+            fn += f'_{args.pick_trajectories_on}'
 
     if extension is not None:
         fn += '.' + extension
@@ -675,7 +675,6 @@ def spherical_cut_stacked_animation():
     logger.info('Instantiating renderer.')
     mlab.options.offscreen = save_plots
     # visual.set_viewer(fig)
-    axis_colour = _get_rgb('red')
 
     # Sphere and trajectory colours
     colours = np.array([
