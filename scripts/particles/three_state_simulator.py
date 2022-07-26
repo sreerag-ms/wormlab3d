@@ -28,7 +28,7 @@ from wormlab3d.trajectories.util import smooth_trajectory
 plot_n_examples = 20
 show_plots = True
 save_plots = True
-img_extension = 'png'
+img_extension = 'svg'
 
 
 def _get_p_strs(pe: ThreeStateExplorer, include_names: bool = True) -> List[str]:
@@ -82,33 +82,82 @@ def _plot_angle_pdfs(pe: ThreeStateExplorer):
         # ax_.plot(x, dist.pdf(x), linestyle='--', alpha=0.9, label=label, color=colour)
         # ax_.plot(x, dist.pdf(x), alpha=0.9, label=label, color=colour)
         x = np.linspace(-np.pi, np.pi, N)
-        ax_.plot(x, vals, alpha=0.9, label=label, color=colour, zorder=zorder)
+        return ax_.plot(x, vals, alpha=0.9, label=label, color=colour, zorder=zorder)
 
     # fig, ax = plt.subplots(1, figsize=(8, 6))
     # _plot_pdf(ax, pe.planar_angles_dist_params, 'Planar\n' + p_strs[0])
     # _plot_pdf(ax, pe.nonplanar_angles_dist_params, 'Non-planar\n' + p_strs[1])
-    fig, ax = plt.subplots(1, figsize=(3, 3))
-    _plot_pdf(ax, pe.theta_dist_params, '$\\theta$', colour='red', zorder=2)
+    fig, ax = plt.subplots(1, figsize=(1.7, 1.4))
+    l1 = _plot_pdf(ax, pe.theta_dist_params, '$\\theta$', colour='red', zorder=2)
     t_samples = pe.theta_dist.sample((2000,)).squeeze()
     t_samples = torch.atan2(torch.sin(t_samples), torch.cos(t_samples)).numpy()
     ax.hist(t_samples, bins=51, density=True, facecolor='pink', alpha=0.5)
-    _plot_pdf(ax, pe.phi_dist_params, '$\phi$', colour='green', zorder=1)
+    l2 = _plot_pdf(ax, pe.phi_dist_params, '$\psi$', colour='green', zorder=1)
     p_samples = pe.phi_dist.sample((2000,)).squeeze()
     p_samples = torch.atan(torch.tan(p_samples)).numpy()
     ax.hist(p_samples, bins=25, density=True, facecolor='lightgreen', alpha=0.5)
 
     ax.set_xlim(left=-np.pi - 0.1, right=np.pi + 0.1)
-    ax.set_xticks([-np.pi, 0, np.pi])
-    ax.set_xticklabels(['$-\pi$', '0', '$\pi$'])
-    ax.set_yticks([0, 0.3, 0.6])
-    ax.set_yticklabels([0, 0.3, 0.6])
+    ax.set_xticks([-np.pi, np.pi])
+    ax.set_xticklabels(['$-\pi$', '$\pi$'])
+    # ax.set_xticks([-np.pi, 0, np.pi])
+    # ax.set_xticklabels(['$-\pi$', '0', '$\pi$'])
 
-    ax.set_title('Angle distributions')
-    ax.legend()
+    # ax.set_yticks([])
+    ax.set_yticks([0.6])
+    ax.set_yticklabels([0.6])
+
+    # Pauses
+    phis = np.linspace(-np.pi / 2, np.pi / 2, 1000)
+    if pe.nonp_pause_type == 'linear':
+        pauses = (np.abs(phis) / (np.pi / 2)) * pe.nonp_pause_max
+    elif pe.nonp_pause_type == 'quadratic':
+        pauses = (np.abs(phis) / (np.pi / 2))**2 * pe.nonp_pause_max
+    else:
+        raise RuntimeError(f'Unsupported pause type: {pe.nonp_pause_type}.')
+    ax2 = ax.twinx()
+    l3 = ax2.plot(phis, pauses, label='$\delta(\psi)$')
+    ax2.set_ylim(bottom=0, top=pe.nonp_pause_max + 0.1)
+    ax2.set_yticks([pe.nonp_pause_max])
+    ax2.set_yticklabels([int(pe.nonp_pause_max)])
+
+    # ax.set_title('Angle distributions')
+    # added these three lines
+    lns = l1 + l2 + l3
+    labs = [l.get_label() for l in lns]
+    ax.legend(lns, labs)
+
     fig.tight_layout()
 
     if save_plots:
         plt.savefig(LOGS_PATH / f'{START_TIMESTAMP}_angle_pdfs.{img_extension}', transparent=True)
+    if show_plots:
+        plt.show()
+
+
+def _plot_pause_relation(pe: ThreeStateExplorer):
+    """
+    Plot the relationship between non-planar angle and pause duration.
+    """
+    fig, ax = plt.subplots(1, figsize=(1, 1))
+    phis = np.linspace(-np.pi / 2, np.pi / 2, 1000)
+
+    if pe.nonp_pause_type == 'linear':
+        pauses = (np.abs(phis) / (np.pi / 2)) * pe.nonp_pause_max
+    elif pe.nonp_pause_type == 'quadratic':
+        pauses = (np.abs(phis) / (np.pi / 2))**2 * pe.nonp_pause_max
+    else:
+        raise RuntimeError(f'Unsupported pause type: {pe.nonp_pause_type}.')
+
+    ax.plot(phis, pauses)
+    ax.set_xlim(left=-np.pi - 0.1, right=np.pi + 0.1)
+    ax.set_xticks([-np.pi, np.pi])
+    ax.set_xticklabels(['$-\pi$', '$\pi$'])
+    ax.set_yticks([])
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(LOGS_PATH / f'{START_TIMESTAMP}_pause_rel.{img_extension}', transparent=True)
     if show_plots:
         plt.show()
 
@@ -400,6 +449,7 @@ def simulate():
     )
     pe, TC = get_trajectories_from_args(args)
     _plot_angle_pdfs(pe)
+    _plot_pause_relation(pe)
     exit()
     _plot_histograms(pe, TC)
     _plot_msd(args, pe, TC)
@@ -905,5 +955,5 @@ if __name__ == '__main__':
 
     # from simple_worm.plot3d import interactive
     # interactive()
-    # simulate()
-    plot_trajectories_with_regions()
+    simulate()
+    # plot_trajectories_with_regions()
