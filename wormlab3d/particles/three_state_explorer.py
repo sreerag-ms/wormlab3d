@@ -1,7 +1,7 @@
 import time
 from datetime import timedelta
 from multiprocessing import Pool
-from typing import Dict, Optional, Any, Union
+from typing import Dict, Optional, Any, Union, Tuple, List
 
 import numpy as np
 import torch
@@ -17,8 +17,8 @@ PARTICLE_PARAMETER_KEYS = ['thetas', 'phis']
 
 
 def calculate_durations(
-        cond_state: np.ndarray,
-) -> Union[np.ndarray, Dict[int, np.ndarray]]:
+        cond_state: torch.Tensor,
+) -> Tuple[List[int], List[int]]:
     """
     Calculate the durations stayed in state.
     """
@@ -34,8 +34,8 @@ def calculate_durations(
 
 
 def calculate_durations_parallel(
-        cond_state: np.ndarray,
-):
+        cond_state: torch.Tensor,
+) -> Tuple[List[int], List[int]]:
     """
     Calculate the durations in parallel.
     """
@@ -51,6 +51,56 @@ def calculate_durations_parallel(
         run_starts.append(res[i][0])
         durations.append(res[i][1])
     return run_starts, durations
+
+
+def simulate_particle_trajectory(
+        states: torch.Tensor,
+        e0s: torch.Tensor,
+        durations_0: torch.Tensor,
+        durations_1: torch.Tensor,
+        pauses: torch.Tensor,
+        speed_0: float,
+        speed_1: float
+) -> torch.Tensor:
+    """
+    Simulate an individual particle trajectory.
+    """
+    n_steps = states.shape[0]
+    step = 0
+    j = [0, 0]
+    k = 1
+    e0 = e0s[0]
+    e0_exp = torch.zeros((n_steps, 3))
+    pause_steps = 0
+
+    while step < n_steps:
+        s = int(states[step - pause_steps])
+
+        # Tumble - change heading but stay in the same place
+        if s == 2:
+            e0 = e0s[k]
+            pause = pauses[k - 1]
+            pause_steps += pause
+            run_steps = 1 + pause
+            k += 1
+
+        # Run
+        else:
+            if s == 0:
+                run_steps = durations_0[j[s]]
+            else:
+                run_steps = durations_1[j[s]]
+            speed = [speed_0, speed_1][s]
+            e0_exp[step:step + run_steps] = e0 * speed
+            j[s] += 1
+
+        step += run_steps
+
+    return e0_exp
+
+
+def simulate_particle_trajectory_wrapper(args):
+    return simulate_particle_trajectory(*args)
 
 
 class ThreeStateExplorer(nn.Module):
@@ -206,8 +256,31 @@ class ThreeStateExplorer(nn.Module):
         for i in range(self.batch_size):
             sequences.append(torch.unique_consecutive(states[i]))
 
+        # Generate the tumbles
+        logger.info('Generating tumbles.')
+        tumble_idxs = (states == 2).nonzero()
+        tumble_ts = [tumble_idxs[tumble_idxs[:, 0] == i][:, 1] * dt for i in range(self.batch_size)]
+        max_tumbles = max((states == 2).sum(dim=1))
+        e0s = [self.e0, ]
+        thetas = []
+        phis = []
+        bar = Bar('Generating', max=max_tumbles)
+        bar.check_tty = False
+        for _ in range(max_tumbles):
+            self._sample_parameters()
+            self._rotate_frames(self.thetas, 'planar')
+            self._rotate_frames(self.phis, 'nonplanar')
+            thetas.append(self.thetas.clone())
+            phis.append(self.phis.clone())
+            e0s.append(self.e0)
+            bar.next()
+        bar.finish()
+        e0s = torch.stack(e0s, dim=1)
+        thetas = torch.stack(thetas, dim=1)
+        phis = torch.stack(phis, dim=1)
+
         # Calculate the run durations
-        logger.info('Calculating durations.')
+        logger.info('Calculating run durations.')
         run_starts = {s: [[] for _ in range(self.batch_size)] for s in [0, 1]}
         durations = {s: [[] for _ in range(self.batch_size)] for s in [0, 1]}
 
@@ -238,86 +311,60 @@ class ThreeStateExplorer(nn.Module):
                     bar.next()
             bar.finish()
 
-        # Generate the tumbles
-        logger.info('Generating tumbles.')
-        tumble_idxs = (states == 2).nonzero()
-        tumble_ts = [tumble_idxs[tumble_idxs[:, 0] == i][:, 1] * dt for i in range(self.batch_size)]
-        max_tumbles = max((states == 2).sum(dim=1))
-        e0s = [self.e0, ]
-        thetas = []
-        phis = []
-        bar = Bar('Generating', max=max_tumbles)
-        bar.check_tty = False
-        for _ in range(max_tumbles):
-            self._sample_parameters()
-            self._rotate_frames(self.thetas, 'planar')
-            self._rotate_frames(self.phis, 'nonplanar')
-            thetas.append(self.thetas.clone())
-            phis.append(self.phis.clone())
-            e0s.append(self.e0)
-            bar.next()
-        bar.finish()
-        e0s = torch.stack(e0s, dim=1)
-        thetas = torch.stack(thetas, dim=1)
-        phis = torch.stack(phis, dim=1)
+        # Calculate the pause durations based on how extreme the nonplanar angle is
+        logger.info('Calculating pause durations.')
+        if self.nonp_pause_type is not None:
+            if self.nonp_pause_type == 'linear':
+                p = 1
+            elif self.nonp_pause_type == 'quadratic':
+                p = 2
+            else:
+                raise RuntimeError(f'Unrecognised pause type "{self.nonp_pause_type}".')
+            pauses = ((phis.abs() / (torch.pi / 2))**p * nonp_pause_max).round().to(torch.int32)
+        else:
+            pauses = torch.zeros_like(phis).to(torch.int32)
 
         # Simulate the particle exploration
-        e0_exp = torch.zeros((self.batch_size, n_steps, 3))
         logger.info('Simulating particle exploration.')
-        bar = Bar('Simulating', max=self.batch_size)
-        bar.check_tty = False
-        for i in range(self.batch_size):
-            step = 0
-            j = [0, 0]
-            k = 1
-            e0 = e0s[i, 0]
-            e0_exp[i, 0] = self.x[i]
-            pause_steps = 0
-
-            while step < n_steps:
-                s = int(states[i, step - pause_steps])
-
-                # Tumble - change heading but stay in the same place
-                if s == 2:
-                    e0 = e0s[i, k]
-
-                    # Vary pause duration based on how extreme the nonplanar angle is
-                    if self.nonp_pause_type == 'linear':
-                        phi = phis[i, k - 1].abs()
-                        pause_steps_i = int(((phi / (torch.pi / 2)) * nonp_pause_max).round())
-                        pause_steps += pause_steps_i
-                        run_steps = 1 + pause_steps_i
-                    elif self.nonp_pause_type == 'quadratic':
-                        phi = phis[i, k - 1].abs()
-                        pause_steps_i = int(((phi / (torch.pi / 2))**2 * nonp_pause_max).round())
-                        pause_steps += pause_steps_i
-                        run_steps = 1 + pause_steps_i
-                    else:
-                        run_steps = 1
-
-                    k += 1
-
-                # Run
-                else:
-                    run_steps = durations[s][i][j[s]]
-                    speed = [self.speed_0[i], self.speed_1[i]][s]
-                    e0_exp[i, step:step + run_steps] = e0[None, :] * speed
-                    j[s] += 1
-
-                step += run_steps
-
-            bar.next()
-
+        if N_WORKERS > 1:
+            with Pool(processes=N_WORKERS) as pool:
+                res = pool.map(
+                    simulate_particle_trajectory_wrapper,
+                    [
+                        (states[i], e0s[i], durations[0][i], durations[1][i], pauses[i], self.speed_0[i],
+                         self.speed_1[i])
+                        for i in range(self.batch_size)
+                    ]
+                )
+                e0_exp = torch.stack(res)
+        else:
+            e0_exp = torch.zeros((self.batch_size, n_steps, 3))
+            bar = Bar('Simulating', max=self.batch_size)
+            bar.check_tty = False
+            for i in range(self.batch_size):
+                e0_exp[i] = simulate_particle_trajectory(
+                    states=states[i],
+                    e0s=e0s[i],
+                    durations_0=durations[0][i],
+                    durations_1=durations[1][i],
+                    pauses=pauses[i],
+                    speed_0=self.speed_0[i],
+                    speed_1=self.speed_1[i],
+                )
+                bar.next()
+            bar.finish()
         X = torch.cumsum(e0_exp, dim=1)
-        bar.finish()
 
         # Convert durations into seconds
         for s in [0, 1]:
             for i in range(self.batch_size):
                 durations[s][i] = torch.tensor(durations[s][i], dtype=torch.float64) * dt
+        pauses = pauses.clone().to(torch.float64) * dt
 
-        sim_time = time.time() - start_time
-        logger.info(f'Time: {timedelta(seconds=sim_time)}')
+        # Update the tumble times to account for the pauses
+        cum_pauses = torch.cumsum(torch.cat([torch.zeros(self.batch_size, 1), pauses], dim=1), dim=1)
+        for i in range(self.batch_size):
+            tumble_ts[i] += cum_pauses[i, :len(tumble_ts[i])] + pauses[i, :len(tumble_ts[i])] / 2
 
         # Calculate intervals between turns
         intervals = []
@@ -335,6 +382,9 @@ class ThreeStateExplorer(nn.Module):
         # Prune the angles to those actually used in each run
         thetas = [thetas[i, :len(tumble_ts[i])] for i in range(self.batch_size)]
         phis = [phis[i, :len(tumble_ts[i])] for i in range(self.batch_size)]
+
+        sim_time = time.time() - start_time
+        logger.info(f'Time: {timedelta(seconds=sim_time)}')
 
         return TrajectoryCache(
             batch_size=self.batch_size,
@@ -394,9 +444,6 @@ class ThreeStateExplorer(nn.Module):
 
                     # Transition from 2->1
                     torch.ones_like(self.state)
-
-                    # Stay in state 2
-                    # torch.ones_like(self.state) * 2
                 ),
             ),
         ).to(torch.uint8)

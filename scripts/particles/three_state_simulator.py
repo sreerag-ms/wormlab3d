@@ -25,9 +25,9 @@ from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.displacement import calculate_displacements
 from wormlab3d.trajectories.util import smooth_trajectory
 
-plot_n_examples = 20
+plot_n_examples = 3
 show_plots = True
-save_plots = True
+save_plots = False
 img_extension = 'svg'
 
 
@@ -170,6 +170,7 @@ def _plot_simulation(
     Plot a simulation output.
     """
     ts = TC.ts
+    dt = TC.rt_args['dt']
     tumble_ts = TC.tumble_ts[run_idx]
     X = TC.X[run_idx]
     s0_durations = TC.durations[0][run_idx]
@@ -191,8 +192,8 @@ def _plot_simulation(
     ax = fig.add_subplot(gs[0, :])
     ax.set_title('Tumble trace')
     ax.axhline(y=0, color='darkgrey')
-    ax.scatter(tumble_ts, thetas, label='$\\theta_P$', marker='x')
-    ax.scatter(tumble_ts, phis, label='$\\theta_{NP}$', marker='o')
+    ax.scatter(tumble_ts, thetas, label='$\\theta$', marker='x')
+    ax.scatter(tumble_ts, phis, label='$\\phi$', marker='o')
     ax.set_xlim(left=ts[0], right=ts[-1])
     ax.set_xlabel('Time (s)')
     ax.set_ylabel('$\\theta$')
@@ -232,6 +233,12 @@ def _plot_simulation(
     x, y, z = X.T
     ax = fig.add_subplot(gs[2:5, :4], projection='3d')
     ax.scatter(x, y, z, c=c, s=10, alpha=0.4, zorder=-1)
+
+    # Scatter the tumble points
+    tumble_idxs = np.round(tumble_ts / dt).astype(np.int32)
+    tumble_idxs = tumble_idxs[tumble_idxs < X.shape[0]]
+    ax.scatter(*X[tumble_idxs].T, c='red', s=100, alpha=0.7, zorder=1, marker='x')
+
     # points = X[:, None, :]
     # segments = np.concatenate([points[:-1], points[1:]], axis=1)
     # lc = Line3DCollection(segments, array=colours, cmap=cmap, zorder=-2)
@@ -450,7 +457,7 @@ def simulate():
     pe, TC = get_trajectories_from_args(args)
     _plot_angle_pdfs(pe)
     _plot_pause_relation(pe)
-    exit()
+    # exit()
     _plot_histograms(pe, TC)
     _plot_msd(args, pe, TC)
     _plot_simulations(pe, TC)
