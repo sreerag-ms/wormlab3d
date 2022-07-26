@@ -551,7 +551,7 @@ def _make_label_overlay(
         width: int,
         height: int,
         text: str
-) -> Figure:
+) -> np.ndarray:
     """
     Label overlay.
     """
@@ -561,9 +561,10 @@ def _make_label_overlay(
     ax.axis('off')
     fig.text(0.1, 0.9, text, ha='left', va='top', fontsize=12, linespacing=1.5)
     fig.tight_layout()
-
-    # plt.close(fig)
-    return fig
+    fig.canvas.draw()
+    overlay = np.asarray(fig.canvas.renderer._renderer).take([0, 1, 2], axis=2)
+    plt.close(fig)
+    return overlay
 
 
 def _make_traces_plots(
@@ -660,7 +661,7 @@ def spherical_cut_stacked_animation():
     width = 1280
     height = 720
     n_points = 100
-    args.plot_n_trajectories_per_sigma = 5
+    args.plot_n_trajectories_per_sigma = 1  # 5
     traj_anim_rate = 100
     Xs = np.load(LOGS_PATH / 'trajectories.npz', mmap_mode=True)['Xs']
     T = Xs.shape[2]
@@ -806,22 +807,34 @@ def spherical_cut_stacked_animation():
             update_scenes(t * traj_anim_rate)
             update_traces_plot(t * traj_anim_rate)
 
-            # Stitch renders together
+            # Take the traces render
+            plot_traces = np.asarray(fig_traces.canvas.renderer._renderer).take([0, 1, 2], axis=2)
+
+            # Collate the 3D views with overlaid labels
             frames_t = []
             for i, fig in figs.items():
                 screenshot = mlab.screenshot(mode='rgb', antialiased=True, figure=figs[i])
                 screenshot = cv2.resize(screenshot, dsize=(int(width / 2), int(height / n_sigmas)),
                                         interpolation=cv2.INTER_AREA)
-                # label_overlay = np.asarray(label_overlays[i].canvas.renderer._renderer).take([0, 1, 2], axis=2)
-                fig_overlay = _make_label_overlay(int(width / 2), int(height / n_sigmas),
-                                                  f'$\sigma$ = {sigma_labels[i]}')
-                label_overlay = np.asarray(fig_overlay.canvas.renderer._renderer).take([0, 1, 2], axis=2)
-                screenshot = overlay_image(screenshot, label_overlay, x_offset=0, y_offset=0)
+                screenshot = overlay_image(screenshot, label_overlays[i], x_offset=0, y_offset=0)
                 frames_t.append(screenshot)
 
-            plot_traces = np.asarray(fig_traces.canvas.renderer._renderer).take([0, 1, 2], axis=2)
+            # Stitch together the data
+            frame_data = np.concatenate([np.concatenate(frames_t), plot_traces], axis=1)
+            if frame_data.shape[0] < height:
+                frame_data = np.concatenate([
+                    frame_data,
+                    np.ones((height - frame_data.shape[0], width, 3), dtype=np.uint8) * 255
+                ], axis=0)
+            if frame_data.shape[1] < width:
+                frame_data = np.concatenate([
+                    frame_data,
+                    np.ones((height, width - frame_data.shape[1], 3), dtype=np.uint8) * 255
+                ], axis=1)
+            if frame_data.shape[0] != height or frame_data.shape[1] != width:
+                raise RuntimeError('Frame is the wrong shape!')
 
-            frame = Image.fromarray(np.concatenate([np.concatenate(frames_t), plot_traces], axis=1), 'RGB')
+            frame = Image.fromarray(frame_data, 'RGB')
             process.stdin.write(frame.tobytes())
 
         # Flush video
