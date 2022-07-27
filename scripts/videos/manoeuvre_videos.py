@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import time
 from argparse import ArgumentParser, Namespace
 from pathlib import PosixPath
@@ -38,6 +39,7 @@ def get_args() -> Namespace:
     # Video
     parser.add_argument('--width', type=int, default=1200, help='Width of video in pixels.')
     parser.add_argument('--height', type=int, default=900, help='Height of video in pixels.')
+    parser.add_argument('--fps', type=int, default=25, help='Video framerate.')
 
     # Spec
     parser.add_argument('--spec', type=str, help='Load spec from file (relative to logs path).')
@@ -371,7 +373,7 @@ def generate_manoeuvre_video(
     output_args = {
         'pix_fmt': 'yuv444p',
         'vcodec': 'libx264',
-        'r': trial.fps,
+        'r': args.fps,
         'metadata:g:0': f'title=Trial {trial.id}. Reconstruction {reconstruction.id}.',
         'metadata:g:1': 'artist=Leeds Wormlab',
         'metadata:g:2': f'year={time.strftime("%Y")}',
@@ -468,9 +470,23 @@ def generate_manoeuvre_video(
 
 
 def generate_from_spec(args: Namespace):
-    with open(LOGS_PATH / args.spec / 'spec.yml') as f:
+    """
+    Generate a set of clips from a specification file.
+    """
+    spec_dir = LOGS_PATH / args.spec
+    with open(spec_dir / 'spec.yml') as f:
         spec = yaml.load(f, Loader=yaml.FullLoader)
 
+    # Copy the spec to the output dir
+    output_dir = spec_dir / START_TIMESTAMP
+    shutil.copy(spec_dir / 'spec.yml', output_dir / 'spec.yml')
+
+    # Load arguments
+    for k, v in spec['args'].items():
+        assert hasattr(args, k)
+        setattr(args, k, v)
+
+    # Generate clips
     clips = spec['clips']
     for i, clip in enumerate(clips):
         logger.info(f'Generating clip {i + 1}/{len(clips)}.')
@@ -479,7 +495,7 @@ def generate_from_spec(args: Namespace):
         args.end_frame = clip['end']
         generate_manoeuvre_video(
             args,
-            output_dir=LOGS_PATH / args.spec / START_TIMESTAMP,
+            output_dir=output_dir / 'clips',
             clip_idx=i
         )
 
