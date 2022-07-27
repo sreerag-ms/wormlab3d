@@ -13,12 +13,13 @@ from simple_worm.plot3d import generate_interactive_scatter_clip
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d import logger
 from wormlab3d.data.model import Reconstruction
+from wormlab3d.postures.chiralities import calculate_chiralities
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.toolkit.util import print_args
 from wormlab3d.trajectories.cache import get_trajectory
 from wormlab3d.trajectories.pca import generate_or_load_pca_cache
-from wormlab3d.trajectories.util import calculate_speeds, calculate_rotation_matrix, calculate_chiralities
+from wormlab3d.trajectories.util import calculate_speeds, calculate_rotation_matrix
 
 # tex_mode()
 
