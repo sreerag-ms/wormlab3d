@@ -29,7 +29,7 @@ def plot_natural_frame_3d(
         use_centred_midline: bool = True
 ) -> Union[Figure, Axes]:
     # Set up frame
-    if use_centred_midline:
+    if use_centred_midline or np.iscomplexobj(NF.X):
         F = FrameNumpy(x=NF.X_pos.T)
     else:
         F = FrameNumpy(x=NF.X.T)

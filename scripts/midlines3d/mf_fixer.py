@@ -103,6 +103,9 @@ def get_args() -> Namespace:
     parser.add_argument('--loss-w-ot', type=float, default=1.)
     parser.add_argument('--reg-w-ds', type=float, default=1e-1)
     parser.add_argument('--reg-w-dt', type=float, default=1e-1)
+    parser.add_argument('--parabola-baseline', type=float, default=1e-1)
+    parser.add_argument('--parabola-gradient', type=float, default=1.)
+    parser.add_argument('--convergence-patience', type=int, default=100)
 
     args = parser.parse_args()
     assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
@@ -1384,30 +1387,34 @@ def _plot_curvature_fix_examples(
 
     for i, idx in enumerate(idxs):
         frame_num = start_frame_num + idx
+        Xi = to_numpy(points[idx])
+        Xfi = to_numpy(points_f[idx])
+        X2i = to_numpy(points_2d[idx])
+        X2fi = to_numpy(points_2d_f[idx])
 
         # Prepare images with overlays
         img_path = PREPARED_IMAGES_PATH / f'{trial.id:03d}' / f'{frame_num:06d}.npz'
         image_triplet = np.load(img_path)['images']
         images_original = generate_annotated_images(
             image_triplet=image_triplet,
-            points_2d=np.round(to_numpy(points_2d[idx])).astype(np.int32)
+            points_2d=np.round(X2i).astype(np.int32)
         )
         images_r = generate_annotated_images(
             image_triplet=image_triplet,
-            points_2d=np.round(to_numpy(points_2d_f[idx])).astype(np.int32)
+            points_2d=np.round(X2fi).astype(np.int32)
         )
-        NF_original = NaturalFrame(to_numpy(points[idx]))
-        NF_reconst = NaturalFrame(to_numpy(points_f[idx]))
+        NF_original = NaturalFrame(Xi)
+        NF_reconst = NaturalFrame(Xfi)
 
-        fig = plt.figure(figsize=(9, 9))
-        gs = GridSpec(3, 3)
+        fig = plt.figure(figsize=(10, 9))
+        gs = GridSpec(4, 2)
         title = f'Trial={trial.id}. Frame={frame_num}. Loss={losses_combined[idx]:.4E}.\n' \
                 f'Losses=[' + ', '.join([f'{k}: {v[idx].item():.3E}' for k, v in losses.items()]) + f']\n ' + \
                 f'Regs=[' + ', '.join([f'{k}: {v[idx].item():.3E}' for k, v in regs.items()]) + ']\n'
         fig.suptitle(title)
 
         # Plot 3D
-        ax = fig.add_subplot(gs[0, 0:2], projection='3d')
+        ax = fig.add_subplot(gs[0:2, 0], projection='3d')
         ax.set_title('Original + fixed')
         plot_natural_frame_3d(NF_original, azim=60, show_frame_arrows=False, show_pca_arrows=False, ax=ax,
                               midline_cmap='autumn', use_centred_midline=False)
@@ -1419,34 +1426,48 @@ def _plot_curvature_fix_examples(
             getattr(ax, f'set_{xyz}lim')(min(lims1[j][0], lims2[j][0]), max(lims1[j][1], lims2[j][1]))
 
         # Plot reprojections
-        ax = fig.add_subplot(gs[1, 0:2])
+        ax = fig.add_subplot(gs[2, 0])
         ax.set_title('Original')
         ax.imshow(images_original, aspect='auto')
         ax.axis('off')
 
-        ax = fig.add_subplot(gs[2, 0:2])
+        ax = fig.add_subplot(gs[3, 0])
         ax.set_title('Fixed')
         ax.imshow(images_r, aspect='auto')
         ax.axis('off')
+
+        # Plot distances from original
+        d3d = np.linalg.norm(Xi - Xfi, axis=-1)
+        d2d = np.linalg.norm(X2i - X2fi, axis=-1)
+        ax = fig.add_subplot(gs[0, 1])
+        ax.set_title('Point distances from originals')
+        ax.set_xlabel('u')
+        ax.set_ylabel('2D')
+        for j in range(3):
+            ax.plot(d2d[:, j], label=f'cam{j}', alpha=0.7)
+        ax.legend()
+        ax = ax.twinx()
+        ax.set_ylabel('3D')
+        ax.plot(d3d, color='purple', linestyle='--', linewidth=3, alpha=0.5)
 
         # Plot curvature
         Ki = to_numpy(K[idx])
         Ki_f = to_numpy(K_f[idx])
         N2 = K.shape[1] / 2
-        ax = fig.add_subplot(gs[0, 2])
+        ax = fig.add_subplot(gs[1, 1])
         ax.set_title('$|\kappa|$')
         ax.plot(np.linalg.norm(Ki, axis=-1), label='Original')
         ax.plot(np.linalg.norm(Ki_f, axis=-1), label='Fixed')
         ax.axvline(x=N2, linestyle=':', color='pink', alpha=0.6)
         ax.legend()
 
-        ax = fig.add_subplot(gs[1, 2])
+        ax = fig.add_subplot(gs[2, 1])
         ax.set_title('$m_1$')
         ax.plot(Ki[:, 0], label='Original')
         ax.plot(Ki_f[:, 0], label='Fixed')
         ax.axvline(x=N2, linestyle=':', color='pink', alpha=0.6)
 
-        ax = fig.add_subplot(gs[2, 2])
+        ax = fig.add_subplot(gs[3, 1])
         ax.set_title('$m_2$')
         ax.plot(Ki[:, 1], label='Original')
         ax.plot(Ki_f[:, 1], label='Fixed')
@@ -1465,6 +1486,7 @@ def _plot_curvature_fix_examples(
         plt.close(fig)
 
 
+@torch.jit.script
 def _process_curvature_batch(
         X0: torch.Tensor,
         T0: torch.Tensor,
@@ -1474,7 +1496,9 @@ def _process_curvature_batch(
         points_3d_base: torch.Tensor,
         points_2d_base: torch.Tensor,
         X_original: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        parabola_baseline: float,
+        parabola_gradient: float,
+) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
     """
     Process a batch of curves.
     """
@@ -1491,15 +1515,15 @@ def _process_curvature_batch(
     X_t, T_t, M1_t = integrate_curvature(X_f[:, -2], T_f[:, -2], lengths, K, M1_f[:, -2], start_idx=N - 2)
 
     # Calculate losses - L2 distance between curves to ensure consistency
-    L_fh = (X_f - X_h).norm(dim=-1).mean(dim=-1)
-    L_ft = (X_f - X_t).norm(dim=-1).mean(dim=-1)
-    L_ht = (X_h - X_t).norm(dim=-1).mean(dim=-1)
+    L_fh = (X_f - X_h).norm(dim=-1, p=2).mean(dim=-1)
+    L_ft = (X_f - X_t).norm(dim=-1, p=2).mean(dim=-1)
+    L_ht = (X_h - X_t).norm(dim=-1, p=2).mean(dim=-1)
 
     # Match original curve, but weighted towards ends
-    w = 0.1 + 10 * torch.linspace(-1, 1, N, device=device)**2
-    L_of = (w * (X_original - X_f).norm(dim=-1)).sum(dim=-1)
-    L_oh = (w * (X_original - X_h).norm(dim=-1)).sum(dim=-1)
-    L_ot = (w * (X_original - X_t).norm(dim=-1)).sum(dim=-1)
+    w = parabola_baseline + parabola_gradient * torch.linspace(-1, 1, N, device=device)**2
+    L_of = (w * (X_original - X_f).norm(dim=-1, p=2)).sum(dim=-1)
+    L_oh = (w * (X_original - X_h).norm(dim=-1, p=2)).sum(dim=-1)
+    L_ot = (w * (X_original - X_t).norm(dim=-1, p=2)).sum(dim=-1)
 
     losses = {
         'fh': L_fh,
@@ -1526,10 +1550,11 @@ def _process_curvature_batch(
 
     # Regularisation 2 - smoothness along body
     reg_ds = ((K[:, 1:] - K[:, :-1])**2).sum(dim=(-1, -2))
+    reg_ds2 = ((K[:, 2:] - K[:, :-2])**2).sum(dim=(-1, -2)) / 2
 
     regs = {
         'dt': reg_dt,
-        'ds': reg_ds,
+        'ds': reg_ds + reg_ds2,
     }
 
     # Check for tracking failures and just zero the losses where it happens
@@ -1590,7 +1615,9 @@ def _fix_curvature(
     trial = ts.trial
     device = _init_devices(args)
     prs = ProjectRenderScoreModel(image_size=trial.crop_size, clamp_X0=args.clamp_X0)
+    prs = torch.jit.script(prs)
     prs = prs.to(device)
+    batch_prefix_size = 2
 
     loss_weightings = {
         'fh': args.loss_w_fh,
@@ -1634,9 +1661,10 @@ def _fix_curvature(
     points_f = torch.zeros_like(points, device=device)
     points_2d_f = torch.zeros_like(points_2d, device=device)
 
+    # Calculate number of batches accounting for overlaps
+    n_batches = int(n_frames / (args.batch_size - batch_prefix_size)) + 1
+
     # Initialise optimiser and outputs
-    n_batches = int(n_frames / (args.batch_size - 1)) + 1
-    n_batches = 3
     losses = {
         k: np.zeros((n_batches, args.train_steps))
         for k in loss_weightings.keys()
@@ -1652,23 +1680,140 @@ def _fix_curvature(
     # Process batches at a time
     for i in range(n_batches):
         logger.info(f'--- Fixing camera parameters for batch {i + 1}/{n_batches}.')
-        start_idx = i * args.batch_size
-        end_idx = min(n_frames, (i + 1) * args.batch_size)
-        idxs = np.arange(start_idx, end_idx)
-        batch_size = end_idx - start_idx
+
+        # Build batch idxs
+        if i == 0:
+            start_idx = 0
+            start_idx_prefix = 0
+            end_idx = min(n_frames, args.batch_size)
+        else:
+            start_idx = i * (args.batch_size - batch_prefix_size) + batch_prefix_size
+            start_idx_prefix = start_idx - batch_prefix_size
+            end_idx = min(n_frames, start_idx + args.batch_size - batch_prefix_size)
+
+        idxs_all = np.arange(start_idx_prefix, end_idx)
+        idxs_opt = np.arange(start_idx, end_idx)
+        idxs_prefix = np.arange(start_idx_prefix, start_idx)
+        batch_size = end_idx - start_idx_prefix
+
+        if len(idxs_opt) == len(idxs_prefix):
+            logger.info('Empty batch!')
+            continue
 
         # Instantiate optimisable parameters
-        X0f_batch = nn.Parameter(X0[idxs], requires_grad=args.optimise_X0)
-        T0f_batch = nn.Parameter(T0[idxs], requires_grad=args.optimise_T0)
-        M10f_batch = nn.Parameter(M10[idxs], requires_grad=args.optimise_M10)
-        Kf_batch = nn.Parameter(K[idxs], requires_grad=args.optimise_K)
-        lengthsf_batch = nn.Parameter(lengths[idxs], requires_grad=args.optimise_lengths)
+        X0o_batch = nn.Parameter(X0[idxs_opt], requires_grad=args.optimise_X0)
+        T0o_batch = nn.Parameter(T0[idxs_opt], requires_grad=args.optimise_T0)
+        M10o_batch = nn.Parameter(M10[idxs_opt], requires_grad=args.optimise_M10)
+        Ko_batch = nn.Parameter(K[idxs_opt], requires_grad=args.optimise_K)
+        lengthso_batch = nn.Parameter(lengths[idxs_opt], requires_grad=args.optimise_lengths)
+        X0f_batch, T0f_batch, M10f_batch, Kf_batch, lengthsf_batch = None, None, None, None, None
 
+        def prefix_batch():
+            # Prefix the previous batch overlap
+            nonlocal X0f_batch, T0f_batch, M10f_batch, Kf_batch, lengthsf_batch
+            X0f_batch = torch.cat([X0f[idxs_prefix].detach(), X0o_batch])
+            T0f_batch = torch.cat([T0f[idxs_prefix].detach(), T0o_batch])
+            M10f_batch = torch.cat([M10f[idxs_prefix].detach(), M10o_batch])
+            Kf_batch = torch.cat([Kf[idxs_prefix].detach(), Ko_batch])
+            lengthsf_batch = torch.cat([lengthsf[idxs_prefix].detach(), lengthso_batch])
+
+        # Align frames
+        prefix_batch()
+        obs = args.batch_size - batch_prefix_size
+        alignment_angles = np.zeros(obs)
+        alignment_angles_post = np.zeros(obs)
+        M10_dists = np.zeros(obs)
+        alignment_errors = np.zeros(obs)
+
+        with torch.no_grad():
+            for k in range(obs):
+                k2 = k + batch_prefix_size
+
+                # Calculate optimal alignment rotation angle between frames
+                mc_prev = Kf_batch[k2 - 1, :, 0] + 1j * Kf_batch[k2 - 1, :, 1]
+                mc_next = Kf_batch[k2, :, 0] + 1j * Kf_batch[k2, :, 1]
+                opt_angle = -torch.angle(torch.dot(mc_prev, mc_next.conj()))
+                alignment_angles[k] = opt_angle.item()
+
+                # Rotate the curvature components
+                mc_aligned = torch.exp(-1j * opt_angle) * mc_next
+                K_aligned = torch.stack([mc_aligned.real, mc_aligned.imag], axis=-1)
+                ver_angle = -torch.angle(torch.dot(mc_prev, mc_aligned.conj()))
+                alignment_angles_post[k] = ver_angle.item()
+                assert ver_angle.abs() <= opt_angle.abs()
+
+                # Rotate the M10 vector around the tangent
+                T0k = T0f_batch[k2]
+                M10k = M10f_batch[k2]
+                I = torch.eye(3)
+                cosA = torch.cos(opt_angle)
+                sinA = torch.sin(opt_angle)
+                outer = torch.einsum('i,j->ij', T0k, T0k)
+                cross = torch.cross(T0k[..., None].repeat(1, 3), I)
+                R = cosA * I \
+                    + sinA * cross \
+                    + (1 - cosA) * outer
+                M10_aligned = torch.einsum('ij,j->i', R, M10k)
+                M10_dists[k] = torch.norm(M10k - M10_aligned).item()
+
+                # Verify that the rotated frame gives the same curve
+                points_o, tangents_o, M1_o = integrate_curvature(
+                    X0f_batch[k2].unsqueeze(0),
+                    T0f_batch[k2].unsqueeze(0),
+                    lengthsf_batch[k2].unsqueeze(0),
+                    Kf_batch[k2].unsqueeze(0),
+                    M10f_batch[k2].unsqueeze(0),
+                )
+                points_a, tangents_a, M1_a = integrate_curvature(
+                    X0f_batch[k2].unsqueeze(0),
+                    T0f_batch[k2].unsqueeze(0),
+                    lengthsf_batch[k2].unsqueeze(0),
+                    K_aligned.unsqueeze(0),
+                    M10_aligned.unsqueeze(0),
+                )
+                err = ((points_o - points_a)**2).sum()
+                alignment_errors[k] = err.item()
+                Kf_batch[k2] = K_aligned
+                M10f_batch[k2] = M10_aligned
+                Ko_batch.data[k] = K_aligned
+                M10o_batch.data[k] = M10_aligned
+
+        # Plot alignment results
+        fig, axes = plt.subplots(3, figsize=(6, 6))
+        fig.suptitle(f'Alignment results. Trial {trial.id}. Batch {i + 1}/{n_batches}.')
+
+        ax = axes[0]
+        ax.set_title('Alignment angles')
+        ax.plot(alignment_angles, label='Angle')
+        ax.plot(alignment_angles_post, label='Verification')
+        ax.legend()
+
+        ax = axes[1]
+        ax.set_title('M10 adjustment distance')
+        ax.plot(M10_dists)
+
+        ax = axes[2]
+        ax.set_title('Curve reconstruction errors')
+        ax.plot(alignment_errors)
+
+        fig.tight_layout()
+
+        if save_plots:
+            path = save_dir_n / f'batch_{i:04d}_alignment.{img_extension}'
+            logger.info(f'Saving plot to {path}.')
+            plt.savefig(path)
+
+        if show_plots:
+            plt.show()
+
+        plt.close(fig)
+
+        # Initialise optimiser and lr scheduler
         optimiser = AdamW(
             params=[
-                {'params': [X0f_batch, T0f_batch, M10f_batch, lengthsf_batch],
+                {'params': [X0o_batch, T0o_batch, M10o_batch, lengthso_batch],
                  'lr': args.learning_rate},
-                {'params': [Kf_batch], 'lr': args.learning_rate_K}
+                {'params': [Ko_batch], 'lr': args.learning_rate_K}
             ],
             amsgrad=True,
             weight_decay=0
@@ -1684,15 +1829,20 @@ def _fix_curvature(
 
         for step in range(args.train_steps):
             optimiser.zero_grad()
+            prefix_batch()
+
+            # Process the batch and calculate errors
             losses_batch, regs_batch = _process_curvature_batch(
                 X0=X0f_batch,
                 T0=T0f_batch,
                 M10=M10f_batch,
                 K=Kf_batch,
                 lengths=lengthsf_batch,
-                points_3d_base=points_3d_base[idxs],
-                points_2d_base=points_2d_base[idxs],
-                X_original=points[idxs]
+                points_3d_base=points_3d_base[idxs_all],
+                points_2d_base=points_2d_base[idxs_all],
+                X_original=points[idxs_all],
+                parabola_baseline=args.parabola_baseline,
+                parabola_gradient=args.parabola_gradient,
             )
 
             # Sum the losses
@@ -1705,6 +1855,10 @@ def _fix_curvature(
                 regs[k][i, step] = r.mean().item()
             losses_c[i, step] = losses_c_batch.mean()
             batch_loss = losses_c_batch.mean()
+
+            if batch_loss.item() < args.loss_batch_mean_threshold:
+                logger.info('Batch loss better than threshold, breaking.')
+                break
 
             # Train step
             batch_loss.backward()
@@ -1732,8 +1886,9 @@ def _fix_curvature(
                 log += f'\tlr: {optimiser.param_groups[0]["lr"]:.4f}.'
                 logger.info(log)
 
-            if batch_loss.item() < args.loss_batch_mean_threshold:
-                break
+            if step > args.convergence_patience and (
+                    lrs[i, step - args.convergence_patience:step] == args.learning_rate_min).all():
+                logger.info('No longer improving at minimum learning rate, breaking.')
 
         if not args.dry_run and batch_loss.item() > args.error_threshold:
             logger.warning(f'Failed to reach error threshold ({args.error_threshold:.2f}), aborting.')
@@ -1741,60 +1896,62 @@ def _fix_curvature(
 
         # Build camera coefficients for these frames
         cam_coeffs_batch = {
-            k: cam_coeffs[k][idxs]
+            k: cam_coeffs[k][idxs_opt]
             for k in CAM_PARAMETER_NAMES
         }
 
         # Get final output from updated parameters
-        points_f_batch, points_2d_f_batch = _project_curvature_batch(
+        points_o_batch, points_2d_o_batch = _project_curvature_batch(
             prs=prs,
-            X0=X0f_batch,
-            T0=T0f_batch,
-            M10=M10f_batch,
-            K=Kf_batch,
-            lengths=lengthsf_batch,
+            X0=X0o_batch,
+            T0=T0o_batch,
+            M10=M10o_batch,
+            K=Ko_batch,
+            lengths=lengthso_batch,
             cam_coeffs=cam_coeffs_batch,
-            points_3d_base=points_3d_base[idxs],
-            points_2d_base=points_2d_base[idxs],
+            points_3d_base=points_3d_base[idxs_opt],
+            points_2d_base=points_2d_base[idxs_opt],
         )
 
         # Verify batch
         points_r, tangents_r, M1_r = integrate_curvature(
-            X0f_batch,
-            T0f_batch,
-            lengthsf_batch,
-            Kf_batch,
-            M10f_batch,
+            X0o_batch,
+            T0o_batch,
+            lengthso_batch,
+            Ko_batch,
+            M10o_batch,
         )
 
-        assert torch.allclose(points_r, points_f_batch)
+        assert torch.allclose(points_r, points_o_batch)
 
         # Update parameters
-        X0f[idxs] = X0f_batch
-        T0f[idxs] = T0f_batch
-        M10f[idxs] = M10f_batch
-        Kf[idxs] = Kf_batch
-        lengthsf[idxs] = lengthsf_batch
-        points_f[idxs] = points_f_batch
-        points_2d_f[idxs] = points_2d_f_batch
+        X0f[idxs_opt] = X0o_batch
+        T0f[idxs_opt] = T0o_batch
+        M10f[idxs_opt] = M10o_batch
+        Kf[idxs_opt] = Ko_batch
+        lengthsf[idxs_opt] = lengthso_batch
+        points_f[idxs_opt] = points_o_batch
+        points_2d_f[idxs_opt] = points_2d_o_batch
         train_steps[i] = step
 
         if args.plot_n_examples_per_batch > 0:
+            losses_o_batch = {k: l[batch_prefix_size:] for k, l in losses_batch.items()}
+            regs_o_batch = {k: l[batch_prefix_size:] for k, l in regs_batch.items()}
             _plot_curvature_fix_examples(
                 trial=trial,
                 batch=i,
                 step=step,
                 start_frame_num=start_idx,
-                plot_n=min(batch_size, args.plot_n_examples_per_batch),
-                points=points[idxs],
-                points_2d=points_2d[idxs],
-                K=K[idxs],
-                points_f=points_f_batch,
-                points_2d_f=points_2d_f_batch,
-                K_f=Kf_batch,
-                losses=losses_batch,
-                losses_combined=losses_c_batch,
-                regs=regs_batch,
+                plot_n=min(batch_size - len(idxs_prefix), args.plot_n_examples_per_batch),
+                points=points[idxs_opt],
+                points_2d=points_2d[idxs_opt],
+                K=K[idxs_opt],
+                points_f=points_o_batch,
+                points_2d_f=points_2d_o_batch,
+                K_f=Ko_batch,
+                losses=losses_o_batch,
+                losses_combined=losses_c_batch[len(idxs_prefix):],
+                regs=regs_o_batch,
                 save_dir=save_dir_n
             )
 
@@ -1837,8 +1994,8 @@ def _fix_curvature(
         ax.grid()
 
         for j in range(4):
-            vo = to_numpy([X0, T0, M10, K][j][idxs])
-            vf = to_numpy([X0f, T0f, M10f, Kf][j][idxs])
+            vo = to_numpy([X0, T0, M10, K][j][idxs_opt])
+            vf = to_numpy([X0f, T0f, M10f, Kf][j][idxs_opt])
             for k in range(3):
                 ax = fig.add_subplot(gs[2 + k, j * 3:j * 3 + 3])
                 if k == 0:
@@ -1846,8 +2003,8 @@ def _fix_curvature(
                 if j == 3:
                     ax.set_ylabel(['m1', 'm2', 'l'][k])
                     if k == 2:
-                        vo = to_numpy(lengths[idxs])
-                        vf = to_numpy(lengthsf[idxs])
+                        vo = to_numpy(lengths[idxs_opt])
+                        vf = to_numpy(lengthsf[idxs_opt])
                         ax.plot(vo, label='original')
                         ax.plot(vf, label='fixed')
                     else:
