@@ -1718,8 +1718,9 @@ def _fix_curvature(
             lengthsf_batch = torch.cat([lengthsf[idxs_prefix].detach(), lengthso_batch])
 
         # Align frames
+        logger.info('Aligning frames.')
         prefix_batch()
-        obs = args.batch_size - batch_prefix_size
+        obs = len(idxs_opt) - batch_prefix_size
         alignment_angles = np.zeros(obs)
         alignment_angles_post = np.zeros(obs)
         M10_dists = np.zeros(obs)
@@ -1923,7 +1924,8 @@ def _fix_curvature(
             M10o_batch,
         )
 
-        assert torch.allclose(points_r, points_o_batch)
+        diff = (points_o_batch - points_r).norm(dim=-1)
+        assert diff.max() < 1e-6
 
         # Update parameters
         X0f[idxs_opt] = X0o_batch
