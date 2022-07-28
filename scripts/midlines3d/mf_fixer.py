@@ -1679,7 +1679,7 @@ def _fix_curvature(
 
     # Process batches at a time
     for i in range(n_batches):
-        logger.info(f'--- Fixing camera parameters for batch {i + 1}/{n_batches}.')
+        logger.info(f'--- Fixing curvature for batch {i + 1}/{n_batches}.')
 
         # Build batch idxs
         if i == 0:
@@ -1745,7 +1745,7 @@ def _fix_curvature(
                 # Rotate the M10 vector around the tangent
                 T0k = T0f_batch[k2]
                 M10k = M10f_batch[k2]
-                I = torch.eye(3)
+                I = torch.eye(3, device=device)
                 cosA = torch.cos(opt_angle)
                 sinA = torch.sin(opt_angle)
                 outer = torch.einsum('i,j->ij', T0k, T0k)
@@ -1889,6 +1889,7 @@ def _fix_curvature(
             if step > args.convergence_patience and (
                     lrs[i, step - args.convergence_patience:step] == args.learning_rate_min).all():
                 logger.info('No longer improving at minimum learning rate, breaking.')
+                break
 
         if not args.dry_run and batch_loss.item() > args.error_threshold:
             logger.warning(f'Failed to reach error threshold ({args.error_threshold:.2f}), aborting.')
