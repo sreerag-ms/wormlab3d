@@ -106,6 +106,7 @@ def get_args() -> Namespace:
     parser.add_argument('--parabola-baseline', type=float, default=1e-1)
     parser.add_argument('--parabola-gradient', type=float, default=1.)
     parser.add_argument('--convergence-patience', type=int, default=100)
+    parser.add_argument('--min-steps', type=int, default=50)
 
     args = parser.parse_args()
     assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
@@ -1857,7 +1858,7 @@ def _fix_curvature(
             losses_c[i, step] = losses_c_batch.mean()
             batch_loss = losses_c_batch.mean()
 
-            if batch_loss.item() < args.loss_batch_mean_threshold:
+            if step > args.min_steps and batch_loss.item() < args.loss_batch_mean_threshold:
                 logger.info('Batch loss better than threshold, breaking.')
                 break
 
@@ -1887,8 +1888,9 @@ def _fix_curvature(
                 log += f'\tlr: {optimiser.param_groups[0]["lr"]:.4f}.'
                 logger.info(log)
 
-            if step > args.convergence_patience and (
-                    lrs[i, step - args.convergence_patience:step] == args.learning_rate_min).all():
+            if step > args.min_steps \
+                    and step > args.convergence_patience \
+                    and (lrs[i, step - args.convergence_patience:step] == args.learning_rate_min).all():
                 logger.info('No longer improving at minimum learning rate, breaking.')
                 break
 
