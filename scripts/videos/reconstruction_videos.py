@@ -3,7 +3,7 @@ import os
 import time
 from argparse import ArgumentParser, Namespace
 from datetime import datetime
-from typing import Tuple, Callable, Optional
+from typing import Tuple, Callable
 
 import cv2
 import ffmpeg
@@ -13,24 +13,31 @@ import torch
 from matplotlib.collections import LineCollection
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpec
+from mayavi import mlab
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
 from simple_worm.frame import FrameSequenceNumpy
 from simple_worm.plot3d import FrameArtist
-from wormlab3d import logger, PREPARED_IMAGES_PATH, START_TIMESTAMP, LOGS_PATH
-from wormlab3d.data.model import Frame, Reconstruction, Trial
-from wormlab3d.data.model.midline3d import M3D_SOURCE_MF, Midline3D
+from wormlab3d import PREPARED_IMAGES_PATH
+from wormlab3d import logger, START_TIMESTAMP, LOGS_PATH
+from wormlab3d.data.model import Frame, Reconstruction, Trial, Midline3D
+from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
 from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.midlines3d.util import generate_annotated_images
 from wormlab3d.particles.tumble_run import calculate_curvature
 from wormlab3d.postures.chiralities import calculate_chiralities
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
+from wormlab3d.postures.natural_frame import NaturalFrame
+from wormlab3d.postures.plot_utils import FrameArtistMLab
 from wormlab3d.toolkit.plot_utils import equal_aspect_ratio, overlay_image
-from wormlab3d.toolkit.util import print_args, str2bool, normalise, to_dict
+from wormlab3d.toolkit.util import normalise, print_args, str2bool, to_dict
 from wormlab3d.trajectories.cache import get_trajectory
 from wormlab3d.trajectories.pca import generate_or_load_pca_cache
-from wormlab3d.trajectories.util import calculate_speeds, smooth_trajectory
+from wormlab3d.trajectories.util import smooth_trajectory, calculate_speeds
+
+# Off-screen rendering
+mlab.options.offscreen = True
 
 
 def get_args() -> Namespace:
@@ -50,9 +57,12 @@ def get_args() -> Namespace:
     parser.add_argument('--use-valid-range', type=str2bool, help='Use valid range if available.')
     parser.add_argument('--smoothing-window-postures', type=int, help='Smoothing window for the postures.')
     parser.add_argument('--smoothing-window-components', type=int, help='Smoothing window for the components.')
-    parser.add_argument('--smoothing-window-speed', type=int, default=25, help='Smoothing window for the speed calculation.')
+    parser.add_argument('--smoothing-window-speed', type=int, default=25,
+                        help='Smoothing window for the speed calculation.')
 
-    # 3D plots
+    # Trajectory
+    parser.add_argument('--trajectory-use-mlab', type=str2bool, default=True,
+                        help='Use mayavi mlab to render the 3D trajectory plot.')
     parser.add_argument('--trajectory-colouring', type=str, choices=['time', 'speed', 'curvature'], default='time',
                         help='Colour the 3D trajectory by time, speed or curvature.')
     parser.add_argument('--show-trajectory-colourbar', type=str2bool, default=False,
@@ -65,6 +75,10 @@ def get_args() -> Namespace:
                         help='Show ticks on the 3D trajectory plot.')
     parser.add_argument('--show-trajectory-tick-labels', type=str2bool, default=False,
                         help='Show tick labels on the 3D trajectory plot.')
+
+    # Posture
+    parser.add_argument('--posture-use-mlab', type=str2bool, default=True,
+                        help='Use mayavi mlab to render the 3D posture plot.')
     parser.add_argument('--show-posture-axis', type=str2bool, default=True,
                         help='Show axis on the 3D posture plot.')
     parser.add_argument('--show-posture-grid', type=str2bool, default=True,
@@ -155,7 +169,7 @@ def _make_3d_trajectory_plot(
         args: Namespace,
 ) -> Tuple[Figure, Callable]:
     """
-    Build a 3D trajectory plot with worm.
+    Build a 3D trajectory plot with worm using matplotlib.
     Returns an update function to call which rotates the view and updates the worm.
     """
     logger.info('Building 3D trajectory plot.')
@@ -230,6 +244,80 @@ def _make_3d_trajectory_plot(
     return fig, update
 
 
+def _make_3d_trajectory_plot_mlab(
+        width: int,
+        height: int,
+        trial: Trial,
+        X: np.ndarray,
+        speeds: np.ndarray,
+        curvature: np.ndarray,
+        args: Namespace,
+) -> Tuple[Figure, Callable]:
+    """
+    Build a 3D trajectory plot with worm using mayavi.
+    Returns an update function to call which rotates the view and updates the worm.
+    """
+    logger.info('Building 3D trajectory plot.')
+
+    X_trajectory = X.mean(axis=1)
+    x, y, z = X_trajectory.T
+    centre = X_trajectory.mean(axis=0)
+
+    # Construct colours
+    if args.trajectory_colouring == 'time':
+        s = np.linspace(0, 1, len(X))
+        cmap = plt.get_cmap('viridis_r')
+    elif args.trajectory_colouring == 'speed':
+        s = speeds
+        cmap = plt.get_cmap('PRGn')
+    elif args.trajectory_colouring == 'curvature':
+        s = curvature
+        cmap = plt.get_cmap('Reds')
+    cmaplist = np.array([cmap(i) for i in range(cmap.N)]) * 255
+
+    # Set up mlab figure
+    fig = mlab.figure(size=(width * 2, height * 2), bgcolor=(1, 1, 1))
+    if 1:
+        # Doesn't really seem to make any difference
+        fig.scene.render_window.point_smoothing = True
+        fig.scene.render_window.line_smoothing = True
+        fig.scene.render_window.polygon_smoothing = True
+        fig.scene.render_window.multi_samples = 20
+        fig.scene.anti_aliasing_frames = 20
+
+    # Render the trajectory with simple lines
+    path = mlab.plot3d(x, y, z, s, opacity=0.4, tube_radius=None, line_width=8)
+    path.module_manager.scalar_lut_manager.lut.table = cmaplist
+
+    # Set up the artist and add the pieces
+    NF = NaturalFrame(X[0])
+    fa = FrameArtistMLab(NF, use_centred_midline=False, midline_opts={'opacity': 1, 'line_width': 8})
+    fa.add_midline(fig)
+    fa.add_surface(fig, v_min=-curvature.max(), v_max=curvature.max())
+
+    # Add box/axes
+    mlab.outline(path, color=(0, 0, 0), figure=fig)
+    axes = mlab.axes(color=(0, 0, 0), nb_labels=5, xlabel='', ylabel='', zlabel='')
+    axes.axes.label_format = ''
+
+    # Aspects
+    n_revolutions = len(X) / trial.fps / 60 * args.revolution_rate
+    azims = np.linspace(start=0, stop=360 * n_revolutions, num=len(X))
+    # fig.scene._lift()
+    mlab.view(figure=fig, azimuth=azims[0], distance='auto', focalpoint=centre)
+    # mlab.show()
+
+    def update(frame_idx: int):
+        fig.scene.disable_render = True
+        NF = NaturalFrame(X[frame_idx])
+        fa.update(NF)
+        fig.scene.disable_render = False
+        mlab.view(figure=fig, azimuth=azims[frame_idx])
+        fig.scene.render()
+
+    return fig, update
+
+
 def _make_3d_posture_plot(
         width: int,
         height: int,
@@ -238,7 +326,7 @@ def _make_3d_posture_plot(
         args: Namespace
 ) -> Tuple[Figure, Callable]:
     """
-    Build a 3D posture plot.
+    Build a 3D posture plot using matplotlib.
     Returns an update function to call which rotates the view and updates the worm.
     """
     logger.info('Building 3D postures plot.')
@@ -289,6 +377,84 @@ def _make_3d_posture_plot(
 
         # Redraw the canvas
         fig.canvas.draw()
+
+    return fig, update
+
+
+def _make_3d_posture_plot_mlab(
+        width: int,
+        height: int,
+        trial: Trial,
+        X: np.ndarray,
+        curvature: np.ndarray,
+        lengths: np.ndarray,
+        args: Namespace
+) -> Tuple[Figure, Callable]:
+    """
+    Build a 3D posture plot using mayavi.
+    Returns an update function to call which rotates the view and updates the worm.
+    """
+    logger.info('Building 3D postures plot.')
+
+    # Set up mlab figure
+    fig = mlab.figure(size=(width * 2, height * 2), bgcolor=(1, 1, 1))
+    if 1:
+        # Doesn't really seem to make any difference
+        fig.scene.render_window.point_smoothing = True
+        fig.scene.render_window.line_smoothing = True
+        fig.scene.render_window.polygon_smoothing = True
+        fig.scene.render_window.multi_samples = 20
+        fig.scene.anti_aliasing_frames = 20
+
+    # Set up the artist and add the pieces
+    NF = NaturalFrame(X[0])
+    fa = FrameArtistMLab(NF, use_centred_midline=True, midline_opts={'opacity': 1, 'line_width': 8})
+    fa.add_midline(fig)
+    fa.add_surface(fig, v_min=-curvature.max(), v_max=curvature.max())
+
+    # Determine zoom level - make a sphere around the average midpoint that would contain
+    # a straight worm at its longest length in the clip
+    max_length = lengths.max()
+    phi, theta = np.mgrid[0:2 * np.pi:12j, 0:np.pi:12j]
+    r = (max_length * 0.6) / 2
+    x = r * np.cos(phi) * np.sin(theta)
+    y = r * np.sin(phi) * np.sin(theta)
+    z = r * np.cos(theta)
+    tmp_mesh = mlab.mesh(x, y, z)
+    mlab.view(figure=fig, distance='auto')
+    distance = mlab.view()[2]
+    tmp_mesh.remove()
+
+    # Add outline box
+    outline = mlab.outline(fa.surface, color=(0, 0, 0), figure=fig)
+
+    # Not adding axes as can't set the ticks to any fixed spacing so when animated looks confusing
+    # axes = mlab.axes(color=(0, 0, 0), nb_labels=5, xlabel='', ylabel='', zlabel='')
+    # axes.axes.label_format = ''
+
+    # Aspects
+    n_revolutions = len(X) / trial.fps / 60 * args.revolution_rate
+    azims = np.linspace(start=0, stop=360 * n_revolutions, num=len(X))
+    # fig.scene._lift()
+    mlab.view(figure=fig, azimuth=azims[0], distance=distance, focalpoint=fa.X.mean(axis=0))
+    # mlab.show()
+
+    def update(frame_idx: int):
+        nonlocal outline
+        fig.scene.disable_render = True
+        NF = NaturalFrame(X[frame_idx])
+        fa.update(NF)
+
+        # Update box/axes
+        outline.remove()
+        outline = mlab.outline(fa.surface, color=(0, 0, 0), figure=fig)
+        # axes.remove()
+        # axes = mlab.axes(color=(0, 0, 0), nb_labels=5, xlabel='', ylabel='', zlabel='')
+        # axes.axes.label_format = ''
+
+        fig.scene.disable_render = False
+        mlab.view(figure=fig, azimuth=azims[frame_idx], distance=distance, focalpoint=fa.X.mean(axis=0))
+        fig.scene.render()
 
     return fig, update
 
@@ -636,7 +802,6 @@ def generate_reconstruction_video():
             for k in ['intrinsics', 'rotations', 'translations', 'distortions', 'shifts', ]
         ], axis=2)
         prs = ProjectRenderScoreModel(image_size=trial.crop_size)
-
     else:
         lengths = np.linalg.norm(Xc[:, 1:] - Xc[:, :-1], axis=-1).sum(axis=-1)
 
@@ -667,7 +832,7 @@ def generate_reconstruction_video():
         X=Xc,
         lengths=lengths
     )
-    fig_traj, update_traj_plot = _make_3d_trajectory_plot(
+    traj_fn_args = dict(
         width=int(args.width / 3),
         height=int(args.height / 3 * 2),
         trial=trial,
@@ -676,13 +841,25 @@ def generate_reconstruction_video():
         curvature=curvature_traj,
         args=args
     )
-    fig_posture, update_posture_plot = _make_3d_posture_plot(
+    if args.trajectory_use_mlab:
+        fig_traj, update_traj_plot = _make_3d_trajectory_plot_mlab(**traj_fn_args)
+    else:
+        fig_traj, update_traj_plot = _make_3d_trajectory_plot(**traj_fn_args)
+    posture_fn_args = dict(
         width=int(args.width / 12 * 3),
         height=int(args.height / 3 * 2),
         trial=trial,
         X=Xc - X_com[:, None],
         args=args
     )
+    if args.posture_use_mlab:
+        fig_posture, update_posture_plot = _make_3d_posture_plot_mlab(
+            curvature=curvature_postures,
+            lengths=lengths,
+            **posture_fn_args
+        )
+    else:
+        fig_posture, update_posture_plot = _make_3d_posture_plot(**posture_fn_args)
     fig_traces, update_traces_plot = _make_traces_plots(
         width=int(args.width) / 12 * 5,
         height=int(args.height / 3 * 2),
@@ -795,18 +972,29 @@ def generate_reconstruction_video():
             points_2d=points_2d
         )
 
-        # Update the plots and extract rendered image
+        # Update the plots and extract renders
         idx = start_frame - r_start_frame + i
         update_info_plot(idx)
         update_traj_plot(idx)
         update_posture_plot(idx)
         update_traces_plot(idx)
         update_lambdas_plot(idx)
+
         plot_info = np.asarray(fig_info.canvas.renderer._renderer).take([0, 1, 2], axis=2)
-        plot_traj = np.asarray(fig_traj.canvas.renderer._renderer).take([0, 1, 2], axis=2)
-        plot_posture = np.asarray(fig_posture.canvas.renderer._renderer).take([0, 1, 2], axis=2)
         plot_traces = np.asarray(fig_traces.canvas.renderer._renderer).take([0, 1, 2], axis=2)
         plot_lambdas = np.asarray(fig_lambdas.canvas.renderer._renderer).take([0, 1, 2], axis=2)
+
+        if args.posture_use_mlab:
+            plot_posture = mlab.screenshot(mode='rgb', antialiased=True, figure=fig_posture)
+            plot_posture = cv2.resize(plot_posture, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
+        else:
+            plot_posture = np.asarray(fig_posture.canvas.renderer._renderer).take([0, 1, 2], axis=2)
+
+        if args.trajectory_use_mlab:
+            plot_traj = mlab.screenshot(mode='rgb', antialiased=True, figure=fig_traj)
+            plot_traj = cv2.resize(plot_traj, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
+        else:
+            plot_traj = np.asarray(fig_traj.canvas.renderer._renderer).take([0, 1, 2], axis=2)
 
         # Overlay plot info on top of images panel
         images = overlay_image(images, plot_info, x_offset=0, y_offset=0)

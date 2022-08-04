@@ -5,7 +5,6 @@ from typing import List, Union, Tuple, Callable
 
 import cv2
 import ffmpeg
-import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
@@ -15,7 +14,7 @@ from mayavi.core.scene import Scene
 from tvtk.tools import visual
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
-from wormlab3d.toolkit.plot_utils import overlay_image
+from wormlab3d.toolkit.plot_utils import overlay_image, to_rgb
 from wormlab3d.trajectories.args import get_args
 
 show_plots = False
@@ -184,12 +183,6 @@ def make_filename(
     return LOGS_PATH / fn
 
 
-def _get_rgb(c: Union[str, np.ndarray]):
-    if type(c) == str:
-        return mcolors.to_rgb(c)
-    return c
-
-
 def _get_sphere_slice_border_points(
         r: float,
         h: float,
@@ -213,7 +206,7 @@ def _plot_sphere_slice_border(
         fig: Scene = None
 ):
     x, y, z = _get_sphere_slice_border_points(r, h, n_points)
-    return mlab.mesh(x, y, z, color=_get_rgb(c), opacity=alpha, figure=fig)
+    return mlab.mesh(x, y, z, color=to_rgb(c), opacity=alpha, figure=fig)
 
 
 def _plot_sphere_slice_caps(
@@ -230,8 +223,8 @@ def _plot_sphere_slice_caps(
     x = np.outer(r2, np.sin(theta))
     y = np.outer(r2, np.cos(theta))
     z = h * np.ones((n_points, n_points))
-    top = mlab.mesh(x, y, z, color=_get_rgb(c), opacity=alpha)
-    bottom = mlab.mesh(x, y, -z, color=_get_rgb(c), opacity=alpha)
+    top = mlab.mesh(x, y, z, color=to_rgb(c), opacity=alpha)
+    bottom = mlab.mesh(x, y, -z, color=to_rgb(c), opacity=alpha)
     return top, bottom
 
 
@@ -326,7 +319,7 @@ def spherical_cut_plot():
     z_max = z_values.max()
     angle = np.pi / 2
     z_max_offset = 4
-    axis_colour = _get_rgb('red')
+    axis_colour = to_rgb('red')
     _plot_arrow(
         dest=(0, 0, z_max),
         c=axis_colour
@@ -428,7 +421,7 @@ def spherical_cut_animation():
     visual.set_viewer(fig)
 
     # Axis arrows
-    axis_colour = _get_rgb('red')
+    axis_colour = to_rgb('red')
     z_arrow = _plot_arrow(dest=(0, 0, 1), c=axis_colour)
     r_arrow = _plot_arrow(dest=(1, 0, 0), c=axis_colour)
 

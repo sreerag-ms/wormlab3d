@@ -92,6 +92,18 @@ class NaturalFrame:
     def length(self) -> float:
         return np.linalg.norm(self.X_pos[:-1] - self.X_pos[1:], axis=1).sum()
 
+    @property
+    def e0(self) -> np.ndarray:
+        return self.T
+
+    @property
+    def e1(self) -> np.ndarray:
+        return self.M1
+
+    @property
+    def e2(self) -> np.ndarray:
+        return self.M2
+
     def _calculate_tangent_and_curvature(self):
         """
         Calculate the tangent and the curvature from the midline coordinates.
@@ -288,3 +300,53 @@ class NaturalFrame:
             c *= -1
 
         return c
+
+    def surface(
+            self,
+            N_theta: int = 32,
+            radius: float = 0.02,
+            taper: float = 0.25,
+            shape_k1: float = 1.5,
+            shape_k2: float = 1,
+            use_centred: bool = False
+    ) -> np.ndarray:
+        """
+        Generate a tapered cylindrical mesh.
+        """
+        from scipy.interpolate import interp1d
+        assert 0 <= taper <= 0.5, f'taper out of bounds! {taper}'
+        N_taper = int(self.N * taper)
+        theta = np.linspace(0, 2 * np.pi, N_theta)
+
+        # Define the radius as a function of midline
+        if N_taper > 0:
+            s = np.linspace(0, np.pi / 2, N_taper)
+            x = N_taper * np.cos(s)**shape_k1
+            y = radius * np.sin(s)**shape_k2
+            t_idxs = np.linspace(0, N_taper, N_taper)
+
+            # Resample to get equally spaced points
+            f = interp1d(x, y, kind='cubic', fill_value='extrapolate')
+            slopes = f(t_idxs)
+            r = np.concatenate([
+                slopes[::-1],
+                np.ones(self.N - 2 * N_taper) * radius,
+                slopes
+            ])
+        else:
+            r = np.ones(self.N) * radius
+
+        # Generate cylinder
+        cylinder = np.einsum('i,jk->ijk', np.cos(theta), self.M1) \
+                   + np.einsum('i,jk->ijk', np.sin(theta), self.M2)
+
+        # Generate surface
+        if use_centred or np.iscomplexobj(self.X):
+            surface = self.X_pos + r[None, :, None] * cylinder
+        else:
+            surface = self.X + r[None, :, None] * cylinder
+
+        # Map the curvature to the surface
+        K_surf = np.einsum('ij,kij->ki', self.K, cylinder)
+
+        return surface, K_surf

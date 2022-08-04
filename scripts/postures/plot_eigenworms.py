@@ -13,14 +13,14 @@ from wormlab3d.data.model import Reconstruction, Eigenworms, Dataset
 from wormlab3d.postures.cpca import load_cpca_from_file
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.postures.natural_frame import NaturalFrame
-from wormlab3d.postures.plot_utils import plot_natural_frame_3d
+from wormlab3d.postures.plot_utils import plot_natural_frame_3d, plot_natural_frame_3d_mlab
 from wormlab3d.toolkit.util import print_args
 from wormlab3d.trajectories.cache import get_trajectory
 
-plot_n_components = 10
+plot_n_components = 5
 show_plots = True
-save_plots = True
-img_extension = 'svg'
+save_plots = False
+img_extension = 'png'
 eigenworm_length = 1
 eigenworm_scale = 64
 cmap = cm.get_cmap(MIDLINE_CMAP_DEFAULT)
@@ -183,6 +183,85 @@ def _plot_eigenworms_basic(
         ax.set_zticks([])
         ax.set_zticklabels([])
         ax.grid(False)
+
+        if save_plots:
+            path = LOGS_PATH / f'{START_TIMESTAMP}_eigenworms_c={i}_{filename}.{img_extension}'
+            logger.info(f'Saving plot to {path}.')
+            plt.savefig(path)
+
+        if show_plots:
+            plt.show()
+
+        plt.close(fig)
+
+
+def _plot_eigenworms_basic_mlab(
+        eigenworms: Eigenworms,
+        filename: str
+):
+    plot_config = {
+        0: {
+            # 'azimuth': -60,
+            # 'elevation': 60,
+            # 'roll': -45,
+            # 'distance': 1.6,
+            'arrow_scale': 0.12,
+        },
+        1: {
+            # 'azimuth': -30,
+            # 'elevation': -165,
+            # 'arrow_scale': 0.1,
+        },
+        2: {
+            # 'azimuth': -60,
+            # 'elevation': -160,
+            # 'arrow_scale': 0.08,
+        },
+        3: {
+            # 'azimuth': -160,
+            # 'elevation': 30,
+            # 'arrow_scale': 0.12,
+        },
+        4: {
+            # 'azimuth': -20,
+            # 'elevation': -165,
+            # 'arrow_scale': 0.12,
+        }
+    }
+
+    default_plot_options = {
+        'azimuth': -60,
+        'elevation': 60,
+        'roll': -45,
+        'distance': 1.8,
+        'arrow_scale': 0.12,
+        'arrow_opts': {
+            'radius_shaft': 0.02,
+            'radius_cone': 0.1,
+            'length_cone': 0.2,
+        },
+        'midline_opts': {
+            'line_width': 8
+        }
+    }
+
+    for i in range(plot_n_components):
+        if i not in plot_config:
+            continue
+
+        component = eigenworms.components[i]
+        NF = NaturalFrame(component * eigenworm_scale, length=eigenworm_length)
+
+        # 3D plot of eigenworm
+        fig = plot_natural_frame_3d_mlab(
+            NF,
+            show_frame_arrows=True,
+            n_frame_arrows=16,
+            show_pca_arrows=False,
+            show_outline=False,
+            show_axis=False,
+            **{**default_plot_options, **plot_config[i]}
+        )
 
         if save_plots:
             path = LOGS_PATH / f'{START_TIMESTAMP}_eigenworms_c={i}_{filename}.{img_extension}'
@@ -398,7 +477,8 @@ def main():
     filename += f'_M={ew.n_samples}_N={ew.n_features}'
 
     # _plot_eigenworms_basic(ew, filename)
-    _plot_eigenvalues_basic(ew, filename)
+    # _plot_eigenvalues_basic(ew, filename)
+    _plot_eigenworms_basic_mlab(ew, filename)
     # _plot_eigenworms(ew, title, filename)
     # _plot_eigenvalues(ew, title, filename)
     # if X_full is not None:

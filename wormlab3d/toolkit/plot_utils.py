@@ -1,7 +1,8 @@
-from typing import List, Callable, Optional
+from typing import List, Callable, Optional, Union
 from typing import Tuple
 
 import cv2
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import animation
@@ -51,6 +52,12 @@ def equal_aspect_ratio(ax: Axes):
     """Fix equal aspect ratio for 3D plots."""
     limits = np.array([getattr(ax, f'get_{axis}lim')() for axis in 'xyz'])
     ax.set_box_aspect(np.ptp(limits, axis=1))
+
+
+def to_rgb(c: Union[str, np.ndarray]):
+    if type(c) == str:
+        return mcolors.to_rgb(c)
+    return c
 
 
 class CameraImageArtist:
