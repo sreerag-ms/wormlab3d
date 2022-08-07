@@ -11,6 +11,7 @@ from matplotlib.collections import LineCollection
 from matplotlib.gridspec import GridSpec
 from torch import nn
 from torch.backends import cudnn
+from torch.nn.functional import interpolate
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
@@ -875,6 +876,9 @@ def _process_camfix_batch(
     tracking_failure_idxs = (points_3d_base.sum(dim=-1) == 0) | (points_2d_base.sum(dim=(-1, -2)) == 0)
     losses_p2d[tracking_failure_idxs] = 0
 
+    # Check for zero-lengths and zero the losses where it happens
+    losses_p2d[lengths == 0] = 0
+
     return p3d_batch, p2d_batch, losses_p2d, reg_spread
 
 
@@ -909,6 +913,28 @@ def _fix_camera_positions(
     lengths = torch.from_numpy(ts.get('length', **f_range).copy())[:, 0].to(device)
     K = torch.from_numpy(ts.get('curvatures', **f_range).copy()).to(device)
     n_frames = len(points)
+
+    # Interpolate any missing data
+    for var in [points_2d, X0, T0, M10, lengths, K]:
+        if var.ndim == 1:
+            zero_points = (var == 0).nonzero()[:, 0]
+        else:
+            zero_points = (var.sum(dim=list(range(1, var.ndim))) == 0).nonzero()[:, 0]
+        if len(zero_points) > 0:
+            i = 0
+            while i < len(zero_points):
+                start_idx = zero_points[i] - 1
+                end_idx = zero_points[i] + 1
+                while end_idx in zero_points:
+                    end_idx += 1
+                    i += 1
+                i += 1
+                v = torch.stack([var[start_idx], var[end_idx]], dim=0)
+                v = v.reshape([1, 2, -1])
+                v = v.permute(0, 2, 1)
+                v = interpolate(v, size=end_idx - start_idx + 1, mode='linear', align_corners=True)
+                v = v.squeeze().T.reshape(var[start_idx:end_idx + 1].shape)
+                var[start_idx:end_idx + 1] = v
 
     # Initialise output placeholders
     X0f = torch.zeros_like(X0)
