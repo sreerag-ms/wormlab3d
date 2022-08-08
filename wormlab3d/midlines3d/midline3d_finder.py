@@ -27,7 +27,8 @@ from wormlab3d.midlines3d.mf_methods import generate_residual_targets, calculate
     calculate_aunts_losses, calculate_curvature_losses, calculate_temporal_losses, calculate_parents_losses_curvatures, \
     calculate_smoothness_losses_curvatures, calculate_curvature_losses_curvatures, calculate_temporal_losses_curvatures, \
     calculate_temporal_losses_curvature_deltas, calculate_curvature_losses_curvature_deltas, \
-    calculate_intersection_losses_curvatures, integrate_curvature, normalise, orthogonalise
+    calculate_intersection_losses_curvatures, calculate_alignment_losses_curvatures, integrate_curvature, normalise, \
+    orthogonalise
 from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.nn.LBFGS import FullBatchLBFGS
@@ -48,6 +49,7 @@ PRINT_KEYS = [
     # 'loss/global',
     'loss/scores',
     'loss/intersections',
+    'loss/alignment',
     'shifts'
 ]
 
@@ -1081,6 +1083,7 @@ class Midline3DFinder:
                 'intersections': calculate_intersection_losses_curvatures(
                     points_smoothed, sigmas_smoothed, p.curvature_max
                 ),
+                'alignment': calculate_alignment_losses_curvatures(curvatures, curvatures_prev),
             }}
             if p.curvature_deltas:
                 losses['temporal'] = calculate_temporal_losses_curvature_deltas(

@@ -974,3 +974,37 @@ def calculate_intersection_losses_curvatures(
         losses.append(loss_d)
 
     return losses
+
+
+@torch.jit.script
+def calculate_alignment_losses_curvatures(
+        curvatures: List[torch.Tensor],
+        curvatures_prev: Optional[List[torch.Tensor]],
+) -> List[torch.Tensor]:
+    """
+    Consecutive curves should be aligned in shape space.
+    """
+    D = len(curvatures)
+    bs = curvatures[0].shape[0]
+    device = curvatures[0].device
+    losses = []
+
+    if curvatures_prev is None and bs == 1:
+        return [torch.tensor(0., device=device) for _ in range(D)]
+
+    for d in range(D):
+        curvatures_d = curvatures[d]
+
+        # Prepend previous curvatures to the batch
+        if curvatures_prev is not None:
+            curvatures_prev_d = curvatures_prev[d].unsqueeze(0).detach()
+            curvatures_d = torch.cat([curvatures_prev_d, curvatures_d], dim=0)
+
+        # Calculate optimal alignment rotation angle between frames
+        mc_prev = curvatures_d[:-1, :, 0] + 1j * curvatures_d[:-1, :, 1]
+        mc_next = curvatures_d[1:, :, 0] + 1j * curvatures_d[1:, :, 1]
+        opt_angles = -torch.angle(torch.einsum('ij,ij->i', mc_prev, mc_next.conj()))
+        loss_d = torch.mean(opt_angles.abs())
+        losses.append(loss_d)
+
+    return losses

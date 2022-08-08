@@ -78,6 +78,7 @@ class ParameterArgs(BaseArgs):
             loss_curvature: float = 1.,
             loss_temporal: float = 0.,
             loss_intersections: float = 0.,
+            loss_alignment: float = 0.,
 
             algorithm: str = OPTIMISER_ADAM,
 
@@ -209,6 +210,7 @@ class ParameterArgs(BaseArgs):
         self.loss_curvature = loss_curvature
         self.loss_temporal = loss_temporal
         self.loss_intersections = loss_intersections
+        self.loss_alignment = loss_alignment
 
         assert algorithm in OPTIMISER_ALGORITHMS
         self.algorithm = algorithm
@@ -358,6 +360,8 @@ class ParameterArgs(BaseArgs):
                            help='Temporal smoothing weight between frames.')
         group.add_argument('--loss-intersections', type=float, default=0.,
                            help='Self-intersections loss.')
+        group.add_argument('--loss-alignment', type=float, default=0.,
+                           help='Shape-space alignment loss.')
 
         group.add_argument('--algorithm', type=str, choices=OPTIMISER_ALGORITHMS, default=OPTIMISER_ADAM,
                            help='Optimisation algorithm.')
