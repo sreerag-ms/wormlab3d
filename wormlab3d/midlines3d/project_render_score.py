@@ -411,14 +411,14 @@ class ProjectRenderScoreModel(nn.Module):
                     curvatures_d = calculate_curvature(points_d)
 
                 # Prepare sigmas, exponents and intensities
-                N4 = int(N / 4)
+                N5 = int(N / 5)
 
                 # Sigmas should be equal in the middle section but taper towards the ends
                 sigma_d = sigmas_d[:, None].clamp(min=self.sigmas_min)
-                slopes = (sigma_d - self.sigmas_min) / N4 * torch.arange(N4, device=device)[None, :] + self.sigmas_min
+                slopes = (sigma_d - self.sigmas_min) / N5 * torch.arange(N5, device=device)[None, :] + self.sigmas_min
                 sigmas_d = torch.cat([
                     slopes,
-                    torch.ones(bs, 2 * N4, device=device) * sigma_d,
+                    torch.ones(bs, N - 2 * N5, device=device) * sigma_d,
                     slopes.flip(dims=(1,))
                 ], dim=1)
 
@@ -427,11 +427,11 @@ class ProjectRenderScoreModel(nn.Module):
 
                 # Intensities should be equal in the middle section but taper towards the ends
                 int_d = intensities_d[:, None]
-                slopes = (int_d - self.intensities_min) / N4 \
-                         * torch.arange(N4, device=device)[None, :] + self.intensities_min
+                slopes = (int_d - self.intensities_min) / N5 \
+                         * torch.arange(N5, device=device)[None, :] + self.intensities_min
                 intensities_d = torch.cat([
                     slopes,
-                    torch.ones(bs, 2 * N4, device=device) * int_d,
+                    torch.ones(bs, N - 2 * N5, device=device) * int_d,
                     slopes.flip(dims=(1,))
                 ], dim=1)
 
