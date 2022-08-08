@@ -1453,6 +1453,8 @@ class Midline3DFinder:
         """
         Make a multiscale curve 3D scatter plot.
         """
+        if not self.runtime_args.plot_3d:
+            return
         cmap_vertices = 'autumn_r'
         cmap_curve = 'jet'
         D = self.parameters.depth - self.parameters.depth_min
@@ -1518,6 +1520,8 @@ class Midline3DFinder:
         """
         Plot the 2D mask renderings of the mutiscale curves.
         """
+        if not self.runtime_args.plot_2d:
+            return
         D = self.parameters.depth
         D_min = self.parameters.depth_min
         n_rows = int(np.ceil(np.sqrt(D - D_min)))
@@ -1597,6 +1601,8 @@ class Midline3DFinder:
         """
         Plot a batch of 2D mask renderings of the mutiscale curves.
         """
+        if not self.runtime_args.plot_2d:
+            return
         D = self.parameters.depth
         D_min = self.parameters.depth_min
         n_rows = D - D_min
@@ -1678,6 +1684,8 @@ class Midline3DFinder:
         """
         Plot the point scores, sigmas, exponents and intensities for the curves.
         """
+        if not self.runtime_args.plot_point_stats:
+            return
         ra = self.runtime_args
         D = self.parameters.depth
         D_min = self.parameters.depth_min
@@ -1760,6 +1768,8 @@ class Midline3DFinder:
         """
         Plot the curvatures.
         """
+        if not self.runtime_args.plot_curvatures:
+            return
         D = self.parameters.depth
         D_min = self.parameters.depth_min
         cmap = plt.get_cmap('jet')
@@ -1859,6 +1869,8 @@ class Midline3DFinder:
         """
         Plot the filters.
         """
+        if not self.runtime_args.plot_filters:
+            return
         fig, axes = plt.subplots(len(self.frame_batch), 3, figsize=(10, 4), squeeze=False)
         fig.suptitle(self._plot_title(self.master_frame_state))
 
@@ -1879,6 +1891,9 @@ class Midline3DFinder:
         self._save_plot(fig, 'filters', frame_state)
 
     def _plot_title(self, frame_state: FrameState, skipped: bool = False) -> str:
+        """
+        Generate a title for the plots.
+        """
         title = f'Trial: {self.trial.id}. {self.trial.date:%Y%m%d}. ' \
                 f'Frame: {frame_state.frame_num}/{self.trial.n_frames_min}.\n' \
                 f'Global step: {self.checkpoint.step}. '

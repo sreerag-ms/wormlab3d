@@ -20,11 +20,16 @@ class RuntimeArgs(BaseArgs):
             plot_every_n_init_steps: int = -1,
             plot_every_n_frames: int = -1,
             plot_n_examples: int = 1,
+            save_plots: bool = True,
+            plot_3d: bool = False,
+            plot_2d: bool = False,
+            plot_point_stats: bool = False,
+            plot_curvatures: bool = False,
+            plot_filters: bool = False,
             plot_sigmas: bool = True,
             plot_exponents: bool = True,
             plot_intensities: bool = True,
             plot_scores: bool = True,
-            save_plots: bool = True,
             seed: int = None,
             prefix_seed_to_plot_names: bool = False,
             **kwargs
@@ -38,15 +43,26 @@ class RuntimeArgs(BaseArgs):
         self.cpu_only = cpu_only
         self.gpu_id = gpu_id
         self.log_level = log_level
+
+        # General plot options
         self.plot_every_n_steps = plot_every_n_steps
         self.plot_every_n_init_steps = plot_every_n_init_steps
         self.plot_every_n_frames = plot_every_n_frames
         self.plot_n_examples = plot_n_examples
+        self.save_plots = save_plots
+
+        # Which plots to make
+        self.plot_3d = plot_3d
+        self.plot_2d = plot_2d
+        self.plot_point_stats = plot_point_stats
+        self.plot_curvatures = plot_curvatures
+        self.plot_filters = plot_filters
+
+        # Customise the point stats plot
         self.plot_sigmas = plot_sigmas
         self.plot_exponents = plot_exponents
         self.plot_intensities = plot_intensities
         self.plot_scores = plot_scores
-        self.save_plots = save_plots
 
         # Generate a random seed if one was not provided.
         if seed is None:
@@ -82,26 +98,43 @@ class RuntimeArgs(BaseArgs):
                            help='Only run on CPU. Otherwise will use GPU if available.')
         group.add_argument('--gpu-id', type=int, default=0,
                            help='GPU id to use if using GPUs.')
+        group.add_argument('--log-level', type=int, default=2, choices=[0, 1, 2],
+                           help='Tensorboard logging level. 0=Totals only. 1=Depth losses. 2=All losses and parameter stats.')
+
+        # General plot options
         group.add_argument('--plot-every-n-steps', type=int, default=-1,
                            help='Plot example inputs and outputs every n steps, -1 turns this off.')
         group.add_argument('--plot-every-n-init-steps', type=int, default=-1,
                            help='Plot example inputs and outputs every n init steps, -1 turns this off.')
-        group.add_argument('--log-level', type=int, default=2, choices=[0, 1, 2],
-                           help='Tensorboard logging level. 0=Totals only. 1=Depth losses. 2=All losses and parameter stats.')
         group.add_argument('--plot-every-n-frames', type=int, default=-1,
                            help='Plot example inputs and outputs every n frames, -1 turns this off.')
         group.add_argument('--plot-n-examples', type=int, default=1,
                            help='Plot this number of examples from the batch at each iteration.')
-        group.add_argument('--plot-sigmas', type=str2bool, default=True,
-                           help='Plot sigmas.')
-        group.add_argument('--plot-exponents', type=str2bool, default=True,
-                           help='Plot exponents.')
-        group.add_argument('--plot-intensities', type=str2bool, default=True,
-                           help='Plot intensities.')
-        group.add_argument('--plot-scores', type=str2bool, default=True,
-                           help='Plot scores.')
         group.add_argument('--save-plots', type=str2bool, default=True,
                            help='Save plot images to disk. Default = True.')
+
+        # Which plots to make
+        group.add_argument('--plot-3d', type=str2bool, default=False,
+                           help='Plot 3d.')
+        group.add_argument('--plot-2d', type=str2bool, default=True,
+                           help='Plot 2d.')
+        group.add_argument('--plot-point-stats', type=str2bool, default=False,
+                           help='Plot point stats.')
+        group.add_argument('--plot-curvatures', type=str2bool, default=False,
+                           help='Plot curvatures.')
+        group.add_argument('--plot-filters', type=str2bool, default=False,
+                           help='Plot filters.')
+
+        # Customise the point stats plot (requires point-stats plot to be active)
+        group.add_argument('--plot-sigmas', type=str2bool, default=True,
+                           help='Plot sigmas on the point-stats plot.')
+        group.add_argument('--plot-exponents', type=str2bool, default=True,
+                           help='Plot exponents on the point-stats plot.')
+        group.add_argument('--plot-intensities', type=str2bool, default=True,
+                           help='Plot intensities on the point-stats plot.')
+        group.add_argument('--plot-scores', type=str2bool, default=True,
+                           help='Plot scores on the point-stats plot.')
+
         group.add_argument('--seed', type=int,
                            help='Set a random seed.')
         group.add_argument('--prefix-seed-to-plot-names', type=str2bool, default=False,
