@@ -246,6 +246,7 @@ class ProjectRenderScoreModel(nn.Module):
         List[torch.Tensor],
         List[torch.Tensor],
         List[torch.Tensor],
+        List[torch.Tensor],
         List[torch.Tensor]
     ]:
         """
@@ -258,6 +259,7 @@ class ProjectRenderScoreModel(nn.Module):
         blobs = []
         masks = []
         detection_masks = []
+        points_raw = []
         points_2d = []
         scores = []
         points_smoothed = []
@@ -391,7 +393,17 @@ class ProjectRenderScoreModel(nn.Module):
                         X0_d = X0_d.clamp(min=-0.5, max=0.5)
 
                     # Integrate the curvature to get the midline coordinates
-                    points_d, tangents_d, M1_d = integrate_curvature(X0_d, T0_d, length_d, curvatures_d, M10_d)
+                    Xc_d, Tc_d, M1c_d = integrate_curvature(X0_d, T0_d, length_d, curvatures_d, M10_d)
+
+                    # Rebuild it again from the head and the tail
+                    Xh_d, Th_d, M1h_d = integrate_curvature(Xc_d[:, 1], Tc_d[:, 1], length_d, curvatures_d, M1c_d[:, 1], start_idx=1)
+                    Xt_d, Tt_d, M1t_d = integrate_curvature(Xc_d[:, -2], Tc_d[:, -2], length_d, curvatures_d, M1c_d[:, -2], start_idx=N - 2)
+
+                    # Use the average of the head and tail curves
+                    points_d = (Xh_d + Xt_d) / 2
+
+                    # Log centre, head and tail curves
+                    points_raw_d = torch.stack([Xc_d, Xh_d, Xt_d], dim=1)
 
                 else:
                     # Distance to parent points fixed as a quarter of the mean segment-length between parents.
@@ -408,6 +420,7 @@ class ProjectRenderScoreModel(nn.Module):
                             points_d[:, -1][:, None, :]
                         ], dim=1)
                     points_d = smooth_parameter(points_d, ks, mode='gaussian')
+                    points_raw_d = torch.zeros_like(points_d)
                     curvatures_d = calculate_curvature(points_d)
 
                 # Prepare sigmas, exponents and intensities
@@ -436,6 +449,7 @@ class ProjectRenderScoreModel(nn.Module):
                 ], dim=1)
 
             else:
+                points_raw_d = torch.zeros_like(points_d)
                 curvatures_d = torch.zeros_like(points_d)
 
             # Project and render
@@ -455,6 +469,7 @@ class ProjectRenderScoreModel(nn.Module):
 
             blobs.append(blobs_d)
             masks.append(masks_d)
+            points_raw.append(points_raw_d)
             points_2d.append(points_2d_d.transpose(1, 2))
             points_smoothed.append(points_d)
             curvatures_smoothed.append(curvatures_d)
@@ -535,7 +550,7 @@ class ProjectRenderScoreModel(nn.Module):
         scores = scores[::-1]
         detection_masks = detection_masks[::-1]
 
-        return masks, detection_masks, points_2d, scores, curvatures_smoothed, points_smoothed, \
+        return masks, detection_masks, points_raw, points_2d, scores, curvatures_smoothed, points_smoothed, \
                sigmas_smoothed, exponents_smoothed, intensities_smoothed
 
     def _project_to_2d(

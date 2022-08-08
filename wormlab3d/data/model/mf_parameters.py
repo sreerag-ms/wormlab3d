@@ -83,6 +83,7 @@ class MFParameters(Document):
     loss_temporal = FloatField()
     loss_intersections = FloatField()
     loss_alignment = FloatField()
+    loss_consistency = FloatField()
 
     # --- Deprecated
     loss_sigmas = FloatField()

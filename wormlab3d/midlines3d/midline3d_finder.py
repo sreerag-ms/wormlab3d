@@ -27,8 +27,9 @@ from wormlab3d.midlines3d.mf_methods import generate_residual_targets, calculate
     calculate_aunts_losses, calculate_curvature_losses, calculate_temporal_losses, calculate_parents_losses_curvatures, \
     calculate_smoothness_losses_curvatures, calculate_curvature_losses_curvatures, calculate_temporal_losses_curvatures, \
     calculate_temporal_losses_curvature_deltas, calculate_curvature_losses_curvature_deltas, \
-    calculate_intersection_losses_curvatures, calculate_alignment_losses_curvatures, integrate_curvature, normalise, \
-    orthogonalise
+    calculate_intersection_losses_curvatures, calculate_alignment_losses_curvatures, \
+    calculate_consistency_losses_curvatures, \
+    integrate_curvature, normalise, orthogonalise
 from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.nn.LBFGS import FullBatchLBFGS
@@ -50,6 +51,7 @@ PRINT_KEYS = [
     'loss/scores',
     'loss/intersections',
     'loss/alignment',
+    'loss/consistency',
     'shifts'
 ]
 
@@ -901,7 +903,7 @@ class Midline3DFinder:
                            or (p.length_regrow_steps is not None and self.checkpoint.step_frame < p.length_regrow_steps)
 
             # Generate the outputs
-            masks, detection_masks, points_2d, scores, curvatures_smoothed, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed = self.model.forward(
+            masks, detection_masks, points_raw, points_2d, scores, curvatures_smoothed, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed = self.model.forward(
                 cam_coeffs=cam_coeffs,
                 points_3d_base=points_3d_base,
                 points_2d_base=points_2d_base,
@@ -933,6 +935,7 @@ class Midline3DFinder:
                 M10=M10,
                 length=length,
                 curvatures=curvatures,
+                points_raw=points_raw,
                 points=points,
                 masks_target=masks_target_residuals,
                 sigmas=sigmas,
@@ -1024,6 +1027,7 @@ class Midline3DFinder:
             M10: List[torch.Tensor],
             length: List[torch.Tensor],
             curvatures: List[torch.Tensor],
+            points_raw: List[torch.Tensor],
             points: List[torch.Tensor],
             masks_target: List[torch.Tensor],
             sigmas: List[torch.Tensor],
@@ -1084,6 +1088,7 @@ class Midline3DFinder:
                     points_smoothed, sigmas_smoothed, p.curvature_max
                 ),
                 'alignment': calculate_alignment_losses_curvatures(curvatures, curvatures_prev),
+                'consistency': calculate_consistency_losses_curvatures(points_raw),
             }}
             if p.curvature_deltas:
                 losses['temporal'] = calculate_temporal_losses_curvature_deltas(

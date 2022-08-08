@@ -987,11 +987,11 @@ def calculate_alignment_losses_curvatures(
     D = len(curvatures)
     bs = curvatures[0].shape[0]
     device = curvatures[0].device
-    losses = []
 
     if curvatures_prev is None and bs == 1:
         return [torch.tensor(0., device=device) for _ in range(D)]
 
+    losses = []
     for d in range(D):
         curvatures_d = curvatures[d]
 
@@ -1001,10 +1001,29 @@ def calculate_alignment_losses_curvatures(
             curvatures_d = torch.cat([curvatures_prev_d, curvatures_d], dim=0)
 
         # Calculate optimal alignment rotation angle between frames
-        mc_prev = curvatures_d[:-1, :, 0] + 1j * curvatures_d[:-1, :, 1]
-        mc_next = curvatures_d[1:, :, 0] + 1j * curvatures_d[1:, :, 1]
+        mc_prev = torch.view_as_complex(torch.stack([curvatures_d[:-1, :, 0], curvatures_d[:-1, :, 1]], dim=-1))
+        mc_next = torch.view_as_complex(torch.stack([curvatures_d[1:, :, 0], curvatures_d[1:, :, 1]], dim=-1))
+
         opt_angles = -torch.angle(torch.einsum('ij,ij->i', mc_prev, mc_next.conj()))
         loss_d = torch.mean(opt_angles.abs())
         losses.append(loss_d)
+
+    return losses
+
+
+@torch.jit.script
+def calculate_consistency_losses_curvatures(
+        X: List[torch.Tensor],
+) -> List[torch.Tensor]:
+    """
+    Curves should be consistent with integration from head or tail.
+    """
+    D = len(X)
+    losses = []
+
+    for d in range(D):
+        X_d = X[d]
+        L_ht = (X_d[:, 1] - X_d[:, 2]).norm(dim=-1, p=2).sum(dim=-1).mean()
+        losses.append(L_ht)
 
     return losses

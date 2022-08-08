@@ -79,6 +79,7 @@ class ParameterArgs(BaseArgs):
             loss_temporal: float = 0.,
             loss_intersections: float = 0.,
             loss_alignment: float = 0.,
+            loss_consistency: float = 0.,
 
             algorithm: str = OPTIMISER_ADAM,
 
@@ -211,6 +212,7 @@ class ParameterArgs(BaseArgs):
         self.loss_temporal = loss_temporal
         self.loss_intersections = loss_intersections
         self.loss_alignment = loss_alignment
+        self.loss_consistency = loss_consistency
 
         assert algorithm in OPTIMISER_ALGORITHMS
         self.algorithm = algorithm
@@ -362,6 +364,8 @@ class ParameterArgs(BaseArgs):
                            help='Self-intersections loss.')
         group.add_argument('--loss-alignment', type=float, default=0.,
                            help='Shape-space alignment loss.')
+        group.add_argument('--loss-consistency', type=float, default=0.,
+                           help='Loss to control difference between head and tail integrations.')
 
         group.add_argument('--algorithm', type=str, choices=OPTIMISER_ALGORITHMS, default=OPTIMISER_ADAM,
                            help='Optimisation algorithm.')
