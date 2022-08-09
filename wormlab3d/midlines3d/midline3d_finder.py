@@ -1,7 +1,7 @@
 import os
 import random
 from pathlib import Path
-from typing import Tuple, Union, Dict, List
+from typing import Tuple, Union, Dict, List, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,6 +13,7 @@ from mongoengine import DoesNotExist
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from torch.backends import cudnn
 from torch.optim import Optimizer
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.tensorboard import SummaryWriter
 
 from simple_worm.plot3d import MidpointNormalize
@@ -52,7 +53,8 @@ PRINT_KEYS = [
     'loss/intersections',
     'loss/alignment',
     'loss/consistency',
-    'shifts'
+    'shifts',
+    'lr'
 ]
 
 
@@ -145,13 +147,20 @@ class Midline3DFinder:
         """
         logger.info(f'Initialising parameters.')
         parameters = None
-        params = self.parameter_args.get_db_params()
+        pa = self.parameter_args
+        params = pa.get_db_params()
+        if self.runtime_args.finetune_mode:
+            assert not pa.use_master, 'Cannot use_master in finetune mode!'
+            assert pa.length_warmup_steps is None, 'Cannot use length_warmup_steps in finetune mode!'
+            assert pa.length_regrow_steps is None, 'Cannot use length_regrow_steps in finetune mode!'
+            assert pa.curvature_relaxation_factor is None, 'Cannot use curvature_relaxation_factor in finetune mode!'
+            assert pa.frame_skip is None or pa.frame_skip < pa.window_size, 'frame_skip must be less than window_size in finetune mode!'
 
         # Try to load an existing model
-        if self.parameter_args.load:
+        if pa.load:
             # If we have a model id then load this from the database
-            if self.parameter_args.params_id is not None:
-                parameters = MFParameters.objects.get(id=self.parameter_args.params_id)
+            if pa.params_id is not None:
+                parameters = MFParameters.objects.get(id=pa.params_id)
             else:
                 # Otherwise, try to find one matching the same parameters
                 params_matching = MFParameters.objects(**params)
@@ -345,7 +354,10 @@ class Midline3DFinder:
         mfs = self.master_frame_state if self.parameters.use_master else None
         for i in range(self.parameters.window_size):
             if i == 0:
-                frame_num = mfs.frame_num
+                frame_num = start_frame
+            elif ra.finetune_mode:
+                # Use contiguous batches in finetune mode
+                frame_num += 1
             else:
                 # Try to find a frame with sufficiently different images
                 diff_frame = self.trial.find_next_frame_with_different_images(
@@ -457,6 +469,11 @@ class Midline3DFinder:
             {'params': params['filters'], 'lr': p.lr_filters},
         ]
 
+        # Merge the other parameters into flat lists
+        for i, pg in enumerate(opt_params):
+            if type(pg['params'][0]) == list:
+                opt_params[i]['params'] = [pp for ppl in opt_params[i]['params'] for pp in ppl]
+
         if p.algorithm == OPTIMISER_LBFGS_NEW:
             assert p.curvature_mode, 'Can only use LBFGS algorithm in curvature mode.'
 
@@ -482,6 +499,24 @@ class Midline3DFinder:
             )
 
         return optimiser
+
+    def _init_lr_scheduler(self) -> Optional[ReduceLROnPlateau]:
+        """
+        Set up the learning rate scheduler.
+        """
+        logger.info('Initialising lr scheduler.')
+        p = self.parameters
+        if p.lr_decay is None or p.lr_decay <= 0:
+            return None
+        scheduler = ReduceLROnPlateau(
+            self.optimiser,
+            mode='min',
+            factor=p.lr_decay,
+            patience=p.lr_patience,
+            min_lr=p.lr_min
+        )
+
+        return scheduler
 
     def _init_checkpoint(self) -> MFCheckpoint:
         """
@@ -546,6 +581,7 @@ class Midline3DFinder:
         Process the trial.
         """
         p = self.parameters
+        ra = self.runtime_args
         direction = self.source_args.direction
         mfs = self.master_frame_state
         self._configure_paths()
@@ -559,19 +595,24 @@ class Midline3DFinder:
         frame_nums = self.trial_state.frame_nums
         if self.source_args.direction == -1:
             frame_nums = frame_nums[::-1]
-        if self.runtime_args.fix_mode:
+        if ra.fix_mode:
             frame_nums = frame_nums[1:-1]
         frame_skip = 1 if p.frame_skip is None else p.frame_skip
         first_frame = self.checkpoint.frame_num
-        frame_nums = frame_nums[::frame_skip]
+        if not ra.finetune_mode:
+            frame_nums = frame_nums[::frame_skip]
         n_frames = len(frame_nums)
+        w2 = int(p.window_size / 2)
+        to_skip = 0
 
         # Train
         for i, frame_num in enumerate(frame_nums):
+            if to_skip > 0:
+                to_skip -= 1
+                continue
             logger.info(f'======== Training frame #{frame_num} ({i + 1}/{n_frames}) ========')
-            # active_idx = min(i, w2)
             self.frame_num = frame_num
-            self.active_idx = 0  # active_idx
+            self.active_idx = min(i, w2)
 
             # Reset convergence detection
             self.convergence_detector.reset_counters()
@@ -582,7 +623,11 @@ class Midline3DFinder:
             self.train(frame_num == first_frame)
 
             # Save the state
-            self.trial_state.update_frame_state(frame_num, mfs)
+            if p.use_master:
+                self.trial_state.update_frame_state(frame_num, mfs)
+            else:
+                for f in self.frame_batch:
+                    self.trial_state.update_frame_state(f.frame_num, f)
             self.trial_state.save()
 
             # Update the reconstruction
@@ -593,7 +638,7 @@ class Midline3DFinder:
             self.reconstruction.save()
 
             # Interpolate skipped frame parameters
-            if p.frame_skip and self.last_frame_state is not None:
+            if p.frame_skip and self.last_frame_state is not None and not ra.finetune_mode:
                 logger.info('Interpolating skipped frames.')
                 if direction == 1:
                     start_frame = self.last_frame_state.frame_num
@@ -625,15 +670,15 @@ class Midline3DFinder:
                 self.trial_state.save()
 
             # Make plots
-            if self.runtime_args.plot_every_n_frames > -1:
+            if ra.plot_every_n_frames > -1:
                 if self.last_frame_state is None \
-                        and (frame_num - first_frame + 1) % self.runtime_args.plot_every_n_frames == 0:
+                        and (frame_num - first_frame + 1) % ra.plot_every_n_frames == 0:
                     self._make_plots(final_step=True)
                 else:
                     skip = p.frame_skip if p.frame_skip is not None else 1
                     for j in range(skip):
                         plot_frame_num = self.last_frame_state.frame_num + direction * (j + 1)
-                        if (plot_frame_num - first_frame + 1) % self.runtime_args.plot_every_n_frames == 0:
+                        if (plot_frame_num - first_frame + 1) % ra.plot_every_n_frames == 0:
                             if plot_frame_num == mfs.frame_num:
                                 fs = mfs
                                 skipped = False
@@ -642,17 +687,56 @@ class Midline3DFinder:
                                 skipped = True
                             self._make_plots(final_step=True, frame_state=fs, skipped=skipped)
 
-            # Freeze just-optimised frame
-            self.last_frame_state = self.trial_state.init_frame_state(
-                frame_num=frame_num,
-                trainable=False,
-                load=False,
-                prev_frame_state=mfs,
-                device=self.device
-            )
+            if ra.finetune_mode:
+                # In finetune mode just shift the batch along and append the next frames
+                f0 = self.frame_batch[0].frame_num + frame_skip
+                f1 = min(n_frames - 1, self.frame_batch[-1].frame_num + frame_skip)
 
-            # Roll window
-            if i < n_frames - 1:
+                # Start the new batch with any from the previous batch
+                new_batch = []
+                expired_batch = []
+                for f in self.frame_batch:
+                    if f.frame_num >= f0:
+                        new_batch.append(f)
+                        f0 = f.frame_num
+                    else:
+                        expired_batch.append(f)
+
+                # Load the closest expired frame as the last frame state
+                self.last_frame_state = expired_batch[-1]
+                self.last_frame_state.freeze()
+
+                # Load new frames to fill the batch
+                for fn in range(f0 + 1, f1 + 1):
+                    f = self.trial_state.init_frame_state(
+                        frame_num=fn,
+                        trainable=True,
+                        load=True,
+                        device=self.device
+                    )
+                    new_batch.append(f)
+                self.frame_batch = new_batch
+                print([f.frame_num for f in new_batch])
+
+                # Abort if the new batch is too small
+                if len(self.frame_batch) < w2:
+                    logger.info(f'New batch size {len(new_batch)} < {w2}. Aborting.')
+                    break
+
+                # Update master frame state
+                mfs.frame_num = self.frame_batch[self.active_idx].frame_num
+                mfs.copy_state(self.frame_batch[self.active_idx])
+
+            elif i >= n_frames - 1:
+                # Freeze just-optimised frame
+                self.last_frame_state = self.trial_state.init_frame_state(
+                    frame_num=frame_num,
+                    trainable=False,
+                    load=False,
+                    prev_frame_state=mfs,
+                    device=self.device
+                )
+
                 next_frame_num = frame_num + direction * frame_skip  # + w2
                 next_frame = self.trial_state.init_frame_state(
                     frame_num=next_frame_num,
@@ -677,6 +761,7 @@ class Midline3DFinder:
                             l_d.data = l_d * p.length_shrink_factor
                             self.shrunken_lengths[d] = l_d.detach()
 
+                # Update master frame state
                 mfs.frame_num = next_frame.frame_num
                 mfs.copy_state(next_frame)
 
@@ -705,6 +790,9 @@ class Midline3DFinder:
                     curr_frame.copy_state(next_frame)
                     curr_frame.frame_num = next_frame.frame_num
 
+            if ra.finetune_mode:
+                to_skip = frame_skip
+
     def train(self, first_frame: bool = False):
         """
         Train the camera coefficients and multiscale curve.
@@ -712,6 +800,7 @@ class Midline3DFinder:
         logger.info('----- Training the camera coefficients and multiscale curve -----')
         p = self.parameters
         self.optimiser = self._init_optimiser()
+        lr_scheduler = self._init_lr_scheduler()
         max_steps = p.n_steps_init if first_frame else p.n_steps_max
         start_step = self.checkpoint.step_frame + 1
         final_step = start_step + max_steps
@@ -723,6 +812,11 @@ class Midline3DFinder:
 
             # Calculate losses and optimise
             loss, loss_global, losses_depths, stats = self._train_step()
+
+            # Update lr
+            stats['lr'] = self.optimiser.param_groups[1]['lr']
+            if lr_scheduler is not None:
+                lr_scheduler.step(loss.item())
 
             # Merge stats
             stats = {**stats, **stats_centre}
@@ -976,10 +1070,35 @@ class Midline3DFinder:
         else:
             self.optimiser.step()
         if is_bad(loss):
-            logger.warning('Bad loss!')
+            raise RuntimeError('Bad loss!')
 
         # Clamp parameters
         self._clamp_parameters(points_smoothed)
+
+        # Update frames
+        self._update_frame_states(masks, masks_target_residuals, points_2d, scores, sigmas_smoothed,
+                                  exponents_smoothed, intensities_smoothed, points_smoothed, curvatures_smoothed, stats)
+
+        return loss, loss_global, losses_depths, stats
+
+    def _update_frame_states(
+            self,
+            masks: List[torch.Tensor],
+            masks_target_residuals: List[torch.Tensor],
+            points_2d: List[torch.Tensor],
+            scores: List[torch.Tensor],
+            sigmas_smoothed: List[torch.Tensor],
+            exponents_smoothed: List[torch.Tensor],
+            intensities_smoothed: List[torch.Tensor],
+            points_smoothed: List[torch.Tensor],
+            curvatures_smoothed: List[torch.Tensor],
+            stats: Dict[str, float],
+    ):
+        """
+        Update the frame states.
+        """
+        p = self.parameters
+        D = p.depth - p.depth_min
 
         # Update master state
         self.master_frame_state.set_state('masks_curve', [masks[d][self.active_idx] for d in range(D)])
@@ -1016,8 +1135,6 @@ class Midline3DFinder:
                 fs.set_state('curvatures_smoothed', [curvatures_smoothed[d][i] for d in range(D)])
             else:
                 fs.set_state('curvatures', [curvatures_smoothed[d][i] for d in range(D)])
-
-        return loss, loss_global, losses_depths, stats
 
     def _calculate_losses(
             self,
@@ -1294,13 +1411,17 @@ class Midline3DFinder:
                                 max=p.length_max
                             )
 
-                            if self.last_frame_state is not None and p.dl_limit is not None:
-                                l_prev = self.last_frame_state.get_state('length')[d]
-                                l = l.clamp(
-                                    min=l_prev - p.dl_limit,
-                                    max=l_prev + p.dl_limit,
-                                )
-
+                            if p.dl_limit is not None:
+                                l_prev = None
+                                if i == 0 and self.last_frame_state is not None:
+                                    l_prev = self.last_frame_state.get_state('length')[d]
+                                elif i > 0:
+                                    l_prev = self.frame_batch[i - 1].get_state('length')[d]
+                                if l_prev is not None:
+                                    l = l.clamp(
+                                        min=l_prev - p.dl_limit,
+                                        max=l_prev + p.dl_limit,
+                                    )
                         length[d].data = l
 
                         # Ensure curvature doesn't get too large.
@@ -1348,16 +1469,23 @@ class Midline3DFinder:
             }
 
             for sei in ['sigmas', 'exponents', 'intensities']:
-                params = [*self.master_frame_state.get_state(sei), ]
+                if p.use_master:
+                    params = [*self.master_frame_state.get_state(sei), ]
+                else:
+                    params = [pp for f in self.frame_batch for pp in f.get_state(sei)]
                 for v in params:
                     v.data = v.clamp(**render_parameters_limits[sei])
 
                 # Camera scaling factors should average 1 and not be more than 30% from the mean
-                v = self.master_frame_state.get_state(f'camera_{sei}')
-                v.data = v / v.mean()
-                sf = 0.3 / ((v - 1).abs()).amax()
-                if sf < 1:
-                    v.data = (v - 1) * sf + 1
+                if p.use_master:
+                    params = [self.master_frame_state.get_state(f'camera_{sei}'), ]
+                else:
+                    params = [f.get_state(f'camera_{sei}') for f in self.frame_batch]
+                for v in params:
+                    v.data = v / v.mean()
+                    sf = 0.3 / ((v - 1).abs()).amax()
+                    if sf < 1:
+                        v.data = (v - 1) * sf + 1
 
             # Camera filters should be normalised
             filters = self.master_frame_state.get_state('filters')
@@ -1445,9 +1573,11 @@ class Midline3DFinder:
         ):
             logger.info(f'Plotting frame #{frame_state.frame_num}.')
             self._plot_3d(frame_state, skipped)
-            self._plot_2d(frame_state, skipped)
             if self.parameters.window_size > 1:
-                self._plot_2d_batch()
+                self._plot_2d_batch_basic()
+                # self._plot_2d_batch()
+            else:
+                self._plot_2d(frame_state, skipped)
             if self.parameters.curvature_mode:
                 self._plot_curvatures()
             if self.parameters.filter_size is not None and self.parameters.filter_size > 0:
@@ -1682,6 +1812,58 @@ class Midline3DFinder:
                 errors_triplet = errors_triplet / np.abs(errors_triplet).max()
                 ax.imshow(errors_triplet, vmin=-1, vmax=1, cmap='PRGn', aspect='equal',
                           extent=(0, N - 1, M - 1, 2 * int(M / 3)))
+
+        self._save_plot(fig, '2D_batch', self.master_frame_state)
+
+    def _plot_2d_batch_basic(self):
+        """
+        Plot a basic version of a batch of 2D mask renderings.
+        """
+        if not self.runtime_args.plot_2d:
+            return
+        D = self.parameters.depth
+        D_min = self.parameters.depth_min
+        n_cols = D - D_min
+        if n_cols != 1:
+            raise RuntimeError('Basic 2d batch plotting only available at one depth!')
+        n_rows = self.parameters.window_size
+
+        fig, ax = plt.subplots(1, figsize=(4, n_rows * 2), gridspec_kw=dict(
+            wspace=0.01,
+            hspace=0.02,
+            top=0.98,
+            bottom=0.02,
+            left=0.02,
+            right=0.98
+        ))
+        ax.set_title(self._plot_title(self.master_frame_state))
+
+        # Stitch images together and add labels on the left
+        frames = []
+        bs = len(self.frame_batch)
+        label_positions = np.linspace(1 - 1/bs/2, 1/bs/2, bs)  # + 1)[1:-1]
+        for i, frame_state in enumerate(self.frame_batch):
+            images = to_numpy(frame_state.get_state('images'))
+            frames.append(np.concatenate(1 - images, axis=1))
+            ax.text(-0.01, label_positions[i], frame_state.frame_num, transform=ax.transAxes, rotation='vertical',
+                    fontsize='x-small', horizontalalignment='center', verticalalignment='bottom')
+        images = np.concatenate(frames, axis=0)
+
+        # Draw images
+        ax.axis('off')
+        ax.imshow(images, cmap='gray', vmin=0, vmax=1)
+
+        # Scatter the midline points
+        for i, frame_state in enumerate(self.frame_batch):
+            points_2d = frame_state.get_state('points_2d')[0]
+            p2d = to_numpy(points_2d).transpose(1, 0, 2)
+            for k in range(3):
+                p = p2d[k] + (0, i * self.trial.crop_size)
+                if k == 1:
+                    p += (self.trial.crop_size, 0)
+                elif k == 2:
+                    p += (self.trial.crop_size * 2, 0)
+                ax.scatter(p[:, 0], p[:, 1], cmap='jet', c=np.linspace(0, 1, len(p)), s=0.5, alpha=0.6)
 
         self._save_plot(fig, '2D_batch', self.master_frame_state)
 

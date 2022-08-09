@@ -12,6 +12,7 @@ class RuntimeArgs(BaseArgs):
             copy_state: str = None,
             fix_mode: bool = False,
             fix_decay_rate: float = 10.,
+            finetune_mode: bool = False,
             gpu_only: bool = False,
             cpu_only: bool = False,
             gpu_id: int = 0,
@@ -39,10 +40,14 @@ class RuntimeArgs(BaseArgs):
         self.copy_state = copy_state
         self.fix_mode = fix_mode
         self.fix_decay_rate = fix_decay_rate
+        self.finetune_mode = finetune_mode
         self.gpu_only = gpu_only
         self.cpu_only = cpu_only
         self.gpu_id = gpu_id
         self.log_level = log_level
+
+        if fix_mode or finetune_mode:
+            assert resume, '--resume must be set for fix_mode or finetune_mode'
 
         # General plot options
         self.plot_every_n_steps = plot_every_n_steps
@@ -92,6 +97,8 @@ class RuntimeArgs(BaseArgs):
                            help='Run in fix-mode. Requires --resume and --end-frame to be set.')
         group.add_argument('--fix-decay-rate', type=float, default=10.,
                            help='Target frame loss ratio decay rate. Used only in fix-mode.')
+        group.add_argument('--finetune-mode', type=str2bool, default=False,
+                           help='Run in finetune-mode. Requires --resume to be set.')
         group.add_argument('--gpu-only', action='store_true',
                            help='Abort if no gpus are detected.')
         group.add_argument('--cpu-only', action='store_true',

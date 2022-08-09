@@ -636,7 +636,7 @@ def calculate_scores_losses(
 
         # Symmetry loss
         N2 = int(scores_d.shape[1] / 2)
-        loss_sym = torch.sum(((scores_d[:, :N2].flip(dims=(1,)) - scores_d[:, N2:]) / torch.amax(scores_d, dim=-1))**2)
+        loss_sym = torch.sum(((scores_d[:, :N2].flip(dims=(1,)) - scores_d[:, N2:]) / torch.amax(scores_d, dim=-1, keepdim=True))**2)
         loss = loss + loss_sym
 
         losses.append(loss)

@@ -89,6 +89,11 @@ class ParameterArgs(BaseArgs):
             lr_exponents: float = 1e-3,
             lr_intensities: float = 1e-3,
             lr_filters: float = 1e-3,
+
+            lr_decay: float = None,
+            lr_min: float = 1e-6,
+            lr_patience: int = 10,
+
             **kwargs
     ):
         self.load = load
@@ -141,12 +146,18 @@ class ParameterArgs(BaseArgs):
             elif length_shrink_factor is None:
                 length_regrow_steps = None
         self.curvature_deltas = curvature_deltas
+        if curvature_relaxation_factor is not None and curvature_relaxation_factor <= 0:
+            curvature_relaxation_factor = None
         self.curvature_relaxation_factor = curvature_relaxation_factor
         self.length_min = length_min
         self.length_max = length_max
         self.length_shrink_factor = length_shrink_factor
         self.length_init = length_init
+        if length_warmup_steps is not None and length_warmup_steps <= 0:
+            length_warmup_steps = None
         self.length_warmup_steps = length_warmup_steps
+        if length_regrow_steps is not None and length_regrow_steps <= 0:
+            length_regrow_steps = None
         self.length_regrow_steps = length_regrow_steps
         self.dX0_limit = dX0_limit
         self.dl_limit = dl_limit
@@ -223,6 +234,12 @@ class ParameterArgs(BaseArgs):
         self.lr_exponents = lr_exponents
         self.lr_intensities = lr_intensities
         self.lr_filters = lr_filters
+
+        if lr_decay is not None and lr_decay <= 0:
+            lr_decay = None
+        self.lr_decay = lr_decay
+        self.lr_min = lr_min
+        self.lr_patience = lr_patience
 
     @classmethod
     def add_args(cls, parser: ArgumentParser) -> _ArgumentGroup:
@@ -382,6 +399,14 @@ class ParameterArgs(BaseArgs):
                            help='Learning rate for the rendering intensities.')
         group.add_argument('--lr-filters', type=float, default=1e-3,
                            help='Learning rate for the filters.')
+
+        group.add_argument('--lr-decay', type=float, default=0,
+                           help='Learning rate decay rate.')
+        group.add_argument('--lr-min', type=float, default=1e-3,
+                           help='Learning rate for the filters.')
+        group.add_argument('--lr-patience', type=float, default=1e-3,
+                           help='Learning rate for the filters.')
+
         return group
 
     def get_db_params(self) -> dict:

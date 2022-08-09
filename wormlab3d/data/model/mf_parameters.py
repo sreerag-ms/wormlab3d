@@ -100,6 +100,10 @@ class MFParameters(Document):
     lr_intensities = FloatField()
     lr_filters = FloatField()
 
+    lr_decay = FloatField()
+    lr_min = FloatField()
+    lr_patience = IntField()
+
     meta = {
         'collection': 'mf_parameters',
         'ordering': ['-created'],

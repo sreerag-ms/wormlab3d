@@ -529,8 +529,8 @@ class ProjectRenderScoreModel(nn.Module):
                                          / (torch.amax(torch.stack([scores_d, scores_d_untapered], dim=2), dim=2) + eps)
                     head_consistent = (scores_rel_tapered[:, 0] < 0.2) & (scores_d[:, 0] > 250)
                     tail_consistent = (scores_rel_tapered[:, -1] < 0.2) & (scores_d[:, -1] > 250)
-                    dmd = dmd + torch.where(head_consistent, head_blobs, torch.zeros_like(head_blobs))
-                    dmd = dmd + torch.where(tail_consistent, tail_blobs, torch.zeros_like(tail_blobs))
+                    dmd = dmd + torch.where(head_consistent[:, None, None, None], head_blobs, torch.zeros_like(head_blobs))
+                    dmd = dmd + torch.where(tail_consistent[:, None, None, None], tail_blobs, torch.zeros_like(tail_blobs))
 
                 # Add head and tail booster regions regardless
                 else:
