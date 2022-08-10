@@ -716,7 +716,6 @@ class Midline3DFinder:
                     )
                     new_batch.append(f)
                 self.frame_batch = new_batch
-                print([f.frame_num for f in new_batch])
 
                 # Abort if the new batch is too small
                 if len(self.frame_batch) < w2:
@@ -727,7 +726,10 @@ class Midline3DFinder:
                 mfs.frame_num = self.frame_batch[self.active_idx].frame_num
                 mfs.copy_state(self.frame_batch[self.active_idx])
 
-            elif i >= n_frames - 1:
+                # Ensure loop skips appropriately
+                to_skip = frame_skip
+
+            else:
                 # Freeze just-optimised frame
                 self.last_frame_state = self.trial_state.init_frame_state(
                     frame_num=frame_num,
@@ -737,61 +739,60 @@ class Midline3DFinder:
                     device=self.device
                 )
 
-                next_frame_num = frame_num + direction * frame_skip  # + w2
-                next_frame = self.trial_state.init_frame_state(
-                    frame_num=next_frame_num,
-                    trainable=True,
-                    load=False,
-                    prev_frame_state=mfs,
-                    device=self.device
-                )
-
-                # Reduce curvature
-                if p.curvature_mode and p.curvature_relaxation_factor is not None:
-                    K = next_frame.get_state('curvatures')
-                    with torch.no_grad():
-                        for K_d in K:
-                            K_d.data = K_d * p.curvature_relaxation_factor
-
-                # Shrink length
-                if p.curvature_mode and p.length_shrink_factor is not None:
-                    l = next_frame.get_state('length')
-                    with torch.no_grad():
-                        for d, l_d in enumerate(l):
-                            l_d.data = l_d * p.length_shrink_factor
-                            self.shrunken_lengths[d] = l_d.detach()
-
-                # Update master frame state
-                mfs.frame_num = next_frame.frame_num
-                mfs.copy_state(next_frame)
-
-                # Update first frame in batch to be the same as the master frame
-                self.frame_batch[0].copy_state(mfs)
-                self.frame_batch[0].frame_num = mfs.frame_num
-
-                for j in range(1, p.window_size):
-                    prev_frame = self.frame_batch[j - 1]
-                    curr_frame = self.frame_batch[j]
-
-                    # Try to find a frame with sufficiently different images
-                    diff_frame = self.trial.find_next_frame_with_different_images(
-                        prev_frame.frame_num,
-                        threshold=self.parameters.window_image_diff_threshold,
-                        direction=direction
-                    )
+                # Roll window
+                if i < n_frames - 1:
+                    next_frame_num = frame_num + direction * frame_skip  # + w2
                     next_frame = self.trial_state.init_frame_state(
-                        frame_num=diff_frame.frame_num,
+                        frame_num=next_frame_num,
                         trainable=True,
                         load=False,
-                        prev_frame_state=curr_frame,
+                        prev_frame_state=mfs,
                         device=self.device
                     )
 
-                    curr_frame.copy_state(next_frame)
-                    curr_frame.frame_num = next_frame.frame_num
+                    # Reduce curvature
+                    if p.curvature_mode and p.curvature_relaxation_factor is not None:
+                        K = next_frame.get_state('curvatures')
+                        with torch.no_grad():
+                            for K_d in K:
+                                K_d.data = K_d * p.curvature_relaxation_factor
 
-            if ra.finetune_mode:
-                to_skip = frame_skip
+                    # Shrink length
+                    if p.curvature_mode and p.length_shrink_factor is not None:
+                        l = next_frame.get_state('length')
+                        with torch.no_grad():
+                            for d, l_d in enumerate(l):
+                                l_d.data = l_d * p.length_shrink_factor
+                                self.shrunken_lengths[d] = l_d.detach()
+
+                    # Update master frame state
+                    mfs.frame_num = next_frame.frame_num
+                    mfs.copy_state(next_frame)
+
+                    # Update first frame in batch to be the same as the master frame
+                    self.frame_batch[0].copy_state(mfs)
+                    self.frame_batch[0].frame_num = mfs.frame_num
+
+                    for j in range(1, p.window_size):
+                        prev_frame = self.frame_batch[j - 1]
+                        curr_frame = self.frame_batch[j]
+
+                        # Try to find a frame with sufficiently different images
+                        diff_frame = self.trial.find_next_frame_with_different_images(
+                            prev_frame.frame_num,
+                            threshold=self.parameters.window_image_diff_threshold,
+                            direction=direction
+                        )
+                        next_frame = self.trial_state.init_frame_state(
+                            frame_num=diff_frame.frame_num,
+                            trainable=True,
+                            load=False,
+                            prev_frame_state=curr_frame,
+                            device=self.device
+                        )
+
+                        curr_frame.copy_state(next_frame)
+                        curr_frame.frame_num = next_frame.frame_num
 
     def train(self, first_frame: bool = False):
         """
