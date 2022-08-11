@@ -342,7 +342,7 @@ def _plot_eigenvalues_basic(
         component = eigenworms.components[i]
         NF = NaturalFrame(component * eigenworm_scale, length=eigenworm_length)
         NPs.append(NF.non_planarity())
-        Hs.append(NF.chirality())
+        Hs.append(NF.helicity())
     Hs = np.array(Hs)
 
     fig, ax = plt.subplots(1, figsize=(4, 3))
@@ -368,10 +368,10 @@ def _plot_eigenvalues_basic(
     ax2.set_yticklabels([0, 0.01, 0.02])
 
     # Helicity
-    ax_chir = ax.twinx()
-    ax_chir.set_yticks([])
+    ax_hel = ax.twinx()
+    ax_hel.set_yticks([])
     h_lim = np.abs(Hs).max() * 1.1
-    ax_chir.set_ylim(bottom=-h_lim, top=h_lim)
+    ax_hel.set_ylim(bottom=-h_lim, top=h_lim)
     n_fade_lines = 100
     fade_lines_pos = np.linspace(0, Hs.max(), n_fade_lines)
     fade_lines_neg = np.linspace(0, Hs.min(), n_fade_lines)
@@ -381,7 +381,7 @@ def _plot_eigenvalues_basic(
         h = np.ones(2) * H
         for j in range(n_fade_lines):
             if H > 0:
-                ax_chir.fill_between(
+                ax_hel.fill_between(
                     x_bounds,
                     np.ones_like(h) * fade_lines_pos[j],
                     h,
@@ -392,7 +392,7 @@ def _plot_eigenvalues_basic(
                     zorder=-100,
                 )
             else:
-                ax_chir.fill_between(
+                ax_hel.fill_between(
                     x_bounds,
                     h,
                     np.ones_like(h) * fade_lines_neg[j],

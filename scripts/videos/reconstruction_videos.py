@@ -26,7 +26,7 @@ from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.midlines3d.util import generate_annotated_images
 from wormlab3d.particles.tumble_run import calculate_curvature
-from wormlab3d.postures.chiralities import calculate_chiralities, plot_chiralities
+from wormlab3d.postures.helicities import calculate_helicities, plot_helicities
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.postures.plot_utils import FrameArtistMLab
@@ -101,8 +101,8 @@ def get_args() -> Namespace:
     parser.add_argument('--plot-components', type=lambda s: [int(item) for item in s.split(',')],
                         default='0,1', help='Comma delimited list of component idxs to plot.')
     parser.add_argument('--x-label', type=str, default='time', help='Label x-axis with time or frame number.')
-    parser.add_argument('--n-chirality-fade-lines', type=int, default=100,
-                        help='Filled region fade resolution in chirality plot.')
+    parser.add_argument('--n-helicity-fade-lines', type=int, default=100,
+                        help='Filled region fade resolution in helicity plot.')
 
     # Lambdas
     parser.add_argument('--time-range-lambdas', type=float, default=5,
@@ -463,7 +463,7 @@ def _make_traces_plots(
         X: np.ndarray,
         X_ew: np.ndarray,
         speeds: np.ndarray,
-        chiralities: np.ndarray,
+        helicities: np.ndarray,
         curvature: np.ndarray,
         args: Namespace,
 ) -> Tuple[Figure, Callable]:
@@ -538,26 +538,26 @@ def _make_traces_plots(
     ax_nonpt.spines['bottom'].set_visible(False)
     ax_nonpt_marker = ax_nonpt.axvline(x=0, color='red')
 
-    # Chirality
-    ax_chir = axes[2]
-    ax_chir.axhline(y=0, color='darkgrey')
-    plot_chiralities(
-        ax=ax_chir,
-        chiralities=chiralities,
+    # Helicity
+    ax_hel = axes[2]
+    ax_hel.axhline(y=0, color='darkgrey')
+    plot_helicities(
+        ax=ax_hel,
+        helicities=helicities,
         xs=ts,
-        n_fade_lines=args.n_chirality_fade_lines
+        n_fade_lines=args.n_helicity_fade_lines
     )
 
-    label_args = dict(transform=ax_chir.transAxes, horizontalalignment='right', fontweight='bold', fontsize='large',
+    label_args = dict(transform=ax_hel.transAxes, horizontalalignment='right', fontweight='bold', fontsize='large',
                       fontfamily='Symbol')
-    ax_chir.text(-0.02, 0.94, '↻', verticalalignment='top', **label_args)
-    ax_chir.text(-0.02, 0.05, '↺', verticalalignment='bottom', **label_args)
-    ax_chir.set_yticks([0, ])
-    ax_chir.set_yticklabels([])
-    ax_chir.set_xticklabels([])
-    ax_chir.spines['top'].set_visible(False)
-    ax_chir.spines['bottom'].set_visible(False)
-    ax_chir_marker = ax_chir.axvline(x=0, color='red')
+    ax_hel.text(-0.02, 0.94, '↻', verticalalignment='top', **label_args)
+    ax_hel.text(-0.02, 0.05, '↺', verticalalignment='bottom', **label_args)
+    ax_hel.set_yticks([0, ])
+    ax_hel.set_yticklabels([])
+    ax_hel.set_xticklabels([])
+    ax_hel.spines['top'].set_visible(False)
+    ax_hel.spines['bottom'].set_visible(False)
+    ax_hel_marker = ax_hel.axvline(x=0, color='red')
 
     # Curvature
     ax_curvature = axes[3]
@@ -601,14 +601,14 @@ def _make_traces_plots(
         # Update the axis limits
         ax_speed.set_xlim([ts[frame_idx] - t_range / 2, ts[frame_idx] + t_range / 2])
         ax_nonpt.set_xlim([ts[frame_idx] - t_range / 2, ts[frame_idx] + t_range / 2])
-        ax_chir.set_xlim([ts[frame_idx] - t_range / 2, ts[frame_idx] + t_range / 2])
+        ax_hel.set_xlim([ts[frame_idx] - t_range / 2, ts[frame_idx] + t_range / 2])
         ax_curvature.set_xlim([ts[frame_idx] - t_range / 2, ts[frame_idx] + t_range / 2])
         ax_ew.set_xlim([ts[frame_idx] - t_range / 2, ts[frame_idx] + t_range / 2])
 
         # Move the markers
         ax_speed_marker.set_data([ts[frame_idx], ts[frame_idx]], [0, 1])
         ax_nonpt_marker.set_data([ts[frame_idx], ts[frame_idx]], [0, 1])
-        ax_chir_marker.set_data([ts[frame_idx], ts[frame_idx]], [0, 1])
+        ax_hel_marker.set_data([ts[frame_idx], ts[frame_idx]], [0, 1])
         ax_curvature_marker.set_data([ts[frame_idx], ts[frame_idx]], [0, 1])
         ax_ew_marker.set_data([ts[frame_idx], ts[frame_idx]], [0, 1])
 
@@ -803,8 +803,8 @@ def generate_reconstruction_video():
     curvature_traj = calculate_curvature(e0)
     curvature_postures = np.abs(Z)
 
-    # Calculate posture chiralities
-    chiralities = calculate_chiralities(Xc)
+    # Calculate posture helicities
+    helicities = calculate_helicities(Xc)
 
     # Build plots
     fig_info, update_info_plot = _make_info_panel(
@@ -850,7 +850,7 @@ def generate_reconstruction_video():
         X=Xc,
         X_ew=X_ew,
         speeds=speeds,
-        chiralities=chiralities,
+        helicities=helicities,
         curvature=curvature_postures,
         args=args
     )

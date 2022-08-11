@@ -269,9 +269,9 @@ class NaturalFrame:
         r = self.pca.explained_variance_ratio_
         return r[2] / np.sqrt(r[1] * r[0])
 
-    def chirality(self) -> float:
+    def helicity(self) -> float:
         """
-        Compute the chirality of the curve.
+        Compute the helicity of the curve.
         """
 
         # Try to align v1 with the direction of the curve
@@ -291,15 +291,15 @@ class NaturalFrame:
         r = np.linalg.norm(diff, axis=-1)
         theta = np.unwrap(np.arctan2(*diff.T))
 
-        # Weight the angular changes by the radii and sum to give chirality measure.
+        # Weight the angular changes by the radii and sum to give helicity measure.
         r = (r[1:] + r[:-1]) / 2
-        c = np.sum(r * (theta[1:] - theta[:-1]))
+        h = np.sum(r * (theta[1:] - theta[:-1]))
 
         # Correct for reflections
         if np.allclose(np.linalg.det(R), -1):
-            c *= -1
+            h *= -1
 
-        return c
+        return h
 
     def surface(
             self,

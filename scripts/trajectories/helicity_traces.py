@@ -8,7 +8,7 @@ import numpy as np
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d import logger
 from wormlab3d.data.model import Reconstruction
-from wormlab3d.postures.chiralities import calculate_chiralities, plot_chiralities
+from wormlab3d.postures.helicities import calculate_helicities, plot_helicities
 from wormlab3d.toolkit.util import print_args
 from wormlab3d.trajectories.cache import get_trajectory
 
@@ -20,7 +20,7 @@ img_extension = 'svg'
 
 
 def parse_args() -> Namespace:
-    parser = ArgumentParser(description='Wormlab3D script to plot chirality across a clip.')
+    parser = ArgumentParser(description='Wormlab3D script to plot helicity across a clip.')
     parser.add_argument('--reconstruction', type=str,
                         help='Reconstruction by id.')
     parser.add_argument('--start-frame', type=int, help='Frame number to start from.')
@@ -33,9 +33,9 @@ def parse_args() -> Namespace:
     return args
 
 
-def chirality_trace(x_label: str = 'time'):
+def helicity_trace(x_label: str = 'time'):
     """
-    Plot a trace of the chirality over time.
+    Plot a trace of the helicity over time.
     """
     args = parse_args()
 
@@ -55,25 +55,25 @@ def chirality_trace(x_label: str = 'time'):
     else:
         ts = np.arange(N) + (args.start_frame if args.start_frame is not None else 0)
 
-    # Chirality
-    logger.info('Calculating chiralities.')
-    c = calculate_chiralities(X)
+    # Calculate helicity
+    logger.info('Calculating helicities.')
+    H = calculate_helicities(X)
 
     # Plot
     fig, axes = plt.subplots(1, figsize=(12, 8))
 
-    # Chiralities
+    # Helicities
     ax = axes
     ax.set_title(f'Helicity\n'
                  f'Trial {trial.id} ({trial.date:%Y-%m-%d} #{trial.trial_num}).\n'
                  f'Reconstruction {reconstruction.id} ({reconstruction.source}).')
     ax.axhline(y=0, color='darkgrey')
-    plot_chiralities(
+    plot_helicities(
         ax=ax,
-        chiralities=c,
+        helicities=H,
         xs=ts,
     )
-    h_lim = np.abs(c).max() * 1.1
+    h_lim = np.abs(H).max() * 1.1
     ax.set_ylim(top=h_lim, bottom=-h_lim)
 
     label_args = dict(transform=ax.transAxes, horizontalalignment='right', fontweight='bold', fontfamily='Symbol')
@@ -89,7 +89,7 @@ def chirality_trace(x_label: str = 'time'):
     fig.tight_layout()
 
     if save_plots:
-        path = LOGS_PATH / f'{START_TIMESTAMP}_chirality_trace_' \
+        path = LOGS_PATH / f'{START_TIMESTAMP}_helicity_trace_' \
                            f'r={reconstruction.id}_' \
                            f'f={meta["start_frame"]}-{meta["end_frame"]}' \
                            f'.{img_extension}'
@@ -105,4 +105,4 @@ if __name__ == '__main__':
         os.makedirs(LOGS_PATH, exist_ok=True)
     # from simple_worm.plot3d import interactive
     # interactive()
-    chirality_trace(x_label='frames')
+    helicity_trace(x_label='frames')

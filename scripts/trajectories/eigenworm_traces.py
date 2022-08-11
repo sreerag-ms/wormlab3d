@@ -13,7 +13,7 @@ from simple_worm.plot3d import generate_interactive_scatter_clip
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d import logger
 from wormlab3d.data.model import Reconstruction
-from wormlab3d.postures.chiralities import calculate_chiralities, plot_chiralities
+from wormlab3d.postures.helicities import calculate_helicities, plot_helicities
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.toolkit.util import print_args
@@ -86,9 +86,9 @@ def traces(x_label: str = 'time'):
     Z, meta = get_trajectory(**common_args, natural_frame=True, rebuild_cache=False)
     X_ew = ew.transform(np.array(Z))
 
-    # Chirality
-    logger.info('Calculating chiralities.')
-    c = calculate_chiralities(X)
+    # Helicity
+    logger.info('Calculating helicities.')
+    c = calculate_helicities(X)
 
     # Plot
     fig, axes = plt.subplots(7, figsize=(16, 18), sharex=True)
@@ -108,11 +108,11 @@ def traces(x_label: str = 'time'):
     ax.set_title('Non-Planarity.')
     ax.grid()
 
-    # Chiralities
+    # Helicities
     ax = axes[2]
     ax.plot(ts, c)
-    ax.set_ylabel('Chirality')
-    ax.set_title('Chirality.')
+    ax.set_ylabel('Helicity')
+    ax.set_title('Helicity.')
     ax.grid()
 
     # Eigenworms - absolute values
@@ -249,7 +249,7 @@ def traces_condensed(x_label: str = 'time'):
 
     # Helicity
     logger.info('Calculating helicity')
-    chiralities = calculate_chiralities(X)
+    H = calculate_helicities(X)
 
     # Eigenworms embeddings
     Z, meta = get_trajectory(**common_args, natural_frame=True, rebuild_cache=False)
@@ -292,13 +292,13 @@ def traces_condensed(x_label: str = 'time'):
     ax_nonp.set_yticklabels([0, 0.1, 0.2])
 
     # Helicity
-    ax_chir = ax_sp.twinx()
-    ax_chir.set_yticks([])
-    c_max = np.abs(chiralities).max() * 1.1
-    ax_chir.set_ylim(bottom=-c_max, top=c_max)
-    plot_chiralities(
-        ax=ax_chir,
-        chiralities=chiralities,
+    ax_hel = ax_sp.twinx()
+    ax_hel.set_yticks([])
+    h_lim = np.abs(H).max() * 1.1
+    ax_hel.set_ylim(bottom=-h_lim, top=h_lim)
+    plot_helicities(
+        ax=ax_hel,
+        helicities=H,
         xs=ts,
         alpha_max=0.8
     )
