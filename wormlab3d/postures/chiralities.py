@@ -1,6 +1,7 @@
 from multiprocessing import Pool
 
 import numpy as np
+from matplotlib.axes import Axes
 
 from wormlab3d import N_WORKERS
 from wormlab3d.postures.natural_frame import NaturalFrame
@@ -37,3 +38,38 @@ def calculate_chiralities(X: np.ndarray, parallel: bool = True) -> np.ndarray:
         for i, Xi in enumerate(X):
             c[i] = calculate_chirality(Xi)
     return c
+
+
+def plot_chiralities(
+        ax: Axes,
+        chiralities: np.ndarray,
+        xs: np.ndarray = None,
+        alpha_max: int = 1,
+        n_fade_lines: int = 100
+):
+    """
+    Helper method to plot the chiralities on an axes.
+    """
+    fade_lines_pos = np.linspace(0, chiralities.max(), n_fade_lines)
+    fade_lines_neg = np.linspace(0, chiralities.min(), n_fade_lines)
+    if xs is None:
+        xs = np.arange(len(chiralities))
+    for i in range(n_fade_lines):
+        ax.fill_between(
+            xs,
+            np.ones_like(chiralities) * fade_lines_pos[i],
+            chiralities,
+            where=chiralities > fade_lines_pos[i],
+            color='purple',
+            alpha=alpha_max / n_fade_lines,
+            linewidth=0,
+        )
+        ax.fill_between(
+            xs,
+            chiralities,
+            np.ones_like(chiralities) * fade_lines_neg[i],
+            where=chiralities < fade_lines_neg[i],
+            color='green',
+            alpha=alpha_max / n_fade_lines,
+            linewidth=0,
+        )

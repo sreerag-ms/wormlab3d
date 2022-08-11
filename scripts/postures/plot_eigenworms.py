@@ -4,8 +4,10 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+from PIL import Image
 from matplotlib import cm
 from matplotlib.gridspec import GridSpec
+from mayavi import mlab
 
 from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT
 from wormlab3d import LOGS_PATH, logger, START_TIMESTAMP
@@ -17,10 +19,10 @@ from wormlab3d.postures.plot_utils import plot_natural_frame_3d, plot_natural_fr
 from wormlab3d.toolkit.util import print_args
 from wormlab3d.trajectories.cache import get_trajectory
 
-plot_n_components = 5
-show_plots = True
-save_plots = False
-img_extension = 'png'
+plot_n_components = 10
+show_plots = False
+save_plots = True
+img_extension = 'svg'
 eigenworm_length = 1
 eigenworm_scale = 64
 cmap = cm.get_cmap(MIDLINE_CMAP_DEFAULT)
@@ -197,35 +199,39 @@ def _plot_eigenworms_basic(
 
 def _plot_eigenworms_basic_mlab(
         eigenworms: Eigenworms,
-        filename: str
+        filename: str,
+        interactive: bool = True,
+        transparent_bg: bool = True,
 ):
+    """
+    Use mayavi to plot the eigenworms.
+    """
     plot_config = {
         0: {
-            # 'azimuth': -60,
-            # 'elevation': 60,
-            # 'roll': -45,
-            # 'distance': 1.6,
-            'arrow_scale': 0.12,
+            'azimuth': -60,
+            'elevation': 60,
         },
         1: {
-            # 'azimuth': -30,
-            # 'elevation': -165,
-            # 'arrow_scale': 0.1,
+            'azimuth': 90,
+            'elevation': 55,
+            'roll': 135,
         },
         2: {
-            # 'azimuth': -60,
-            # 'elevation': -160,
-            # 'arrow_scale': 0.08,
+            'azimuth': 120,
+            'elevation': 45,
+            'roll': 140,
         },
         3: {
-            # 'azimuth': -160,
-            # 'elevation': 30,
-            # 'arrow_scale': 0.12,
+            'azimuth': -130,
+            'elevation': 115,
+            'roll': -65,
+            'distance': 1.5,
         },
         4: {
-            # 'azimuth': -20,
-            # 'elevation': -165,
-            # 'arrow_scale': 0.12,
+            'azimuth': 175,
+            'elevation': 120,
+            'roll': -90,
+            'distance': 1.7,
         }
     }
 
@@ -248,6 +254,7 @@ def _plot_eigenworms_basic_mlab(
     for i in range(plot_n_components):
         if i not in plot_config:
             continue
+        logger.info(f'Plotting component {i}.')
 
         component = eigenworms.components[i]
         NF = NaturalFrame(component * eigenworm_scale, length=eigenworm_length)
@@ -260,18 +267,39 @@ def _plot_eigenworms_basic_mlab(
             show_pca_arrows=False,
             show_outline=False,
             show_axis=False,
+            offscreen=not interactive,
             **{**default_plot_options, **plot_config[i]}
         )
 
         if save_plots:
             path = LOGS_PATH / f'{START_TIMESTAMP}_eigenworms_c={i}_{filename}.{img_extension}'
             logger.info(f'Saving plot to {path}.')
-            plt.savefig(path)
+
+            if not transparent_bg:
+                mlab.savefig(str(path), figure=fig)
+            else:
+                fig.scene._lift()
+                img = mlab.screenshot(figure=fig, mode='rgba', antialiased=True)
+                img = Image.fromarray((img * 255).astype(np.uint8), 'RGBA')
+                img.save(path)
+                mlab.clf(fig)
+                mlab.close()
 
         if show_plots:
-            plt.show()
-
-        plt.close(fig)
+            if interactive:
+                mlab.show()
+            else:
+                fig.scene._lift()
+                img = mlab.screenshot(figure=fig, mode='rgba', antialiased=True)
+                mlab.clf(fig)
+                mlab.close()
+                fig_mpl = plt.figure(figsize=(10, 10))
+                ax = fig_mpl.add_subplot()
+                ax.imshow(img)
+                ax.axis('off')
+                fig_mpl.tight_layout()
+                plt.show()
+                plt.close(fig_mpl)
 
 
 def _plot_eigenvalues(
@@ -309,10 +337,13 @@ def _plot_eigenvalues_basic(
     xs = np.arange(len(vr))
 
     NPs = []
+    Hs = []
     for i in range(plot_n_components):
         component = eigenworms.components[i]
         NF = NaturalFrame(component * eigenworm_scale, length=eigenworm_length)
         NPs.append(NF.non_planarity())
+        Hs.append(NF.chirality())
+    Hs = np.array(Hs)
 
     fig, ax = plt.subplots(1, figsize=(4, 3))
     ax.grid()
@@ -335,6 +366,42 @@ def _plot_eigenvalues_basic(
     ax2.plot(xs[1:], NPs, zorder=4, alpha=0.3, color='orange', linestyle='--')
     ax2.set_yticks([0, 0.01, 0.02])
     ax2.set_yticklabels([0, 0.01, 0.02])
+
+    # Helicity
+    ax_chir = ax.twinx()
+    ax_chir.set_yticks([])
+    h_lim = np.abs(Hs).max() * 1.1
+    ax_chir.set_ylim(bottom=-h_lim, top=h_lim)
+    n_fade_lines = 100
+    fade_lines_pos = np.linspace(0, Hs.max(), n_fade_lines)
+    fade_lines_neg = np.linspace(0, Hs.min(), n_fade_lines)
+    alpha_max = 1
+    for i, H in enumerate(Hs):
+        x_bounds = np.array([xs[i + 1] - 0.25, xs[i + 1] + 0.25])
+        h = np.ones(2) * H
+        for j in range(n_fade_lines):
+            if H > 0:
+                ax_chir.fill_between(
+                    x_bounds,
+                    np.ones_like(h) * fade_lines_pos[j],
+                    h,
+                    where=h > fade_lines_pos[j],
+                    color='purple',
+                    alpha=alpha_max / n_fade_lines,
+                    linewidth=0,
+                    zorder=-100,
+                )
+            else:
+                ax_chir.fill_between(
+                    x_bounds,
+                    h,
+                    np.ones_like(h) * fade_lines_neg[j],
+                    where=h < fade_lines_neg[j],
+                    color='green',
+                    alpha=alpha_max / n_fade_lines,
+                    linewidth=0,
+                    zorder=-100,
+                )
 
     fig.tight_layout()
 
@@ -477,10 +544,10 @@ def main():
     filename += f'_M={ew.n_samples}_N={ew.n_features}'
 
     # _plot_eigenworms_basic(ew, filename)
-    # _plot_eigenvalues_basic(ew, filename)
-    _plot_eigenworms_basic_mlab(ew, filename)
+    # _plot_eigenworms_basic_mlab(ew, filename, interactive=False)
     # _plot_eigenworms(ew, title, filename)
     # _plot_eigenvalues(ew, title, filename)
+    _plot_eigenvalues_basic(ew, filename)
     # if X_full is not None:
     #     _plot_reconstruction(ew, X_full, 500, title, filename)
 

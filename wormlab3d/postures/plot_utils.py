@@ -163,7 +163,7 @@ class FrameArtistMLab:
         x, y, z = surface[..., 0], surface[..., 1], surface[..., 2]
         self.surface = mlab.mesh(x, y, z, scalars=K_surf, figure=fig, vmin=v_min, vmax=v_max, **self.mesh_opts)
         self.surface.scene.renderer.use_depth_peeling = True
-        self.surface.scene.renderer.maximum_number_of_peels = 8
+        self.surface.scene.renderer.maximum_number_of_peels = 16
         self.surface.module_manager.scalar_lut_manager.lut.table = cmaplist
 
     def add_component_vectors(
@@ -368,25 +368,16 @@ def plot_natural_frame_3d_mlab(
         show_pca_arrow_labels: bool = True,
         midline_cmap: str = None,
         surface_cmap: str = None,
-        ax: Axes = None,
-        use_centred_midline: bool = True
-) -> Union[Figure, Axes]:
+        use_centred_midline: bool = True,
+        offscreen: bool = True
+) -> Scene:
     """
     Make a 3D plot of a midline with optional frame vectors and pca arrows.
     Uses mayavi.
     """
 
-    # Create matplotlib figure if required
-    return_ax = False
-    if ax is None:
-        fig_mpl = plt.figure(figsize=(10, 10))
-        ax = fig_mpl.add_subplot()
-    else:
-        fig_mpl = ax.get_figure()
-        return_ax = True
-
     # Set up mlab figure
-    mlab.options.offscreen = True
+    mlab.options.offscreen = offscreen
     fig = mlab.figure(size=(2000, 2000), bgcolor=(1, 1, 1))
     if 1:
         # Doesn't really seem to make any difference
@@ -451,24 +442,19 @@ def plot_natural_frame_3d_mlab(
     )
 
     # Useful for getting the view parameters when recording from the gui:
-    # print(mlab.view())
+    # scene = mlab.get_engine().scenes[0]
+    # scene.scene.camera.position = [-1.1775452668990132, -0.1332975309100127, -0.8927046287535579]
+    # scene.scene.camera.focal_point = [0.38528885084019227, -0.2636949947563936, -0.009219472198689134]
+    # scene.scene.camera.view_angle = 30.0
+    # scene.scene.camera.view_up = [0.4928373598104637, 0.011932303604696205, -0.8700396295030113]
+    # scene.scene.camera.clipping_range = [0.9497780853808081, 2.9636040298406305]
+    # scene.scene.camera.compute_view_plane_normal()
+    # scene.scene.render()
+    # print(mlab.view())  # (azimuth, elevation, distance, focalpoint)
     # print(mlab.roll())
     # exit()
 
-    # fig.scene._lift()
-    img = mlab.screenshot(figure=fig, mode='rgba', antialiased=True)
-    # mlab.show()
-    mlab.clf(fig)
-    mlab.close()
-    ax.imshow(img)
-    ax.axis('off')
-
-    if return_ax:
-        return ax
-
-    fig_mpl.tight_layout()
-
-    return fig_mpl
+    return fig
 
 
 def plot_natural_frame_components(NF: NaturalFrame) -> Figure:

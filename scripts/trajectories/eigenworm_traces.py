@@ -13,7 +13,7 @@ from simple_worm.plot3d import generate_interactive_scatter_clip
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d import logger
 from wormlab3d.data.model import Reconstruction
-from wormlab3d.postures.chiralities import calculate_chiralities
+from wormlab3d.postures.chiralities import calculate_chiralities, plot_chiralities
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.toolkit.util import print_args
@@ -247,6 +247,10 @@ def traces_condensed(x_label: str = 'time'):
     r = pcas.explained_variance_ratio.T
     nonp = r[2] / np.sqrt(r[1] * r[0])
 
+    # Helicity
+    logger.info('Calculating helicity')
+    chiralities = calculate_chiralities(X)
+
     # Eigenworms embeddings
     Z, meta = get_trajectory(**common_args, natural_frame=True, rebuild_cache=False)
     X_ew = ew.transform(np.array(Z))
@@ -257,7 +261,7 @@ def traces_condensed(x_label: str = 'time'):
     gs = GridSpec(nrows=3, ncols=1)
 
     # Speeds
-    ax = fig.add_subplot(gs[0:2, 0])  # axes[0]
+    ax_sp = fig.add_subplot(gs[0:2, 0])  # axes[0]
 
     for k, region in regions.items():
         if x_label == 'time':
@@ -265,7 +269,7 @@ def traces_condensed(x_label: str = 'time'):
             x_r = [ts[idxs[0]], ts[idxs[1]]]
         else:
             x_r = [region['start'], region['end']]
-        ax.fill_between(
+        ax_sp.fill_between(
             x=x_r,
             y1=region['y1'],
             y2=region['y2'],
@@ -274,27 +278,37 @@ def traces_condensed(x_label: str = 'time'):
             linewidth=0
         )
 
-    ax.axhline(y=0, color='darkgrey')
-    ax.plot(ts, speeds)
-    ax.set_ylabel('Speed (mm/s)')
+    ax_sp.axhline(y=0, color='darkgrey')
+    ax_sp.plot(ts, speeds)
+    ax_sp.set_ylabel('Speed (mm/s)')
     # ax.grid()
 
-    # ax.set_yticks([])
-
     # Planarities
-    ax2 = ax.twinx()
-    ax2.plot(ts, nonp, color='orange', alpha=0.6, linestyle='--')
-    ax2.set_ylabel('Non-planarity', rotation=270, labelpad=15)
-    ax2.axhline(y=0, color='darkgrey')
-    ax2.set_yticks([0, 0.1, 0.2])
-    ax2.set_yticklabels([0, 0.1, 0.2])
+    ax_nonp = ax_sp.twinx()
+    ax_nonp.plot(ts, nonp, color='orange', alpha=0.6, linestyle='--')
+    ax_nonp.set_ylabel('Non-planarity', rotation=270, labelpad=15)
+    ax_nonp.axhline(y=0, color='darkgrey')
+    ax_nonp.set_yticks([0, 0.1, 0.2])
+    ax_nonp.set_yticklabels([0, 0.1, 0.2])
+
+    # Helicity
+    ax_chir = ax_sp.twinx()
+    ax_chir.set_yticks([])
+    c_max = np.abs(chiralities).max() * 1.1
+    ax_chir.set_ylim(bottom=-c_max, top=c_max)
+    plot_chiralities(
+        ax=ax_chir,
+        chiralities=chiralities,
+        xs=ts,
+        alpha_max=0.8
+    )
 
     # Eigenworms - absolute values
     prop_cycle = plt.rcParams['axes.prop_cycle']
     default_colours = prop_cycle.by_key()['color']
     component_colours = [default_colours[i] for i in range(len(args.plot_components))]
 
-    ax = fig.add_subplot(gs[2, 0])  # axes[1]
+    ax_sp = fig.add_subplot(gs[2, 0])
     for i in args.plot_components:
         for j, (k, region) in enumerate(regions.items()):
             idxs = region['start'] - args.start_frame, region['end'] - args.start_frame + 1
@@ -321,7 +335,7 @@ def traces_condensed(x_label: str = 'time'):
                     alpha = 0.8
                     linewidth = 2
                     add_label = True
-            ax.plot(
+            ax_sp.plot(
                 x_r,
                 np.abs(X_ew[idxs[0]:idxs[1], i]),
                 color=component_colours[i],
@@ -331,17 +345,17 @@ def traces_condensed(x_label: str = 'time'):
             )
 
         # ax.plot(ts, np.abs(X_ew[:, i]), label=i, alpha=0.7)
-    ax.set_ylabel('$|\lambda|$')
-    ax.legend()
+    ax_sp.set_ylabel('$|\lambda|$')
+    ax_sp.legend()
     # ax.grid()
 
-    ax.set_yticks([0, 40, 80])
-    ax.set_yticklabels([0, 40, 80])
+    ax_sp.set_yticks([0, 40, 80])
+    ax_sp.set_yticklabels([0, 40, 80])
 
     if x_label == 'time':
-        ax.set_xlabel('Time (s)')
+        ax_sp.set_xlabel('Time (s)')
     else:
-        ax.set_xlabel('Frame #')
+        ax_sp.set_xlabel('Frame #')
 
     fig.tight_layout()
 
@@ -349,8 +363,9 @@ def traces_condensed(x_label: str = 'time'):
         path = LOGS_PATH / f'{START_TIMESTAMP}_traces_condensed_' \
                            f'r={reconstruction.id}_' \
                            f'f={args.start_frame}-{args.end_frame}_' \
-                           f'ew={ew.id}.{img_extension}' \
-                           f'nc={",".join([str(c) for c in args.plot_components])}.{img_extension}'
+                           f'ew={ew.id}_' \
+                           f'nc={",".join([str(c) for c in args.plot_components])}' \
+                           f'.{img_extension}'
         logger.info(f'Saving plot to {path}.')
         plt.savefig(path, transparent=True)
 
@@ -606,8 +621,8 @@ if __name__ == '__main__':
         os.makedirs(LOGS_PATH, exist_ok=True)
     # from simple_worm.plot3d import interactive
     # interactive()
-    traces(x_label='frames')
-    # traces_condensed(x_label='time')
+    # traces(x_label='frames')
+    traces_condensed(x_label='time')
     # heatmap()
     # heatmap_basic()
     # animate()

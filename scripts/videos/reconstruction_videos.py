@@ -26,7 +26,7 @@ from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.midlines3d.util import generate_annotated_images
 from wormlab3d.particles.tumble_run import calculate_curvature
-from wormlab3d.postures.chiralities import calculate_chiralities
+from wormlab3d.postures.chiralities import calculate_chiralities, plot_chiralities
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.postures.plot_utils import FrameArtistMLab
@@ -305,7 +305,6 @@ def _make_3d_trajectory_plot_mlab(
     azims = np.linspace(start=0, stop=360 * n_revolutions, num=len(X))
     # fig.scene._lift()
     mlab.view(figure=fig, azimuth=azims[0], distance='auto', focalpoint=centre)
-    # mlab.show()
 
     def update(frame_idx: int):
         fig.scene.disable_render = True
@@ -435,9 +434,7 @@ def _make_3d_posture_plot_mlab(
     # Aspects
     n_revolutions = len(X) / trial.fps / 60 * args.revolution_rate
     azims = np.linspace(start=0, stop=360 * n_revolutions, num=len(X))
-    # fig.scene._lift()
     mlab.view(figure=fig, azimuth=azims[0], distance=distance, focalpoint=fa.X.mean(axis=0))
-    # mlab.show()
 
     def update(frame_idx: int):
         nonlocal outline
@@ -544,26 +541,12 @@ def _make_traces_plots(
     # Chirality
     ax_chir = axes[2]
     ax_chir.axhline(y=0, color='darkgrey')
-    n_fade_lines = args.n_chirality_fade_lines
-    fade_lines_pos = np.linspace(0, chiralities.max(), n_fade_lines)
-    fade_lines_neg = np.linspace(0, chiralities.min(), n_fade_lines)
-    for i in range(n_fade_lines):
-        ax_chir.fill_between(
-            ts,
-            np.ones_like(chiralities) * fade_lines_pos[i],
-            chiralities,
-            where=chiralities > fade_lines_pos[i],
-            color='purple',
-            alpha=1 / n_fade_lines
-        )
-        ax_chir.fill_between(
-            ts,
-            chiralities,
-            np.ones_like(chiralities) * fade_lines_neg[i],
-            where=chiralities < fade_lines_neg[i],
-            color='green',
-            alpha=1 / n_fade_lines
-        )
+    plot_chiralities(
+        ax=ax_chir,
+        chiralities=chiralities,
+        xs=ts,
+        n_fade_lines=args.n_chirality_fade_lines
+    )
 
     label_args = dict(transform=ax_chir.transAxes, horizontalalignment='right', fontweight='bold', fontsize='large',
                       fontfamily='Symbol')
