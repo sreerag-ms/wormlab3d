@@ -8,13 +8,13 @@ import numpy as np
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d import logger
 from wormlab3d.data.model import Reconstruction
-from wormlab3d.postures.chiralities import calculate_chiralities
+from wormlab3d.postures.chiralities import calculate_chiralities, plot_chiralities
 from wormlab3d.toolkit.util import print_args
 from wormlab3d.trajectories.cache import get_trajectory
 
 # tex_mode()
 
-show_plots = False
+show_plots = True
 save_plots = True
 img_extension = 'svg'
 
@@ -34,6 +34,9 @@ def parse_args() -> Namespace:
 
 
 def chirality_trace(x_label: str = 'time'):
+    """
+    Plot a trace of the chirality over time.
+    """
     args = parse_args()
 
     common_args = {
@@ -44,10 +47,11 @@ def chirality_trace(x_label: str = 'time'):
     }
 
     reconstruction = Reconstruction.objects.get(id=args.reconstruction)
+    trial = reconstruction.trial
     X, meta = get_trajectory(**common_args)
     N = len(X)
     if x_label == 'time':
-        ts = np.linspace(0, N / reconstruction.trial.fps, N)
+        ts = np.linspace(0, N / trial.fps, N)
     else:
         ts = np.arange(N) + (args.start_frame if args.start_frame is not None else 0)
 
@@ -56,37 +60,38 @@ def chirality_trace(x_label: str = 'time'):
     c = calculate_chiralities(X)
 
     # Plot
-    fig, axes = plt.subplots(1, figsize=(12, 8), sharex=True)
+    fig, axes = plt.subplots(1, figsize=(12, 8))
 
     # Chiralities
     ax = axes
-    ax.set_title('Chirality.')
+    ax.set_title(f'Helicity\n'
+                 f'Trial {trial.id} ({trial.date:%Y-%m-%d} #{trial.trial_num}).\n'
+                 f'Reconstruction {reconstruction.id} ({reconstruction.source}).')
     ax.axhline(y=0, color='darkgrey')
-    # ax.plot(ts, c)
-
-    n_fade_lines = 100
-    fade_lines_pos = np.linspace(0, c.max(), n_fade_lines)
-    fade_lines_neg = np.linspace(0, c.min(), n_fade_lines)
-    for i in range(n_fade_lines):
-        ax.fill_between(ts, np.ones_like(c) * fade_lines_pos[i], c, where=c > fade_lines_pos[i], color='purple',
-                        alpha=1 / n_fade_lines)
-        ax.fill_between(ts, c, np.ones_like(c) * fade_lines_neg[i], where=c < fade_lines_neg[i], color='green',
-                        alpha=1 / n_fade_lines)
+    plot_chiralities(
+        ax=ax,
+        chiralities=c,
+        xs=ts,
+    )
+    h_lim = np.abs(c).max() * 1.1
+    ax.set_ylim(top=h_lim, bottom=-h_lim)
 
     label_args = dict(transform=ax.transAxes, horizontalalignment='right', fontweight='bold', fontfamily='Symbol')
     ax.text(-0.02, 0.96, '↻', verticalalignment='top', **label_args)
     ax.text(-0.02, 0.03, '↺', verticalalignment='bottom', **label_args)
     ax.set_yticks([0, ])
     ax.set_yticklabels([])
-    ax.set_xticklabels([])
-    # ax.axvline(x=0, color='red')
 
+    if x_label == 'time':
+        ax.set_xlabel('Time (s)')
+    else:
+        ax.set_xlabel('Frame #')
     fig.tight_layout()
 
     if save_plots:
         path = LOGS_PATH / f'{START_TIMESTAMP}_chirality_trace_' \
                            f'r={reconstruction.id}_' \
-                           f'f={args.start_frame}-{args.end_frame}_' \
+                           f'f={meta["start_frame"]}-{meta["end_frame"]}' \
                            f'.{img_extension}'
         logger.info(f'Saving plot to {path}.')
         plt.savefig(path)
