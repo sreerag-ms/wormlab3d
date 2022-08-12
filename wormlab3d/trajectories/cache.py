@@ -102,7 +102,11 @@ def get_trajectory(
     return X, meta
 
 
-def get_trajectory_from_args(args: Namespace, return_meta: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, dict]]:
+def get_trajectory_from_args(
+        args: Namespace,
+        return_meta: bool = False,
+        natural_frame: bool = False
+) -> Union[np.ndarray, Tuple[np.ndarray, dict]]:
     """
     Get the trajectory using parameters from an argument namespace.
     """
@@ -119,6 +123,7 @@ def get_trajectory_from_args(args: Namespace, return_meta: bool = False) -> Unio
         projection=args.projection,
         trajectory_point=args.trajectory_point,
         tracking_only=args.tracking_only,
+        natural_frame=natural_frame,
         rebuild_cache=args.rebuild_cache
     )
 
@@ -450,5 +455,7 @@ def generate_or_load_trajectory_cache(
     X = X_full[start_frame:end_frame + 1]
     meta['start_frame'] = start_frame
     meta['end_frame'] = end_frame
+    if reconstruction is not None:
+        meta['reconstruction'] = reconstruction.id
 
     return X, meta

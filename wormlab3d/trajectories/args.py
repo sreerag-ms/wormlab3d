@@ -51,6 +51,8 @@ def get_args(
                             help='Use a projection of the midline, or not (default=3D).')
         parser.add_argument('--smoothing-window-curvature', type=int,
                             help='Smooth the curvature using average in a sliding window. Size defined in number of frames.')
+        parser.add_argument('--eigenworms', type=str,
+                            help='Eigenworms by id.')
 
     # MSD arguments
     if include_msd_options:
