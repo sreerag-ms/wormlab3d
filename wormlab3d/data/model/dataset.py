@@ -339,6 +339,7 @@ class DatasetMidline3D(Dataset):
         self.X_test: np.ndarray = None
         self.metas = None
         self.nonplanarities = None
+        self.helicities = None
 
     @property
     def data_path(self) -> Path:
@@ -353,6 +354,11 @@ class DatasetMidline3D(Dataset):
     @property
     def nonplanarities_path(self) -> Path:
         dest = DATASETS_MIDLINES3D_PATH / f'{self.id}_nonplanarities.npz'
+        return dest
+
+    @property
+    def helicities_path(self) -> Path:
+        dest = DATASETS_MIDLINES3D_PATH / f'{self.id}_helicities.npz'
         return dest
 
     @property
@@ -476,6 +482,47 @@ class DatasetMidline3D(Dataset):
             self.nonplanarities = nonp
 
         return self.nonplanarities
+
+    def get_helicities(self, recalculate: bool = False) -> np.ndarray:
+        """
+        Calculate the helicity score for all postures.
+        Uses a result cache on disk.
+        """
+        if self.helicities is None:
+            H = None
+
+            # Try to load
+            if not recalculate:
+                try:
+                    H = np.load(self.helicities_path)['data']
+
+                    # Check that the size is the same
+                    if H.shape[0] != self.size_all:
+                        logger.warning('Helicities data does not match size of dataset!')
+                        H = None
+                except Exception:
+                    pass
+
+            # Can't be loaded or asked to recalculate so calculate.
+            if H is None:
+                logger.info('Calculating helicities.')
+                H = np.zeros(len(self.X_all))
+                for i, X in enumerate(self.X_all):
+                    if (i + 1) % 100 == 0:
+                        logger.info(f'Calculating helicity for midline {i + 1}/{self.size_train}.')
+                    NF = NaturalFrame(X)
+                    H[i] = NF.helicity()
+
+                # Save
+                logger.info(f'Saving helicities to {self.helicities_path}.')
+                np.savez_compressed(
+                    self.helicities_path,
+                    data=H,
+                )
+
+            self.helicities = H
+
+        return self.helicities
 
     @property
     def n_reconstructions(self):

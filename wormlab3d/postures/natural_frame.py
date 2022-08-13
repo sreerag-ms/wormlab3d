@@ -3,20 +3,27 @@ from numpy.linalg import norm
 from sklearn.decomposition import PCA
 
 PSI_ESTIMATION_KAPPA_THRESHOLD_DEFAULT = 0.5
+EPS = 1e-8
 
 
-def normalise(v):
+def normalise(v: np.ndarray) -> np.ndarray:
+    """Normalise an array along its final dimension."""
     return v / norm(v, axis=-1, keepdims=True)
 
 
-def an_orthonormal(x):
+def orthogonalise(source: np.ndarray, ref: np.ndarray) -> np.ndarray:
+    """Orthogonalise a vector against another."""
+    return source - np.dot(source, ref) / norm(ref, axis=-1, keepdims=True) * ref
+
+
+def an_orthonormal(x: np.ndarray) -> np.ndarray:
+    """Generate an arbitrary normalised vector orthogonal to x."""
     if abs(x[0]) < 1e-20:
         return np.array([1., 0., 0.])
     if abs(x[1]) < 1e-20:
         return np.array([0., 1., 0.])
-
     X = np.array([x[1], -x[0], 0.])
-    return X / norm(X)
+    return normalise(X)
 
 
 def rotate(v: np.ndarray, theta: float):
@@ -269,23 +276,26 @@ class NaturalFrame:
         r = self.pca.explained_variance_ratio_
         return r[2] / np.sqrt(r[1] * r[0])
 
-    def helicity(self) -> float:
+    def helicity(self, normalise_length: bool = True) -> float:
         """
         Compute the helicity of the curve.
         """
+        X = self.X_pos.copy()
+        if normalise_length:
+            X /= self.length
 
-        # Try to align v1 with the direction of the curve
-        u = normalise(self.X_pos[-1] - self.X_pos[0])
-        v1, v2, v3 = self.pca.components_
-        if np.dot(u, v1) < 0:
-            v1 *= -1
-
-        # Rotate points to align with the principal components.
+        # Calculate a projection plane normal to the average direction
+        v1 = normalise(self.T.mean(axis=0) / (self.T.var(axis=0) + EPS))
+        v2 = normalise(orthogonalise(np.roll(v1, 1), v1))
+        v3 = np.cross(v1, v2)
         R = np.stack([v1, v2, v3], axis=1)
-        Xt = np.einsum('ij,bj->bi', R.T, self.X_pos)
 
-        # Use the difference vectors between adjacent points and ignore first coordinate.
-        diff = (Xt[1:] - Xt[:-1])[:, 1:]
+        # Rotate points to align with the projection space
+        Xt = np.einsum('ij,bj->bi', R.T, X)
+        Xp = Xt[:, 1:]
+
+        # Use the difference vectors between adjacent points and take the appropriate components.
+        diff = Xp[1:] - Xp[:-1]
 
         # Convert into polar coordinates
         r = np.linalg.norm(diff, axis=-1)
@@ -294,10 +304,6 @@ class NaturalFrame:
         # Weight the angular changes by the radii and sum to give helicity measure.
         r = (r[1:] + r[:-1]) / 2
         h = np.sum(r * (theta[1:] - theta[:-1]))
-
-        # Correct for reflections
-        if np.allclose(np.linalg.det(R), -1):
-            h *= -1
 
         return h
 

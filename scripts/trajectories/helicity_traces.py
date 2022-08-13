@@ -15,7 +15,7 @@ from wormlab3d.trajectories.cache import get_trajectory
 # tex_mode()
 
 show_plots = True
-save_plots = True
+save_plots = False
 img_extension = 'svg'
 
 
@@ -86,6 +86,7 @@ def helicity_trace(x_label: str = 'time'):
         ax.set_xlabel('Time (s)')
     else:
         ax.set_xlabel('Frame #')
+
     fig.tight_layout()
 
     if save_plots:
