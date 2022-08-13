@@ -690,7 +690,7 @@ class Midline3DFinder:
             if ra.finetune_mode:
                 # In finetune mode just shift the batch along and append the next frames
                 f0 = self.frame_batch[0].frame_num + frame_skip
-                f1 = min(n_frames - 1, self.frame_batch[-1].frame_num + frame_skip)
+                f1 = min(frame_nums[-1] - 1, self.frame_batch[-1].frame_num + frame_skip)
 
                 # Start the new batch with any from the previous batch
                 new_batch = []
