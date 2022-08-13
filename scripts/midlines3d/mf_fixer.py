@@ -1665,6 +1665,10 @@ def _fix_curvature(
 
     # Fetch parameters
     f_range = {'start_frame': ts.reconstruction.start_frame, 'end_frame': ts.reconstruction.end_frame}
+    if ts.reconstruction.start_frame_valid is not None:
+        f_range['start_frame'] = ts.reconstruction.start_frame_valid
+    if ts.reconstruction.end_frame_valid is not None:
+        f_range['end_frame'] = ts.reconstruction.end_frame_valid
     cam_coeffs = _init_cam_coeffs(ts, args, device=device, fixed=False)
     points = torch.from_numpy(ts.get('points', **f_range).copy()).to(device)
     points_2d = torch.from_numpy(ts.get('points_2d', **f_range).copy()).to(device)
