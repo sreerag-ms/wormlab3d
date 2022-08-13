@@ -456,6 +456,6 @@ def generate_or_load_trajectory_cache(
     meta['start_frame'] = start_frame
     meta['end_frame'] = end_frame
     if reconstruction is not None:
-        meta['reconstruction'] = reconstruction.id
+        meta['reconstruction'] = str(reconstruction.id)
 
     return X, meta
