@@ -730,7 +730,7 @@ class Midline3DFinder:
                 mfs.copy_state(self.frame_batch[self.active_idx])
 
                 # Ensure loop skips appropriately
-                to_skip = frame_skip
+                to_skip = frame_skip - 1
 
             else:
                 # Freeze just-optimised frame
