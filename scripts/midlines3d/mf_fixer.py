@@ -69,6 +69,7 @@ def get_args() -> Namespace:
     parser.add_argument('--plot-n-examples-per-batch', type=int, default=0,
                         help='Plot n examples above the plotting error threshold per batch.')
     parser.add_argument('--clamp-X0', type=str2bool, default=True)
+    parser.add_argument('--smooth-K', type=str2bool, default=True)
 
     # -- Optimisation arguments
     parser.add_argument('--gpu-id', type=int, default=-1,
@@ -171,13 +172,16 @@ def _check_bad_parameters(
         X0_batch = torch.from_numpy(X0[start_idx:end_idx, 0])
         if args.clamp_X0:
             X0_batch = X0_batch.clamp(min=-0.5, max=0.5)
+        K_batch = torch.from_numpy(K[start_idx:end_idx].copy())
+        if args.smooth_K:
+            K_batch = smooth_parameter(K_batch, 15, mode='gaussian'),
 
         # Reconstruct the 3D points from the parameters
         points_r_batch, tangents_r, M1_r = integrate_curvature(
             X0_batch,
             torch.from_numpy(T0[start_idx:end_idx, 0]),
             torch.from_numpy(lengths[start_idx:end_idx, 0]),
-            smooth_parameter(torch.from_numpy(K[start_idx:end_idx].copy()), 15, mode='gaussian'),
+            K_batch,
             torch.from_numpy(M10[start_idx:end_idx, 0]),
         )
         points_r[start_idx:end_idx] = points_r_batch
@@ -348,6 +352,7 @@ def _verify_flipped_batch(
         trial: Trial,
         start_frame: int,
         clamp_X0: bool,
+        smooth_K: bool,
 
         X0: np.ndarray,
         T0: np.ndarray,
@@ -381,11 +386,14 @@ def _verify_flipped_batch(
     X0 = torch.from_numpy(X0)
     if clamp_X0:
         X0 = X0.clamp(min=-0.5, max=0.5)
+    K = torch.from_numpy(K.copy())
+    if smooth_K:
+        K = smooth_parameter(K, 15, mode='gaussian')
     points_r, tangents_r, M1_r = integrate_curvature(
         X0,
         torch.from_numpy(T0),
         torch.from_numpy(lengths),
-        smooth_parameter(torch.from_numpy(K.copy()), 15, mode='gaussian'),
+        K,
         torch.from_numpy(M10),
     )
 
@@ -393,11 +401,14 @@ def _verify_flipped_batch(
     X0_flipped = torch.from_numpy(X0_flipped)
     if clamp_X0:
         X0_flipped = X0_flipped.clamp(min=-0.5, max=0.5)
+    K_flipped = torch.from_numpy(K_flipped.copy())
+    if smooth_K:
+        K_flipped = smooth_parameter(K_flipped, 15, mode='gaussian')
     points_flipped_r, tangents_flipped_r, M1_flipped_r = integrate_curvature(
         X0_flipped,
         torch.from_numpy(T0_flipped),
         torch.from_numpy(lengths),
-        smooth_parameter(torch.from_numpy(K_flipped.copy()), 15, mode='gaussian'),
+        K_flipped,
         torch.from_numpy(M10_flipped),
     )
 
@@ -592,6 +603,7 @@ def _flip_frames(
                 trial=trial,
                 start_frame=n + start_idx,
                 clamp_X0=args.clamp_X0,
+                smooth_K=args.smooth_K,
                 X0=X0[start_idx:end_idx, 0],
                 T0=T0[start_idx:end_idx, 0],
                 M10=M10[start_idx:end_idx, 0],
@@ -811,6 +823,7 @@ def _plot_camera_fix_examples(
 def _process_camfix_batch(
         prs: ProjectRenderScoreModel,
         clamp_X0: bool,
+        smooth_K: bool,
         X0: torch.Tensor,
         T0: torch.Tensor,
         M10: torch.Tensor,
@@ -830,11 +843,13 @@ def _process_camfix_batch(
     # Build the 3D points from the new parameters.
     if clamp_X0:
         X0 = X0.clamp(min=-0.5, max=0.5)
+    if smooth_K:
+        K = smooth_parameter(K, 15, mode='gaussian')
     p3d_batch, tangents_r, M1_r = integrate_curvature(
         X0,
         T0,
         lengths,
-        smooth_parameter(K, 15, mode='gaussian'),
+        K,
         M10,
     )
 
@@ -1010,6 +1025,7 @@ def _fix_camera_positions(
             points_f_batch, points_2d_f_batch, losses_p2d_batch, losses_reg_batch = _process_camfix_batch(
                 prs=prs,
                 clamp_X0=args.clamp_X0,
+                smooth_K=args.smooth_K,
                 X0=X0f_batch,
                 T0=T0f_batch,
                 M10=M10f_batch,
@@ -1070,6 +1086,7 @@ def _fix_camera_positions(
         points_f_batch, points_2d_f_batch, losses_p2d_batch, losses_reg_batch = _process_camfix_batch(
             prs=prs,
             clamp_X0=args.clamp_X0,
+            smooth_K=args.smooth_K,
             X0=X0f_batch,
             T0=T0f_batch,
             M10=M10f_batch,
@@ -1082,11 +1099,14 @@ def _fix_camera_positions(
         )
 
         # Verify batch
+        Kf_batch_v = Kf_batch.clone()
+        if args.smooth_K:
+            Kf_batch_v = smooth_parameter(Kf_batch, 15, mode='gaussian')
         points_r, tangents_r, M1_r = integrate_curvature(
             X0f_batch,
             T0f_batch,
             lengthsf_batch,
-            smooth_parameter(Kf_batch, 15, mode='gaussian'),
+            Kf_batch_v,
             M10f_batch,
         )
 
@@ -1532,7 +1552,6 @@ def _process_curvature_batch(
     device = X0.device
     batch_size = len(X0)
     N = K.shape[1]
-    # smooth_parameter(K, 15, mode='gaussian'),  # todo: parameterise this?
 
     # Build the 3D curve from the updated parameters
     X_f, T_f, M1_f = integrate_curvature(X0, T0, lengths, K, M10)

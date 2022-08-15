@@ -669,7 +669,6 @@ def calculate_smoothness_losses(
 @torch.jit.script
 def calculate_smoothness_losses_curvatures(
         curvatures: List[torch.Tensor],
-        curvatures_smoothed: List[torch.Tensor],
 ) -> List[torch.Tensor]:
     """
     The curvatures should change smoothly along the body.
@@ -679,8 +678,9 @@ def calculate_smoothness_losses_curvatures(
     for d in range(D):
         K_d = curvatures[d]
         if K_d.shape[1] > 4:
-            Ks_d = curvatures_smoothed[d]
-            loss = torch.sum((K_d - Ks_d)**2)
+            ds = ((K_d[:, 1:] - K_d[:, :-1])**2).sum(dim=(-1, -2)).mean()
+            ds2 = ((K_d[:, 2:] - K_d[:, :-2])**2).sum(dim=(-1, -2)).mean() / 2
+            loss = ds + ds2
         else:
             loss = torch.tensor(0., device=curvatures[0].device)
         losses.append(loss)

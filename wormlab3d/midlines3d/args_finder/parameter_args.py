@@ -31,12 +31,15 @@ class ParameterArgs(BaseArgs):
             curvature_deltas: bool = False,
             curvature_max: float = 2.,
             curvature_relaxation_factor: float = None,
+            curvature_smoothing: bool = True,
+
             length_min: float = None,
             length_max: float = None,
             length_shrink_factor: float = None,
             length_init: float = None,
             length_warmup_steps: int = None,
             length_regrow_steps: int = None,
+
             dX0_limit: float = None,
             dl_limit: float = None,
             dk_limit: float = None,
@@ -123,6 +126,14 @@ class ParameterArgs(BaseArgs):
         self.curvature_max = curvature_max
         if not curvature_mode:
             curvature_deltas = False
+        self.curvature_deltas = curvature_deltas
+        self.curvature_deltas = curvature_deltas
+        if curvature_relaxation_factor is not None and curvature_relaxation_factor <= 0:
+            curvature_relaxation_factor = None
+        self.curvature_relaxation_factor = curvature_relaxation_factor
+        self.curvature_smoothing = curvature_smoothing
+
+        if not curvature_mode:
             length_min = None
             length_max = None
             length_shrink_factor = None
@@ -145,10 +156,6 @@ class ParameterArgs(BaseArgs):
                     assert length_regrow_steps <= n_steps_max
             elif length_shrink_factor is None:
                 length_regrow_steps = None
-        self.curvature_deltas = curvature_deltas
-        if curvature_relaxation_factor is not None and curvature_relaxation_factor <= 0:
-            curvature_relaxation_factor = None
-        self.curvature_relaxation_factor = curvature_relaxation_factor
         self.length_min = length_min
         self.length_max = length_max
         self.length_shrink_factor = length_shrink_factor
@@ -159,6 +166,7 @@ class ParameterArgs(BaseArgs):
         if length_regrow_steps is not None and length_regrow_steps <= 0:
             length_regrow_steps = None
         self.length_regrow_steps = length_regrow_steps
+
         self.dX0_limit = dX0_limit
         self.dl_limit = dl_limit
         self.dk_limit = dk_limit
@@ -284,12 +292,15 @@ class ParameterArgs(BaseArgs):
         group.add_argument('--curvature-mode', type=str2bool, default=False,
                            help='Optimise the curvature rather than the points. Default=False.')
         group.add_argument('--curvature-deltas', type=str2bool, default=False,
-                           help='Use future frame curvatures as delta values. Only applicable in curvature mode .Default=False.')
+                           help='Use future frame curvatures as delta values. Only applicable in curvature mode. Default=False.')
         group.add_argument('--curvature-max', type=float, default=2.,
                            help='Maximum allowed curvature in terms of coils/revolutions. '
                                 'Used in curvature-loss for points-mode or as a hard limit when in curvature-mode. Default=2.')
         group.add_argument('--curvature-relaxation-factor', type=float,
                            help='The curvature is scaled by this factor at the start of each new frame, if defined.')
+        group.add_argument('--curvature-smoothing', type=str2bool, default=True,
+                           help='Apply smoothing to the raw curvature before integrating. Default=True.')
+
         group.add_argument('--length-min', type=float,
                            help='Minimum worm length (only used in curvature mode). Default=0.5.')
         group.add_argument('--length-max', type=float,

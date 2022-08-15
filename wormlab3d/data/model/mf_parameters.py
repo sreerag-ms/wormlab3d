@@ -35,6 +35,8 @@ class MFParameters(Document):
     curvature_deltas = BooleanField()
     curvature_max = FloatField()
     curvature_relaxation_factor = FloatField()
+    curvature_smoothing = BooleanField()
+
     length_min = FloatField()
     length_max = FloatField()
     length_shrink_factor = FloatField()

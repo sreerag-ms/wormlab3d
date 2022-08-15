@@ -176,6 +176,7 @@ class ProjectRenderScoreModel(nn.Module):
             intensities_max: float = 10.,
             curvature_mode: bool = False,
             curvature_deltas: bool = False,
+            curvature_smoothing: bool = True,
             length_min: float = 0.5,
             length_max: float = 2,
             curvature_max: float = 2.,
@@ -199,6 +200,7 @@ class ProjectRenderScoreModel(nn.Module):
         self.intensities_max = intensities_max
         self.curvature_mode = curvature_mode
         self.curvature_deltas = curvature_deltas
+        self.curvature_smoothing = curvature_smoothing
         self.length_min = length_min
         self.length_max = length_max
         self.curvature_max = curvature_max
@@ -377,7 +379,8 @@ class ProjectRenderScoreModel(nn.Module):
                         length_d = length_d.clamp(min=self.length_min, max=self.length_max)
 
                     # Smooth the curvatures
-                    curvatures_d = smooth_parameter(curvatures_d, ks, mode='gaussian')
+                    if self.curvature_smoothing:
+                        curvatures_d = smooth_parameter(curvatures_d, ks, mode='gaussian')
 
                     # Ensure curvature doesn't get too large
                     k = torch.norm(curvatures_d, dim=-1)

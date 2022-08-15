@@ -407,6 +407,7 @@ class Midline3DFinder:
             intensities_min=p.intensities_min,
             curvature_mode=p.curvature_mode,
             curvature_deltas=p.curvature_deltas,
+            curvature_smoothing=p.curvature_smoothing,
             length_min=p.length_min,
             length_max=p.length_max,
             curvature_max=p.curvature_max,
@@ -1204,7 +1205,7 @@ class Midline3DFinder:
         if p.curvature_mode:
             losses = {**losses, **{
                 'parents': calculate_parents_losses_curvatures(X0, T0, M10, length, curvatures, curvatures_smoothed),
-                'smoothness': calculate_smoothness_losses_curvatures(curvatures, curvatures_smoothed),
+                'smoothness': calculate_smoothness_losses_curvatures(curvatures),
                 'intersections': calculate_intersection_losses_curvatures(
                     points_smoothed, sigmas_smoothed, p.curvature_max
                 ),
