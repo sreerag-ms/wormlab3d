@@ -10,6 +10,7 @@ import torch
 from wormlab3d import MF_DATA_PATH
 from wormlab3d import logger
 from wormlab3d.data.model import MFParameters, MFCheckpoint, Reconstruction, Trial
+from wormlab3d.data.model.mf_parameters import CURVATURE_INTEGRATION_HT
 from wormlab3d.midlines3d.frame_state import FrameState, BUFFER_NAMES, PARAMETER_NAMES, BINARY_DATA_KEYS, \
     CURVATURE_PARAMETER_NAMES, TRANSIENTS_NAMES
 from wormlab3d.midlines3d.mf_methods import make_rotation_matrix
@@ -128,6 +129,13 @@ class TrialState:
                         else:
                             raise RuntimeError('Filter shape invalid for loading!')
 
+                # Head/Tail integration parameters
+                if k in ['X0ht', 'T0ht', 'M10ht'] and (k not in meta['shapes'] or not path_state.exists()):
+                    _, shape = self._init_state_component(k)
+                    meta['shapes'][k] = shape
+                    with open(self.path / 'metadata.json', 'w') as f:
+                        json.dump(meta, f, indent=2, separators=(',', ': '))
+
                 state = np.memmap(path_state, dtype=np.float32, mode=mode, shape=tuple(meta['shapes'][k]))
                 if np.isnan(state).any():
                     if read_only:
@@ -211,6 +219,8 @@ class TrialState:
             shape = (T, 3, 1)
         elif k in ['X0', 'T0', 'M10']:
             shape = (T, D, 3)
+        elif k in ['X0ht', 'T0ht', 'M10ht']:
+            shape = (T, D, 2, 3)
         elif k == 'curvatures':
             shape = (T, N, 2)
         elif k == 'points':
@@ -265,12 +275,12 @@ class TrialState:
         assert self.start_frame <= frame_num <= self.end_frame, 'Requested frame is not available.'
         for k in BUFFER_NAMES + PARAMETER_NAMES:
             # Collate outputs generated at each depth
-            if k in ['points', 'points_2d', 'sigmas', 'exponents', 'intensities', 'scores',] \
+            if k in ['points', 'points_2d', 'sigmas', 'exponents', 'intensities', 'scores', ] \
                     + CURVATURE_PARAMETER_NAMES:
                 p_ms = frame_state.get_state(k)
 
                 # Stack parameters which do not change across depths
-                if k in ['X0', 'T0', 'M10', 'length', 'sigmas', 'exponents', 'intensities']:
+                if k in ['X0', 'T0', 'M10', 'X0ht', 'T0ht', 'M10ht', 'length', 'sigmas', 'exponents', 'intensities']:
                     p = np.array([to_numpy(p) for p in p_ms])
 
                 # Vectorise everything else
@@ -326,7 +336,7 @@ class TrialState:
                 # Expand collapsed
                 if k in ['curvatures', 'points', 'points_2d', 'scores']:
                     v = [v[2**d - idx_offset - 1:2**(d + 1) - idx_offset - 1] for d in range(D_min, D)]
-                elif k in ['X0', 'T0', 'M10', 'length', 'sigmas', 'exponents', 'intensities']:
+                elif k in ['X0', 'T0', 'M10', 'X0ht', 'T0ht', 'M10ht', 'length', 'sigmas', 'exponents', 'intensities']:
                     v = [v[i] for i in range(D - D_min)]
 
                 # Check filters
@@ -337,6 +347,16 @@ class TrialState:
                     v /= v.norm(dim=(1, 2), keepdim=True)
 
                 frame_state.set_state(k, v)
+
+            # Check HT data is valid if required
+            if self.parameters.curvature_integration == CURVATURE_INTEGRATION_HT:
+                ht_missing = False
+                for k in ['X0ht', 'T0ht', 'M10ht']:
+                    if self.get(k)[frame_num].sum() == 0:
+                        ht_missing = True
+                        break
+                if ht_missing:
+                    frame_state.update_ht_data_from_mp()
 
         # Move onto target device
         if device is not None:

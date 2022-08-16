@@ -11,6 +11,13 @@ RENDER_MODES = [
     RENDER_MODE_CIRCLES
 ]
 
+CURVATURE_INTEGRATION_MIDPOINT = 'mp'
+CURVATURE_INTEGRATION_HT = 'ht'
+CURVATURE_INTEGRATION_OPTIONS = [
+    CURVATURE_INTEGRATION_MIDPOINT,
+    CURVATURE_INTEGRATION_HT
+]
+
 
 class MFParameters(Document):
     created = DateTimeField(required=True, default=datetime.datetime.utcnow)
@@ -36,6 +43,7 @@ class MFParameters(Document):
     curvature_max = FloatField()
     curvature_relaxation_factor = FloatField()
     curvature_smoothing = BooleanField()
+    curvature_integration = StringField(choices=CURVATURE_INTEGRATION_OPTIONS, default=CURVATURE_INTEGRATION_MIDPOINT)
 
     length_min = FloatField()
     length_max = FloatField()

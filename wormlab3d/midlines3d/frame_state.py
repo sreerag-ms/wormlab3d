@@ -8,6 +8,7 @@ from torchvision.transforms.functional import gaussian_blur
 
 from wormlab3d import CAMERA_IDXS
 from wormlab3d.data.model import Cameras, MFParameters, Frame
+from wormlab3d.data.model.mf_parameters import CURVATURE_INTEGRATION_MIDPOINT
 from wormlab3d.midlines3d.mf_methods import make_rotation_matrix, normalise, integrate_curvature, an_orthonormal
 
 PARAMETER_NAMES = [
@@ -19,6 +20,9 @@ PARAMETER_NAMES = [
     'X0',
     'T0',
     'M10',
+    'X0ht',
+    'T0ht',
+    'M10ht',
     'length',
     'curvatures',
     'points',
@@ -35,6 +39,9 @@ CURVATURE_PARAMETER_NAMES = [
     'X0',
     'T0',
     'M10',
+    'X0ht',
+    'T0ht',
+    'M10ht',
     'length',
     'curvatures',
 ]
@@ -371,6 +378,9 @@ class FrameState(nn.Module):
                 self.register_buffer(f'X0_{d}', torch.zeros(3))
                 self.register_buffer(f'T0_{d}', torch.tensor([1., 0., 0.]))
                 self.register_buffer(f'M10_{d}', torch.tensor([0., 1., 0.]))
+                self.register_buffer(f'X0ht_{d}', torch.zeros(2, 3))
+                self.register_buffer(f'T0ht_{d}', torch.tensor([[1., 0., 0.], [1., 0., 0.]]))
+                self.register_buffer(f'M10ht_{d}', torch.tensor([[0., 1., 0.], [0., 1., 0.]]))
                 self.register_buffer(f'length_{d}', torch.tensor(1.))
                 self.register_buffer(f'curvatures_{d}', torch.zeros(2**d, 2))
 
@@ -381,19 +391,20 @@ class FrameState(nn.Module):
         Initialise the multiscale curve points and curvatures in curvatures mode.
         """
         mp = self.parameters
+        midpoint_mode = mp.curvature_integration == CURVATURE_INTEGRATION_MIDPOINT
 
         # Pick a random midpoint near the centre
         X0 = torch.normal(mean=torch.zeros(3), std=0.1)
-        X0s = [nn.Parameter(X0, requires_grad=True) for _ in range(mp.depth - mp.depth_min)]
+        X0s = [nn.Parameter(X0, requires_grad=midpoint_mode) for _ in range(mp.depth - mp.depth_min)]
 
         # Pick a random tangent direction
         T0 = torch.normal(mean=torch.zeros(3), std=1)
         T0 = normalise(T0)
-        T0s = [nn.Parameter(T0, requires_grad=True) for _ in range(mp.depth - mp.depth_min)]
+        T0s = [nn.Parameter(T0, requires_grad=midpoint_mode) for _ in range(mp.depth - mp.depth_min)]
 
         # Pick a consistent M10 direction
         M10s = [
-            nn.Parameter(an_orthonormal(T0s[i].unsqueeze(0))[0].detach(), requires_grad=True)
+            nn.Parameter(an_orthonormal(T0s[i].unsqueeze(0))[0].detach(), requires_grad=midpoint_mode)
             for i in range(mp.depth - mp.depth_min)
         ]
 
@@ -401,25 +412,61 @@ class FrameState(nn.Module):
         l = torch.tensor(mp.length_init)
         lengths = [nn.Parameter(l, requires_grad=True) for _ in range(mp.depth - mp.depth_min)]
 
+        # Prepare HT parameters
+        X0ht = []
+        T0ht = []
+        M10ht = []
+
         # Start in a straight line configuration
         curvatures = []
         for i, d in enumerate(range(mp.depth_min, mp.depth)):
             N = 2**d
             K = nn.Parameter(torch.zeros(N, 2), requires_grad=True)
-            points_d, tangents_d, M1_d = integrate_curvature(
+            curvatures.append(K)
+            X_d, T_d, M1_d = integrate_curvature(
                 X0s[i].unsqueeze(0),
                 T0s[i].unsqueeze(0),
                 lengths[i].unsqueeze(0),
                 K.unsqueeze(0),
                 M10=M10s[i].unsqueeze(0)
             )
-            curvatures.append(K)
-            self.register_buffer(f'points_{d}', points_d[0].detach())
+            self.register_buffer(f'points_{d}', X_d[0].detach())
             self.register_buffer(f'curvatures_smoothed_{d}', K.detach())
+
+            X0ht.append(nn.Parameter(torch.stack([X_d[0, 0], X_d[0, -1]]), requires_grad=not midpoint_mode))
+            T0ht.append(nn.Parameter(torch.stack([T_d[0, 0], T_d[0, -1]]), requires_grad=not midpoint_mode))
+            M10ht.append(nn.Parameter(torch.stack([M1_d[0, 0], M1_d[0, -1]]), requires_grad=not midpoint_mode))
+
+            # Verify that the curves match
+            Xh, Th, M1h = integrate_curvature(
+                X0ht[0][0].unsqueeze(0),
+                T0ht[0][0].unsqueeze(0),
+                lengths[i].unsqueeze(0),
+                K.unsqueeze(0),
+                M10=M10ht[0][0].unsqueeze(0),
+                start_idx=0
+            )
+            Xt, Tt, M1t = integrate_curvature(
+                X0ht[0][1].unsqueeze(0),
+                T0ht[0][1].unsqueeze(0),
+                lengths[i].unsqueeze(0),
+                K.unsqueeze(0),
+                M10=M10ht[0][1].unsqueeze(0),
+                start_idx=N - 1
+            )
+            assert torch.allclose(X_d, Xh)
+            assert torch.allclose(X_d, Xt)
+            assert torch.allclose(T_d, Th)
+            assert torch.allclose(T_d, Tt)
+            assert torch.allclose(M1_d, M1h, atol=1e-7)
+            assert torch.allclose(M1_d, M1t, atol=1e-7)
 
         self.register_parameter('X0', X0s)
         self.register_parameter('T0', T0s)
         self.register_parameter('M10', M10s)
+        self.register_parameter('X0ht', X0ht)
+        self.register_parameter('T0ht', T0ht)
+        self.register_parameter('M10ht', M10ht)
         self.register_parameter('length', lengths)
         self.register_parameter('curvatures', curvatures)
 
@@ -581,3 +628,58 @@ class FrameState(nn.Module):
                     pi.requires_grad_(False)
             else:
                 p.requires_grad_(False)
+
+    def update_ht_data_from_mp(self):
+        """
+        Update the ht parameters using the midpoint integration method.
+        """
+        mp = self.parameters
+
+        # Prepare HT parameters
+        X0ht = []
+        T0ht = []
+        M10ht = []
+
+        for i, d in enumerate(range(mp.depth_min, mp.depth)):
+            N = 2**d
+
+            # Build curve from midpoint data
+            X_d, T_d, M1_d = integrate_curvature(
+                self.X0[i].unsqueeze(0),
+                self.T0[i].unsqueeze(0),
+                self.length[i].unsqueeze(0),
+                self.curvatures[i].unsqueeze(0),
+                self.M10[i].unsqueeze(0)
+            )
+
+            X0ht.append(torch.stack([X_d[0, 0], X_d[0, -1]]))
+            T0ht.append(torch.stack([T_d[0, 0], T_d[0, -1]]))
+            M10ht.append(torch.stack([M1_d[0, 0], M1_d[0, -1]]))
+
+            # Verify that the curves match
+            Xh, Th, M1h = integrate_curvature(
+                X0ht[0][0].unsqueeze(0),
+                T0ht[0][0].unsqueeze(0),
+                self.length[i].unsqueeze(0),
+                self.curvatures[i].unsqueeze(0),
+                M10=M10ht[0][0].unsqueeze(0),
+                start_idx=0
+            )
+            Xt, Tt, M1t = integrate_curvature(
+                X0ht[0][1].unsqueeze(0),
+                T0ht[0][1].unsqueeze(0),
+                self.length[i].unsqueeze(0),
+                self.curvatures[i].unsqueeze(0),
+                M10=M10ht[0][1].unsqueeze(0),
+                start_idx=N - 1
+            )
+            assert torch.allclose(X_d, Xh, atol=1e-2)
+            assert torch.allclose(X_d, Xt, atol=1e-2)
+            assert torch.allclose(T_d, Th, atol=1e-1)
+            assert torch.allclose(T_d, Tt, atol=1e-1)
+            assert torch.allclose(M1_d, M1h, atol=1e-1)
+            assert torch.allclose(M1_d, M1t, atol=1e-1)
+
+        self.set_state('X0ht', X0ht)
+        self.set_state('T0ht', T0ht)
+        self.set_state('M10ht', M10ht)

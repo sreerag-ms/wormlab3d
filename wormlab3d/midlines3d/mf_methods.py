@@ -272,7 +272,7 @@ def integrate_curvature(
     if start_idx is None:
         start_idx = int((N - 1) / 2)
     else:
-        assert 0 < start_idx < N
+        assert 0 <= start_idx < N
     device = X0.device
     shape = (bs, N, 3)
 
@@ -310,10 +310,9 @@ def integrate_curvature(
 
     # Calculate curve coordinates
     X[:, start_idx] = X0
-    X[:, start_idx + 1] = X0 + T0 * h
     for i in range(start_idx - 1, -1, -1):
         X[:, i] = X[:, i + 1] - h * T[:, i]
-    for i in range(start_idx + 2, N):
+    for i in range(start_idx + 1, N):
         X[:, i] = X[:, i - 1] + h * T[:, i - 1]
 
     return X, T, M1
@@ -543,6 +542,9 @@ def calculate_parents_losses_curvatures(
         X0: List[torch.Tensor],
         T0: List[torch.Tensor],
         M10: List[torch.Tensor],
+        X0ht: List[torch.Tensor],
+        T0ht: List[torch.Tensor],
+        M10ht: List[torch.Tensor],
         length: List[torch.Tensor],
         curvatures: List[torch.Tensor],
         curvatures_smoothed: List[torch.Tensor],
@@ -556,11 +558,20 @@ def calculate_parents_losses_curvatures(
         # X0 (midpoint) should be close between parent and child
         loss_X0 = torch.sum((X0[d] - X0[d - 1].detach())**2)
 
-        # T0 (initial tangent) direction should be similar
+        # T0 (tangent at midpoint) direction should be similar
         loss_T0 = torch.sum((T0[d] - T0[d - 1].detach())**2)
 
-        # M10 (initial frame) direction should be similar
+        # M10 (frame at midpoint) direction should be similar
         loss_M10 = torch.sum((M10[d] - M10[d - 1].detach())**2)
+
+        # X0ht (end points) should be close between parent and child
+        loss_X0ht = torch.sum((X0ht[d] - X0ht[d - 1].detach())**2)
+
+        # T0ht (tangents at end points) direction should be similar
+        loss_T0ht = torch.sum((T0ht[d] - T0ht[d - 1].detach())**2)
+
+        # M10 (frame at end points) direction should be similar
+        loss_M10ht = torch.sum((M10ht[d] - M10ht[d - 1].detach())**2)
 
         # Lengths should be similar
         loss_l = torch.sum((length[d] - length[d - 1].detach())**2)
@@ -571,7 +582,7 @@ def calculate_parents_losses_curvatures(
         Ks_p = torch.repeat_interleave(Ks_p, repeats=2, dim=1)
         loss_K = torch.sum((Ks_d - Ks_p)**2)
 
-        loss = loss_X0 + loss_T0 + loss_M10 + loss_l + loss_K
+        loss = loss_X0 + loss_T0 + loss_M10 + loss_X0ht + loss_T0ht + loss_M10ht + loss_l + loss_K
         losses.append(loss)
 
     return losses
@@ -636,7 +647,9 @@ def calculate_scores_losses(
 
         # Symmetry loss
         N2 = int(scores_d.shape[1] / 2)
-        loss_sym = torch.sum(((scores_d[:, :N2].flip(dims=(1,)) - scores_d[:, N2:]) / torch.amax(scores_d, dim=-1, keepdim=True))**2)
+        loss_sym = torch.sum(
+            ((scores_d[:, :N2].flip(dims=(1,)) - scores_d[:, N2:]) / torch.amax(scores_d, dim=-1, keepdim=True))**2
+        )
         loss = loss + loss_sym
 
         losses.append(loss)
@@ -806,25 +819,32 @@ def calculate_temporal_losses(
 
 @torch.jit.script
 def calculate_temporal_losses_curvatures(
+        length: List[torch.Tensor],
+        curvatures: List[torch.Tensor],
         X0: List[torch.Tensor],
         T0: List[torch.Tensor],
         M10: List[torch.Tensor],
-        length: List[torch.Tensor],
-        curvatures: List[torch.Tensor],
+        X0ht: Optional[List[torch.Tensor]],
+        T0ht: Optional[List[torch.Tensor]],
+        M10ht: Optional[List[torch.Tensor]],
+        length_prev: Optional[List[torch.Tensor]],
+        curvatures_prev: Optional[List[torch.Tensor]],
         X0_prev: Optional[List[torch.Tensor]],
         T0_prev: Optional[List[torch.Tensor]],
         M10_prev: Optional[List[torch.Tensor]],
-        length_prev: Optional[List[torch.Tensor]],
-        curvatures_prev: Optional[List[torch.Tensor]],
+        X0ht_prev: Optional[List[torch.Tensor]],
+        T0ht_prev: Optional[List[torch.Tensor]],
+        M10ht_prev: Optional[List[torch.Tensor]],
 ) -> List[torch.Tensor]:
     """
     The curvatures should change smoothly in time.
     """
     D = len(curvatures)
+    device = X0[0].device
 
     # If there are no other time points available then just return zeros.
     if X0_prev is None and len(X0[0]) == 1:
-        return [torch.tensor(0., device=X0[0].device) for _ in range(D)]
+        return [torch.tensor(0., device=device) for _ in range(D)]
 
     losses = []
     for d in range(D):
@@ -835,19 +855,49 @@ def calculate_temporal_losses_curvatures(
             X0_d = torch.cat([X0_prev_d, X0_d], dim=0)
         loss_X0 = torch.sum((X0_d[1:] - X0_d[:-1])**2)
 
-        # T0 (initial tangent) direction should be similar
+        # T0 (tangent at midpoint) direction should be similar
         T0_d = T0[d]
         if T0_prev is not None:
             T0_prev_d = T0_prev[d].unsqueeze(0).detach()
             T0_d = torch.cat([T0_prev_d, T0_d], dim=0)
         loss_T0 = torch.sum((T0_d[1:] - T0_d[:-1])**2)
 
-        # M10 (initial frame) direction should be similar
+        # M10 (frame at midpoint) direction should be similar
         M10_d = M10[d]
         if M10_prev is not None:
             M10_prev_d = M10_prev[d].unsqueeze(0).detach()
             M10_d = torch.cat([M10_prev_d, M10_d], dim=0)
         loss_M10 = torch.sum((M10_d[1:] - M10_d[:-1])**2)
+
+        # X0ht (end points) should be close
+        if X0ht is not None:
+            X0ht_d = X0ht[d]
+            if X0ht_prev is not None:
+                X0ht_prev_d = X0ht_prev[d].unsqueeze(0).detach()
+                X0ht_d = torch.cat([X0ht_prev_d, X0ht_d], dim=0)
+            loss_X0ht = torch.sum((X0ht_d[1:] - X0ht_d[:-1])**2)
+        else:
+            loss_X0ht = torch.tensor(0., device=device)
+
+        # T0ht (tangent at end points) direction should be similar
+        if T0ht is not None:
+            T0ht_d = T0ht[d]
+            if T0ht_prev is not None:
+                T0ht_prev_d = T0ht_prev[d].unsqueeze(0).detach()
+                T0ht_d = torch.cat([T0ht_prev_d, T0ht_d], dim=0)
+            loss_T0ht = torch.sum((T0ht_d[1:] - T0ht_d[:-1])**2)
+        else:
+            loss_T0ht = torch.tensor(0., device=device)
+
+        # M10ht (frame at end points) direction should be similar
+        if M10ht is not None:
+            M10ht_d = M10ht[d]
+            if M10ht_prev is not None:
+                M10ht_prev_d = M10ht_prev[d].unsqueeze(0).detach()
+                M10ht_d = torch.cat([M10ht_prev_d, M10ht_d], dim=0)
+            loss_M10ht = torch.sum((M10ht_d[1:] - M10ht_d[:-1])**2)
+        else:
+            loss_M10ht = torch.tensor(0., device=device)
 
         # Lengths should be similar
         length_d = length[d]
@@ -863,7 +913,7 @@ def calculate_temporal_losses_curvatures(
             curvatures_d = torch.cat([curvatures_prev_d, curvatures_d], dim=0)
         loss_K = torch.sum((curvatures_d[1:] - curvatures_d[:-1])**2)
 
-        loss = loss_X0 + loss_T0 + loss_M10 + loss_l + loss_K
+        loss = loss_X0 + loss_T0 + loss_M10 + loss_X0ht + loss_T0ht + loss_M10ht + loss_l + loss_K
         losses.append(loss)
 
     return losses
@@ -889,16 +939,22 @@ def calculate_temporal_losses_curvature_deltas(
 
     # Calculate the temporal losses as usual between previous curve and main curve.
     losses = calculate_temporal_losses_curvatures(
+        [length[d][0].unsqueeze(0) for d in range(D)],
+        [curvatures[d][0].unsqueeze(0) for d in range(D)],
         [X0[d][0].unsqueeze(0) for d in range(D)],
         [T0[d][0].unsqueeze(0) for d in range(D)],
         [M10[d][0].unsqueeze(0) for d in range(D)],
-        [length[d][0].unsqueeze(0) for d in range(D)],
-        [curvatures[d][0].unsqueeze(0) for d in range(D)],
+        None,
+        None,
+        None,
+        length_prev,
+        curvatures_prev,
         X0_prev,
         T0_prev,
         M10_prev,
-        length_prev,
-        curvatures_prev,
+        None,
+        None,
+        None,
     )
 
     # If there are no deltas available then just return zeros.
@@ -1014,16 +1070,25 @@ def calculate_alignment_losses_curvatures(
 @torch.jit.script
 def calculate_consistency_losses_curvatures(
         X: List[torch.Tensor],
+        T: List[torch.Tensor],
+        M1: List[torch.Tensor],
 ) -> List[torch.Tensor]:
     """
-    Curves should be consistent with integration from head or tail.
+    Curves should be consistent with integration from head, tail and midpoint.
     """
     D = len(X)
     losses = []
 
     for d in range(D):
         X_d = X[d]
-        L_ht = (X_d[:, 1] - X_d[:, 2]).norm(dim=-1, p=2).sum(dim=-1).mean()
-        losses.append(L_ht)
+        T_d = T[d]
+        M1_d = M1[d]
+
+        LX = X_d.var(dim=1).sum(dim=(-1, -2)).mean()
+        LT = T_d.var(dim=1).sum(dim=(-1, -2)).mean()
+        LM1 = M1_d.var(dim=1).sum(dim=(-1, -2)).mean()
+
+        L = LX + LT + LM1
+        losses.append(L)
 
     return losses

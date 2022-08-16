@@ -19,6 +19,7 @@ from torch.utils.tensorboard import SummaryWriter
 from simple_worm.plot3d import MidpointNormalize
 from wormlab3d import logger, LOGS_PATH, START_TIMESTAMP
 from wormlab3d.data.model import Trial, MFCheckpoint, MFParameters, Reconstruction
+from wormlab3d.data.model.mf_parameters import CURVATURE_INTEGRATION_MIDPOINT, CURVATURE_INTEGRATION_HT
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
 from wormlab3d.midlines3d.args_finder import ParameterArgs, RuntimeArgs, SourceArgs
 from wormlab3d.midlines3d.frame_state import FrameState, BUFFER_NAMES, PARAMETER_NAMES, CAM_PARAMETER_NAMES, \
@@ -447,7 +448,7 @@ class Midline3DFinder:
 
         # Merge the curvature parameters into a single parameter group
         lbfgs_params = []
-        lbfgs_keys = ['curvatures', 'T0', 'M10']
+        lbfgs_keys = ['curvatures', 'T0', 'M10', 'T0ht', 'M10ht']
         if p.curvature_mode:
             del params['points']
             point_params = []
@@ -958,6 +959,12 @@ class Midline3DFinder:
         # Outputs
         masks = None
         detection_masks = None
+        X0 = None
+        T0 = None
+        M10 = None
+        X0ht = None
+        T0ht = None
+        M10ht = None
         points_2d = None
         scores = None
         curvatures_smoothed = None
@@ -972,9 +979,9 @@ class Midline3DFinder:
         stats = None
 
         def closure():
-            nonlocal masks, detection_masks, points_2d, scores, curvatures_smoothed, points_smoothed, \
-                sigmas_smoothed, exponents_smoothed, intensities_smoothed, masks_target_residuals, \
-                loss, loss_global, losses_depths, stats
+            nonlocal masks, detection_masks, X0, T0, M10, X0ht, T0ht, M10ht, points_2d, scores, \
+                curvatures_smoothed, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed, \
+                masks_target_residuals, loss, loss_global, losses_depths, stats
             self.optimiser.zero_grad()
 
             # Collect parameters
@@ -989,6 +996,9 @@ class Midline3DFinder:
             X0 = [torch.stack([f.get_state('X0')[d] for f in self.frame_batch]) for d in range(D)]
             T0 = [torch.stack([f.get_state('T0')[d] for f in self.frame_batch]) for d in range(D)]
             M10 = [torch.stack([f.get_state('M10')[d] for f in self.frame_batch]) for d in range(D)]
+            X0ht = [torch.stack([f.get_state('X0ht')[d] for f in self.frame_batch]) for d in range(D)]
+            T0ht = [torch.stack([f.get_state('T0ht')[d] for f in self.frame_batch]) for d in range(D)]
+            M10ht = [torch.stack([f.get_state('M10ht')[d] for f in self.frame_batch]) for d in range(D)]
             length = [torch.stack([f.get_state('length')[d] for f in self.frame_batch]) for d in range(D)]
             curvatures = [torch.stack([f.get_state('curvatures')[d] for f in self.frame_batch]) for d in range(D)]
             points = [torch.stack([f.get_state('points')[d] for f in self.frame_batch]) for d in range(D)]
@@ -1002,13 +1012,16 @@ class Midline3DFinder:
                            or (p.length_regrow_steps is not None and self.checkpoint.step_frame < p.length_regrow_steps)
 
             # Generate the outputs
-            masks, detection_masks, points_raw, points_2d, scores, curvatures_smoothed, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed = self.model.forward(
+            masks, detection_masks, X_raw, T_raw, M1_raw, points_2d, scores, curvatures_smoothed, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed = self.model.forward(
                 cam_coeffs=cam_coeffs,
                 points_3d_base=points_3d_base,
                 points_2d_base=points_2d_base,
                 X0=X0,
                 T0=T0,
                 M10=M10,
+                X0ht=X0ht,
+                T0ht=T0ht,
+                M10ht=M10ht,
                 length=length,
                 curvatures=curvatures,
                 points=points,
@@ -1026,15 +1039,50 @@ class Midline3DFinder:
             # Generate targets with added residuals
             masks_target_residuals = generate_residual_targets(masks_target, masks, detection_masks)
 
+            # Update HT data
+            if p.curvature_integration == CURVATURE_INTEGRATION_MIDPOINT:
+                X0ht = [
+                    torch.stack([X_raw[d][:, 0, 0], X_raw[d][:, 0, -1]], dim=1)
+                    for d in range(D)
+                ]
+                T0ht = [
+                    torch.stack([T_raw[d][:, 0, 0], T_raw[d][:, 0, -1]], dim=1)
+                    for d in range(D)
+                ]
+                M10ht = [
+                    torch.stack([M1_raw[d][:, 0, 0], M1_raw[d][:, 0, -1]], dim=1)
+                    for d in range(D)
+                ]
+
+            # Update midpoint data
+            elif p.curvature_integration == CURVATURE_INTEGRATION_HT:
+                X0 = [
+                    X_raw[d][:, 0, int((2**(p.depth_min + d)) / 2)]
+                    for d in range(D)
+                ]
+                T0 = [
+                    T_raw[d][:, 0, int((2**(p.depth_min + d)) / 2)]
+                    for d in range(D)
+                ]
+                M10 = [
+                    M1_raw[d][:, 0, int((2**(p.depth_min + d)) / 2)]
+                    for d in range(D)
+                ]
+
             # Calculate the losses
             loss, loss_global, losses_depths, stats = self._calculate_losses(
                 cam_rotation_preangles=cam_rotation_preangles,
                 X0=X0,
                 T0=T0,
                 M10=M10,
+                X0ht=X0ht,
+                T0ht=T0ht,
+                M10ht=M10ht,
                 length=length,
                 curvatures=curvatures,
-                points_raw=points_raw,
+                X_raw=X_raw,
+                T_raw=T_raw,
+                M1_raw=M1_raw,
                 points=points,
                 masks_target=masks_target_residuals,
                 sigmas=sigmas,
@@ -1077,12 +1125,13 @@ class Midline3DFinder:
         if is_bad(loss):
             raise RuntimeError('Bad loss!')
 
+        # Update frames
+        self._update_frame_states(masks, masks_target_residuals, X0, T0, M10, X0ht, T0ht, M10ht, points_2d, scores,
+                                  sigmas_smoothed, exponents_smoothed, intensities_smoothed,
+                                  points_smoothed, curvatures_smoothed, stats)
+
         # Clamp parameters
         self._clamp_parameters(points_smoothed)
-
-        # Update frames
-        self._update_frame_states(masks, masks_target_residuals, points_2d, scores, sigmas_smoothed,
-                                  exponents_smoothed, intensities_smoothed, points_smoothed, curvatures_smoothed, stats)
 
         return loss, loss_global, losses_depths, stats
 
@@ -1090,6 +1139,12 @@ class Midline3DFinder:
             self,
             masks: List[torch.Tensor],
             masks_target_residuals: List[torch.Tensor],
+            X0: List[torch.Tensor],
+            T0: List[torch.Tensor],
+            M10: List[torch.Tensor],
+            X0ht: List[torch.Tensor],
+            T0ht: List[torch.Tensor],
+            M10ht: List[torch.Tensor],
             points_2d: List[torch.Tensor],
             scores: List[torch.Tensor],
             sigmas_smoothed: List[torch.Tensor],
@@ -1122,6 +1177,18 @@ class Midline3DFinder:
                                               [points_smoothed[d][self.active_idx] for d in range(D)])
             self.master_frame_state.set_state('curvatures_smoothed',
                                               [curvatures_smoothed[d][self.active_idx] for d in range(D)])
+
+            # Update HT data
+            if p.curvature_integration == CURVATURE_INTEGRATION_MIDPOINT:
+                self.master_frame_state.set_state('X0ht', [X0ht[d][self.active_idx] for d in range(D)])
+                self.master_frame_state.set_state('T0ht', [T0ht[d][self.active_idx] for d in range(D)])
+                self.master_frame_state.set_state('M10ht', [M10ht[d][self.active_idx] for d in range(D)])
+
+            elif p.curvature_integration == CURVATURE_INTEGRATION_HT:
+                self.master_frame_state.set_state('X0', [X0[d][self.active_idx] for d in range(D)])
+                self.master_frame_state.set_state('T0', [T0[d][self.active_idx] for d in range(D)])
+                self.master_frame_state.set_state('M10', [M10[d][self.active_idx] for d in range(D)])
+
         else:
             self.master_frame_state.set_state('curvatures', [curvatures_smoothed[d][self.active_idx] for d in range(D)])
 
@@ -1138,6 +1205,18 @@ class Midline3DFinder:
             if p.curvature_mode:
                 fs.set_state('points', [points_smoothed[d][i] for d in range(D)])
                 fs.set_state('curvatures_smoothed', [curvatures_smoothed[d][i] for d in range(D)])
+
+                # Update HT data
+                if p.curvature_integration == CURVATURE_INTEGRATION_MIDPOINT:
+                    fs.set_state('X0ht', [X0ht[d][i] for d in range(D)])
+                    fs.set_state('T0ht', [T0ht[d][i] for d in range(D)])
+                    fs.set_state('M10ht', [M10ht[d][i] for d in range(D)])
+
+                elif p.curvature_integration == CURVATURE_INTEGRATION_HT:
+                    fs.set_state('X0', [X0[d][i] for d in range(D)])
+                    fs.set_state('T0', [T0[d][i] for d in range(D)])
+                    fs.set_state('M10', [M10[d][i] for d in range(D)])
+
             else:
                 fs.set_state('curvatures', [curvatures_smoothed[d][i] for d in range(D)])
 
@@ -1147,9 +1226,14 @@ class Midline3DFinder:
             X0: List[torch.Tensor],
             T0: List[torch.Tensor],
             M10: List[torch.Tensor],
+            X0ht: List[torch.Tensor],
+            T0ht: List[torch.Tensor],
+            M10ht: List[torch.Tensor],
             length: List[torch.Tensor],
             curvatures: List[torch.Tensor],
-            points_raw: List[torch.Tensor],
+            X_raw: List[torch.Tensor],
+            T_raw: List[torch.Tensor],
+            M1_raw: List[torch.Tensor],
             points: List[torch.Tensor],
             masks_target: List[torch.Tensor],
             sigmas: List[torch.Tensor],
@@ -1185,6 +1269,9 @@ class Midline3DFinder:
             X0_prev = self.last_frame_state.get_state('X0')
             T0_prev = self.last_frame_state.get_state('T0')
             M10_prev = self.last_frame_state.get_state('M10')
+            X0ht_prev = self.last_frame_state.get_state('X0ht')
+            T0ht_prev = self.last_frame_state.get_state('T0ht')
+            M10ht_prev = self.last_frame_state.get_state('M10ht')
             length_prev = self.last_frame_state.get_state('length')
             curvatures_prev = self.last_frame_state.get_state('curvatures')
             points_prev = self.last_frame_state.get_state('points')
@@ -1192,6 +1279,9 @@ class Midline3DFinder:
             X0_prev = None
             T0_prev = None
             M10_prev = None
+            X0ht_prev = None
+            T0ht_prev = None
+            M10ht_prev = None
             length_prev = None
             curvatures_prev = None
             points_prev = None
@@ -1204,13 +1294,15 @@ class Midline3DFinder:
 
         if p.curvature_mode:
             losses = {**losses, **{
-                'parents': calculate_parents_losses_curvatures(X0, T0, M10, length, curvatures, curvatures_smoothed),
+                'parents': calculate_parents_losses_curvatures(
+                    X0, T0, M10, X0ht, T0ht, M10ht, length, curvatures, curvatures_smoothed
+                ),
                 'smoothness': calculate_smoothness_losses_curvatures(curvatures),
                 'intersections': calculate_intersection_losses_curvatures(
                     points_smoothed, sigmas_smoothed, p.curvature_max
                 ),
                 'alignment': calculate_alignment_losses_curvatures(curvatures, curvatures_prev),
-                'consistency': calculate_consistency_losses_curvatures(points_raw),
+                'consistency': calculate_consistency_losses_curvatures(X_raw, T_raw, M1_raw),
             }}
             if p.curvature_deltas:
                 losses['temporal'] = calculate_temporal_losses_curvature_deltas(
@@ -1220,8 +1312,8 @@ class Midline3DFinder:
                 losses['curvature'] = calculate_curvature_losses_curvature_deltas(curvatures)
             else:
                 losses['temporal'] = calculate_temporal_losses_curvatures(
-                    X0, T0, M10, length, curvatures,
-                    X0_prev, T0_prev, M10_prev, length_prev, curvatures_prev
+                    length, curvatures, X0, T0, M10, X0ht, T0ht, M10ht,
+                    length_prev, curvatures_prev, X0_prev, T0_prev, M10_prev, X0ht_prev, T0ht_prev, M10ht_prev
                 )
                 losses['curvature'] = calculate_curvature_losses_curvatures(curvatures)
         else:
@@ -1380,16 +1472,23 @@ class Midline3DFinder:
                         break
                     T0 = fs.get_state('T0')
                     M10 = fs.get_state('M10')
+                    T0ht = fs.get_state('T0ht')
+                    M10ht = fs.get_state('M10ht')
                     length = fs.get_state('length')
                     curvatures = fs.get_state('curvatures')
                     for d in range(D):
-                        # T0 should be normalised
+                        # Tangents should be normalised
                         T0[d].data = normalise(T0[d])
+                        T0ht[d].data = normalise(T0ht[d])
 
-                        # M10 should be orthogonal to T0 and normalised
+                        # M1 should be orthogonal to T and normalised
                         M10_d = normalise(M10[d])
                         M10_d = orthogonalise(M10_d.unsqueeze(0), T0[d].unsqueeze(0))[0]
                         M10[d].data = normalise(M10_d)
+
+                        M10ht_d = normalise(M10ht[d])
+                        M10ht_d = orthogonalise(M10ht_d, T0ht[d])
+                        M10ht[d].data = normalise(M10ht_d)
 
                         # In length warmup phase, linearly grow the length from length_init to length_min
                         if not self.runtime_args.resume \
@@ -1846,7 +1945,7 @@ class Midline3DFinder:
         # Stitch images together and add labels on the left
         frames = []
         bs = len(self.frame_batch)
-        label_positions = np.linspace(1 - 1/bs/2, 1/bs/2, bs)  # + 1)[1:-1]
+        label_positions = np.linspace(1 - 1 / bs / 2, 1 / bs / 2, bs)  # + 1)[1:-1]
         for i, frame_state in enumerate(self.frame_batch):
             images = to_numpy(frame_state.get_state('images'))
             frames.append(np.concatenate(1 - images, axis=1))

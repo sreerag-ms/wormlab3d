@@ -1,6 +1,7 @@
 from argparse import ArgumentParser, _ArgumentGroup
 
-from wormlab3d.data.model.mf_parameters import MFParameters, RENDER_MODE_GAUSSIANS, RENDER_MODES
+from wormlab3d.data.model.mf_parameters import MFParameters, RENDER_MODE_GAUSSIANS, RENDER_MODES, \
+    CURVATURE_INTEGRATION_MIDPOINT, CURVATURE_INTEGRATION_OPTIONS
 from wormlab3d.nn.args.base_args import BaseArgs
 from wormlab3d.nn.args.optimiser_args import OPTIMISER_ALGORITHMS, LOSS_MSE, OPTIMISER_ADAM, LOSSES
 from wormlab3d.toolkit.util import str2bool
@@ -32,6 +33,7 @@ class ParameterArgs(BaseArgs):
             curvature_max: float = 2.,
             curvature_relaxation_factor: float = None,
             curvature_smoothing: bool = True,
+            curvature_integration: str = CURVATURE_INTEGRATION_MIDPOINT,
 
             length_min: float = None,
             length_max: float = None,
@@ -132,6 +134,13 @@ class ParameterArgs(BaseArgs):
             curvature_relaxation_factor = None
         self.curvature_relaxation_factor = curvature_relaxation_factor
         self.curvature_smoothing = curvature_smoothing
+        self.curvature_integration = curvature_integration
+        if curvature_integration != CURVATURE_INTEGRATION_MIDPOINT:
+            assert not curvature_deltas, 'Only midpoint integration supported for curvature-deltas!'
+            assert centre_shift_every_n_steps is None or centre_shift_every_n_steps <= 0, \
+                'Centre shift only supported for midpoint integration!'
+            assert not clamp_X0, 'clamp-X0 is only supported for midpoint integration!'
+            assert not curvature_smoothing, 'curvature-smoothing is only supported for midpoint integration!'
 
         if not curvature_mode:
             length_min = None
@@ -173,7 +182,7 @@ class ParameterArgs(BaseArgs):
         self.dpsi_limit = dpsi_limit
         self.clamp_X0 = clamp_X0
 
-        if not curvature_mode:
+        if not curvature_mode or centre_shift_every_n_steps <= 0:
             centre_shift_every_n_steps = None
         self.centre_shift_every_n_steps = centre_shift_every_n_steps
         if centre_shift_every_n_steps is not None:
@@ -300,6 +309,9 @@ class ParameterArgs(BaseArgs):
                            help='The curvature is scaled by this factor at the start of each new frame, if defined.')
         group.add_argument('--curvature-smoothing', type=str2bool, default=True,
                            help='Apply smoothing to the raw curvature before integrating. Default=True.')
+        group.add_argument('--curvature-integration', type=str,
+                           default=CURVATURE_INTEGRATION_MIDPOINT, choices=CURVATURE_INTEGRATION_OPTIONS,
+                           help='Integrate using a single midpoint-out ("mp", default) or from both ends ("ht").')
 
         group.add_argument('--length-min', type=float,
                            help='Minimum worm length (only used in curvature mode). Default=0.5.')
