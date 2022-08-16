@@ -409,6 +409,7 @@ class Midline3DFinder:
             curvature_mode=p.curvature_mode,
             curvature_deltas=p.curvature_deltas,
             curvature_smoothing=p.curvature_smoothing,
+            curvature_integration=p.curvature_integration,
             length_min=p.length_min,
             length_max=p.length_max,
             curvature_max=p.curvature_max,

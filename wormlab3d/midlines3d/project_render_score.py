@@ -430,12 +430,12 @@ class ProjectRenderScoreModel(nn.Module):
                                                                 M10ht_d[:, 1], start_idx=N - 1)
 
                         # Build again from the midpoint
-                        N2 = int(N / 2)
+                        N2 = int((N - 1) / 2)
                         points_d = (Xh_d + Xt_d) / 2
                         Tht_d = (Th_d + Tt_d) / 2
                         M1ht_d = (M1h_d + M1t_d) / 2
-                        Xc_d, Tc_d, M1c_d = integrate_curvature(points_d[N2], Tht_d[N2], length_d, curvatures_d,
-                                                                M1ht_d[N2])
+                        Xc_d, Tc_d, M1c_d = integrate_curvature(points_d[:, N2], Tht_d[:, N2], length_d, curvatures_d,
+                                                                M1ht_d[:, N2], start_idx=N2)
 
                     # Log centre, head and tail curves
                     X_raw_d = torch.stack([Xc_d, Xh_d, Xt_d], dim=1)
