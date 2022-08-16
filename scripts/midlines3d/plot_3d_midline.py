@@ -4,21 +4,22 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
+from mayavi import mlab
 
 from simple_worm.frame import FrameNumpy
 from simple_worm.plot3d import cla, FrameArtist
 from wormlab3d import logger, CAMERA_IDXS, LOGS_PATH, START_TIMESTAMP
 from wormlab3d.data.model import Trial, Midline3D
 from wormlab3d.postures.natural_frame import NaturalFrame
-from wormlab3d.postures.plot_utils import plot_natural_frame_3d
+from wormlab3d.postures.plot_utils import plot_natural_frame_3d, plot_natural_frame_3d_mlab
 from wormlab3d.toolkit.plot_utils import equal_aspect_ratio
 from wormlab3d.toolkit.util import parse_target_arguments
 
 MAX_ATTEMPTS = 10
 
-img_extension = 'svg'
+img_extension = 'png'
 show_plots = True
-save_plots = False
+save_plots = True
 invert = True
 
 if save_plots:
@@ -92,6 +93,74 @@ def plot_3d(midline: Midline3D):
 
     if show_plots:
         plt.show()
+
+
+def plot_3d_mlab(
+        midline: Midline3D,
+        interactive: bool = True,
+        transparent_bg: bool = True,
+):
+    """
+    3D plot of a midline using mayavi.
+    """
+    frame = midline.frame
+    trial = frame.trial
+    fig = plt.figure()
+    ax = fig.add_subplot(projection='3d')
+    ax.set_title(
+        f'Trial: {trial.id}. \n'
+        f'Frame: {frame.frame_num}'
+    )
+    NF = NaturalFrame(midline.X)
+
+    # 3D plot of eigenworm
+    fig = plot_natural_frame_3d_mlab(
+        NF,
+        azimuth=155,
+        elevation=165,
+        roll=155,
+        distance=1.1,
+        midline_opts={'line_width': 18, 'opacity': 1, 'tube_radius': 0.003},
+        mesh_opts={'opacity': 0.4},
+        show_frame_arrows=False,
+        show_pca_arrows=False,
+        show_outline=False,
+        show_axis=False,
+        offscreen=not interactive,
+    )
+
+    if save_plots:
+        path = LOGS_PATH / f'{START_TIMESTAMP}' \
+                           f'_trial={trial.id}' \
+                           f'_frame={frame.frame_num}' \
+                           f'_midline={midline.id}' \
+                           f'_3D.{img_extension}'
+        logger.info(f'Saving plot to {path}.')
+
+        if not transparent_bg:
+            mlab.savefig(str(path), figure=fig)
+        else:
+            fig.scene._lift()
+            img = mlab.screenshot(figure=fig, mode='rgba', antialiased=True)
+            img = Image.fromarray((img * 255).astype(np.uint8), 'RGBA')
+            img.save(path)
+
+    if show_plots:
+        if interactive:
+            mlab.show()
+        else:
+            fig.scene._lift()
+            img = mlab.screenshot(figure=fig, mode='rgba', antialiased=True)
+            fig_mpl = plt.figure(figsize=(10, 10))
+            ax = fig_mpl.add_subplot()
+            ax.imshow(img)
+            ax.axis('off')
+            fig_mpl.tight_layout()
+            plt.show()
+            plt.close(fig_mpl)
+
+    mlab.clf(fig)
+    mlab.close()
 
 
 def plot_3d_with_pca(midline: Midline3D):
@@ -229,6 +298,7 @@ if __name__ == '__main__':
     # interactive_plots()
     mid = get_midline()
     # plot_3d(mid)
+    plot_3d_mlab(mid, interactive=False, transparent_bg=True)
     # plot_3d_with_pca(mid)
     # plot_reprojections(mid)
-    plot_reprojection_singles(mid)
+    # plot_reprojection_singles(mid)
