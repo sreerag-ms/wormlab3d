@@ -673,8 +673,8 @@ class FrameState(nn.Module):
                 M10=M10ht[0][1].unsqueeze(0),
                 start_idx=N - 1
             )
-            assert torch.allclose(X_d, Xh, atol=1e-2)
-            assert torch.allclose(X_d, Xt, atol=1e-2)
+            assert torch.allclose(X_d, Xh, atol=1e-1)
+            assert torch.allclose(X_d, Xt, atol=1e-1)
             assert torch.allclose(T_d, Th, atol=1e-1)
             assert torch.allclose(T_d, Tt, atol=1e-1)
             assert torch.allclose(M1_d, M1h, atol=1e-1)
