@@ -681,7 +681,7 @@ class Midline3DFinder:
                     skip = p.frame_skip if p.frame_skip is not None else 1
                     for j in range(skip):
                         if self.last_frame_state is not None:
-                            plot_frame_num = self.last_frame_state.frame_num - 1 + direction * (j + 1)
+                            plot_frame_num = self.last_frame_state.frame_num + direction * (j + 1)
                         else:
                             plot_frame_num = frame_num - 1 + direction * (j + 1)
                         if (plot_frame_num - first_frame + 1) % ra.plot_every_n_frames == 0:
