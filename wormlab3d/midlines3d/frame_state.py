@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch import nn
 from torchvision.transforms.functional import gaussian_blur
 
-from wormlab3d import CAMERA_IDXS
+from wormlab3d import CAMERA_IDXS, logger
 from wormlab3d.data.model import Cameras, MFParameters, Frame
 from wormlab3d.data.model.mf_parameters import CURVATURE_INTEGRATION_MIDPOINT
 from wormlab3d.midlines3d.mf_methods import make_rotation_matrix, normalise, integrate_curvature, an_orthonormal
@@ -629,7 +629,11 @@ class FrameState(nn.Module):
             else:
                 p.requires_grad_(False)
 
-    def update_ht_data_from_mp(self):
+    def update_ht_data_from_mp(
+            self,
+            verification_threshold: float = 1e-1,
+            abort_on_verification_errors: bool = False
+    ):
         """
         Update the ht parameters using the midpoint integration method.
         """
@@ -658,27 +662,40 @@ class FrameState(nn.Module):
 
             # Verify that the curves match
             Xh, Th, M1h = integrate_curvature(
-                X0ht[0][0].unsqueeze(0),
-                T0ht[0][0].unsqueeze(0),
+                X0ht[i][0].unsqueeze(0),
+                T0ht[i][0].unsqueeze(0),
                 self.length[i].unsqueeze(0),
                 self.curvatures[i].unsqueeze(0),
                 M10=M10ht[0][0].unsqueeze(0),
                 start_idx=0
             )
             Xt, Tt, M1t = integrate_curvature(
-                X0ht[0][1].unsqueeze(0),
-                T0ht[0][1].unsqueeze(0),
+                X0ht[i][1].unsqueeze(0),
+                T0ht[i][1].unsqueeze(0),
                 self.length[i].unsqueeze(0),
                 self.curvatures[i].unsqueeze(0),
-                M10=M10ht[0][1].unsqueeze(0),
+                M10=M10ht[i][1].unsqueeze(0),
                 start_idx=N - 1
             )
-            assert torch.allclose(X_d, Xh, atol=1e-1)
-            assert torch.allclose(X_d, Xt, atol=1e-1)
-            assert torch.allclose(T_d, Th, atol=1e-1)
-            assert torch.allclose(T_d, Tt, atol=1e-1)
-            assert torch.allclose(M1_d, M1h, atol=1e-1)
-            assert torch.allclose(M1_d, M1t, atol=1e-1)
+
+            L_Xh = (X_d - Xh).abs().max()
+            L_Xt = (X_d - Xt).abs().max()
+            L_Th = (T_d - Th).abs().max()
+            L_Tt = (T_d - Tt).abs().max()
+            L_M1h = (M1_d - M1h).abs().max()
+            L_M1t = (M1_d - M1t).abs().max()
+            errors = [L_Xh, L_Xt, L_Th, L_Tt, L_M1h, L_M1t]
+            keys = ['Xh', 'Xt', 'Th', 'Tt', 'M1h', 'M1t']
+            fails = [err > verification_threshold for err in errors]
+            if any(fails):
+                msg = f'Verification failed at threshold {verification_threshold:.2E}!'
+                for k, l, f in zip(keys, errors, fails):
+                    if f:
+                        msg += f' {k}: {l:.4f}.'
+                if abort_on_verification_errors:
+                    raise RuntimeError(msg)
+                else:
+                    logger.warning(msg)
 
         self.set_state('X0ht', X0ht)
         self.set_state('T0ht', T0ht)
