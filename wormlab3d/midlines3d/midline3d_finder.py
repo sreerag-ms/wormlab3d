@@ -1312,10 +1312,16 @@ class Midline3DFinder:
                 )
                 losses['curvature'] = calculate_curvature_losses_curvature_deltas(curvatures)
             else:
-                losses['temporal'] = calculate_temporal_losses_curvatures(
-                    length, curvatures, X0, T0, M10, X0ht, T0ht, M10ht,
-                    length_prev, curvatures_prev, X0_prev, T0_prev, M10_prev, X0ht_prev, T0ht_prev, M10ht_prev
-                )
+                if p.curvature_integration == CURVATURE_INTEGRATION_MIDPOINT:
+                    losses['temporal'] = calculate_temporal_losses_curvatures(
+                        length, curvatures, X0, T0, M10, None, None, None,
+                        length_prev, curvatures_prev, X0_prev, T0_prev, M10_prev, None, None, None
+                    )
+                else:
+                    losses['temporal'] = calculate_temporal_losses_curvatures(
+                        length, curvatures, None, None, None, X0ht, T0ht, M10ht,
+                        length_prev, curvatures_prev, None, None, None, X0ht_prev, T0ht_prev, M10ht_prev
+                    )
                 losses['curvature'] = calculate_curvature_losses_curvatures(curvatures)
         else:
             losses = {**losses, **{

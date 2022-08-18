@@ -821,9 +821,9 @@ def calculate_temporal_losses(
 def calculate_temporal_losses_curvatures(
         length: List[torch.Tensor],
         curvatures: List[torch.Tensor],
-        X0: List[torch.Tensor],
-        T0: List[torch.Tensor],
-        M10: List[torch.Tensor],
+        X0: Optional[List[torch.Tensor]],
+        T0: Optional[List[torch.Tensor]],
+        M10: Optional[List[torch.Tensor]],
         X0ht: Optional[List[torch.Tensor]],
         T0ht: Optional[List[torch.Tensor]],
         M10ht: Optional[List[torch.Tensor]],
@@ -840,34 +840,43 @@ def calculate_temporal_losses_curvatures(
     The curvatures should change smoothly in time.
     """
     D = len(curvatures)
-    device = X0[0].device
+    device = length[0].device
 
     # If there are no other time points available then just return zeros.
-    if X0_prev is None and len(X0[0]) == 1:
+    if length_prev is None and len(length[0]) == 1:
         return [torch.tensor(0., device=device) for _ in range(D)]
 
     losses = []
     for d in range(D):
         # X0 (midpoint) should be close
-        X0_d = X0[d]
-        if X0_prev is not None:
-            X0_prev_d = X0_prev[d].unsqueeze(0).detach()
-            X0_d = torch.cat([X0_prev_d, X0_d], dim=0)
-        loss_X0 = torch.sum((X0_d[1:] - X0_d[:-1])**2)
+        if X0 is not None:
+            X0_d = X0[d]
+            if X0_prev is not None:
+                X0_prev_d = X0_prev[d].unsqueeze(0).detach()
+                X0_d = torch.cat([X0_prev_d, X0_d], dim=0)
+            loss_X0 = torch.sum((X0_d[1:] - X0_d[:-1])**2)
+        else:
+            loss_X0 = torch.tensor(0., device=device)
 
         # T0 (tangent at midpoint) direction should be similar
-        T0_d = T0[d]
-        if T0_prev is not None:
-            T0_prev_d = T0_prev[d].unsqueeze(0).detach()
-            T0_d = torch.cat([T0_prev_d, T0_d], dim=0)
-        loss_T0 = torch.sum((T0_d[1:] - T0_d[:-1])**2)
+        if T0 is not None:
+            T0_d = T0[d]
+            if T0_prev is not None:
+                T0_prev_d = T0_prev[d].unsqueeze(0).detach()
+                T0_d = torch.cat([T0_prev_d, T0_d], dim=0)
+            loss_T0 = torch.sum((T0_d[1:] - T0_d[:-1])**2)
+        else:
+            loss_T0 = torch.tensor(0., device=device)
 
         # M10 (frame at midpoint) direction should be similar
-        M10_d = M10[d]
-        if M10_prev is not None:
-            M10_prev_d = M10_prev[d].unsqueeze(0).detach()
-            M10_d = torch.cat([M10_prev_d, M10_d], dim=0)
-        loss_M10 = torch.sum((M10_d[1:] - M10_d[:-1])**2)
+        if M10 is not None:
+            M10_d = M10[d]
+            if M10_prev is not None:
+                M10_prev_d = M10_prev[d].unsqueeze(0).detach()
+                M10_d = torch.cat([M10_prev_d, M10_d], dim=0)
+            loss_M10 = torch.sum((M10_d[1:] - M10_d[:-1])**2)
+        else:
+            loss_M10 = torch.tensor(0., device=device)
 
         # X0ht (end points) should be close
         if X0ht is not None:
