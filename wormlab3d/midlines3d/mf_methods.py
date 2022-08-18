@@ -1092,3 +1092,21 @@ def calculate_consistency_losses_curvatures(
         losses.append(L)
 
     return losses
+
+
+@torch.jit.script
+def calculate_consistency_losses_curvatures_ht(
+        X: List[torch.Tensor],
+) -> List[torch.Tensor]:
+    """
+    Curves should be consistent with integration from head or tail.
+    """
+    D = len(X)
+    losses = []
+
+    for d in range(D):
+        X_d = X[d]
+        L_ht = (X_d[:, 1] - X_d[:, 2]).norm(dim=-1, p=2).sum(dim=-1).mean()
+        losses.append(L_ht)
+
+    return losses
