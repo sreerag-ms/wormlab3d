@@ -1,7 +1,7 @@
 from argparse import ArgumentParser, Namespace
 
 from simple_worm.material_parameters import MP_DEFAULT_K
-from wormlab3d.data.model.midline3d import M3D_SOURCES, M3D_SOURCE_RECONST
+from wormlab3d.data.model.midline3d import M3D_SOURCES, M3D_SOURCE_MF
 from wormlab3d.particles.particle_explorer import DIST_TYPES
 from wormlab3d.toolkit.util import str2bool
 from wormlab3d.trajectories.displacement import DISPLACEMENT_AGGREGATION_OPTIONS, DISPLACEMENT_AGGREGATION_SQUARED_SUM
@@ -12,6 +12,7 @@ def get_args(
         include_msd_options: bool = True,
         include_K_options: bool = True,
         include_planarity_options: bool = True,
+        include_helicity_options: bool = True,
         include_manoeuvre_options: bool = True,
         include_pe_options: bool = True,
         validate_source: bool = True
@@ -28,7 +29,7 @@ def get_args(
     parser.add_argument('--trial', type=int, help='Trial id.', required=False)
     parser.add_argument('--trials', type=lambda s: [int(item) for item in s.split(',')], help='Trial ids.',
                         required=False)
-    parser.add_argument('--midline3d-source', type=str, default=M3D_SOURCE_RECONST, choices=M3D_SOURCES,
+    parser.add_argument('--midline3d-source', type=str, default=M3D_SOURCE_MF, choices=M3D_SOURCES,
                         help='Midline3D source.')
     parser.add_argument('--midline3d-source-file', type=str, help='Midline3D source file.')
     parser.add_argument('--start-frame', type=int, help='Frame number to start from.')
@@ -75,6 +76,11 @@ def get_args(
     if include_planarity_options:
         parser.add_argument('--planarity-window', type=int, default=5,
                             help='Number of frames to use when calculating the planarity measure.')
+
+    # Helicity arguments
+    if include_helicity_options:
+        parser.add_argument('--helicity-window', type=int, default=50,
+                            help='Number of frames to use when calculating the helicity measure.')
 
     # Manoeuvre arguments
     if include_manoeuvre_options:

@@ -10,9 +10,10 @@ from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from sklearn.decomposition import PCA
 
 from simple_worm.frame import FrameSequenceNumpy
-from simple_worm.plot3d import FrameArtist
+from simple_worm.plot3d import FrameArtist, MidpointNormalize
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.data.model import Trial
+from wormlab3d.postures.helicities import calculate_helicities, plot_helicities, calculate_trajectory_helicities
 from wormlab3d.simple_worm.estimate_k import get_K_estimates_from_args
 from wormlab3d.toolkit.plot_utils import tex_mode, equal_aspect_ratio, make_box_from_pca
 from wormlab3d.trajectories.args import get_args
@@ -22,7 +23,7 @@ from wormlab3d.trajectories.pca import get_planarity_from_args
 from wormlab3d.trajectories.util import calculate_speeds, calculate_htd
 
 animate = False
-show_plots = False
+show_plots = True
 save_plots = True
 img_extension = 'png'
 fps = 25
@@ -52,6 +53,7 @@ def make_plot(
         draw_worm: bool = True,
         show_axis: bool = True,
         show_ticks: bool = True,
+        midpoint_norm: bool = False
 ):
     x, y, z = X_slice.T
     if X_full is None:
@@ -61,7 +63,7 @@ def make_plot(
     if colours is None:
         colours = np.linspace(0, 1, len(X_slice))
     cmap = plt.get_cmap(cmap)
-    c = [cmap(c_) for c_ in colours]
+    # c = [cmap(c_) for c_ in colours]
 
     # Create figure if required
     return_ax = False
@@ -73,7 +75,8 @@ def make_plot(
         return_ax = True
 
     # Scatter the vertices
-    s = ax.scatter(x, y, z, c=c, s=10, alpha=0.4, zorder=-1)
+    norm = MidpointNormalize(midpoint=0) if midpoint_norm else None
+    s = ax.scatter(x, y, z, c=colours, cmap=cmap, s=10, alpha=0.4, zorder=-1, norm=norm)
     if show_colourbar:
         fig.colorbar(s)
 
@@ -207,7 +210,8 @@ def plot_trajectory_signed_speed():
         X_slice=X_slice,
         colours=signed_speeds,
         cmap='PRGn',
-        show_colourbar=True
+        show_colourbar=True,
+        midpoint_norm=True
     )
 
 
@@ -239,6 +243,15 @@ def plot_trajectory_planarity():
     X_full, X_slice = get_trajectory(args)
     planarity = get_planarity_from_args(args)
 
+    # Pad planarity to match trajectories
+    ps_l = int((len(X_full) - len(planarity)) / 2)
+    ps_r = len(X_full) - len(planarity) - ps_l
+    planarity = np.concatenate([
+        np.ones(ps_l) * planarity[0],
+        planarity,
+        np.ones(ps_r) * planarity[-1]
+    ])
+
     make_plot(
         title=f'Planarity. Trial {args.trial}. PCA window: {args.planarity_window} frames.',
         filename=f'trajectory_planarity_w={args.planarity_window}_trial={args.trial}_{args.midline3d_source}',
@@ -248,6 +261,90 @@ def plot_trajectory_planarity():
         cmap='OrRd',
         show_colourbar=True
     )
+
+
+def plot_trajectory_helicity():
+    """
+    Draw the trajectory coloured by the trajectory helicity.
+    """
+    args = get_args()
+    X_full, X_slice = get_trajectory(args)
+    helicities = calculate_trajectory_helicities(X_slice, window_size=args.helicity_window)
+    title = f'Trajectory helicity. Trial {args.trial}. Helicity window: {args.helicity_window} frames.'
+    filename = f'trajectory_helicity_w={args.helicity_window}_trial={args.trial}_{args.midline3d_source}'
+
+    fig = plt.figure()
+    ax3d = fig.add_subplot(211, projection='3d')
+    make_plot(
+        title=title,
+        filename=filename,
+        X_full=X_full,
+        X_slice=X_slice,
+        colours=helicities,
+        cmap='PRGn_r',
+        draw_worm=False,
+        draw_edges=False,
+        ax=ax3d
+    )
+
+    axh = fig.add_subplot(212)
+    plot_helicities(
+        ax=axh,
+        helicities=helicities,
+    )
+
+    fig.tight_layout()
+
+    if save_plots:
+        save_path = LOGS_PATH / f'{START_TIMESTAMP}_{filename}.{img_extension}'
+        logger.info(f'Saving plot to {save_path}.')
+        plt.savefig(save_path, transparent=True)
+
+    if show_plots:
+        plt.show()
+
+    plt.close(fig)
+
+
+def plot_trajectory_posture_helicity():
+    """
+    Draw the trajectory coloured by the posture helicity.
+    """
+    args = get_args()
+    X_full, X_slice = get_trajectory(args)
+    helicities = calculate_helicities(X_full)
+    title = f'Posture helicity. Trial {args.trial}.'
+    filename = f'trajectory_posture_helicity_trial={args.trial}_{args.midline3d_source}'
+
+    fig = plt.figure()
+    ax3d = fig.add_subplot(211, projection='3d')
+    make_plot(
+        title=title,
+        filename=filename,
+        X_full=X_full,
+        X_slice=X_slice,
+        colours=helicities,
+        cmap='PRGn_r',
+        ax=ax3d
+    )
+
+    axh = fig.add_subplot(212)
+    plot_helicities(
+        ax=axh,
+        helicities=helicities,
+    )
+
+    fig.tight_layout()
+
+    if save_plots:
+        save_path = LOGS_PATH / f'{START_TIMESTAMP}_{filename}.{img_extension}'
+        logger.info(f'Saving plot to {save_path}.')
+        plt.savefig(save_path, transparent=True)
+
+    if show_plots:
+        plt.show()
+
+    plt.close(fig)
 
 
 def plot_brownian_trajectory():
@@ -626,6 +723,8 @@ if __name__ == '__main__':
     # plot_trajectory_signed_speed()
     # plot_trajectory_K()
     # plot_trajectory_planarity()
+    plot_trajectory_helicity()
+    plot_trajectory_posture_helicity()
     # plot_brownian_trajectory()
     # plot_active_particle_trajectory()
     # plot_active_particle_trajectories()
@@ -639,4 +738,4 @@ if __name__ == '__main__':
     #     plot_individual=True
     # )
 
-    plot_trajectory_with_regions()
+    # plot_trajectory_with_regions()

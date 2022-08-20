@@ -94,6 +94,7 @@ class NaturalFrame:
             raise RuntimeError('Unrecognised input!')
 
         self._smooth_psi()
+        self._calculate_torsion()
 
     @property
     def length(self) -> float:
@@ -132,6 +133,9 @@ class NaturalFrame:
         # Curvature is gradient of tangent
         K = np.gradient(self.T, 1 / (self.N - 1), axis=0, edge_order=1)
         self.K = K / T_norm
+
+        # Speed
+        self.speed = norm(np.gradient(self.X_pos, axis=0, edge_order=1), axis=-1)
 
     def _calculate_pca(self):
         """
@@ -249,6 +253,7 @@ class NaturalFrame:
         self.T = T
         self.M1 = M1
         self.M2 = M2
+        self.speed = np.ones(self.N) * h
 
     def _smooth_psi(self):
         """
@@ -269,6 +274,13 @@ class NaturalFrame:
         if below_threshold:
             self.psi[start_idx:] = start_psi
 
+    def _calculate_torsion(self):
+        """
+        Torsion is the derivative of the twist angle psi.
+        """
+        psi = np.unwrap(self.psi)
+        self.tau = np.gradient(psi, axis=0)
+
     def non_planarity(self) -> float:
         """
         Compute the non-planarity of the curve.
@@ -280,30 +292,20 @@ class NaturalFrame:
         """
         Compute the helicity of the curve.
         """
-        X = self.X_pos.copy()
-        if normalise_length:
-            X /= self.length
+        if normalise_length and np.abs(self.length - 1) > EPS:
+            NF_normed = NaturalFrame(self.X_pos / self.length)
+            kappa = NF_normed.kappa.copy()
+            tau = NF_normed.tau.copy()
+            speed = NF_normed.speed.copy()
+        else:
+            kappa = self.kappa.copy()
+            tau = self.tau.copy()
+            speed = self.speed.copy()
 
-        # Calculate a projection plane normal to the average direction
-        v1 = normalise(self.T.mean(axis=0) / (self.T.var(axis=0) + EPS))
-        v2 = normalise(orthogonalise(np.roll(v1, 1), v1))
-        v3 = np.cross(v1, v2)
-        R = np.stack([v1, v2, v3], axis=1)
-
-        # Rotate points to align with the projection space
-        Xt = np.einsum('ij,bj->bi', R.T, X)
-        Xp = Xt[:, 1:]
-
-        # Use the difference vectors between adjacent points and take the appropriate components.
-        diff = Xp[1:] - Xp[:-1]
-
-        # Convert into polar coordinates
-        r = np.linalg.norm(diff, axis=-1)
-        theta = np.unwrap(np.arctan2(*diff.T))
-
-        # Weight the angular changes by the radii and sum to give helicity measure.
-        r = (r[1:] + r[:-1]) / 2
-        h = np.sum(r * (theta[1:] - theta[:-1]))
+        c = kappa / (np.pi * 2)  # Number of coils
+        t = tau * (self.N - 1) / (np.pi * 2)  # Number of twists
+        u = speed * (self.N - 1) / self.N  # Arc speed
+        h = np.sum(t * c * u)
 
         return h
 

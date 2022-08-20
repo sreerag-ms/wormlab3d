@@ -483,7 +483,13 @@ class DatasetMidline3D(Dataset):
 
         return self.nonplanarities
 
-    def get_helicities(self, recalculate: bool = False) -> np.ndarray:
+    def get_helicities(
+            self,
+            recalculate: bool = False,
+            rel_spacing_threshold: float = 2.,
+            length_min: float = 0.5,
+            length_max: float = 2.
+    ) -> np.ndarray:
         """
         Calculate the helicity score for all postures.
         Uses a result cache on disk.
@@ -505,15 +511,32 @@ class DatasetMidline3D(Dataset):
 
             # Can't be loaded or asked to recalculate so calculate.
             if H is None:
+                from wormlab3d.postures.helicities import calculate_helicities
                 logger.info('Calculating helicities.')
-                H = np.zeros(len(self.X_all))
-                for i, X in enumerate(self.X_all):
-                    if (i + 1) % 100 == 0:
-                        logger.info(f'Calculating helicity for midline {i + 1}/{self.size_train}.')
-                    NF = NaturalFrame(X)
-                    H[i] = NF.helicity()
 
-                # Save
+                # Calculate vertex spacings and worm lengths
+                N = self.X_all.shape[1]
+                sl = np.linalg.norm(self.X_all[:, 1:]-self.X_all[:, :-1], axis=-1)
+                l = sl.sum(axis=-1)
+
+                # Exclude postures where the vertices are not evenly spaced
+                exc_uneven = sl.max(axis=-1) > rel_spacing_threshold * l / (N-1)
+                if exc_uneven.sum() > 0:
+                    logger.info(f'Excluding {exc_uneven.sum()} worms with uneven spacing (max spacing > {rel_spacing_threshold:.2f * l/(N-1)}).')
+
+                # Exclude postures which are too short or long
+                exc_too_short = l < length_min
+                exc_too_long = l > length_max
+                if exc_too_short.sum() > 0:
+                    logger.info(f'Excluding {exc_too_short.sum()} worms below minimum length threshold (< {length_min:.2f}).')
+                if exc_too_long.sum() > 0:
+                    logger.info(f'Excluding {exc_too_long.sum()} worms above maximum length threshold (> {length_max:.2f}).')
+
+                # Calculate helicities
+                includes = ~exc_uneven & ~exc_too_short & ~exc_too_long
+                H = np.zeros(len(self.X_all))
+                X_normed = self.X_all[includes] / l[includes, None, None]
+                H[includes] = calculate_helicities(X_normed)
                 logger.info(f'Saving helicities to {self.helicities_path}.')
                 np.savez_compressed(
                     self.helicities_path,

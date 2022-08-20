@@ -14,7 +14,7 @@ from tvtk.tools.visual import Arrow
 from simple_worm.controls import ControlsNumpy
 from simple_worm.frame import FrameNumpy, FRAME_COMPONENT_KEYS
 from simple_worm.plot3d import FrameArtist, Arrow3D, MIDLINE_CMAP_DEFAULT
-from wormlab3d.postures.natural_frame import NaturalFrame
+from wormlab3d.postures.natural_frame import NaturalFrame, normalise
 from wormlab3d.toolkit.plot_utils import to_rgb
 
 SURFACE_CMAP_DEFAULT = 'coolwarm'
@@ -307,7 +307,7 @@ def plot_natural_frame_3d(
     if show_pca_arrows:
         centre = NF.X_pos.mean(axis=0)
         for i in range(2, -1, -1):
-            vec = NF.pca.components_[i] * NF.pca.singular_values_[i] / 3
+            vec = NF.pca.components_[i] * NF.pca.explained_variance_ratio_[i] * NF.length / 3
             if vec.sum() == 0:
                 continue
             origin = centre - vec / 2
@@ -323,7 +323,7 @@ def plot_natural_frame_3d(
             ax.add_artist(arrow)
 
             if show_pca_arrow_labels:
-                origin = origin - vec / np.linalg.norm(vec) * 0.15
+                origin = origin - normalise(vec) * NF.length * 0.15
                 ax.text(
                     origin[0],
                     origin[1],

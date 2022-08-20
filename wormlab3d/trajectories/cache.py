@@ -355,7 +355,7 @@ def generate_or_load_trajectory_cache(
     # Set defaults for frame range
     if start_frame is None:
         start_frame = 0
-    if end_frame is None:
+    if end_frame is None or end_frame < 0:
         end_frame = trial.n_frames_min
 
     # Bind to reconstruction range, or valid range if requested and available

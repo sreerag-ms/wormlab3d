@@ -242,5 +242,5 @@ def get_planarity_from_args(args: Namespace) -> np.ndarray:
     Planarity metric is 1 - the relative contribution from the 3rd component.
     """
     pcas = get_pca_cache_from_args(args)
-    r = pcas.explained_variance_ratio_
+    r = pcas.explained_variance_ratio.T
     return 1 - r[2] / np.sqrt(r[1] * r[0])

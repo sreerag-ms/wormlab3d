@@ -236,13 +236,17 @@ def fetch_reconstruction(
             filters['source_file'] = midline_source_file
 
         reconstructions = Reconstruction.objects(**filters).order_by('-updated')
-        if reconstructions.count() == 0:
+        N = reconstructions.count()
+        if N == 0:
             logger.warning(f'Found no reconstructions for parameters {filters}.')
         else:
-            logger.info(
-                f'Found {reconstructions.count()} matching reconstructions. '
-                f'Using most recent.'
-            )
+            if N == 1:
+                logger.info('Found 1 matching reconstruction.')
+            else:
+                logger.info(
+                    f'Found {N} matching reconstructions. '
+                    f'Using most recent.'
+                )
             reconstruction = reconstructions[0]
 
     return reconstruction

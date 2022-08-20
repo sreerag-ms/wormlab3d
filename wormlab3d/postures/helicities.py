@@ -6,9 +6,10 @@ from matplotlib import cm
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpec
+from numpy.lib.stride_tricks import sliding_window_view
 
 from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT, Arrow3D
-from wormlab3d import N_WORKERS
+from wormlab3d import N_WORKERS, logger
 from wormlab3d.postures.natural_frame import NaturalFrame, normalise, EPS, orthogonalise
 from wormlab3d.postures.plot_utils import plot_natural_frame_3d
 
@@ -38,12 +39,35 @@ def calculate_helicities(X: np.ndarray, parallel: bool = True) -> np.ndarray:
     Calculate the helicity metric for all the postures.
     """
     if parallel and N_WORKERS > 1:
-        c = _calculate_helicities_parallel(X)
+        h = _calculate_helicities_parallel(X)
     else:
-        c = np.zeros(len(X))
+        h = np.zeros(len(X))
         for i, Xi in enumerate(X):
-            c[i] = calculate_helicity(Xi)
-    return c
+            h[i] = calculate_helicity(Xi)
+    return h
+
+
+def calculate_trajectory_helicities(X: np.ndarray, window_size: int, parallel: bool = True) -> np.ndarray:
+    """
+    Calculate helicities along a trajectory.
+    """
+    logger.info('Calculating trajectory helicities.')
+    assert X.ndim == 2, 'Only point trajectories supported!'
+    N = len(X)
+    w2 = int((window_size + 1) / 2)
+    h = np.zeros(N)
+    Xw = sliding_window_view(X, window_size, axis=0).transpose(0, 2, 1)
+    h[w2 - 1:-w2] = calculate_helicities(Xw, parallel=parallel)
+
+    # Fill in the ends
+    for i in range(w2 - 1):
+        ws = window_size - i - 1
+        if ws < 5:
+            break
+        h[w2 - 2 - i] = calculate_helicity(X[:ws])
+        h[-w2 + i] = calculate_helicity(X[-ws:])
+
+    return h
 
 
 def plot_helicities(
@@ -81,7 +105,72 @@ def plot_helicities(
         )
 
 
-def illustrate_method(NF: NaturalFrame) -> Figure:
+def illustrate_helicity_method(NF: NaturalFrame, normalise_curve: bool = True) -> Figure:
+    """
+    Illustrate the method.
+    """
+    N = NF.N
+    s = np.linspace(0, 1, N)
+    if normalise_curve:
+        NF = NaturalFrame(NF.X_pos / NF.length)
+    X = NF.X_pos.copy()
+
+    cmap = cm.get_cmap(MIDLINE_CMAP_DEFAULT)
+    fc = cmap((np.arange(N) + 0.5) / N)
+    fig = plt.figure(figsize=(16, 12))
+    gs = GridSpec(4, 2)
+
+    # Plot the 3d curve
+    ax = fig.add_subplot(gs[0:2, 0], projection='3d')
+    ax.set_title('Original curve')
+    plot_natural_frame_3d(NF, ax=ax, show_frame_arrows=False)
+
+    # Plot psi
+    ax = fig.add_subplot(gs[0:2, 1], projection='polar')
+    ax.set_title('$\psi=arg(m_1+i m_2)$')
+    for i in range(N - 1):
+        ax.plot(NF.psi[i:i + 2], s[i:i + 2], c=fc[i])
+    ax.set_rticks([])
+    thetaticks = np.arange(0, 2 * np.pi, np.pi / 2)
+    ax.set_xticks(thetaticks)
+    ax.set_xticklabels(['0', '$\pi/2$', '$\pi$', '$3\pi/2$'])
+    ax.xaxis.set_tick_params(pad=-3)
+
+    # Plot number of twists
+    ax = fig.add_subplot(gs[2, 0])
+    t = NF.tau * (NF.N - 1) / (np.pi * 2)
+    ax.set_title('Number of twists: $t=\\tau \dot N / 2 \pi$')
+    ax.scatter(x=s, y=t, c=fc)
+
+    # Plot number of coils
+    k = NF.kappa / (np.pi * 2)
+    ax = fig.add_subplot(gs[2, 1])
+    ax.set_title('Number of coils: $c=\kappa / 2 \pi$')
+    ax.scatter(x=s, y=k, c=fc)
+
+    # Plot curve speed
+    u = NF.speed * (NF.N - 1) / NF.N
+    ax = fig.add_subplot(gs[3, 0])
+    ax.set_title('Curve speed: $u$')
+    ax.scatter(x=s, y=u, c=fc)
+
+    hx = t * k * u
+    h = np.sum(hx)
+
+    assert h == NF.helicity()
+
+    # Plot the cumulative sum of helicity contributions
+    ax = fig.add_subplot(gs[3, 1])
+    ax.set_title(f'Cumulative sum of $h=\sum_s t c u={h:.6f}$')
+    ax.scatter(x=s, y=np.cumsum(hx), c=fc)
+    ax.scatter(x=s[-1], y=[h, ], color='red', s=150, marker='x')
+
+    fig.tight_layout()
+
+    return fig
+
+
+def illustrate_helicity_method_old(NF: NaturalFrame) -> Figure:
     """
     Illustrate the method.
     """
@@ -102,20 +191,25 @@ def illustrate_method(NF: NaturalFrame) -> Figure:
     X = NF.X_pos.copy()
     X /= NF.length
 
-    # Calculate a projection plane normal to the average direction
-    v1 = normalise(NF.T.mean(axis=0) / (NF.T.var(axis=0) + EPS))
-    v2 = normalise(orthogonalise(np.roll(v1, 1), v1))
-    v3 = np.cross(v1, v2)
-    R = np.stack([v1, v2, v3], axis=1)
+    # If the first PCA component is large then use this to define the projection plane
+    if NF.pca.explained_variance_ratio_[0] > 0.8:
+        v1, v2, v3 = NF.pca.components_
+
+    # Otherwise calculate a projection plane normal to the average direction
+    else:
+        v1 = normalise(NF.T.mean(axis=0) / (NF.T.var(axis=0) + EPS))
+        v2 = normalise(orthogonalise(np.roll(v1, 1), v1))
+        v3 = np.cross(v1, v2)
 
     # Rotate points to align with the projection space
+    R = np.stack([v1, v2, v3], axis=1)
     Xt = np.einsum('ij,bj->bi', R.T, X)
     Xp = Xt[:, 1:]
 
     # Add average tangent vector to plot
     arrow = Arrow3D(
         origin=NF.X_pos.mean(axis=0),
-        vec=normalise(v1) / 2,
+        vec=normalise(v1) * NF.length / 2,
         color='purple',
         mutation_scale=20,
         arrowstyle='->',
@@ -127,7 +221,7 @@ def illustrate_method(NF: NaturalFrame) -> Figure:
     # Plot the projection of the points onto the 2nd two components
     ax = fig.add_subplot(gs[0:2, 2:4])
     ax.set_title('Projected points')
-    ax.scatter(x=Xp[:5, 0], y=Xp[:5, 1], c=fc[:5])
+    ax.scatter(x=Xp[:, 0], y=Xp[:, 1], c=fc)
 
     # Use the difference vectors between adjacent points and ignore first coordinate.
     diff = Xp[1:] - Xp[:-1]
