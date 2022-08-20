@@ -17,7 +17,7 @@ from mayavi import mlab
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
 from simple_worm.frame import FrameSequenceNumpy
-from simple_worm.plot3d import FrameArtist
+from simple_worm.plot3d import FrameArtist, MidpointNormalize
 from wormlab3d import PREPARED_IMAGES_PATH
 from wormlab3d import logger, START_TIMESTAMP, LOGS_PATH
 from wormlab3d.data.model import Frame, Reconstruction, Trial, Midline3D
@@ -26,8 +26,8 @@ from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.midlines3d.util import generate_annotated_images
 from wormlab3d.particles.tumble_run import calculate_curvature
-from wormlab3d.postures.helicities import calculate_helicities, plot_helicities
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
+from wormlab3d.postures.helicities import calculate_helicities, plot_helicities
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.postures.plot_utils import FrameArtistMLab
 from wormlab3d.toolkit.plot_utils import equal_aspect_ratio, overlay_image
@@ -251,6 +251,7 @@ def _make_3d_trajectory_plot_mlab(
         X: np.ndarray,
         speeds: np.ndarray,
         curvature: np.ndarray,
+        lengths: np.ndarray,
         args: Namespace,
 ) -> Tuple[Figure, Callable]:
     """
@@ -260,7 +261,6 @@ def _make_3d_trajectory_plot_mlab(
     logger.info('Building 3D trajectory plot.')
 
     X_trajectory = X.mean(axis=1)
-    x, y, z = X_trajectory.T
     centre = X_trajectory.mean(axis=0)
 
     # Construct colours
@@ -285,7 +285,21 @@ def _make_3d_trajectory_plot_mlab(
         fig.scene.render_window.multi_samples = 20
         fig.scene.anti_aliasing_frames = 20
 
+    # Determine zoom level - make a sphere around the centre that would contain
+    # a straight worm at its longest length extending from the furthest trajectory point.
+    max_dist = np.linalg.norm(X - centre, axis=-1).max() + lengths.max()
+    phi, theta = np.mgrid[0:2 * np.pi:12j, 0:np.pi:12j]
+    r = (max_dist * 0.6) / 2
+    x = r * np.cos(phi) * np.sin(theta)
+    y = r * np.sin(phi) * np.sin(theta)
+    z = r * np.cos(theta)
+    tmp_mesh = mlab.mesh(x, y, z)
+    mlab.view(figure=fig, distance='auto')
+    distance = mlab.view()[2]
+    tmp_mesh.remove()
+
     # Render the trajectory with simple lines
+    x, y, z = X_trajectory.T
     path = mlab.plot3d(x, y, z, s, opacity=0.4, tube_radius=None, line_width=8)
     path.module_manager.scalar_lut_manager.lut.table = cmaplist
 
@@ -304,14 +318,14 @@ def _make_3d_trajectory_plot_mlab(
     n_revolutions = len(X) / trial.fps / 60 * args.revolution_rate
     azims = np.linspace(start=0, stop=360 * n_revolutions, num=len(X))
     # fig.scene._lift()
-    mlab.view(figure=fig, azimuth=azims[0], distance='auto', focalpoint=centre)
+    mlab.view(figure=fig, azimuth=azims[0], distance=distance, focalpoint=centre)
 
     def update(frame_idx: int):
         fig.scene.disable_render = True
         NF = NaturalFrame(X[frame_idx])
         fa.update(NF)
         fig.scene.disable_render = False
-        mlab.view(figure=fig, azimuth=azims[frame_idx])
+        mlab.view(figure=fig, azimuth=azims[frame_idx], distance=distance)
         fig.scene.render()
 
     return fig, update
@@ -465,6 +479,7 @@ def _make_traces_plots(
         speeds: np.ndarray,
         helicities: np.ndarray,
         curvature: np.ndarray,
+        torsion: np.ndarray,
         args: Namespace,
 ) -> Tuple[Figure, Callable]:
     """
@@ -502,7 +517,7 @@ def _make_traces_plots(
         nonp_trajectories[i, t0:t0 + len(pcas)] = r[2] / np.sqrt(r[1] * r[0])
 
     # Plot
-    fig, axes = plt.subplots(5, figsize=(width / 100, height / 100), gridspec_kw={
+    fig, axes = plt.subplots(6, figsize=(width / 100, height / 100), gridspec_kw={
         'hspace': 0,
         'top': 0.98,
         'bottom': 0.07,
@@ -575,8 +590,25 @@ def _make_traces_plots(
     ax_curvature.spines['bottom'].set_visible(False)
     ax_curvature_marker = ax_curvature.axvline(x=0, color='red')
 
+    # Torsion
+    ax_torsion = axes[4]
+    im = ax_torsion.imshow(torsion.T, aspect='auto', cmap='PRGn', origin='lower', extent=(0, ts[-1], 0, 1),
+                           norm=MidpointNormalize(midpoint=0))
+    cax = ax_torsion.inset_axes([1.03, 0.1, 0.02, 0.8], transform=ax_torsion.transAxes)
+    fig.colorbar(im, ax=ax_torsion, cax=cax)
+    ht_args = dict(transform=ax_torsion.transAxes, horizontalalignment='right', fontweight='bold')
+    ax_torsion.text(-0.02, 0.98, 'T', verticalalignment='top', **ht_args)
+    ax_torsion.text(-0.02, 0.01, 'H', verticalalignment='bottom', **ht_args)
+    ax_torsion.set_ylabel('$\\tau$', fontsize=12, labelpad=10)
+    ax_torsion.set_yticks([0, 1])
+    ax_torsion.set_yticklabels([])
+    ax_torsion.set_xticklabels([])
+    ax_torsion.spines['top'].set_visible(False)
+    ax_torsion.spines['bottom'].set_visible(False)
+    ax_torsion_marker = ax_torsion.axvline(x=0, color='red')
+
     # Eigenworms - absolute values
-    ax_ew = axes[4]
+    ax_ew = axes[5]
     for i in args.plot_components:
         ax_ew.plot(
             ts,
@@ -603,6 +635,7 @@ def _make_traces_plots(
         ax_nonpt.set_xlim([ts[frame_idx] - t_range / 2, ts[frame_idx] + t_range / 2])
         ax_hel.set_xlim([ts[frame_idx] - t_range / 2, ts[frame_idx] + t_range / 2])
         ax_curvature.set_xlim([ts[frame_idx] - t_range / 2, ts[frame_idx] + t_range / 2])
+        ax_torsion.set_xlim([ts[frame_idx] - t_range / 2, ts[frame_idx] + t_range / 2])
         ax_ew.set_xlim([ts[frame_idx] - t_range / 2, ts[frame_idx] + t_range / 2])
 
         # Move the markers
@@ -610,6 +643,7 @@ def _make_traces_plots(
         ax_nonpt_marker.set_data([ts[frame_idx], ts[frame_idx]], [0, 1])
         ax_hel_marker.set_data([ts[frame_idx], ts[frame_idx]], [0, 1])
         ax_curvature_marker.set_data([ts[frame_idx], ts[frame_idx]], [0, 1])
+        ax_torsion_marker.set_data([ts[frame_idx], ts[frame_idx]], [0, 1])
         ax_ew_marker.set_data([ts[frame_idx], ts[frame_idx]], [0, 1])
 
         # Redraw the canvas
@@ -803,6 +837,10 @@ def generate_reconstruction_video():
     curvature_traj = calculate_curvature(e0)
     curvature_postures = np.abs(Z)
 
+    # Calculate torsions
+    psi = np.unwrap(np.angle(Z), axis=0)
+    torsion = np.gradient(psi, axis=0)
+
     # Calculate posture helicities
     helicities = calculate_helicities(Xc)
 
@@ -825,7 +863,7 @@ def generate_reconstruction_video():
         args=args
     )
     if args.trajectory_use_mlab:
-        fig_traj, update_traj_plot = _make_3d_trajectory_plot_mlab(**traj_fn_args)
+        fig_traj, update_traj_plot = _make_3d_trajectory_plot_mlab(lengths=lengths, **traj_fn_args)
     else:
         fig_traj, update_traj_plot = _make_3d_trajectory_plot(**traj_fn_args)
     posture_fn_args = dict(
@@ -852,6 +890,7 @@ def generate_reconstruction_video():
         speeds=speeds,
         helicities=helicities,
         curvature=curvature_postures,
+        torsion=torsion,
         args=args
     )
     fig_lambdas, update_lambdas_plot = _make_lambdas_plot(
