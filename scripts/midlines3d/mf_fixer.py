@@ -128,7 +128,7 @@ def _check_bad_parameters(
     """
     logger.info(f'Checking for bad parameters.')
     trial = ts.trial
-    prs = ProjectRenderScoreModel(image_size=trial.crop_size, clamp_X0=args.clamp_X0)
+    prs = ProjectRenderScoreModel(image_size=trial.crop_size, curvature_smoothing=args.smooth_K, clamp_X0=args.clamp_X0)
 
     # Make output directory
     save_dir_n = save_dir / f'{START_TIMESTAMP}_check_params'
@@ -380,7 +380,7 @@ def _verify_flipped_batch(
     """
     Verify that the flipped parameters are consistent.
     """
-    prs = ProjectRenderScoreModel(image_size=trial.crop_size, clamp_X0=clamp_X0)
+    prs = ProjectRenderScoreModel(image_size=trial.crop_size, curvature_smoothing=smooth_K, clamp_X0=clamp_X0)
 
     # Reconstruct the 3D points from the parameters
     X0 = torch.from_numpy(X0)
@@ -908,7 +908,7 @@ def _fix_camera_positions(
     logger.info(f'Fix camera positions.')
     trial = ts.trial
     device = _init_devices(args)
-    prs = ProjectRenderScoreModel(image_size=trial.crop_size, clamp_X0=args.clamp_X0)
+    prs = ProjectRenderScoreModel(image_size=trial.crop_size, curvature_smoothing=args.smooth_K, clamp_X0=args.clamp_X0)
     prs = prs.to(device)
 
     # Make output directory
@@ -1557,8 +1557,8 @@ def _process_curvature_batch(
     X_f, T_f, M1_f = integrate_curvature(X0, T0, lengths, K, M10)
 
     # Rebuild it again from the head and the tail
-    X_h, T_h, M1_h = integrate_curvature(X_f[:, 1], T_f[:, 1], lengths, K, M1_f[:, 1], start_idx=1)
-    X_t, T_t, M1_t = integrate_curvature(X_f[:, -2], T_f[:, -2], lengths, K, M1_f[:, -2], start_idx=N - 2)
+    X_h, T_h, M1_h = integrate_curvature(X_f[:, 0], T_f[:, 0], lengths, K, M1_f[:, 0], start_idx=0)
+    X_t, T_t, M1_t = integrate_curvature(X_f[:, -1], T_f[:, -1], lengths, K, M1_f[:, -1], start_idx=N - 1)
 
     # Calculate losses - L2 distance between curves to ensure consistency
     L_fh = (X_f - X_h).norm(dim=-1, p=2).mean(dim=-1)
@@ -1660,7 +1660,7 @@ def _fix_curvature(
     logger.info(f'Fix curvature.')
     trial = ts.trial
     device = _init_devices(args)
-    prs = ProjectRenderScoreModel(image_size=trial.crop_size, clamp_X0=args.clamp_X0)
+    prs = ProjectRenderScoreModel(image_size=trial.crop_size, curvature_smoothing=args.smooth_K, clamp_X0=args.clamp_X0)
     prs = torch.jit.script(prs)
     prs = prs.to(device)
     batch_prefix_size = 2
@@ -1696,6 +1696,9 @@ def _fix_curvature(
     X0 = torch.from_numpy(ts.get('X0', **f_range).copy())[:, 0].to(device)
     T0 = torch.from_numpy(ts.get('T0', **f_range).copy())[:, 0].to(device)
     M10 = torch.from_numpy(ts.get('M10', **f_range).copy())[:, 0].to(device)
+    X0ht = torch.from_numpy(ts.get('X0ht', **f_range).copy())[:, 0].to(device)
+    T0ht = torch.from_numpy(ts.get('T0ht', **f_range).copy())[:, 0].to(device)
+    M10ht = torch.from_numpy(ts.get('M10ht', **f_range).copy())[:, 0].to(device)
     lengths = torch.from_numpy(ts.get('length', **f_range).copy())[:, 0].to(device)
     K = torch.from_numpy(ts.get('curvatures', **f_range).copy()).to(device)
     n_frames = len(points)
@@ -1704,6 +1707,9 @@ def _fix_curvature(
     X0f = torch.zeros_like(X0)
     T0f = torch.zeros_like(T0)
     M10f = torch.zeros_like(M10)
+    X0htf = torch.zeros_like(X0ht)
+    T0htf = torch.zeros_like(T0ht)
+    M10htf = torch.zeros_like(M10ht)
     Kf = torch.zeros_like(K)
     lengthsf = torch.zeros_like(lengths)
 
@@ -1966,6 +1972,9 @@ def _fix_curvature(
             points_2d_base=points_2d_base[idxs_opt],
         )
 
+        # Build the 3D curve again to get the HT data
+        Xo_batch, To_batch, M1o_batch = integrate_curvature(X0o_batch, T0o_batch, lengthso_batch, Ko_batch, M10o_batch)
+
         # Verify batch
         points_r, tangents_r, M1_r = integrate_curvature(
             X0o_batch,
@@ -1982,6 +1991,9 @@ def _fix_curvature(
         X0f[idxs_opt] = X0o_batch
         T0f[idxs_opt] = T0o_batch
         M10f[idxs_opt] = M10o_batch
+        X0htf[idxs_opt] = torch.stack([Xo_batch[:, 0], Xo_batch[:, -1]], axis=1)
+        T0htf[idxs_opt] = torch.stack([To_batch[:, 0], To_batch[:, -1]], axis=1)
+        M10htf[idxs_opt] = torch.stack([M1o_batch[:, 0], M1o_batch[:, -1]], axis=1)
         Kf[idxs_opt] = Ko_batch
         lengthsf[idxs_opt] = lengthso_batch
         points_f[idxs_opt] = points_o_batch
