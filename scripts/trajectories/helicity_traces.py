@@ -5,6 +5,7 @@ from argparse import Namespace
 import matplotlib.pyplot as plt
 import numpy as np
 
+from simple_worm.plot3d import MidpointNormalize
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d import logger
 from wormlab3d.data.model import Reconstruction
@@ -101,9 +102,75 @@ def helicity_trace(x_label: str = 'time'):
         plt.show()
 
 
+def torsion_trace(x_label: str = 'time'):
+    """
+    Plot a kemogram of the torsion over time.
+    """
+    args = parse_args()
+
+    common_args = {
+        'reconstruction_id': args.reconstruction,
+        'start_frame': args.start_frame,
+        'end_frame': args.end_frame,
+        'smoothing_window': 25
+    }
+
+    reconstruction = Reconstruction.objects.get(id=args.reconstruction)
+    trial = reconstruction.trial
+    Z, meta = get_trajectory(**common_args, natural_frame=True, rebuild_cache=True)
+    N = len(Z)
+    if x_label == 'time':
+        ts = np.linspace(0, N / trial.fps, N)
+    else:
+        ts = np.arange(N) + (args.start_frame if args.start_frame is not None else 0)
+
+    # Calculate torsions
+    psi = np.unwrap(np.angle(Z), axis=1)
+    torsion = np.gradient(psi, axis=1)
+
+    # Plot
+    fig, axes = plt.subplots(1, figsize=(12, 8))
+
+    # Torsion
+    ax = axes
+    ax.set_title(f'Torsion\n'
+                 f'Trial {trial.id} ({trial.date:%Y-%m-%d} #{trial.trial_num}).\n'
+                 f'Reconstruction {reconstruction.id} ({reconstruction.source}).')
+    im = ax.imshow(torsion.T, aspect='auto', cmap='PRGn', origin='lower', extent=(0, ts[-1], 0, 1),
+                   norm=MidpointNormalize(midpoint=0))
+    cax = ax.inset_axes([1.03, 0.1, 0.02, 0.8], transform=ax.transAxes)
+    fig.colorbar(im, ax=ax, cax=cax)
+    ht_args = dict(transform=ax.transAxes, horizontalalignment='right', fontweight='bold')
+    ax.text(-0.02, 0.98, 'T', verticalalignment='top', **ht_args)
+    ax.text(-0.02, 0.01, 'H', verticalalignment='bottom', **ht_args)
+    ax.set_ylabel('$\\tau$', fontsize=12, labelpad=10)
+    ax.set_yticks([0, 1])
+    ax.set_yticklabels([])
+    ax.set_xticklabels([])
+
+    if x_label == 'time':
+        ax.set_xlabel('Time (s)')
+    else:
+        ax.set_xlabel('Frame #')
+
+    fig.tight_layout()
+
+    if save_plots:
+        path = LOGS_PATH / f'{START_TIMESTAMP}_torsion_trace_' \
+                           f'r={reconstruction.id}_' \
+                           f'f={meta["start_frame"]}-{meta["end_frame"]}' \
+                           f'.{img_extension}'
+        logger.info(f'Saving plot to {path}.')
+        plt.savefig(path)
+
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
     # from simple_worm.plot3d import interactive
     # interactive()
-    helicity_trace(x_label='frames')
+    # helicity_trace(x_label='frames')
+    torsion_trace(x_label='frames')
