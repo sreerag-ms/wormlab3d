@@ -155,14 +155,14 @@ def illustrate_helicity_method(NF: NaturalFrame, normalise_curve: bool = True) -
     ax.scatter(x=s, y=u, c=fc)
 
     hx = t * k * u
-    h = np.sum(hx)
-
+    h1 = np.sum(hx)
+    h = np.sign(h1) * np.log(1 + h1)
     assert h == NF.helicity()
 
     # Plot the cumulative sum of helicity contributions
     ax = fig.add_subplot(gs[3, 1])
-    ax.set_title(f'Cumulative sum of $h=\sum_s t c u={h:.6f}$')
-    ax.scatter(x=s, y=np.cumsum(hx), c=fc)
+    ax.set_title(f'Cumulative sum of $h=\log\\{{1 + \sum_s t c u={h:.6f}\\}}$')
+    ax.scatter(x=s, y=np.sign(np.cumsum(hx)) * np.log(1 + np.cumsum(hx)), c=fc)
     ax.scatter(x=s[-1], y=[h, ], color='red', s=150, marker='x')
 
     fig.tight_layout()

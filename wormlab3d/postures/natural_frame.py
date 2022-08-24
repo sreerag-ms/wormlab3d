@@ -305,7 +305,10 @@ class NaturalFrame:
         c = kappa / (np.pi * 2)  # Number of coils
         t = tau * (self.N - 1) / (np.pi * 2)  # Number of twists
         u = speed * (self.N - 1) / self.N  # Arc speed
-        h = np.sum(t * c * u)
+        h1 = np.sum(t * c * u)
+
+        # Smooth the peaks with a log
+        h = np.sign(h1) * np.log(1 + np.abs(h1))
 
         return h
 

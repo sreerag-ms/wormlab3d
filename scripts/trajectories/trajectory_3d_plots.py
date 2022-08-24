@@ -273,8 +273,9 @@ def plot_trajectory_helicity():
     title = f'Trajectory helicity. Trial {args.trial}. Helicity window: {args.helicity_window} frames.'
     filename = f'trajectory_helicity_w={args.helicity_window}_trial={args.trial}_{args.midline3d_source}'
 
-    fig = plt.figure()
-    ax3d = fig.add_subplot(211, projection='3d')
+    fig = plt.figure(figsize=(12, 12))
+    gs = GridSpec(4, 1)
+    ax3d = fig.add_subplot(gs[:3, 0], projection='3d')
     make_plot(
         title=title,
         filename=filename,
@@ -287,7 +288,7 @@ def plot_trajectory_helicity():
         ax=ax3d
     )
 
-    axh = fig.add_subplot(212)
+    axh = fig.add_subplot(gs[3, 0])
     plot_helicities(
         ax=axh,
         helicities=helicities,
@@ -316,8 +317,9 @@ def plot_trajectory_posture_helicity():
     title = f'Posture helicity. Trial {args.trial}.'
     filename = f'trajectory_posture_helicity_trial={args.trial}_{args.midline3d_source}'
 
-    fig = plt.figure()
-    ax3d = fig.add_subplot(211, projection='3d')
+    fig = plt.figure(figsize=(12, 12))
+    gs = GridSpec(4, 1)
+    ax3d = fig.add_subplot(gs[:3, 0], projection='3d')
     make_plot(
         title=title,
         filename=filename,
@@ -328,7 +330,7 @@ def plot_trajectory_posture_helicity():
         ax=ax3d
     )
 
-    axh = fig.add_subplot(212)
+    axh = fig.add_subplot(gs[3, 0])
     plot_helicities(
         ax=axh,
         helicities=helicities,
