@@ -55,6 +55,15 @@ def get_trajectory(
     if smoothing_window is not None and smoothing_window > -1:
         X = smooth_trajectory(X, window_len=smoothing_window)
 
+        # Smoothing breaks natural frame alignment so re-align here
+        if natural_frame:
+            for i, Zi in enumerate(X):
+                if i == 0:
+                    Z_prev = Zi
+                else:
+                    X[i] = align_complex_vectors(Zi, Z_prev)
+                    Z_prev = X[i]
+
     # If NF requested, return here
     if natural_frame:
         return X, meta
@@ -227,19 +236,19 @@ def _generate_natural_frame_trajectory_cache_data(
     if X is None or len(X) == 0:
         raise RuntimeError('Failed to find any midlines.')
 
-    M = X.shape[0]
-    N = X.shape[1]
+    M = meta['shape'][0]
+    N = meta['shape'][1]
     if N == 1:
         raise RuntimeError('Trajectory returned only a single point. Eigenworms requires full postures!')
 
     # Calculate the natural frame representations for all midlines
     logger.info('Calculating natural frame representations.')
-    Z = []
+    Z = np.zeros((M, N), dtype=np.complex128)
     bad_idxs = []
     mc_prev = None
     for i, Xi in enumerate(X):
         if (i + 1) % 100 == 0:
-            logger.info(f'Calculating for midline {i + 1}/{M}.')
+            logger.info(f'Calculating for midline {i + 1}/{len(X)}.')
         try:
             nf = NaturalFrame(Xi)
             mc = nf.mc
@@ -249,7 +258,7 @@ def _generate_natural_frame_trajectory_cache_data(
                 mc = align_complex_vectors(mc, mc_prev)
 
             mc_prev = mc
-            Z.append(mc)
+            Z[meta['start_frame'] + i] = mc
         except Exception:
             bad_idxs.append(i)
     if len(bad_idxs):
