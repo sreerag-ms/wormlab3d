@@ -838,8 +838,8 @@ def generate_reconstruction_video():
     curvature_postures = np.abs(Z)
 
     # Calculate torsions
-    psi = np.unwrap(np.angle(Z), axis=0)
-    torsion = np.gradient(psi, axis=0)
+    psi = np.unwrap(np.angle(Z), axis=1)
+    torsion = np.gradient(psi, axis=1)
 
     # Calculate posture helicities
     helicities = calculate_helicities(Xc)
