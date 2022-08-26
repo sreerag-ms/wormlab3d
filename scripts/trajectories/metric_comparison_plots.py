@@ -7,6 +7,7 @@ import numpy as np
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.data.model import Dataset, Reconstruction
+from wormlab3d.postures.helicities import calculate_helicities, calculate_trajectory_helicities
 from wormlab3d.simple_worm.estimate_k import get_K_estimates_from_args
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
@@ -57,6 +58,10 @@ def make_filename(metric_a: str, metric_b: str, args: Namespace, excludes: List[
     if metric_a in ['planarity', 'nonp'] or metric_b in ['planarity', 'nonp']:
         fn += f'_pw={args.planarity_window}'
 
+    # Add helicity window parameter
+    if metric_a == 'helicity_t' or metric_b == 'helicity_t':
+        fn += f'_hw={args.helicity_window}'
+
     return LOGS_PATH / (fn + '.' + img_extension)
 
 
@@ -66,6 +71,8 @@ def make_title(metric_a: str, metric_b: str, args: Namespace):
     htd_title = 'HTD'
     planarity_title = f'Planarity ({args.planarity_window} frames)'
     nonp_title = f'Non-planarity ({args.planarity_window} frames)'
+    helicity_p_title = f'Helicity of postures'
+    helicity_t_title = f'Helicity of trajectory (u={args.trajectory_point}, {args.helicity_window} frames)'
 
     t = []
     for metric in [metric_a, metric_b]:
@@ -79,6 +86,10 @@ def make_title(metric_a: str, metric_b: str, args: Namespace):
             t.append(planarity_title)
         elif metric == 'nonp':
             t.append(nonp_title)
+        elif metric == 'helicity_p':
+            t.append(helicity_p_title)
+        elif metric == 'helicity_t':
+            t.append(helicity_t_title)
         else:
             raise RuntimeError(f'Unrecognised metric: {metric}.')
     t = ' vs '.join(t) + '.'
@@ -111,6 +122,18 @@ def _get_metric_values(metric: str, X: np.ndarray, args: Namespace) -> np.ndarra
             vals = 1 - vals
     elif metric == 'K':
         vals = get_K_estimates_from_args(args)
+    elif metric == 'helicity_p':
+        if X.ndim == 2:
+            tp = args.trajectory_point
+            args.trajectory_point = -1
+            X = get_trajectory_from_args(args)
+            args.trajectory_point = tp
+        vals = calculate_helicities(X)
+    elif metric == 'helicity_t':
+        if X.ndim == 3:
+            args.trajectory_point = 0.1
+            X = get_trajectory_from_args(args)
+        vals = calculate_trajectory_helicities(X, args.helicity_window)
     else:
         raise RuntimeError(f'Unrecognised metric {metric}.')
 
@@ -128,6 +151,10 @@ def _get_label_for_metric(metric: str):
         vals = 'Non-planarity'
     elif metric == 'K':
         vals = 'K_est'
+    elif metric == 'helicity_p':
+        vals = 'Hp'
+    elif metric == 'helicity_t':
+        vals = 'Ht'
     else:
         raise RuntimeError(f'Unrecognised metric {metric}.')
 
@@ -231,4 +258,5 @@ if __name__ == '__main__':
         plot_dataset_metrics('nonp', 'speed')
         plot_dataset_metrics('htd', 'nonp')
     else:
-        plot_reconstruction_metrics('htd', 'speed')
+        # plot_reconstruction_metrics('htd', 'speed')
+        plot_reconstruction_metrics('helicity_p', 'helicity_t')
