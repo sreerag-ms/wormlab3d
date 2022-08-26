@@ -38,6 +38,7 @@ def calculate_helicities(X: np.ndarray, parallel: bool = True) -> np.ndarray:
     """
     Calculate the helicity metric for all the postures.
     """
+    assert X.ndim == 3, 'Full postures required!'
     if parallel and N_WORKERS > 1:
         h = _calculate_helicities_parallel(X)
     else:
@@ -57,7 +58,7 @@ def calculate_trajectory_helicities(X: np.ndarray, window_size: int, parallel: b
     w2 = int((window_size + 1) / 2)
     h = np.zeros(N)
     Xw = sliding_window_view(X, window_size, axis=0).transpose(0, 2, 1)
-    h[w2 - 1:-w2] = calculate_helicities(Xw, parallel=parallel)
+    h[w2 - 1:N - window_size + w2] = calculate_helicities(Xw, parallel=parallel)
 
     # Fill in the ends
     for i in range(w2 - 1):

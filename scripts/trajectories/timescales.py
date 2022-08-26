@@ -8,6 +8,7 @@ from matplotlib.axes import Axes
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.data.model import Reconstruction, Trial, Dataset
+from wormlab3d.postures.helicities import calculate_helicities, calculate_trajectory_helicities
 from wormlab3d.trajectories.angles import calculate_trajectory_angles_parallel, calculate_planar_angles_parallel, \
     calculate_angle
 from wormlab3d.trajectories.args import get_args
@@ -16,7 +17,7 @@ from wormlab3d.trajectories.displacement import calculate_displacements, \
     calculate_transitions_and_dwells_multiple_deltas, DISPLACEMENT_AGGREGATION_L2
 from wormlab3d.trajectories.manoeuvres import get_manoeuvres
 from wormlab3d.trajectories.pca import get_pca_cache_from_args
-from wormlab3d.trajectories.util import get_deltas_from_args, calculate_speeds
+from wormlab3d.trajectories.util import get_deltas_from_args, calculate_speeds, smooth_trajectory
 
 show_plots = False
 save_plots = True
@@ -1127,6 +1128,131 @@ def speed_over_time():
         plt.show()
 
 
+def posture_helicity_over_time():
+    """
+    Plot traces of the posture helicity along a trajectory highlighting regions above and below the average.
+    Show histograms of the dwell times spent in each state.
+    """
+    args = get_args()
+    assert args.trajectory_point is None, 'Posture helicity requires full postures!'
+    assert not args.tracking_only, 'Posture helicity requires full postures!'
+
+    # Calculate posture helicities
+    X = get_trajectory_from_args(args)
+    logger.info('Calculating posture helicities.')
+    helicity = calculate_helicities(X)
+
+    # Smooth over different deltas
+    h = {}
+    for delta in args.deltas:
+        if delta % 2 == 0:
+            delta += 1
+        h[delta] = smooth_trajectory(helicity, window_len=delta)
+
+    dwells = calculate_transitions_and_dwells_multiple_deltas(h)
+    deltas = list(h.keys())
+    delta_ts = np.array(deltas) / 25
+
+    fig, axes = plt.subplots(len(deltas), 2, figsize=(12, 4 + 2 * len(deltas)))
+    for i, delta in enumerate(deltas):
+        s = h[delta]
+
+        # Trace over time
+        ax = axes[i, 0]
+        ax.plot(s, alpha=0.75)
+        ax.set_title(f'$\Delta={delta_ts[i]:.2f}s$')
+        ax.set_ylabel('$H_p$')
+        ax.set_xlabel('$t$')
+
+        # Add average indicator
+        avg = s.mean()
+        ax.axhline(y=avg, color='red')
+
+        # Highlight regions where above/below average
+        for on_dwell in dwells[delta]['on']:
+            ax.fill_between(np.arange(on_dwell[0], on_dwell[1]), max(s), min(s), color='green', alpha=0.3, zorder=-1,
+                            linewidth=0)
+        for off_dwell in dwells[delta]['off']:
+            ax.fill_between(np.arange(off_dwell[0], off_dwell[1]), max(s), min(s), color='orange', alpha=0.3, zorder=-1,
+                            linewidth=0)
+
+        # Plot histogram of dwell times
+        ax = axes[i, 1]
+        ax.set_yscale('log')
+        ax.set_xscale('log')
+        ax.hist(dwells[delta]['on_durations'], bins=50, density=True, alpha=0.5, color='green')
+        ax.hist(dwells[delta]['off_durations'], bins=50, density=True, alpha=0.5, color='orange')
+
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            make_filename(f'traces_posture_helicities', args, excludes=['delta_range', 'delta_step', 'u'])
+        )
+    if show_plots:
+        plt.show()
+
+
+def trajectory_helicity_over_time():
+    """
+    Plot traces of the trajectory helicity highlighting regions above and below the average.
+    Show histograms of the dwell times spent in each state.
+    """
+    args = get_args()
+    assert args.trajectory_point is not None or args.tracking_only, 'Trajectory helicity requires a trajectory point!'
+    X = get_trajectory_from_args(args)
+
+    # Calculate trajectory helicities
+    h = {}
+    for delta in args.deltas:
+        if delta % 2 == 0:
+            delta += 1
+        h[delta] = calculate_trajectory_helicities(X, window_size=delta)
+
+    dwells = calculate_transitions_and_dwells_multiple_deltas(h)
+    deltas = list(h.keys())
+    delta_ts = np.array(deltas) / 25
+
+    fig, axes = plt.subplots(len(deltas), 2, figsize=(12, 4 + 2 * len(deltas)))
+    for i, delta in enumerate(deltas):
+        s = h[delta]
+
+        # Trace over time
+        ax = axes[i, 0]
+        ax.plot(s, alpha=0.75)
+        ax.set_title(f'$\Delta={delta_ts[i]:.2f}s$')
+        ax.set_ylabel('$H_t$')
+        ax.set_xlabel('$t$')
+
+        # Add average indicator
+        avg = s.mean()
+        ax.axhline(y=avg, color='red')
+
+        # Highlight regions where above/below average
+        for on_dwell in dwells[delta]['on']:
+            ax.fill_between(np.arange(on_dwell[0], on_dwell[1]), max(s), min(s), color='green', alpha=0.3, zorder=-1,
+                            linewidth=0)
+        for off_dwell in dwells[delta]['off']:
+            ax.fill_between(np.arange(off_dwell[0], off_dwell[1]), max(s), min(s), color='orange', alpha=0.3, zorder=-1,
+                            linewidth=0)
+
+        # Plot histogram of dwell times
+        ax = axes[i, 1]
+        ax.set_yscale('log')
+        ax.set_xscale('log')
+        ax.hist(dwells[delta]['on_durations'], bins=50, density=True, alpha=0.5, color='green')
+        ax.hist(dwells[delta]['off_durations'], bins=50, density=True, alpha=0.5, color='orange')
+
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            make_filename(f'traces_trajectory_helicities', args, excludes=['delta_range', 'delta_step'])
+        )
+    if show_plots:
+        plt.show()
+
+
 def nonplanarity_and_displacement_over_time(x_label: str = 'time'):
     """
     Plot traces of the nonplanarity/displacement changes along a trajectory highlighting regions above and below the average.
@@ -1570,6 +1696,8 @@ if __name__ == '__main__':
     # angle_diffs_over_time()
     # nonplanarity_over_time()
     # speed_over_time()
+    # posture_helicity_over_time()
+    trajectory_helicity_over_time()
 
     # displacement_over_time_with_stats()
 
@@ -1586,4 +1714,4 @@ if __name__ == '__main__':
     # displacement_transition_rates_dataset_averages()
     # nonplanarity_transition_rates_dataset_averages()
 
-    transition_rates_dataset_averages()
+    # transition_rates_dataset_averages()
