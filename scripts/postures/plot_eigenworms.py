@@ -20,8 +20,8 @@ from wormlab3d.toolkit.util import print_args
 from wormlab3d.trajectories.cache import get_trajectory
 
 plot_n_components = 10
-show_plots = False
-save_plots = True
+show_plots = True
+save_plots = False
 img_extension = 'svg'
 eigenworm_length = 1
 eigenworm_scale = 64
@@ -265,7 +265,7 @@ def _plot_eigenworms_basic_mlab(
             show_frame_arrows=True,
             n_frame_arrows=16,
             show_pca_arrows=False,
-            show_outline=False,
+            show_outline=True,
             show_axis=False,
             offscreen=not interactive,
             **{**default_plot_options, **plot_config[i]}
@@ -544,10 +544,10 @@ def main():
     filename += f'_M={ew.n_samples}_N={ew.n_features}'
 
     # _plot_eigenworms_basic(ew, filename)
-    # _plot_eigenworms_basic_mlab(ew, filename, interactive=False)
+    _plot_eigenworms_basic_mlab(ew, filename, interactive=True)
     # _plot_eigenworms(ew, title, filename)
     # _plot_eigenvalues(ew, title, filename)
-    _plot_eigenvalues_basic(ew, filename)
+    # _plot_eigenvalues_basic(ew, filename)
     # if X_full is not None:
     #     _plot_reconstruction(ew, X_full, 500, title, filename)
 

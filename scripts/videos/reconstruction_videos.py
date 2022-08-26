@@ -251,6 +251,7 @@ def _make_3d_trajectory_plot_mlab(
         X: np.ndarray,
         speeds: np.ndarray,
         curvature: np.ndarray,
+        curvature_postures: np.ndarray,
         lengths: np.ndarray,
         args: Namespace,
 ) -> Tuple[Figure, Callable]:
@@ -305,9 +306,14 @@ def _make_3d_trajectory_plot_mlab(
 
     # Set up the artist and add the pieces
     NF = NaturalFrame(X[0])
-    fa = FrameArtistMLab(NF, use_centred_midline=False, midline_opts={'opacity': 1, 'line_width': 8})
+    fa = FrameArtistMLab(
+        NF,
+        use_centred_midline=False,
+        midline_opts={'opacity': 1, 'line_width': 8},
+        surface_opts={'radius': 0.02 * lengths.mean()}
+    )
     fa.add_midline(fig)
-    fa.add_surface(fig, v_min=-curvature.max(), v_max=curvature.max())
+    fa.add_surface(fig, v_min=-curvature_postures.max(), v_max=curvature_postures.max())
 
     # Add box/axes
     mlab.outline(path, color=(0, 0, 0), figure=fig)
@@ -325,7 +331,7 @@ def _make_3d_trajectory_plot_mlab(
         NF = NaturalFrame(X[frame_idx])
         fa.update(NF)
         fig.scene.disable_render = False
-        mlab.view(figure=fig, azimuth=azims[frame_idx], distance=distance)
+        mlab.view(figure=fig, azimuth=azims[frame_idx], distance=distance, focalpoint=centre)
         fig.scene.render()
 
     return fig, update
@@ -421,9 +427,15 @@ def _make_3d_posture_plot_mlab(
 
     # Set up the artist and add the pieces
     NF = NaturalFrame(X[0])
-    fa = FrameArtistMLab(NF, use_centred_midline=True, midline_opts={'opacity': 1, 'line_width': 8})
+    fa = FrameArtistMLab(
+        NF,
+        use_centred_midline=True,
+        midline_opts={'opacity': 1, 'line_width': 8},
+        surface_opts={'radius': 0.02 * lengths.mean()}
+    )
     fa.add_midline(fig)
     fa.add_surface(fig, v_min=-curvature.max(), v_max=curvature.max())
+    fa.add_outline(fig)
 
     # Determine zoom level - make a sphere around the average midpoint that would contain
     # a straight worm at its longest length in the clip
@@ -438,31 +450,15 @@ def _make_3d_posture_plot_mlab(
     distance = mlab.view()[2]
     tmp_mesh.remove()
 
-    # Add outline box
-    outline = mlab.outline(fa.surface, color=(0, 0, 0), figure=fig)
-
-    # Not adding axes as can't set the ticks to any fixed spacing so when animated looks confusing
-    # axes = mlab.axes(color=(0, 0, 0), nb_labels=5, xlabel='', ylabel='', zlabel='')
-    # axes.axes.label_format = ''
-
     # Aspects
     n_revolutions = len(X) / trial.fps / 60 * args.revolution_rate
     azims = np.linspace(start=0, stop=360 * n_revolutions, num=len(X))
     mlab.view(figure=fig, azimuth=azims[0], distance=distance, focalpoint=fa.X.mean(axis=0))
 
     def update(frame_idx: int):
-        nonlocal outline
         fig.scene.disable_render = True
         NF = NaturalFrame(X[frame_idx])
         fa.update(NF)
-
-        # Update box/axes
-        outline.remove()
-        outline = mlab.outline(fa.surface, color=(0, 0, 0), figure=fig)
-        # axes.remove()
-        # axes = mlab.axes(color=(0, 0, 0), nb_labels=5, xlabel='', ylabel='', zlabel='')
-        # axes.axes.label_format = ''
-
         fig.scene.disable_render = False
         mlab.view(figure=fig, azimuth=azims[frame_idx], distance=distance, focalpoint=fa.X.mean(axis=0))
         fig.scene.render()
@@ -863,7 +859,11 @@ def generate_reconstruction_video():
         args=args
     )
     if args.trajectory_use_mlab:
-        fig_traj, update_traj_plot = _make_3d_trajectory_plot_mlab(lengths=lengths, **traj_fn_args)
+        fig_traj, update_traj_plot = _make_3d_trajectory_plot_mlab(
+            curvature_postures=curvature_postures,
+            lengths=lengths,
+            **traj_fn_args
+        )
     else:
         fig_traj, update_traj_plot = _make_3d_trajectory_plot(**traj_fn_args)
     posture_fn_args = dict(

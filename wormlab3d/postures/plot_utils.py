@@ -1,3 +1,4 @@
+import itertools
 from typing import Union, Dict, Tuple
 
 import matplotlib.pyplot as plt
@@ -62,6 +63,10 @@ class FrameArtistMLab:
     mesh_opt_defaults = {
         'opacity': 0.8,
     }
+    outline_opt_defaults = {
+        'color': to_rgb('darkgrey'),
+        'tube_radius': 0.001
+    }
     arrow_opt_defaults = {
         'opacity': 0.9,
         'radius_shaft': 0.01,
@@ -80,6 +85,7 @@ class FrameArtistMLab:
             midline_opts: Dict = None,
             surface_opts: Dict = None,
             mesh_opts: Dict = None,
+            outline_opts: Dict = None,
             arrow_opts: Dict = None,
             arrow_colours: Dict = None,
             arrow_scale: float = 0.1,
@@ -98,15 +104,21 @@ class FrameArtistMLab:
         self.arrows = {}
         self.path = None
         self.surface = None
+        self.outline = None
         if midline_opts is None:
             midline_opts = {}
         self.midline_opts = {**FrameArtistMLab.midline_opt_defaults, **midline_opts}
         if surface_opts is None:
-            surface_opts = {'use_centred': self.use_centred_midline}
+            surface_opts = {}
+        if 'use_centred' not in surface_opts:
+            surface_opts['use_centred'] = self.use_centred_midline
         self.surface_opts = {**FrameArtistMLab.surface_opt_defaults, **surface_opts}
         if mesh_opts is None:
             mesh_opts = {}
         self.mesh_opts = {**FrameArtistMLab.mesh_opt_defaults, **mesh_opts}
+        if outline_opts is None:
+            outline_opts = {}
+        self.outline_opts = {**FrameArtistMLab.outline_opt_defaults, **outline_opts}
         if arrow_opts is None:
             arrow_opts = {}
         self.arrow_opts = {**FrameArtistMLab.arrow_opt_defaults, **arrow_opts}
@@ -166,6 +178,67 @@ class FrameArtistMLab:
         self.surface.scene.renderer.maximum_number_of_peels = 16
         self.surface.module_manager.scalar_lut_manager.lut.table = cmaplist
 
+    def add_outline(
+            self,
+            fig: Scene = None,
+    ):
+        """
+        Add outline box containing the surface.
+        """
+        lines = self._get_outline_points()
+        outline = []
+        for l in lines:
+            line_obj = mlab.plot3d(
+                *l.T,
+                figure=fig,
+                **self.outline_opts
+            )
+            outline.append(line_obj)
+        self.outline = outline
+
+    def _get_outline_points(self):
+        """
+        Calculate the outline points.
+        """
+
+        # Get the bounds for the mesh points relative to the PCA components
+        mesh_pts = np.stack([
+            self.surface.mlab_source.x.flatten(),
+            self.surface.mlab_source.y.flatten(),
+            self.surface.mlab_source.z.flatten()
+        ], axis=-1)
+        R = np.stack(self.NF.pca.components_, axis=1)
+        Xt = np.einsum('ij,bj->bi', R.T, mesh_pts)
+
+        # Calculate box vertices
+        height, width, depth = np.ptp(Xt, axis=0)
+        M = np.array(list(itertools.product(*[[-1, 1]] * 3)))
+        dims = np.array([[height, width, depth]])
+        v = self.X.mean(axis=0) + (M * dims / 2) @ R.T
+
+        # Bottom face outline
+        l1 = np.stack([v[0], v[1]])
+        l2 = np.stack([v[1], v[3]])
+        l3 = np.stack([v[3], v[2]])
+        l4 = np.stack([v[2], v[0]])
+
+        # Top face outline
+        l5 = np.stack([v[4], v[5]])
+        l6 = np.stack([v[5], v[7]])
+        l7 = np.stack([v[7], v[6]])
+        l8 = np.stack([v[6], v[4]])
+
+        # Connecting vertical lines
+        l9 = np.stack([v[0], v[4]])
+        l10 = np.stack([v[1], v[5]])
+        l11 = np.stack([v[2], v[6]])
+        l12 = np.stack([v[3], v[7]])
+
+        # Stack the lines together
+        lines = np.array([l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12])
+
+        return lines
+
     def add_component_vectors(
             self,
             fig: Scene = None,
@@ -219,6 +292,12 @@ class FrameArtistMLab:
             surface, K_surf = self.NF.surface(**self.surface_opts)
             x, y, z = surface[..., 0], surface[..., 1], surface[..., 2]
             self.surface.mlab_source.reset(x=x, y=y, z=z, scalars=K_surf)
+
+        # Update outline
+        if self.outline is not None:
+            new_lines = self._get_outline_points()
+            for i, l in enumerate(self.outline):
+                l.mlab_source.points = new_lines[i]
 
         # todo: Update component vectors
         if len(self.arrows) is not None:
@@ -406,10 +485,9 @@ def plot_natural_frame_3d_mlab(
         fa.add_component_vectors(fig, draw_e0=False)
     fa.add_midline(fig, cmap_name=midline_cmap)
     fa.add_surface(fig, cmap_name=surface_cmap)
-
-    # Add box/axes
     if show_outline:
-        mlab.outline(color=(0, 0, 0))
+        fa.add_outline(fig)
+
     if show_axis:
         axes = mlab.axes(color=(0, 0, 0), nb_labels=5, xlabel='', ylabel='', zlabel='')
         axes.axes.label_format = ''
