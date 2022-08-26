@@ -190,9 +190,27 @@ def generate_midline3d_dataset(args: DatasetMidline3DArgs) -> DatasetMidline3D:
         raise RuntimeError('No matching trials, cannot build a dataset!')
 
     # Fetch all matching reconstructions
-    reconstruction_ids = fetch_matching_reconstruction_ids(trial_ids, args)
+    if len(args.reconstructions) > 0:
+        trial_ids_used = []
+        reconstruction_ids = []
+
+        # Check that the requested reconstructions are for otherwise valid trials
+        for rid in args.reconstructions:
+            r = Reconstruction.objects.get(id=rid)
+            assert r.trial.id in trial_ids, \
+                f'Requested reconstruction ({r.id}) associated with an unacceptable trial ({r.trial.id})!'
+            trial_ids_used.append(r.trial.id)
+            reconstruction_ids.append(r.id)
+
+        # Set include_trials
+        args.include_trials = trial_ids_used
+    else:
+        reconstruction_ids = fetch_matching_reconstruction_ids(trial_ids, args)
     if len(reconstruction_ids) == 0:
         raise RuntimeError('No matching reconstructions, cannot build a dataset!')
+
+    # Set reconstructions to args
+    args.reconstructions = reconstruction_ids
 
     # Fetch the full trajectories for all the reconstructions
     logger.info('Fetching trajectories.')

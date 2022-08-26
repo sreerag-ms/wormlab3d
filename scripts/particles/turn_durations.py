@@ -210,6 +210,7 @@ def _generate_or_load_dataset_stats(
         outputs = {k: [] for k in stat_keys}
         for trial in ds.include_trials:
             args.trial = trial.id
+            args.reconstruction = ds.get_reconstruction_id_for_trial(trial)
             try:
                 stats = calculate_trial_turn_statistics(args, smooth_K, window_size, curvature_height)
             except RuntimeError as e:
@@ -321,6 +322,7 @@ def plot_dataset_turn_correlations_across_windows():
     # Calculate the model for all trials at all window sizes
     for trial in ds.include_trials:
         args.trial = trial.id
+        args.reconstruction = ds.get_reconstruction_id_for_trial(trial)
         for i, ws in enumerate(window_sizes):
             try:
                 stats = calculate_trial_turn_statistics(args, smooth_K, int(ws / dt), height)
@@ -400,6 +402,7 @@ def plot_dataset_run_stats():
     # Calculate the run stats for all trials
     for trial in ds.include_trials:
         args.trial = trial.id
+        args.reconstruction = ds.get_reconstruction_id_for_trial(trial)
         try:
             stats = calculate_trial_run_statistics(args, smooth_K, k_max, min_run_duration)
         except RuntimeError as e:
@@ -523,8 +526,8 @@ if __name__ == '__main__':
 
     # plot_trial_turns()
     # plot_trial_turn_correlations()
-    # plot_dataset_turn_correlations()
+    plot_dataset_turn_correlations()
     # plot_dataset_turn_correlations_across_windows()
-    # plot_dataset_run_stats()
+    plot_dataset_run_stats()
     # plot_dataset_turns_vs_runs()
-    plot_dataset_turn_nonp()
+    # plot_dataset_turn_nonp()

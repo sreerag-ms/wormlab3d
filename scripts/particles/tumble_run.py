@@ -293,6 +293,7 @@ def plot_dataset_trajectories():
     for trial in ds.include_trials:
         logger.info(f'Computing tumble-run model for trial={trial.id}.')
         args.trial = trial.id
+        args.reconstruction = ds.get_reconstruction_id_for_trial(trial)
         convert_trajectory_to_tumble_run(args)
         gc.collect()
 
@@ -320,6 +321,7 @@ def plot_coefficients_of_variation():
     for i, trial in enumerate(ds.include_trials):
         logger.info(f'Computing tumble-run model for trial={trial.id}.')
         args.trial = trial.id
+        args.reconstruction = ds.get_reconstruction_id_for_trial(trial)
         X = get_trajectory_from_args(args)
         pcas = get_pca_cache_from_args(args)
         e0, e1, e2 = calculate_trajectory_frame(X, pcas, args.planarity_window)
@@ -718,29 +720,29 @@ def dataset_against_three_state_comparison():
     msds_sim = {}
     d_all_sim = {delta: [] for delta in deltas}
 
-    logger.info(f'Calculating MSDs for simulation runs.')
-    bar = Bar('Calculating', max=args.batch_size)
-    bar.check_tty = False
-    for i, X in enumerate(TC.X):
-        # Pick a random length
-        X = X[:T_sim_lengths[i]]
-
-        msds_i = []
-        for delta in deltas:
-            if delta > X.shape[0] / 3:
-                continue
-            d = np.sum((X[delta:] - X[:-delta])**2, axis=-1)
-            d_all_sim[delta].append(d)
-            msds_i.append(d.mean())
-        msds_sim[i] = np.array(msds_i)
-        bar.next()
-    bar.finish()
-
-    for i, delta in enumerate(deltas):
-        msds_all_sim[i] = np.concatenate(d_all_sim[delta]).mean()
+    # logger.info(f'Calculating MSDs for simulation runs.')
+    # bar = Bar('Calculating', max=args.batch_size)
+    # bar.check_tty = False
+    # for i, X in enumerate(TC.X):
+    #     # Pick a random length
+    #     X = X[:T_sim_lengths[i]]
+    #
+    #     msds_i = []
+    #     for delta in deltas:
+    #         if delta > X.shape[0] / 3:
+    #             continue
+    #         d = np.sum((X[delta:] - X[:-delta])**2, axis=-1)
+    #         d_all_sim[delta].append(d)
+    #         msds_i.append(d.mean())
+    #     msds_sim[i] = np.array(msds_i)
+    #     bar.next()
+    # bar.finish()
+    #
+    # for i, delta in enumerate(deltas):
+    #     msds_all_sim[i] = np.concatenate(d_all_sim[delta]).mean()
 
     # Plot MSDs
-    if 1:
+    if 0:
         # Set up plots and colours
         logger.info('Plotting MSD.')
         fig, ax = plt.subplots(1, figsize=(12, 10))
@@ -879,20 +881,24 @@ def dataset_against_three_state_comparison():
                 ax.set_xticks([0, 50, 100])
                 ax.set_xticklabels(['0', '50', '100'])
                 ax.set_xlabel('s')
+                ax.set_yticks([1e-5, 1e-2])
             if param_name == 'Run speeds':
                 ax.set_xticks([0, 0.1, 0.2])
                 ax.set_xticklabels(['0', '0.1', '0.2'])
                 ax.set_xlabel('mm/s')
+                ax.set_yticks([1e-1, 1e1])
             if param_name == 'Planar angles':
                 ax.set_xlim(left=-np.pi - 0.1, right=np.pi + 0.1)
                 ax.set_xticks([-np.pi, np.pi])
                 ax.set_xticklabels(['$-\pi$', '$\pi$'])
                 ax.set_xlabel('$\\theta$')
+                ax.set_yticks([0, 0.25])
             if param_name == 'Non-planar angles':
                 ax.set_xlim(left=-np.pi / 2 - 0.1, right=np.pi / 2 + 0.1)
                 ax.set_xticks([-np.pi / 2, np.pi / 2])
                 ax.set_xticklabels(['$-\\frac{\pi}{2}$', '$\\frac{\pi}{2}$'])
                 ax.set_xlabel('$\\phi$')
+                ax.set_yticks([0, 0.6])
 
         fig.tight_layout()
 
@@ -905,7 +911,7 @@ def dataset_against_three_state_comparison():
         if show_plots:
             plt.show()
 
-        # exit()
+        exit()
 
         # Set up MSD plot
         logger.info('Plotting MSD ranges.')

@@ -2,7 +2,7 @@ import datetime
 import json
 import os
 from pathlib import Path
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 
 import numpy as np
 from bson import ObjectId
@@ -15,6 +15,7 @@ from wormlab3d.data.model.midline2d import Midline2D
 from wormlab3d.data.model.midline3d import M3D_SOURCES
 from wormlab3d.data.model.segmentation_masks import SegmentationMasks
 from wormlab3d.data.model.tag import Tag
+from wormlab3d.data.model.trial import Trial
 from wormlab3d.data.numpy_field import NumpyField, COMPRESS_BLOSC_POINTER
 from wormlab3d.data.triplet_field import TripletField
 from wormlab3d.nn.args import DatasetArgs
@@ -65,6 +66,7 @@ class Dataset(Document):
     exclude_trials = ListField(ReferenceField('Trial'))
     include_trials = ListField(ReferenceField('Trial'))
     min_trial_quality = IntField()
+    reconstructions = ListField(ReferenceField('Reconstruction'))
     tag_info = EmbeddedDocumentListField(TagInfo)
 
     meta = {
@@ -97,6 +99,7 @@ class Dataset(Document):
             exclude_trials=args.exclude_trials,
             include_trials=args.include_trials,
             min_trial_quality=args.min_trial_quality,
+            reconstructions=args.reconstructions,
             n_worm_points=args.n_worm_points,
             restrict_sources=args.restrict_sources,
             min_reconstruction_frames=args.min_reconstruction_frames,
@@ -241,6 +244,16 @@ class Dataset(Document):
     # def eigenworms(self) -> List[Eigenworms]:
     #     return Eigenworms.objects(dataset=self).order_by('-updated')
 
+    def get_reconstruction_id_for_trial(self, trial: Trial) -> Optional[ObjectId]:
+        """
+        Return the reconstruction in this dataset associated with the given trial
+        """
+        assert trial in self.include_trials
+        for r in self.reconstructions:
+            if r.trial.id == trial.id:
+                return str(r.id)
+        return None
+
 
 class DatasetMidline2D(Dataset):
     X_train = ListField(ReferenceField(Midline2D))
@@ -329,7 +342,6 @@ class DatasetMidline3D(Dataset):
     n_worm_points = IntField(required=True)
     restrict_sources = ListField(StringField(choices=M3D_SOURCES))
     mf_depth = IntField()
-    reconstructions = ListField(ReferenceField('Reconstruction'))
     min_reconstruction_frames = IntField()
 
     def __init__(self, *args, **kwargs):
@@ -379,9 +391,6 @@ class DatasetMidline3D(Dataset):
         if self.size_all > 0:
             self.train_test_split_actual = len(train) / self.size_all
         self.metas = metas
-
-        # Set reconstructions
-        self.reconstructions = [ObjectId(k) for k in self.metas['reconstruction'].keys()]
 
     def __getattribute__(self, k):
         if k not in ['X_train', 'X_test', 'metas']:
@@ -516,21 +525,24 @@ class DatasetMidline3D(Dataset):
 
                 # Calculate vertex spacings and worm lengths
                 N = self.X_all.shape[1]
-                sl = np.linalg.norm(self.X_all[:, 1:]-self.X_all[:, :-1], axis=-1)
+                sl = np.linalg.norm(self.X_all[:, 1:] - self.X_all[:, :-1], axis=-1)
                 l = sl.sum(axis=-1)
 
                 # Exclude postures where the vertices are not evenly spaced
-                exc_uneven = sl.max(axis=-1) > rel_spacing_threshold * l / (N-1)
+                exc_uneven = sl.max(axis=-1) > rel_spacing_threshold * l / (N - 1)
                 if exc_uneven.sum() > 0:
-                    logger.info(f'Excluding {exc_uneven.sum()} worms with uneven spacing (max spacing > {rel_spacing_threshold:.2f * l/(N-1)}).')
+                    logger.info(f'Excluding {exc_uneven.sum()} worms with uneven spacing '
+                                f'(max spacing > {rel_spacing_threshold:.2f * l/(N-1)}).')
 
                 # Exclude postures which are too short or long
                 exc_too_short = l < length_min
                 exc_too_long = l > length_max
                 if exc_too_short.sum() > 0:
-                    logger.info(f'Excluding {exc_too_short.sum()} worms below minimum length threshold (< {length_min:.2f}).')
+                    logger.info(f'Excluding {exc_too_short.sum()} worms below minimum '
+                                f'length threshold (< {length_min:.2f}).')
                 if exc_too_long.sum() > 0:
-                    logger.info(f'Excluding {exc_too_long.sum()} worms above maximum length threshold (> {length_max:.2f}).')
+                    logger.info(f'Excluding {exc_too_long.sum()} worms above maximum '
+                                f'length threshold (> {length_max:.2f}).')
 
                 # Calculate helicities
                 includes = ~exc_uneven & ~exc_too_short & ~exc_too_long

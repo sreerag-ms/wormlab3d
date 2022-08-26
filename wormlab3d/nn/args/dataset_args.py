@@ -23,6 +23,7 @@ class DatasetArgs(BaseArgs):
             exclude_trials: List[int] = None,
             include_trials: List[int] = None,
             min_trial_quality: int = 9,
+            reconstructions: List[str] = None,
             augment: bool = False,
             n_dataloader_workers: int = 4,
             preload_from_database: bool = False,
@@ -66,6 +67,14 @@ class DatasetArgs(BaseArgs):
             include_trials = []
         self.include_trials = include_trials
         self.min_trial_quality = min_trial_quality
+        if reconstructions is not None:
+            assert len(self.include_experiments) == 0, 'reconstructions cannot be defined with include_experiments!'
+            assert len(self.exclude_experiments) == 0, 'reconstructions cannot be defined with exclude_experiments!'
+            assert len(self.include_trials) == 0, 'reconstructions cannot be defined with include_trials!'
+            assert len(self.exclude_trials) == 0, 'reconstructions cannot be defined with exclude_trials!'
+        else:
+            reconstructions = []
+        self.reconstructions = reconstructions
         self.augment = augment
         self.n_dataloader_workers = n_dataloader_workers
         self.preload_from_database = preload_from_database
@@ -106,6 +115,8 @@ class DatasetArgs(BaseArgs):
                            help='Only include data from these trials.')
         group.add_argument('--min-trial-quality', type=int, default=9,
                            help='Minimum trial quality.')
+        group.add_argument('--reconstructions', type=lambda s: [str(item) for item in s.split(',')],
+                           help='Only include data from these reconstructions.')
         group.add_argument('--augment', type=str2bool, default=True,
                            help='Apply data augmentation.')
         group.add_argument('--n-dataloader-workers', type=int, default=4,
@@ -129,4 +140,5 @@ class DatasetArgs(BaseArgs):
             f'Include trials={self.include_trials}.',
             f'Exclude trials={self.exclude_trials}.',
             f'Minimum trial quality={self.min_trial_quality}.',
+            f'Reconstructions={self.reconstructions}.',
         ]
