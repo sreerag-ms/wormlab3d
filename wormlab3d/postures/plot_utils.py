@@ -211,10 +211,10 @@ class FrameArtistMLab:
         Xt = np.einsum('ij,bj->bi', R.T, mesh_pts)
 
         # Calculate box vertices
-        height, width, depth = np.ptp(Xt, axis=0)
+        dims = np.ptp(Xt, axis=0)
+        midpoint = Xt.min(axis=0) + dims / 2
         M = np.array(list(itertools.product(*[[-1, 1]] * 3)))
-        dims = np.array([[height, width, depth]])
-        v = self.X.mean(axis=0) + (M * dims / 2) @ R.T
+        v = (midpoint + M * dims[None, :] / 2) @ R.T
 
         # Bottom face outline
         l1 = np.stack([v[0], v[1]])

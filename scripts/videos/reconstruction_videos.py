@@ -441,26 +441,27 @@ def _make_3d_posture_plot_mlab(
     # a straight worm at its longest length in the clip
     max_length = lengths.max()
     phi, theta = np.mgrid[0:2 * np.pi:12j, 0:np.pi:12j]
-    r = (max_length * 0.6) / 2
-    x = r * np.cos(phi) * np.sin(theta)
-    y = r * np.sin(phi) * np.sin(theta)
-    z = r * np.cos(theta)
-    tmp_mesh = mlab.mesh(x, y, z)
-    mlab.view(figure=fig, distance='auto')
+    mp = np.ptp(fa.X, axis=0) / 2
+    r = (max_length * 0.8) / 2
+    x = mp[0] + r * np.cos(phi) * np.sin(theta)
+    y = mp[1] + r * np.sin(phi) * np.sin(theta)
+    z = mp[2] + r * np.cos(theta)
+    tmp_mesh = mlab.mesh(x, y, z, opacity=0.4)
+    mlab.view(figure=fig, distance='auto', focalpoint=mp)
     distance = mlab.view()[2]
     tmp_mesh.remove()
 
     # Aspects
     n_revolutions = len(X) / trial.fps / 60 * args.revolution_rate
     azims = np.linspace(start=0, stop=360 * n_revolutions, num=len(X))
-    mlab.view(figure=fig, azimuth=azims[0], distance=distance, focalpoint=fa.X.mean(axis=0))
+    mlab.view(figure=fig, azimuth=azims[0], distance=distance, focalpoint=mp)
 
     def update(frame_idx: int):
         fig.scene.disable_render = True
         NF = NaturalFrame(X[frame_idx])
         fa.update(NF)
         fig.scene.disable_render = False
-        mlab.view(figure=fig, azimuth=azims[frame_idx], distance=distance, focalpoint=fa.X.mean(axis=0))
+        mlab.view(figure=fig, azimuth=azims[frame_idx], distance=distance, focalpoint=np.ptp(fa.X, axis=0) / 2)
         fig.scene.render()
 
     return fig, update
