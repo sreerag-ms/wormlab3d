@@ -102,9 +102,9 @@ def helicity_trace(x_label: str = 'time'):
         plt.show()
 
 
-def torsion_trace(x_label: str = 'time'):
+def torsion_trace(x_label: str = 'time', threshold: float = np.pi / 2):
     """
-    Plot a kemogram of the torsion over time.
+    Plot a kymogram of the torsion over time.
     """
     args = parse_args()
 
@@ -127,6 +127,12 @@ def torsion_trace(x_label: str = 'time'):
     # Calculate torsions
     psi = np.unwrap(np.angle(Z), axis=1)
     torsion = np.gradient(psi, axis=1)
+
+    # Threshold to ignore torsion at low-curvature. k = 1/r. k = 2pi => circle.
+    if threshold is not None:
+        kappa = np.abs(Z)
+        excludes = kappa < threshold
+        torsion[excludes] = 0
 
     # Plot
     fig, axes = plt.subplots(1, figsize=(12, 8))
