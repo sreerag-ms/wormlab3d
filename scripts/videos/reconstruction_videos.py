@@ -262,7 +262,7 @@ def _make_3d_trajectory_plot_mlab(
     logger.info('Building 3D trajectory plot.')
 
     X_trajectory = X.mean(axis=1)
-    centre = X_trajectory.mean(axis=0)
+    centre = X_trajectory.min(axis=0) + np.ptp(X_trajectory, axis=0) / 2
 
     # Construct colours
     if args.trajectory_colouring == 'time':
@@ -286,19 +286,6 @@ def _make_3d_trajectory_plot_mlab(
         fig.scene.render_window.multi_samples = 20
         fig.scene.anti_aliasing_frames = 20
 
-    # Determine zoom level - make a sphere around the centre that would contain
-    # a straight worm at its longest length extending from the furthest trajectory point.
-    max_dist = np.linalg.norm(X - centre, axis=-1).max() + lengths.max()
-    phi, theta = np.mgrid[0:2 * np.pi:12j, 0:np.pi:12j]
-    r = (max_dist * 0.6) / 2
-    x = r * np.cos(phi) * np.sin(theta)
-    y = r * np.sin(phi) * np.sin(theta)
-    z = r * np.cos(theta)
-    tmp_mesh = mlab.mesh(x, y, z)
-    mlab.view(figure=fig, distance='auto')
-    distance = mlab.view()[2]
-    tmp_mesh.remove()
-
     # Render the trajectory with simple lines
     x, y, z = X_trajectory.T
     path = mlab.plot3d(x, y, z, s, opacity=0.4, tube_radius=None, line_width=8)
@@ -319,6 +306,19 @@ def _make_3d_trajectory_plot_mlab(
     mlab.outline(path, color=(0, 0, 0), figure=fig)
     axes = mlab.axes(color=(0, 0, 0), nb_labels=5, xlabel='', ylabel='', zlabel='')
     axes.axes.label_format = ''
+
+    # Determine zoom level - make a sphere around the centre that would contain
+    # a straight worm at its longest length extending from the furthest trajectory point.
+    max_dist = np.linalg.norm(X_trajectory - centre, axis=-1).max() + lengths.max() / 2
+    phi, theta = np.mgrid[0:2 * np.pi:12j, 0:np.pi:12j]
+    r = max_dist
+    x = centre[0] + r * np.cos(phi) * np.sin(theta)
+    y = centre[1] + r * np.sin(phi) * np.sin(theta)
+    z = centre[2] + r * np.cos(theta)
+    tmp_mesh = mlab.mesh(x, y, z, opacity=0.2)
+    mlab.view(figure=fig, distance='auto', focalpoint=centre)
+    distance = mlab.view()[2]
+    tmp_mesh.remove()
 
     # Aspects
     n_revolutions = len(X) / trial.fps / 60 * args.revolution_rate
