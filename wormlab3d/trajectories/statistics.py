@@ -204,6 +204,8 @@ def calculate_trial_run_statistics(
     if X.ndim == 3:
         X_full = X - X.mean(axis=0)
         X = X.mean(axis=1)
+        if X_full.shape[1] == 1:
+            X_full = None
     else:
         X_full = None
     X -= X.mean(axis=0)

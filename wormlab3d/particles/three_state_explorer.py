@@ -232,7 +232,6 @@ class ThreeStateExplorer(nn.Module):
         """
         Simulate a batch of particle explorers.
         """
-        from wormlab3d.particles.cache import TrajectoryCache
         n_steps = int(T / dt)
         ts = torch.arange(n_steps) * dt
         nonp_pause_max = self.nonp_pause_max / dt
@@ -386,13 +385,13 @@ class ThreeStateExplorer(nn.Module):
         sim_time = time.time() - start_time
         logger.info(f'Time: {timedelta(seconds=sim_time)}')
 
-        return TrajectoryCache(
-            batch_size=self.batch_size,
+        return dict(
             ts=ts,
             tumble_ts=tumble_ts,
             X=X,
             states=states,
-            durations=durations,
+            durations_0=durations[0],
+            durations_1=durations[1],
             thetas=thetas,
             phis=phis,
             intervals=intervals,

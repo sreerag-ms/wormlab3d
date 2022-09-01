@@ -13,6 +13,7 @@ from wormlab3d.data.model.midline3d import Midline3D
 from wormlab3d.data.model.model import Model
 from wormlab3d.data.model.network_parameters import NetworkParameters
 from wormlab3d.data.model.object_point import ObjectPoint
+from wormlab3d.data.model.pe_parameters import PEParameters
 from wormlab3d.data.model.reconstruction import Reconstruction
 from wormlab3d.data.model.segmentation_masks import SegmentationMasks
 from wormlab3d.data.model.sw_checkpoint import SwCheckpoint

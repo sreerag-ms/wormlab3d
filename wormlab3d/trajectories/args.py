@@ -2,7 +2,7 @@ from argparse import ArgumentParser, Namespace
 
 from simple_worm.material_parameters import MP_DEFAULT_K
 from wormlab3d.data.model.midline3d import M3D_SOURCES, M3D_SOURCE_MF
-from wormlab3d.particles.particle_explorer import DIST_TYPES
+from wormlab3d.particles.args.parameter_args import ParameterArgs
 from wormlab3d.toolkit.util import str2bool
 from wormlab3d.trajectories.displacement import DISPLACEMENT_AGGREGATION_OPTIONS, DISPLACEMENT_AGGREGATION_SQUARED_SUM
 
@@ -93,26 +93,7 @@ def get_args(
 
     # Particle explorer arguments
     if include_pe_options:
-        parser.add_argument('--batch-size', type=int, help='Batch size.')
-        parser.add_argument('--rate-01', type=float, help='Transition rate from slow speed to fast speed.')
-        parser.add_argument('--rate-10', type=float, help='Transition rate from fast speed to slow speed.')
-        parser.add_argument('--rate-02', type=float, help='Transition rate from slow speed to turn.')
-        parser.add_argument('--rate-20', type=float, help='Transition rate from turn to slow speed.')
-        parser.add_argument('--speeds-0-mu', type=float, help='Slow speed average.')
-        parser.add_argument('--speeds-0-sig', type=float, help='Slow speed standard deviation.')
-        parser.add_argument('--speeds-1-mu', type=float, help='Fast speed average.')
-        parser.add_argument('--speeds-1-sig', type=float, help='Fast speed standard deviation.')
-        parser.add_argument('--theta-dist-type', type=str, choices=DIST_TYPES, help='Planar angle distribution type.')
-        parser.add_argument('--theta-dist-params', type=lambda s: [float(item) for item in s.split(',')],
-                            help='Planar angle distribution parameters.')
-        parser.add_argument('--phi-dist-type', type=str, choices=DIST_TYPES, help='Non-planar angle distribution type.')
-        parser.add_argument('--phi-dist-params', type=lambda s: [float(item) for item in s.split(',')],
-                            help='Non-planar angle distribution parameters.')
-        parser.add_argument('--nonp-pause-type', type=str, choices=[None, 'linear', 'quadratic'],
-                            help='Non-planar turn pause penalty type.')
-        parser.add_argument('--nonp-pause-max', type=float, help='Maximum non-planar turn pause penalty.')
-        parser.add_argument('--sim-duration', type=float, help='Simulation time.')
-        parser.add_argument('--sim-dt', type=float, help='Simulation timestep.')
+        ParameterArgs.add_args(parser)
 
     args = parser.parse_args()
 

@@ -422,6 +422,7 @@ def calculate_trajectory_frame(
 
     # If the pcas are not provided then calculate them
     if pcas is None:
+        logger.info('Calculating pcas.')
         pcas = calculate_pcas(X, window_size=pca_window)
         pcas = PCACache(pcas)
 

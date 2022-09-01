@@ -14,8 +14,9 @@ from scipy.stats import rv_continuous
 from sklearn.decomposition import PCA
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
-from wormlab3d.particles.cache import get_trajectories_from_args, TrajectoryCache
+from wormlab3d.particles.cache import get_sim_state_from_args
 from wormlab3d.particles.gaussian_mixture import GaussianMixtureScipy
+from wormlab3d.particles.simulation_state import SimulationState
 from wormlab3d.particles.three_state_explorer import ThreeStateExplorer
 from wormlab3d.particles.util import plot_msd
 from wormlab3d.toolkit.plot_utils import equal_aspect_ratio, make_box_from_pca
@@ -26,9 +27,9 @@ from wormlab3d.trajectories.displacement import calculate_displacements
 from wormlab3d.trajectories.util import smooth_trajectory
 
 plot_n_examples = 3
-show_plots = True
-save_plots = False
-img_extension = 'svg'
+show_plots = False
+save_plots = True
+img_extension = 'png'
 
 
 def _get_p_strs(pe: ThreeStateExplorer, include_names: bool = True) -> List[str]:
@@ -76,7 +77,7 @@ def _plot_angle_pdfs(pe: ThreeStateExplorer):
             x = np.linspace(i * np.pi, (i + 2) * np.pi, N)
             vals += dist.pdf(x)
 
-        print(vals.sum() * 2 * np.pi / N)
+        # print(vals.sum() * 2 * np.pi / N)
 
         # x = np.linspace(dist.ppf(0.01), dist.ppf(0.99), 501)
         # ax_.plot(x, dist.pdf(x), linestyle='--', alpha=0.9, label=label, color=colour)
@@ -163,21 +164,21 @@ def _plot_pause_relation(pe: ThreeStateExplorer):
 
 
 def _plot_simulation(
-        TC: TrajectoryCache,
+        SS: SimulationState,
         run_idx: int = 0
 ):
     """
     Plot a simulation output.
     """
-    ts = TC.ts
-    dt = TC.rt_args['dt']
-    tumble_ts = TC.tumble_ts[run_idx]
-    X = TC.X[run_idx]
-    s0_durations = TC.durations[0][run_idx]
-    s1_durations = TC.durations[1][run_idx]
-    thetas = TC.thetas[run_idx]
-    phis = TC.phis[run_idx]
-    intervals = TC.intervals[run_idx]
+    ts = SS.ts
+    dt = SS.parameters.dt
+    tumble_ts = SS.tumble_ts[run_idx]
+    X = SS.X[run_idx]
+    s0_durations = SS.durations_0[run_idx]
+    s1_durations = SS.durations_1[run_idx]
+    thetas = SS.thetas[run_idx]
+    phis = SS.phis[run_idx]
+    intervals = SS.intervals[run_idx]
 
     fig = plt.figure(figsize=(16, 10))
     gs = GridSpec(5, 5)
@@ -261,8 +262,7 @@ def _plot_simulation(
 
 
 def _plot_simulations(
-        pe: ThreeStateExplorer,
-        TC: TrajectoryCache,
+        SS: SimulationState,
 ):
     """
     Plot some simulation runs.
@@ -270,10 +270,10 @@ def _plot_simulations(
     if plot_n_examples == 0:
         return
 
-    for i in range(min(pe.batch_size, plot_n_examples)):
+    for i in range(min(SS.parameters.batch_size, plot_n_examples)):
         title = f'Simulation run {i}.'
         logger.info(f'Plotting {title}')
-        _plot_simulation(TC, i)
+        _plot_simulation(SS, i)
 
         if save_plots:
             plt.savefig(LOGS_PATH / f'{START_TIMESTAMP}_sim_{i}.{img_extension}')
@@ -283,38 +283,37 @@ def _plot_simulations(
 
 
 def _plot_histograms(
-        pe: ThreeStateExplorer,
-        TC: TrajectoryCache,
+        SS: SimulationState,
 ):
     """
     Plot histograms of the sampled parameters.
     """
     logger.info('Plotting histograms.')
-    p_strs = _get_p_strs(pe, include_names=False)
+    p_strs = _get_p_strs(SS.pe, include_names=False)
 
     fig, axes = plt.subplots(7, figsize=(10, 14))
 
     ax = axes[0]
     ax.set_title(f'Run durations (intervals between tumbles)')
-    dr = np.concatenate(TC.intervals)
+    dr = np.concatenate(SS.intervals)
     ax.hist(dr, bins=30, density=True, facecolor='green', alpha=0.75)
     ax.set_yscale('log')
 
     ax = axes[1]
     ax.set_title(f'State0 durations')
-    d0 = np.concatenate(TC.durations[0])
+    d0 = np.concatenate(SS.durations_0)
     ax.hist(d0, bins=30, density=True, facecolor='green', alpha=0.75)
     ax.set_yscale('log')
 
     ax = axes[2]
     ax.set_title(f'State1 durations')
-    d1 = np.concatenate(TC.durations[1])
+    d1 = np.concatenate(SS.durations_1)
     ax.hist(d1, bins=30, density=True, facecolor='green', alpha=0.75)
     ax.set_yscale('log')
 
     ax = axes[3]
     ax.set_title(f'Speeds')
-    s = np.concatenate(TC.speeds)
+    s = np.concatenate(SS.speeds)
     ax.hist(s, bins=30, density=True, facecolor='green', alpha=0.75)
     ax.set_yscale('log')
 
@@ -325,7 +324,7 @@ def _plot_histograms(
 
     ax = axes[5]
     ax.set_title(f'$\\theta$ (Planar Angles)\n{p_strs[0]}')
-    thetas = np.concatenate(TC.thetas)
+    thetas = np.concatenate(SS.thetas)
     ax.hist(thetas, bins=31, density=True, facecolor='green', alpha=0.75)
     ax.set_xlim(left=-np.pi - 0.1, right=np.pi + 0.1)
     ax.set_xticks([-np.pi, 0, np.pi])
@@ -334,7 +333,7 @@ def _plot_histograms(
 
     ax = axes[6]
     ax.set_title(f'$\\phi$ (Non-planar Angles)\n{p_strs[1]}')
-    phis = np.concatenate(TC.phis)
+    phis = np.concatenate(SS.phis)
     ax.hist(phis, bins=31, density=True, facecolor='green', alpha=0.75)
     ax.set_xlim(left=-np.pi / 2 - 0.1, right=np.pi / 2 + 0.1)
     ax.set_xticks([-np.pi / 2, 0, np.pi / 2])
@@ -351,13 +350,12 @@ def _plot_histograms(
 
 def _plot_msd(
         args: Namespace,
-        pe: ThreeStateExplorer,
-        TC: TrajectoryCache
+        SS: SimulationState
 ):
     """
     MSD plot against real trajectory.
     """
-    Xs = TC.X
+    Xs = SS.X
     trial_ids = args.trials if args.trials is not None else [args.trial, ]
 
     max_radius = 0
@@ -394,9 +392,12 @@ def _plot_msd(
 
     fig = plot_msd(args, Xs_real, Xs_confined)
     fig.suptitle(
-        f'$r_{{01}}={pe.rate_01}$, $r_{{10}}={pe.rate_10}$, $r_{{02}}={pe.rate_02}$, $r_{{20}}={pe.rate_20}$\n'
+        f'$r_{{01}}={SS.parameters.rate_01}$, '
+        f'$r_{{10}}={SS.parameters.rate_10}$, '
+        f'$r_{{02}}={SS.parameters.rate_02}$, '
+        f'$r_{{20}}={SS.parameters.rate_20}$\n'
         # + f'$s_0={pe.speed_0}$, $s_1={pe.speed_1}$\n'
-        + '\n'.join(_get_p_strs(pe))
+        + '\n'.join(_get_p_strs(SS.pe))
     )
     fig.tight_layout()
     if save_plots:
@@ -406,8 +407,7 @@ def _plot_msd(
 
 
 def _plot_trajectories(
-        pe: ThreeStateExplorer,
-        TC: TrajectoryCache,
+        SS: SimulationState,
 ):
     """
     Plot some simulation trajectories.
@@ -416,17 +416,17 @@ def _plot_trajectories(
         return
 
     # Construct colours
-    colours = np.linspace(0, 1, TC.X.shape[1])
+    colours = np.linspace(0, 1, SS.X.shape[1])
     cmap = plt.get_cmap('viridis_r')
     c = [cmap(c_) for c_ in colours]
 
-    for i in range(min(pe.batch_size, plot_n_examples)):
+    for i in range(min(SS.parameters.batch_size, plot_n_examples)):
         logger.info(f'Plotting sim run {i}.')
 
         # Plot the trajectory
         fig = plt.figure(figsize=(10, 10))
         ax = fig.add_subplot(projection='3d')
-        x, y, z = TC.X[i].T
+        x, y, z = SS.X[i].T
         ax.scatter(x, y, z, c=c, s=100, alpha=1, zorder=1)
         equal_aspect_ratio(ax)
         ax.grid(False)
@@ -438,7 +438,7 @@ def _plot_trajectories(
 
         if save_plots:
             plt.savefig(LOGS_PATH / f'{START_TIMESTAMP}_sim_{i}.{img_extension}', transparent=True)
-            np.savez(LOGS_PATH / f'{START_TIMESTAMP}_sim_{i}', X=TC.X[i])
+            np.savez(LOGS_PATH / f'{START_TIMESTAMP}_sim_{i}', X=SS.X[i])
 
         if show_plots:
             plt.show()
@@ -454,14 +454,14 @@ def simulate():
         validate_source=False,
         include_pe_options=True
     )
-    pe, TC = get_trajectories_from_args(args)
-    _plot_angle_pdfs(pe)
-    _plot_pause_relation(pe)
+    SS = get_sim_state_from_args(args)
+    _plot_angle_pdfs(SS.pe)
+    _plot_pause_relation(SS.pe)
     # exit()
-    _plot_histograms(pe, TC)
-    _plot_msd(args, pe, TC)
-    _plot_simulations(pe, TC)
-    _plot_trajectories(pe, TC)
+    _plot_histograms(SS)
+    _plot_msd(args, SS)
+    _plot_simulations(SS)
+    _plot_trajectories(SS)
 
 
 def _check_trajectory_for_nice_regions(
@@ -929,7 +929,7 @@ def plot_trajectories_with_regions():
    Draw boxes around the regions.
    """
     args = get_args()
-    pe, TC = get_trajectories_from_args(args)
+    pe, TC = get_sim_state_from_args(args)
 
     if plot_n_examples == 0:
         return

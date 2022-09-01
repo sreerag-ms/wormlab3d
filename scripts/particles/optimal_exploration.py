@@ -4,12 +4,14 @@ from typing import List, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib import transforms
 from progress.bar import Bar
 from scipy.stats import ttest_ind
 
 from simple_worm.plot3d import MidpointNormalize
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
-from wormlab3d.particles.cache import get_trajectories_from_args
+from wormlab3d.particles.cache import get_sim_state_from_args
+from wormlab3d.toolkit.plot_utils import tex_mode
 from wormlab3d.toolkit.util import hash_data
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.util import get_deltas_from_args
@@ -92,6 +94,7 @@ def coverage_scores():
     """
     Simulate across a range of non-planarities and score trajectories based on how many unique voxels have been visited.
     """
+    tex_mode()
     args = get_args(validate_source=False)
     deltas, delta_ts = get_deltas_from_args(args)
 
@@ -100,51 +103,52 @@ def coverage_scores():
     # npa_sigmas = [0.00001, 0.0001, 0.001, 0.01, 0.1, 1, 10]
     # npa_sigmas = np.linspace(0.00001, 10, 20)
     # npa_sigmas = np.exp(-np.linspace(np.log(1/1e-6), np.log(1/10), 20))
-    npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-6), np.log(1 / 10), 12))
+    # npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-6), np.log(1 / 10), 12))
+    npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-6), np.log(1 / 10), 3))
     # npa_sigmas = [1e-6, 10,]
     n_sigmas = len(npa_sigmas)
 
     # voxel_sizes = [1, 0.1, 0.01, 0.001]
     # voxel_sizes = np.exp(-np.linspace(np.log(1/1), np.log(1/0.01), 20))
-    voxel_sizes = np.exp(-np.linspace(np.log(1 / 0.1), np.log(1 / 0.01), 6))
+    voxel_sizes = np.exp(-np.linspace(np.log(1 / 0.1), np.log(1 / 0.01), 12))
     # voxel_sizes = [0.1,]
     n_vs = len(voxel_sizes)
 
     # Outputs
     scores = np.zeros((n_sigmas, n_vs, args.batch_size))
     nonp = np.zeros((n_sigmas, args.batch_size))
-    msds_all = {i: {} for i in range(n_sigmas)}
-    msds = {i: {j: {} for j in range(args.batch_size)} for i in range(n_sigmas)}
+    msds_all = np.zeros((n_sigmas, len(deltas)))
+    msds = np.zeros((n_sigmas, args.batch_size, len(deltas)))
     Xs_all = []
 
     # Sweep over the nonplanarity angle sigmas
     for i, npas in enumerate(npa_sigmas):
         logger.info(f'Simulating exploration with nonplanar angles sigma = {npas:.2E} ({i + 1}/{n_sigmas}).')
         args.phi_dist_params[1] = npas
-        pe, TC = get_trajectories_from_args(args)
-        Xs_all.append(TC.X)
+        SS = get_sim_state_from_args(args)
+        Xs_all.append(SS.X)
 
         # Calculate non-planarity for validation
-        nonp[i] = TC.get_nonp()
-        if TC.needs_save:
-            TC.save()
+        nonp[i] = SS.get_nonp()
+        if SS.needs_save:
+            SS.save()
 
         # Calculate optimality
         logger.info('Calculating coverage.')
         bar = Bar('Calculating', max=n_vs)
         bar.check_tty = False
         for k, vs in enumerate(voxel_sizes):
-            scores[i, k] = TC.get_coverage(vs)
+            scores[i, k] = SS.get_coverage(vs)
             bar.next()
         bar.finish()
-        if TC.needs_save:
-            TC.save()
+        if SS.needs_save:
+            SS.save()
 
         # Calculate MSDs
         logger.info(f'Calculating displacements.')
-        msds_all[i], msds[i] = TC.get_msds(deltas)
-        if TC.needs_save:
-            TC.save()
+        msds_all[i], msds[i] = SS.get_msds(deltas)
+        if SS.needs_save:
+            SS.save()
         logger.info('----')
 
     # Plot results
@@ -208,8 +212,7 @@ def coverage_scores():
 
     # Plot all trajectories plus the average for each sigma
     for i, npas in enumerate(npa_sigmas):
-        msd_vals = np.array(list(msds_all[i].values()))
-        ax.plot(delta_ts, msd_vals, label=f'$\sigma$={npas:.1E}',
+        ax.plot(delta_ts, msds_all[i], label=f'$\sigma$={npas:.1E}',
                 alpha=0.8, c=colours[i], linewidth=1, zorder=100)
         # alpha=0.8, c=default_colours[i], linestyle='--', linewidth=3, zorder=100)
 
@@ -244,6 +247,7 @@ def coverage_scores():
 def search_scores():
     """
     Simulate across a range of non-planarities and score trajectories based on how well they find targets.
+    ## todo: not ported across to new SimulationState so currently broken
     """
     args = get_args(validate_source=False)
 
@@ -277,22 +281,22 @@ def search_scores():
     for i, npas in enumerate(npa_sigmas):
         logger.info(f'Simulating exploration with nonplanar angles sigma = {npas:.2E} ({i + 1}/{n_sigmas}).')
         args.phi_dist_params[1] = npas
-        pe, TC = get_trajectories_from_args(args)
+        SS = get_sim_state_from_args(args)
 
         logger.info('Finding targets.')
         bar = Bar('Finding', max=n_radii)
         bar.check_tty = False
 
         for j, r in enumerate(targets_radii):
-            finds_ij = TC.get_finds(r, n_targets, epsilon)
+            finds_ij = SS.get_finds(r, n_targets, epsilon)
             finds[i, j] = finds_ij['finds']
             find_times[i, j] = finds_ij['find_times']
             finds_pop[i, j] = finds_ij['finds_pop']
             bar.next()
         bar.finish()
         logger.info('----')
-        if TC.needs_save:
-            TC.save()
+        if SS.needs_save:
+            SS.save()
 
     # Plot results
     logger.info('Plotting results.')
@@ -395,6 +399,7 @@ def search_scores():
 def search_t_tests():
     """
     Simulate across a range of non-planarities and use t-statistics to assess if populations are significantly different.
+    ## todo: not ported across to new SimulationState so currently broken
     """
     args = get_args(validate_source=False)
 
@@ -428,7 +433,7 @@ def search_t_tests():
     for i, npas in enumerate(npa_sigmas):
         logger.info(f'Simulating exploration with nonplanar angles sigma = {npas:.2E} ({i + 1}/{n_sigmas}).')
         args.phi_dist_params[1] = npas
-        pe, TC = get_trajectories_from_args(args)
+        pe, TC = get_sim_state_from_args(args)
 
         logger.info('Finding targets.')
         bar = Bar('Finding', max=n_radii)
@@ -568,19 +573,19 @@ def surface_coverage_scores():
     for i, npas in enumerate(npa_sigmas):
         logger.info(f'Simulating exploration with nonplanar angles sigma = {npas:.2E} ({i + 1}/{n_sigmas}).')
         args.phi_dist_params[1] = npas
-        pe, TC = get_trajectories_from_args(args)
+        SS = get_sim_state_from_args(args)
 
         logger.info('Counting crossings.')
         bar = Bar('Counting', max=n_radii)
         bar.check_tty = False
 
         for j, r in enumerate(targets_radii):
-            crossings[i, j] = TC.get_crossings(r)
+            crossings[i, j] = SS.get_crossings(r)
             bar.next()
         bar.finish()
         logger.info('----')
-        if TC.needs_save:
-            TC.save()
+        if SS.needs_save:
+            SS.save()
 
     # Plot results
     logger.info('Plotting results.')
@@ -681,14 +686,14 @@ def crossings_nonp():
     for i, npas in enumerate(npa_sigmas):
         logger.info(f'Simulating exploration with nonplanar angles sigma = {npas:.2E} ({i + 1}/{n_sigmas}).')
         args.phi_dist_params[1] = npas
-        pe, TC = get_trajectories_from_args(args)
+        SS = get_sim_state_from_args(args)
 
         logger.info('Calculating crossing non-planarities.')
         bar = Bar('Counting', max=n_radii)
         bar.check_tty = False
 
         for j, r in enumerate(targets_radii):
-            nonp = TC.get_crossings_nonp(r)
+            nonp = SS.get_crossings_nonp(r)
             nonp_counts[i, j] = len(nonp)
             if len(nonp) > 0:
                 nonp_mins[i, j] = nonp.min()
@@ -697,8 +702,8 @@ def crossings_nonp():
             bar.next()
         bar.finish()
         logger.info('----')
-        if TC.needs_save:
-            TC.save()
+        if SS.needs_save:
+            SS.save()
 
     # Plot results
     logger.info('Plotting results.')
@@ -794,10 +799,10 @@ def volume_metric():
     for i, npas in enumerate(npa_sigmas):
         logger.info(f'Simulating exploration with nonplanar angles sigma = {npas:.2E} ({i + 1}/{n_sigmas}).')
         args.phi_dist_params[1] = npas
-        pe, TC = get_trajectories_from_args(args)
+        SS = get_sim_state_from_args(args)
 
         # Find the maximums in each relative directions
-        Xt = TC.get_Xt()
+        Xt = SS.get_Xt()
         Xt_max = np.abs(Xt).max(axis=1)
 
         # Use first component as radius and third as height of explored disk
@@ -808,22 +813,22 @@ def volume_metric():
         y_values[i] = [Xt_max[:, 1].mean(), Xt_max[:, 1].min(), Xt_max[:, 1].max()]
 
         # Validation r2 is close to the non-rotated frame
-        r2 = np.linalg.norm(TC.X, axis=-1).max(axis=1)
+        r2 = np.linalg.norm(SS.X, axis=-1).max(axis=1)
         r2_values[i] = [r2.mean(), r2.min(), r2.max()]
 
         # Compute singular value volumes
         logger.info('Computing singular value based volumes.')
         sv_i = np.zeros((args.batch_size, 3))
         for j in range(args.batch_size):
-            sv_i[j] = TC.get_pca(j).singular_values_
+            sv_i[j] = SS.get_pca(j).singular_values_
         s_values[i] = np.stack([sv_i.mean(axis=0), sv_i.min(axis=0), sv_i.max(axis=0)], axis=1)
         disk_vols_i = _calculate_disk_volumes(sv_i[:, 0], sv_i[:, 2])
         cuboid_vols_i = sv_i[:, 0] * sv_i[:, 1] * sv_i[:, 2]
         sv_disk_vols[i] = [disk_vols_i.mean(), disk_vols_i.min(), disk_vols_i.max()]
         sv_cuboid_vols[i] = [cuboid_vols_i.mean(), cuboid_vols_i.min(), cuboid_vols_i.max()]
 
-        if TC.needs_save:
-            TC.save()
+        if SS.needs_save:
+            SS.save()
 
     # Calculate the volumes
     disk_vols = _calculate_disk_volumes(r_values, z_values)
@@ -964,6 +969,7 @@ def volume_metric_sweeps():
 
     # Sweep over sim durations
     sim_durations = np.exp(-np.linspace(np.log(1 / (1 * 60)), np.log(1 / (5 * 60)), 3))
+    sim_durations = np.round(sim_durations / args.sim_dt) * args.sim_dt
     n_durations = len(sim_durations)
     args.sim_durations = sim_durations
 
@@ -988,18 +994,18 @@ def volume_metric_sweeps():
                 args.phi_dist_params[1] = npas
                 args.sim_duration = duration
                 args.nonp_pause_max = pause
-                pe, TC = get_trajectories_from_args(args)
+                SS = get_sim_state_from_args(args)
 
                 # Find the maximums in each relative directions
-                Xt = TC.get_Xt()
+                Xt = SS.get_Xt()
                 Xt_max = np.abs(Xt).max(axis=1)
 
                 # Use first component as radius and third as height of explored disk
                 r_values[i, j, k] = [Xt_max[:, 0].mean(), Xt_max[:, 0].min(), Xt_max[:, 0].max()]
                 z_values[i, j, k] = [Xt_max[:, 2].mean(), Xt_max[:, 2].min(), Xt_max[:, 2].max()]
 
-                if TC.needs_save:
-                    TC.save()
+                if SS.needs_save:
+                    SS.save()
                 sim_idx += 1
 
     # Calculate the volumes
@@ -1050,7 +1056,7 @@ def volume_metric_sweeps():
     ax.view_init(azim=30, elev=25)
     ax.set_title('Optimal sigmas.')
     ax.scatter(X, Y, optimal_sigmas, c=optimal_sigmas, cmap='Reds', s=100, marker='x')
-    ax.plot_surface(X, Y, optimal_sigmas, cmap='coolwarm', alpha=0.5)
+    ax.plot_surface(X, Y, optimal_sigmas.T, cmap='coolwarm', alpha=0.5)
     ax.set_xlabel('T')
     ax.set_ylabel('$\delta$')
     ax.set_zlabel('$\sigma_\phi$')
@@ -1129,18 +1135,18 @@ def _calculate_rz_values(
                 args.phi_dist_params[1] = npas
                 args.sim_duration = duration
                 args.nonp_pause_max = pause
-                pe, TC = get_trajectories_from_args(args)
+                SS = get_sim_state_from_args(args)
 
                 # Find the maximums in each relative directions
-                Xt = TC.get_Xt()
+                Xt = SS.get_Xt()
                 Xt_max = np.abs(Xt).max(axis=1)
 
                 # Use first component as radius and third as height of explored disk
                 r_values[i, j, k] = [Xt_max[:, 0].mean(), Xt_max[:, 0].min(), Xt_max[:, 0].max(), Xt_max[:, 0].std()]
                 z_values[i, j, k] = [Xt_max[:, 2].mean(), Xt_max[:, 2].min(), Xt_max[:, 2].max(), Xt_max[:, 2].std()]
 
-                if TC.needs_save:
-                    TC.save()
+                if SS.needs_save:
+                    SS.save()
                 sim_idx += 1
 
     return r_values, z_values
@@ -1191,6 +1197,7 @@ def volume_metric_sweeps2():
     args.npas = npa_sigmas
     # sim_durations = np.exp(-np.linspace(np.log(1 / (1 * 60)), np.log(1 / (30 * 60)), 8))
     sim_durations = np.arange(1, 6)**2 * 60
+    sim_durations = np.round(sim_durations / args.sim_dt) * args.sim_dt
 
     n_durations = len(sim_durations)
     fix_pause = args.nonp_pause_max
@@ -1206,17 +1213,17 @@ def volume_metric_sweeps2():
         cap_vols = 1 / 3 * np.pi * (r_ - z_)**2 * (2 * r_ + z_)
         return sphere_vols - 2 * cap_vols
 
-    if 0:
+    if 1:
         # Fix the pause and sweep over the durations
         args.sim_durations = sim_durations
         args.pauses = [fix_pause]
         r_values, z_values = _generate_or_load_rz_values(args, rebuild_cache=False)
 
-        start_idx = 3
-        end_idx = n_durations -1
+        start_idx = 1
+        end_idx = n_durations - 1
         n_durations = end_idx - start_idx
-        sim_durations = sim_durations[start_idx:end_idx]
-        sim_durations = ['4 min', '7 min', '11 min', '18 min']
+        sim_durations_to_plot = sim_durations[start_idx:end_idx]
+        sim_durations_to_plot = [f'{int(np.round(t / 60))} min' for t in sim_durations_to_plot]
         r_values = r_values[:, start_idx:end_idx]
         z_values = z_values[:, start_idx:end_idx]
 
@@ -1229,7 +1236,7 @@ def volume_metric_sweeps2():
         fig, ax = plt.subplots(1, figsize=(5, 3))
         cmap = plt.get_cmap('winter')
         colours = cmap(np.linspace(0, 1, n_durations))
-        for j, duration in enumerate(sim_durations):
+        for j, duration in enumerate(sim_durations_to_plot):
             vols = disk_vols[:, j, 0].T
             optimal_vols.append(vols[0, optimal_sigmas_idxs[j]])
             # ax.plot(npa_sigmas, vols[0], label=f'T={duration:.0f}s', c=colours[j], marker='o', alpha=0.7)
@@ -1245,11 +1252,12 @@ def volume_metric_sweeps2():
         ax.set_xscale('log')
         # ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
         ax.set_xticks([1e-3, 1e-1, 1e1])
-        ax.text(model_phi, -700, model_phi, color='orange', fontsize='large', fontweight='bold',
-                horizontalalignment='center', verticalalignment='top')
+        trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
+        ax.text(model_phi, -0.07, model_phi, color='orange', fontsize='large', fontweight='bold',
+                horizontalalignment='center', verticalalignment='top', transform=trans)
         ax.set_ylabel('Volume explored')
         # ax.set_yticks([0, 2500, 5000, 7500, 10000])
-        ax.set_yticks([0, 2000, 4000, 6000])
+        # ax.set_yticks([0, 2000, 4000, 6000])
         # ax.grid()
         fig.tight_layout()
         if save_plots:
@@ -1276,7 +1284,7 @@ def volume_metric_sweeps2():
         start_idx = 0
         end_idx = 3
         n_pauses = end_idx - start_idx
-        pauses = pauses[start_idx:end_idx]
+        pauses_to_plot = pauses[start_idx:end_idx]
         r_values = r_values[:, :, start_idx:end_idx]
         z_values = z_values[:, :, start_idx:end_idx]
 
@@ -1284,7 +1292,7 @@ def volume_metric_sweeps2():
         fig, ax = plt.subplots(1, figsize=(5, 3))
         cmap = plt.get_cmap('winter')
         colours = cmap(np.linspace(0, 1, n_pauses))
-        for k, pause in enumerate(pauses):
+        for k, pause in enumerate(pauses_to_plot):
             vols = disk_vols[:, 0, k].T
             optimal_vols.append(vols[0, optimal_sigmas_idxs[k]])
             ax.plot(npa_sigmas, vols[0], label=f'$\delta_\max={pause:.0f}$s', c=colours[k], marker='o', alpha=0.7)
@@ -1294,15 +1302,16 @@ def volume_metric_sweeps2():
         #            edgecolors='red', linewidths=2)
         ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=3, zorder=-1)
         ax.legend(loc='upper left', bbox_to_anchor=(1, 1), bbox_transform=ax.transAxes)
-        # ax.set_title(f'T={fix_duration}s')
-        ax.set_title(f'5 minute simulation time')
+        ax.set_title(f'T={fix_duration}s')
+        # ax.set_title(f'5 minute simulation time')
         ax.set_xlabel(f'$\sigma_\phi$')
         ax.set_xscale('log')
         ax.set_xticks([1e-3, 1e-1, 1e1])
-        ax.text(model_phi, -60, model_phi, color='orange', fontsize='large', fontweight='bold',
-                horizontalalignment='center', verticalalignment='top')
+        trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
+        ax.text(model_phi, -0.075, model_phi, color='orange', fontsize='large', fontweight='bold',
+                horizontalalignment='center', verticalalignment='top', transform=trans)
         ax.set_ylabel('Volume explored')
-        ax.set_yticks([0, 200, 400])
+        # ax.set_yticks([0, 200, 400])
 
         ax.grid()
         fig.tight_layout()
@@ -1316,7 +1325,7 @@ def volume_metric_sweeps2():
             plt.show()
 
     # Plot combined
-    if 0:
+    if 1:
         fig, axes = plt.subplots(2, figsize=(6, 6), gridspec_kw={
             'hspace': 0.4,
             'top': 0.93,
@@ -1337,7 +1346,7 @@ def volume_metric_sweeps2():
         # Plot the volumes
         ax = axes[0]
         cmap = plt.get_cmap('winter')
-        colours = cmap(np.linspace(0, 1, n_durations))
+        colours = cmap(np.linspace(0, 1, len(sim_durations)))
         for j, duration in enumerate(sim_durations):
             vols = disk_vols[:, j, 0].T
             optimal_vols.append(vols[0, optimal_sigmas_idxs[j]])
@@ -1351,10 +1360,11 @@ def volume_metric_sweeps2():
         ax.set_xscale('log')
         # ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
         ax.set_xticks([1e-3, 1e-1, 1e1])
-        ax.text(model_phi, -1450, model_phi, color='orange', fontsize='large', fontweight='bold',
-                horizontalalignment='center', verticalalignment='top')
+        trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
+        ax.text(model_phi, -0.06, model_phi, color='orange', fontsize='large', fontweight='bold',
+                horizontalalignment='center', verticalalignment='top', transform=trans)
         ax.set_ylabel('Volume explored')
-        ax.set_yticks([5000, 10000])
+        # ax.set_yticks([5000, 10000])
         ax.grid()
 
         # Fix the duration and sweep over the pauses
@@ -1369,7 +1379,7 @@ def volume_metric_sweeps2():
         # Plot the volumes
         ax = axes[1]
         cmap = plt.get_cmap('winter')
-        colours = cmap(np.linspace(0, 1, n_pauses))
+        colours = cmap(np.linspace(0, 1, len(pauses)))
         for k, pause in enumerate(pauses):
             vols = disk_vols[:, 0, k].T
             optimal_vols.append(vols[0, optimal_sigmas_idxs[k]])
@@ -1382,10 +1392,11 @@ def volume_metric_sweeps2():
         ax.set_xlabel(f'$\sigma_\phi$')
         ax.set_xscale('log')
         ax.set_xticks([1e-3, 1e-1, 1e1])
-        ax.text(model_phi, -1, model_phi, color='orange', fontsize='large', fontweight='bold',
-                horizontalalignment='center', verticalalignment='top')
+        trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
+        ax.text(model_phi, -0.06, model_phi, color='orange', fontsize='large', fontweight='bold',
+                horizontalalignment='center', verticalalignment='top', transform=trans)
         ax.set_ylabel('Volume explored')
-        ax.set_yticks([0, 4, 8, 12])
+        # ax.set_yticks([0, 4, 8, 12])
         ax.grid()
 
         # fig.tight_layout()
@@ -1404,7 +1415,7 @@ def _calculate_voxel_scores_for_spec(params):
     args.phi_dist_params[1] = npas
     args.sim_duration = duration
     args.nonp_pause_max = pause
-    pe, TC = get_trajectories_from_args(args)
+    pe, TC = get_sim_state_from_args(args)
     scores = np.zeros((len(voxel_sizes), 4))
 
     # Calculate optimality
@@ -1448,14 +1459,14 @@ def _calculate_voxel_scores(
                 args.phi_dist_params[1] = npas
                 args.sim_duration = duration
                 args.nonp_pause_max = pause
-                pe, TC = get_trajectories_from_args(args)
+                SS = get_sim_state_from_args(args)
 
                 # Calculate optimality
                 for l, vs in enumerate(voxel_sizes):
-                    vc = TC.get_coverage(vs) / vs
+                    vc = SS.get_coverage(vs) / vs
                     scores[i, j, k, l] = [vc.mean(), vc.min(), vc.max(), vc.std()]
-                if TC.needs_save:
-                    TC.save()
+                if SS.needs_save:
+                    SS.save()
 
                 sim_idx += 1
 
@@ -1501,10 +1512,12 @@ def voxel_scores_sweeps():
     npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-3), np.log(1 / 10), 20))
     n_sigmas = len(npa_sigmas)
     args.npas = npa_sigmas
-    sim_durations = np.exp(-np.linspace(np.log(1 / (5 * 60)), np.log(1 / (60 * 60)), 8))
+    sim_durations = np.arange(1, 6)**2 * 60
+    sim_durations = np.round(sim_durations / args.sim_dt) * args.sim_dt
     n_durations = len(sim_durations)
     fix_pause = args.nonp_pause_max
-    pauses = np.r_[[0, ], np.exp(-np.linspace(np.log(1 / 1), np.log(1 / 60), 7))]
+    pauses = np.arange(1, 6)**2
+    # pauses = np.r_[[0, ], np.exp(-np.linspace(np.log(1 / 1), np.log(1 / 60), 7))]
     # pauses = np.linspace(0, 10, 11)
     n_pauses = len(pauses)
     fix_duration = args.sim_duration
@@ -1518,10 +1531,9 @@ def voxel_scores_sweeps():
         # Fix the pause and sweep over the durations
         args.sim_durations = sim_durations
         args.pauses = [fix_pause]
-        scores = _generate_or_load_voxel_scores(args, rebuild_cache=True)
+        scores = _generate_or_load_voxel_scores(args, rebuild_cache=False)
         optimal_sigmas_idxs = scores[..., 0].argmax(axis=0).squeeze()
         optimal_sigmas = npa_sigmas[optimal_sigmas_idxs]
-        optimal_scores = []
 
         # scores = np.zeros((n_sigmas, n_durations, n_pauses, n_voxel_sizes, 4))
 
@@ -1532,11 +1544,12 @@ def voxel_scores_sweeps():
 
         for l, vs in enumerate(voxel_sizes):
             ax = axes[l, 0]
+            optimal_scores = []
             for j, duration in enumerate(sim_durations):
                 score = scores[:, j, 0, l, 0]
-                optimal_scores.append(score[optimal_sigmas_idxs[j]])
+                optimal_scores.append(score[optimal_sigmas_idxs[j, l]])
                 ax.plot(npa_sigmas, score, label=f'T={duration:.0f}s', c=colours[j], marker='o', alpha=0.7)
-            ax.scatter(optimal_sigmas, optimal_scores, c='red', marker='o', zorder=100, s=50)
+            ax.scatter(optimal_sigmas[:, l], optimal_scores, c='red', marker='o', zorder=100, s=50)
             ax.axvline(x=model_phi, c='orange', linestyle='--')
             ax.legend()
             ax.set_title(f'$\delta$={fix_pause:.1f}s. Voxel size={vs:.3E}mm.')
@@ -1564,7 +1577,6 @@ def voxel_scores_sweeps():
         scores = _generate_or_load_voxel_scores(args, rebuild_cache=False)
         optimal_sigmas_idxs = scores[..., 0].argmax(axis=0).squeeze()
         optimal_sigmas = npa_sigmas[optimal_sigmas_idxs]
-        optimal_scores = []
 
         # scores = np.zeros((n_sigmas, n_durations, n_pauses, n_voxel_sizes, 4))
 
@@ -1575,11 +1587,12 @@ def voxel_scores_sweeps():
 
         for l, vs in enumerate(voxel_sizes):
             ax = axes[l, 0]
+            optimal_scores = []
             for k, pause in enumerate(pauses):
                 score = scores[:, 0, k, l, 0]
-                optimal_scores.append(score[optimal_sigmas_idxs[k]])
+                optimal_scores.append(score[optimal_sigmas_idxs[k, l]])
                 ax.plot(npa_sigmas, score, label=f'$\delta$={pause:.1f}s', c=colours[k], marker='o', alpha=0.7)
-            ax.scatter(optimal_sigmas, optimal_scores, c='red', marker='o', zorder=100, s=50)
+            ax.scatter(optimal_sigmas[:, l], optimal_scores, c='red', marker='o', zorder=100, s=50)
             ax.axvline(x=model_phi, c='orange', linestyle='--')
             ax.legend()
             ax.set_title(f'T={fix_duration}s. Voxel size={vs:.3E}mm.')
@@ -1608,11 +1621,11 @@ if __name__ == '__main__':
     # from simple_worm.plot3d import interactive
     # interactive()
     # coverage_scores()
-    # search_scores()
-    # search_t_tests()
+    # search_scores()  # broken
+    # search_t_tests()  # broken
     # surface_coverage_scores()
     # crossings_nonp()
     # volume_metric()
-    # volume_metric_sweeps()
+    volume_metric_sweeps()
     volume_metric_sweeps2()
-    # voxel_scores_sweeps()
+    voxel_scores_sweeps()

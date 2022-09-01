@@ -41,13 +41,15 @@ def get_approximate(
         k: np.ndarray,
         distance: int,
         height: int = 50,
-        planarity_window: int = 3
+        planarity_window: int = 3,
+        quiet: bool = False
 ):
     """
     Calculate a tumble-and-run approximation to a trajectory X with curvature k.
     The distance parameter sets a minimum distance that subsequent curvature peaks must be.
     """
-    logger.info(f'Calculating approximation to X at distance {distance}, height={height}.')
+    if not quiet:
+        logger.info(f'Calculating approximation to X at distance {distance}, height={height}.')
     T = len(X)
 
     # Take centre of mass
@@ -162,12 +164,14 @@ def find_approximation(
         height_first: int = 50,
         smooth_e0_first: int = 101,
         smooth_K_first: int = 101,
-        max_attempts: int = 10
+        max_attempts: int = 10,
+        quiet: bool = False
 ):
     """
     Find an approximation to the trajectory at a given error limit.
     """
-    logger.info(f'Finding approximation at error limit={error_limit:.3f}.')
+    if not quiet:
+        logger.info(f'Finding approximation at error limit={error_limit:.3f}.')
     mse = np.inf
     attempts = 0
 
@@ -184,7 +188,8 @@ def find_approximation(
 
         # Calculate the approximation, tumbles and runs
         try:
-            approx = get_approximate(X, k, distance=distance, height=height, planarity_window=planarity_window)
+            approx = get_approximate(X, k, distance=distance, height=height, planarity_window=planarity_window,
+                                     quiet=quiet)
             mse = np.mean(np.sum((X - approx[0])**2, axis=-1))
         except RuntimeError:
             mse = np.inf
@@ -193,7 +198,7 @@ def find_approximation(
 
         if mse > error_limit:
             distance = max(3, distance - 10)
-            if attempts > 10:
+            if attempts > 5:
                 height = max(10, height - 1)
             smooth_e0 = max(11, smooth_e0 - 6)
             smooth_K = max(11, smooth_K - 6)
@@ -205,12 +210,15 @@ def generate_or_load_ds_statistics(
         ds: Dataset,
         error_limits: List[float],
         planarity_window: int = 3,
+        min_run_speed_duration: Tuple[float, float] = (0.01, 60.),
         rebuild_cache: bool = False
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Generate or load tumble/run values
     """
-    cache_path = LOGS_PATH / f'ds={ds.id}_errors={",".join([str(err) for err in error_limits])}_pw={planarity_window}'
+    cache_path = LOGS_PATH / f'ds={ds.id}_errors={",".join([str(err) for err in error_limits])}' \
+                             f'_pw={planarity_window}' \
+                             f'_mrsd={min_run_speed_duration[0]:.2f},{min_run_speed_duration[1]:.1f}'
     cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
     if not rebuild_cache and cache_fn.exists():
         data = np.load(cache_fn)
@@ -222,7 +230,7 @@ def generate_or_load_ds_statistics(
         twist_angles = [data[f'twist_angles_{i}'] for i in range(len(error_limits))]
     else:
         trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles \
-            = _calculate_dataset_values(ds, error_limits, planarity_window)
+            = _calculate_dataset_values(ds, error_limits, planarity_window, min_run_speed_duration)
         save_arrs = {'trajectory_lengths': trajectory_lengths}
         for i in range(len(error_limits)):
             save_arrs[f'durations_{i}'] = durations[i]

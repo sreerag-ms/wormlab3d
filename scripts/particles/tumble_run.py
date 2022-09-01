@@ -6,14 +6,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.gridspec import GridSpec
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
-from progress.bar import Bar
 from scipy.stats import expon
 
 from simple_worm.frame import FrameNumpy
 from simple_worm.plot3d import FrameArtist
 from wormlab3d import START_TIMESTAMP, LOGS_PATH, logger
 from wormlab3d.data.model import Trial, Dataset
-from wormlab3d.particles.cache import get_trajectories_from_args
+from wormlab3d.particles.cache import get_sim_state_from_args
 from wormlab3d.particles.tumble_run import calculate_curvature, get_approximate, find_approximation, \
     generate_or_load_ds_statistics, generate_or_load_ds_msds
 from wormlab3d.particles.util import calculate_trajectory_frame
@@ -616,12 +615,21 @@ def plot_dataset_angle_comparisons():
     plt.show()
 
 
-def dataset_against_three_state_comparison():
+def dataset_against_three_state_comparison(
+        planarity_window: int = 7,
+        use_approximation_stats: bool = True,
+        noise_scale: float = 0.1,
+        smoothing_window: int = 25,
+):
+    """
+    Plot comparisons between simulation runs and the experimental data.
+    """
     args = get_args()
     assert args.dataset is not None
     ds = Dataset.objects.get(id=args.dataset)
     deltas, delta_ts = get_deltas_from_args(args)
-    planarity_window = 7
+
+    min_run_speed_duration = (0.01, 60.)
 
     # Unset midline source args
     args.midline3d_source = None
@@ -632,11 +640,14 @@ def dataset_against_three_state_comparison():
     # error_limits = np.array([0.016, 0.008, 0.004, 0.002, 0.001])
     # error_limits = np.array([0.01,0.001,0.0001])
     error_limits = np.array([0.5, 0.2, 0.1, 0.05, 0.01])
+    # error_limits = np.array([0.2, 0.1, 0.05])
+    # error_limits = np.array([0.2,])
     # error_limits = [0.05,]
 
     # Generate or load tumble/run values
     trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles \
-        = generate_or_load_ds_statistics(ds, error_limits, planarity_window=planarity_window, rebuild_cache=False)
+        = generate_or_load_ds_statistics(ds, error_limits, planarity_window=planarity_window,
+                                         min_run_speed_duration=min_run_speed_duration, rebuild_cache=False)
 
     # Generate or load MSDs
     msds_all_real, msds_real = generate_or_load_ds_msds(ds, args, rebuild_cache=False)
@@ -644,20 +655,40 @@ def dataset_against_three_state_comparison():
     # Now make a simulator to match the results
     args.sim_dt = 1 / 25
     args.sim_duration = max(trajectory_lengths) * args.sim_dt
-    pe, TC = get_trajectories_from_args(args)
+    SS = get_sim_state_from_args(args)
+
+    # Use the same approximation methods for the simulation runs as for real data
+    if use_approximation_stats:
+        stats = SS.get_approximation_statistics(
+            error_limits=error_limits,
+            noise_scale=noise_scale,
+            smoothing_window=smoothing_window,
+            planarity_window=planarity_window,
+        )
+    else:
+        stats = {
+            'durations': {i: np.concatenate(SS.intervals) for i in range(len(error_limits))},
+            'speeds': {i: np.concatenate(SS.speeds) for i in range(len(error_limits))},
+            'planar_angles': {i: np.concatenate(SS.thetas) for i in range(len(error_limits))},
+            'nonplanar_angles': {i: np.concatenate(SS.phis) for i in range(len(error_limits))},
+            'twist_angles': {i: twist_angles[i] for i in range(len(error_limits))},
+        }
 
     # Plot histograms
     if 1:
         fig, axes = plt.subplots(len(error_limits), 6, figsize=(14, 2 + 2 * len(error_limits)), squeeze=False)
-        fig.suptitle(f'Dataset={ds.id}. Planarity windows={args.planarity_window} frames, {planarity_window} vertices.')
+        fig.suptitle(f'Dataset={ds.id}. '
+                     f'Planarity windows={args.planarity_window} frames, {planarity_window} vertices.' +
+                     (f' Approximation statistics; noise_scale={noise_scale}, smoothing_window={smoothing_window}.'
+                      if use_approximation_stats else ''))
 
         for i, (param_name, values) in enumerate({
-                                                     'Durations': [durations, TC.intervals],
-                                                     'Speeds': [speeds, TC.speeds],
-                                                     'Speeds (weighted)': [speeds, TC.speeds],
-                                                     'Planar angles': [planar_angles, TC.thetas],
-                                                     'Non-planar angles': [nonplanar_angles, TC.phis],
-                                                     'Twist angles': [twist_angles, [twist_angles[0], ]],
+                                                     'Durations': [durations, stats['durations']],
+                                                     'Speeds': [speeds, stats['speeds']],
+                                                     'Speeds (weighted)': [speeds, stats['speeds']],
+                                                     'Planar angles': [planar_angles, stats['planar_angles']],
+                                                     'Non-planar angles': [nonplanar_angles, stats['nonplanar_angles']],
+                                                     'Twist angles': [twist_angles, stats['twist_angles']],
                                                  }.items()):
             for j, error_limit in enumerate(error_limits):
                 ax = axes[j, i]
@@ -667,14 +698,15 @@ def dataset_against_three_state_comparison():
                     ax.set_ylabel(f'Error ~ {error_limit:.4f}')
 
                 values_ds = np.array(values[0][j])
-                values_sim = np.concatenate(values[1])
+                values_sim = np.array(values[1][j])
+                # values_sim = np.concatenate(values[1])
 
                 if param_name not in ['Planar angles', 'Non-planar angles', 'Twist angles']:
                     ax.set_yscale('log')
                 if param_name == 'Speeds (weighted)':
                     weights = [
                         np.array(durations[j]),
-                        np.concatenate(TC.intervals),
+                        stats['durations'][j],
                     ]
                 else:
                     weights = [
@@ -979,4 +1011,9 @@ if __name__ == '__main__':
 
     # dataset_distributions()
     # plot_dataset_angle_comparisons()
-    dataset_against_three_state_comparison()
+    dataset_against_three_state_comparison(
+        planarity_window=7,
+        use_approximation_stats=True,
+        noise_scale=0.1,
+        smoothing_window=25,
+    )
