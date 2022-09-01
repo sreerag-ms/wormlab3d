@@ -94,6 +94,35 @@ def get_args(
     # Particle explorer arguments
     if include_pe_options:
         ParameterArgs.add_args(parser)
+        parser.add_argument('--npas-min', type=float, default=1e-6,
+                            help='Minimum non-planar angle sigma to use for sweeping.')
+        parser.add_argument('--npas-max', type=float, default=1e1,
+                            help='Maximum non-planar angle sigma to use for sweeping.')
+        parser.add_argument('--npas-num', type=int, default=3,
+                            help='Number of non-planar angle sigmas to use for sweeping.')
+        parser.add_argument('--vxs-min', type=float, default=1e-1,
+                            help='Minimum voxel size to use for sweeping.')
+        parser.add_argument('--vxs-max', type=float, default=1e1,
+                            help='Maximum voxel size to use for sweeping.')
+        parser.add_argument('--vxs-num', type=int, default=3,
+                            help='Number of voxel sizes to use for sweeping.')
+        parser.add_argument('--durations-min', type=int, default=1,
+                            help='Minimum duration to use for sweeping (in minutes).')
+        parser.add_argument('--durations-max', type=int, default=60,
+                            help='Maximum duration to use for sweeping (in minutes). Ignored if durations-intervals=quadratic.')
+        parser.add_argument('--durations-num', type=int, default=3,
+                            help='Number of durations to use for sweeping.')
+        parser.add_argument('--durations-intervals', type=str, choices=['quadratic', 'exponential'], default='quadratic',
+                            help='Interval between durations.')
+        parser.add_argument('--pauses-min', type=int, default=0,
+                            help='Minimum pause to use for sweeping (in seconds).')
+        parser.add_argument('--pauses-max', type=int, default=60,
+                            help='Maximum pause to use for sweeping (in seconds). Ignored if pauses-intervals=quadratic.')
+        parser.add_argument('--pauses-num', type=int, default=3,
+                            help='Number of pauses to use for sweeping.')
+        parser.add_argument('--pauses-intervals', type=str, choices=['quadratic', 'exponential'], default='quadratic',
+                            help='Interval between pauses.')
+
 
     args = parser.parse_args()
 

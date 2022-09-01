@@ -16,8 +16,7 @@ from wormlab3d.toolkit.util import hash_data
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.util import get_deltas_from_args
 
-plot_n_examples = 2
-show_plots = True
+show_plots = False
 save_plots = True
 img_extension = 'svg'
 
@@ -90,6 +89,35 @@ def make_filename(
     return LOGS_PATH / (fn + '.' + extension)
 
 
+def _get_npas_from_args(args: Namespace) -> np.ndarray:
+    return np.exp(-np.linspace(np.log(1 / args.npas_min), np.log(1 / args.npas_max), args.npas_num))
+
+
+def _get_voxel_sizes_from_args(args: Namespace) -> np.ndarray:
+    return np.exp(-np.linspace(np.log(1 / args.vxs_max), np.log(1 / args.vxs_min), args.vxs_num))
+
+
+def _get_durations_from_args(args: Namespace) -> np.ndarray:
+    if args.durations_intervals == 'exponential':
+        durations = np.exp(-np.linspace(np.log(1 / (args.durations_min * 60)), np.log(1 / (args.durations_min * 60)),
+                                        args.durations_num))
+    else:
+        durations = np.arange(args.durations_min, args.durations_min + args.durations_num)**2 * 60
+    durations = np.round(durations / args.sim_dt) * args.sim_dt
+    return durations
+
+
+def _get_pauses_from_args(args: Namespace) -> np.ndarray:
+    if args.pauses_intervals == 'exponential':
+        if args.pauses_min == 0:
+            pauses = np.r_[[0, ], np.exp(-np.linspace(np.log(1 / 1), np.log(1 / args.pauses_max), args.pauses_num - 1))]
+        else:
+            pauses = np.exp(-np.linspace(np.log(1 / args.pauses_min), np.log(1 / args.pauses_max), args.pauses_num))
+    else:
+        pauses = np.arange(args.pauses_min, args.pauses_min + args.pauses_num)**2
+    return pauses
+
+
 def coverage_scores():
     """
     Simulate across a range of non-planarities and score trajectories based on how many unique voxels have been visited.
@@ -97,22 +125,10 @@ def coverage_scores():
     tex_mode()
     args = get_args(validate_source=False)
     deltas, delta_ts = get_deltas_from_args(args)
-
-    # npa_sigmas = [1e-8, 10]
-    # npa_sigmas = [0.0001, 0.001, 0.01, 0.1, 1, 10]
-    # npa_sigmas = [0.00001, 0.0001, 0.001, 0.01, 0.1, 1, 10]
-    # npa_sigmas = np.linspace(0.00001, 10, 20)
-    # npa_sigmas = np.exp(-np.linspace(np.log(1/1e-6), np.log(1/10), 20))
-    # npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-6), np.log(1 / 10), 12))
-    npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-6), np.log(1 / 10), 3))
-    # npa_sigmas = [1e-6, 10,]
-    n_sigmas = len(npa_sigmas)
-
-    # voxel_sizes = [1, 0.1, 0.01, 0.001]
-    # voxel_sizes = np.exp(-np.linspace(np.log(1/1), np.log(1/0.01), 20))
-    voxel_sizes = np.exp(-np.linspace(np.log(1 / 0.1), np.log(1 / 0.01), 12))
-    # voxel_sizes = [0.1,]
-    n_vs = len(voxel_sizes)
+    npa_sigmas = _get_npas_from_args(args)
+    n_sigmas = args.npas_num
+    voxel_sizes = _get_voxel_sizes_from_args(args)
+    n_vs = args.vxs_num
 
     # Outputs
     scores = np.zeros((n_sigmas, n_vs, args.batch_size))
@@ -549,20 +565,10 @@ def surface_coverage_scores():
     Simulate across a range of non-planarities and count frequency of trajectories crossing different radii.
     """
     args = get_args(validate_source=False)
-
-    # npa_sigmas = [1e-8, 10]
-    # npa_sigmas = [0.0001, 0.001, 0.01, 0.1, 1, 10]
-    # npa_sigmas = [0.00001, 0.0001, 0.001, 0.01, 0.1, 1, 10]
-    # npa_sigmas = np.linspace(0.00001, 10, 20)
-    # npa_sigmas = np.exp(-np.linspace(np.log(1/1e-6), np.log(1/10), 20))
-    npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-6), np.log(1 / 10), 8))
-    # npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-6), np.log(1 / 10), 12))
-    n_sigmas = len(npa_sigmas)
-
+    npa_sigmas = _get_npas_from_args(args)
+    n_sigmas = args.npas_num
     targets_radii = np.linspace(0, 50, 51)
     n_radii = len(targets_radii)
-
-    # todo: this properly
     args.npas = npa_sigmas
     args.targets_radii = targets_radii
 
@@ -659,20 +665,10 @@ def crossings_nonp():
     Non-planarities of crossing points relative to principal plane.
     """
     args = get_args(validate_source=False)
-
-    # npa_sigmas = [1e-8, 10]
-    # npa_sigmas = [0.0001, 0.001, 0.01, 0.1, 1, 10]
-    # npa_sigmas = [0.00001, 0.0001, 0.001, 0.01, 0.1, 1, 10]
-    # npa_sigmas = np.linspace(0.00001, 10, 20)
-    # npa_sigmas = np.exp(-np.linspace(np.log(1/1e-6), np.log(1/10), 20))
-    npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-6), np.log(1 / 10), 8))
-    # npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-6), np.log(1 / 10), 12))
-    n_sigmas = len(npa_sigmas)
-
+    npa_sigmas = _get_npas_from_args(args)
+    n_sigmas = args.npas_num
     targets_radii = np.linspace(0, 30, 31)
     n_radii = len(targets_radii)
-
-    # todo: this properly
     args.npas = npa_sigmas
     args.targets_radii = targets_radii
 
@@ -768,17 +764,8 @@ def volume_metric():
     Estimate the volume explored by a typical trajectory.
     """
     args = get_args(validate_source=False)
-
-    # npa_sigmas = np.array([1e-4, 1])
-    # npa_sigmas = [0.0001, 0.001, 0.01, 0.1, 1, 10]
-    # npa_sigmas = [0.00001, 0.0001, 0.001, 0.01, 0.1, 1, 10]
-    # npa_sigmas = np.linspace(0.00001, 10, 20)
-    # npa_sigmas = np.exp(-np.linspace(np.log(1/1e-6), np.log(1/10), 20))
-    npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-6), np.log(1 / 10), 8))
-    # npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-6), np.log(1 / 10), 12))
-    n_sigmas = len(npa_sigmas)
-
-    # todo: this properly
+    npa_sigmas = _get_npas_from_args(args)
+    n_sigmas = args.npas_num
     args.npas = npa_sigmas
 
     def _calculate_disk_volumes(r_, z_):
@@ -963,18 +950,17 @@ def volume_metric_sweeps():
     Estimate the volume explored by a typical trajectory.
     """
     args = get_args(validate_source=False)
-    npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-3), np.log(1 / 10), 4))
-    n_sigmas = len(npa_sigmas)
+    npa_sigmas = _get_npas_from_args(args)
+    n_sigmas = args.npas_num
     args.npas = npa_sigmas
 
     # Sweep over sim durations
-    sim_durations = np.exp(-np.linspace(np.log(1 / (1 * 60)), np.log(1 / (5 * 60)), 3))
-    sim_durations = np.round(sim_durations / args.sim_dt) * args.sim_dt
+    sim_durations = _get_durations_from_args(args)
     n_durations = len(sim_durations)
     args.sim_durations = sim_durations
 
     # Sweep over the pauses
-    pauses = np.r_[[0, ], np.exp(-np.linspace(np.log(1 / 1), np.log(1 / 60), 3))]
+    pauses = _get_pauses_from_args(args)
     n_pauses = len(pauses)
     args.pauses = pauses
 
@@ -1192,21 +1178,16 @@ def volume_metric_sweeps2():
     model_phi = args.phi_dist_params[1]
 
     # Set parameter ranges
-    npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-3), np.log(1 / 10), 20))
-    n_sigmas = len(npa_sigmas)
+    npa_sigmas = _get_npas_from_args(args)
+    n_sigmas = args.npas_num
     args.npas = npa_sigmas
-    # sim_durations = np.exp(-np.linspace(np.log(1 / (1 * 60)), np.log(1 / (30 * 60)), 8))
-    sim_durations = np.arange(1, 6)**2 * 60
-    sim_durations = np.round(sim_durations / args.sim_dt) * args.sim_dt
+    sim_durations = _get_durations_from_args(args)
+    n_durations = args.durations_num
+    pauses = _get_pauses_from_args(args)
+    n_pauses = args.pauses_num
 
-    n_durations = len(sim_durations)
-    fix_pause = args.nonp_pause_max
-    # pauses = np.r_[[0, ], np.exp(-np.linspace(np.log(1 / 1), np.log(1 / 60), 7))]
-    pauses = np.arange(1, 6)**2
-
-    # pauses = np.linspace(0, 10, 11)
-    n_pauses = len(pauses)
     fix_duration = args.sim_duration
+    fix_pause = args.nonp_pause_max
 
     def _calculate_volumes(r_, z_):
         sphere_vols = 4 / 3 * np.pi * r_**3
@@ -1509,23 +1490,19 @@ def voxel_scores_sweeps():
     model_phi = args.phi_dist_params[1]
 
     # Set parameter ranges
-    npa_sigmas = np.exp(-np.linspace(np.log(1 / 1e-3), np.log(1 / 10), 20))
-    n_sigmas = len(npa_sigmas)
+    npa_sigmas = _get_npas_from_args(args)
+    n_sigmas = args.npas_num
     args.npas = npa_sigmas
-    sim_durations = np.arange(1, 6)**2 * 60
-    sim_durations = np.round(sim_durations / args.sim_dt) * args.sim_dt
-    n_durations = len(sim_durations)
-    fix_pause = args.nonp_pause_max
-    pauses = np.arange(1, 6)**2
-    # pauses = np.r_[[0, ], np.exp(-np.linspace(np.log(1 / 1), np.log(1 / 60), 7))]
-    # pauses = np.linspace(0, 10, 11)
-    n_pauses = len(pauses)
-    fix_duration = args.sim_duration
-
-    # voxel_sizes = np.exp(-np.linspace(np.log(1/1), np.log(1/0.01), 20))
-    voxel_sizes = np.exp(-np.linspace(np.log(1 / 0.1), np.log(1 / 0.01), 6))
+    sim_durations = _get_durations_from_args(args)
+    n_durations = args.durations_num
+    pauses = _get_pauses_from_args(args)
+    n_pauses = args.pauses_num
+    voxel_sizes = _get_voxel_sizes_from_args(args)
     args.voxel_sizes = voxel_sizes
-    n_vs = len(voxel_sizes)
+    n_vs = args.vxs_num
+
+    fix_pause = args.nonp_pause_max
+    fix_duration = args.sim_duration
 
     if 1:
         # Fix the pause and sweep over the durations
@@ -1623,9 +1600,9 @@ if __name__ == '__main__':
     # coverage_scores()
     # search_scores()  # broken
     # search_t_tests()  # broken
-    # surface_coverage_scores()
-    # crossings_nonp()
-    # volume_metric()
+    surface_coverage_scores()
+    crossings_nonp()
+    volume_metric()
     volume_metric_sweeps()
     volume_metric_sweeps2()
     voxel_scores_sweeps()
