@@ -180,6 +180,9 @@ class SimulationState:
                     return np.zeros((0,))
                 mode = 'r' if self.read_only else 'r+'
                 data = np.memmap(path_state, dtype=np.float32, mode=mode, shape=tuple(self.shapes[key]))
+            elif key in VAR_NAMES_VARIABLE_SIZE:
+                npz = np.load(path_state)
+                data = [npz[f'{i:06d}'] for i in range(self.parameters.batch_size)]
             else:
                 data = dict(np.load(path_state))
             self.states[key] = data
@@ -215,11 +218,11 @@ class SimulationState:
             path_state = self.path / f'{k}.npz'
             try:
                 if k in VAR_NAMES_VARIABLE_SIZE:
-                    data = np.load(path_state)
-                    state = [data[f'{i:06d}'] for i in range(self.parameters.batch_size)]
+                    # Load on demand, just check that the file exists
+                    assert path_state.exists()
                 else:
                     state = np.memmap(path_state, dtype=np.float32, mode=mode, shape=tuple(meta['shapes'][k]))
-                states[k] = state
+                    states[k] = state
             except Exception as e:
                 logger.warning(f'Could not load from {path_state}. {e}')
                 if not partial_load_ok:
