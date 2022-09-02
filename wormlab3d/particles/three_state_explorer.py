@@ -260,23 +260,21 @@ class ThreeStateExplorer(nn.Module):
         tumble_idxs = (states == 2).nonzero()
         tumble_ts = [tumble_idxs[tumble_idxs[:, 0] == i][:, 1] * dt for i in range(self.batch_size)]
         max_tumbles = max((states == 2).sum(dim=1))
-        e0s = [self.e0, ]
-        thetas = []
-        phis = []
+        e0s = torch.zeros((self.batch_size, max_tumbles + 1, 3), dtype=torch.float64)
+        e0s[:, 0] = self.e0.clone()
+        thetas = torch.zeros((self.batch_size, max_tumbles))
+        phis = torch.zeros((self.batch_size, max_tumbles))
         bar = Bar('Generating', max=max_tumbles)
         bar.check_tty = False
-        for _ in range(max_tumbles):
+        for i in range(max_tumbles):
             self._sample_parameters()
             self._rotate_frames(self.thetas, 'planar')
             self._rotate_frames(self.phis, 'nonplanar')
-            thetas.append(self.thetas.clone())
-            phis.append(self.phis.clone())
-            e0s.append(self.e0)
+            thetas[:, i] = self.thetas.clone()
+            phis[:, i] = self.phis.clone()
+            e0s[:, i + 1] = self.e0.clone()
             bar.next()
         bar.finish()
-        e0s = torch.stack(e0s, dim=1)
-        thetas = torch.stack(thetas, dim=1)
-        phis = torch.stack(phis, dim=1)
 
         # Calculate the run durations
         logger.info('Calculating run durations.')
