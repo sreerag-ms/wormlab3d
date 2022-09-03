@@ -1,3 +1,4 @@
+import gc
 import time
 from datetime import timedelta
 from multiprocessing import Pool
@@ -257,8 +258,10 @@ class ThreeStateExplorer(nn.Module):
 
         # Generate the tumbles
         logger.info('Generating tumbles.')
+        gc.collect()  # probably in the wrong place but seems to fix the random crashes
         tumble_idxs = (states == 2).nonzero()
-        tumble_ts = [tumble_idxs[tumble_idxs[:, 0] == i][:, 1] * dt for i in range(self.batch_size)]
+        vertex_idxs = [tumble_idxs[tumble_idxs[:, 0] == i][:, 1] for i in range(self.batch_size)]
+        tumble_ts = [vi * dt for vi in vertex_idxs]
         max_tumbles = max((states == 2).sum(dim=1))
         e0s = torch.zeros((self.batch_size, max_tumbles + 1, 3), dtype=torch.float64)
         e0s[:, 0] = self.e0.clone()
@@ -333,7 +336,9 @@ class ThreeStateExplorer(nn.Module):
                         for i in range(self.batch_size)
                     ]
                 )
-                e0_exp = torch.stack(res)
+                e0_exp = torch.zeros((self.batch_size, n_steps, 3))
+                for i in range(self.batch_size):
+                    e0_exp[i] = res[i]
         else:
             e0_exp = torch.zeros((self.batch_size, n_steps, 3))
             bar = Bar('Simulating', max=self.batch_size)
@@ -371,8 +376,7 @@ class ThreeStateExplorer(nn.Module):
         # Calculate average speeds between turns
         speeds = []
         for i in range(self.batch_size):
-            vertex_idxs = tumble_idxs[tumble_idxs[:, 0] == i][:, 1]
-            vertices = X[i, vertex_idxs]
+            vertices = X[i, vertex_idxs[i]]
             distances = (vertices[1:] - vertices[:-1]).norm(dim=-1)
             speeds.append(distances / intervals[i])
 
