@@ -16,6 +16,7 @@ from wormlab3d.data.model import PEParameters
 from wormlab3d.particles.three_state_explorer import ThreeStateExplorer
 from wormlab3d.particles.tumble_run import find_approximation
 from wormlab3d.toolkit.util import hash_data, normalise
+from wormlab3d.trajectories.pca import calculate_pcas, PCACache
 from wormlab3d.trajectories.util import smooth_trajectory
 
 VAR_NAMES = [
@@ -491,6 +492,31 @@ class SimulationState:
             nonp[i] = r[2] / np.sqrt(r[1] * r[0])
         self.states['nonp'], self.shapes['nonp'] = self._init_state_component('nonp')
         self.states['nonp'][:] = nonp
+        self.needs_save = True
+
+        return nonp
+
+    def get_nonp_windowed(self, ws: int, parallel: bool = True):
+        """
+        Calculate windowed non-planarity of trajectories and cache result to disk.
+        """
+        key = f'nonp_{ws:04d}'
+        try:
+            nonp = getattr(self, key)
+            return nonp
+        except AttributeError:
+            pass
+
+        logger.info(f'Calculating non-planarity of trajectories with window size={ws}.')
+        bs = self.parameters.batch_size
+        nonp = np.zeros((bs, self.X.shape[1] - int(ws / 2) * 2))
+        for i, X in enumerate(self.X):
+            pcas = calculate_pcas(X, window_size=ws, parallel=parallel)
+            pcas_cache = PCACache(pcas)
+            r = pcas_cache.explained_variance_ratio.T
+            nonp[i] = r[2] / np.where(r[2] == 0, 1, np.sqrt(r[1] * r[0]))
+        self.states[key], self.shapes[key] = self._init_state_component(key, shape=tuple(nonp.shape))
+        self.states[key][:] = nonp
         self.needs_save = True
 
         return nonp

@@ -92,8 +92,7 @@ def _make_traces_plot(
     # Planarity
     logger.info('Fetching planarities.')
     pcas, meta = generate_or_load_pca_cache(**common_args, window_size=1)
-    r = pcas.explained_variance_ratio.T
-    nonp = r[2] / np.sqrt(r[1] * r[0])
+    nonp = pcas.nonp
 
     # Eigenworms embeddings
     Z, meta = get_trajectory(**common_args, natural_frame=True)

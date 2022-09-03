@@ -1021,9 +1021,7 @@ def nonplanarity_over_time():
         logger.info(f'Fetching PCA data for delta = {int(delta)}.')
         args.planarity_window = int(delta)
         pca_cache = get_pca_cache_from_args(args)
-        r = pca_cache.explained_variance_ratio.T
-        nonp_delta = r[2] / np.sqrt(r[1] * r[0])
-        nonp[delta] = nonp_delta
+        nonp[delta] = pca_cache.nonp
     dwells = calculate_transitions_and_dwells_multiple_deltas(nonp)
 
     deltas = list(nonp.keys())
@@ -1276,8 +1274,7 @@ def nonplanarity_and_displacement_over_time(x_label: str = 'time'):
         logger.info(f'Fetching PCA data for delta = {int(delta)}.')
         args.planarity_window = int(delta)
         pca_cache = get_pca_cache_from_args(args)
-        r = pca_cache.explained_variance_ratio.T
-        nonp[delta] = r[2] / np.sqrt(r[1] * r[0])
+        nonp[delta] = pca_cache.nonp
     dwells_nonp = calculate_transitions_and_dwells_multiple_deltas(nonp)
 
     # # Calculate displacements across all time windows for transitions
@@ -1429,8 +1426,7 @@ def nonplanarity_transition_rates_dataset_averages(
             logger.info(f'Fetching PCA data for delta = {int(delta)}.')
             args.planarity_window = int(delta)
             pca_cache = get_pca_cache_from_args(args)
-            r = pca_cache.explained_variance_ratio.T
-            nonp[delta] = r[2] / np.sqrt(r[1] * r[0])
+            nonp[delta] = pca_cache.nonp
         dwells = calculate_transitions_and_dwells_multiple_deltas(nonp)
 
         # Loop over deltas

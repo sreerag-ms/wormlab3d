@@ -66,8 +66,7 @@ def traces(
     # Planarity
     logger.info('Fetching planarities.')
     pcas, meta = generate_or_load_pca_cache(**common_args, window_size=1, smoothing_window=smoothing_window)
-    r = pcas.explained_variance_ratio.T
-    nonp = r[2] / np.sqrt(r[1] * r[0])
+    nonp = pcas.nonp
 
     # Clusters
     L, _ = get_posture_clusters(

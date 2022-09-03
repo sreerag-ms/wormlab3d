@@ -28,6 +28,12 @@ class PCACache:
 
     def __len__(self):
         return len(self.data)
+    
+    @property
+    def nonp(self) -> np.ndarray:
+        r = self.explained_variance_ratio.T
+        nonp = r[2] / np.where(r[2] == 0, 1, np.sqrt(r[1] * r[0]))
+        return nonp
 
 
 def _map_pcas_to_data(pcas: List[PCA]) -> np.ndarray:
@@ -61,6 +67,8 @@ def calculate_pca(X: np.ndarray, i: int, window_size: int) -> PCA:
     if X_window.ndim == 3:
         X_window = X_window.reshape((window_size_actual * X.shape[1], 3))
     assert X_window.ndim == 2
+    if X_window.var(axis=0).sum() == 0:
+        X_window[0, 0] += 1e-8
     pca = PCA(svd_solver='full', copy=True, n_components=3)
     pca.fit(X_window)
 

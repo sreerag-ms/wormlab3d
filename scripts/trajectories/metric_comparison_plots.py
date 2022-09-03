@@ -116,8 +116,7 @@ def _get_metric_values(metric: str, X: np.ndarray, args: Namespace) -> np.ndarra
             smoothing_window=args.smoothing_window,
             window_size=args.planarity_window,
         )
-        r = pcas.explained_variance_ratio.T
-        vals = r[2] / np.sqrt(r[1] * r[0])
+        vals = pcas.nonp
         if metric == 'planarity':
             vals = 1 - vals
     elif metric == 'K':

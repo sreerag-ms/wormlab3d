@@ -624,8 +624,7 @@ def plot_bishop_frame_components_for_trial():
         nonp = {}
         for delta in deltas:
             pcas = PCACache(calculate_pcas(vertices, delta + 2))
-            r = pcas.explained_variance_ratio.T
-            nonp[delta] = r[2] / np.sqrt(r[1] * r[0])
+            nonp[delta] = pcas.nonp
 
         # nf = calculate_bishop_frame_components(X, smooth_K)
         fig = plot_approximation_planes(

@@ -70,9 +70,7 @@ def nonplanarity_trajectory():
         args.planarity_window = int(delta)
         logger.info(f'Fetching PCA data for delta = {int(delta)}.')
         pca_cache = get_pca_cache_from_args(args)
-        r = pca_cache.explained_variance_ratio.T
-        nonp_delta = r[2] / np.sqrt(r[1] * r[0])
-        nonp.append(nonp_delta)
+        nonp.append(pca_cache.nonp)
 
     fig = plt.figure(figsize=(14, 10))
     ax = fig.add_subplot()
@@ -132,10 +130,8 @@ def nonplanarity_dataset():
             logger.info(f'Fetching PCA data for window size = {int(delta)}.')
             try:
                 pca_cache = get_pca_cache_from_args(args)
-                r = pca_cache.explained_variance_ratio.T
-                nonp_delta = r[2] / np.sqrt(r[1] * r[0])
-                nonp[c][delta].extend(nonp_delta)
-                all_nonp[delta].extend(nonp_delta)
+                nonp[c][delta].extend(pca_cache.nonp)
+                all_nonp[delta].extend(pca_cache.nonp)
             except AssertionError as e:
                 # Window size is greater than trajectory length, so break here
                 logger.warning(e)

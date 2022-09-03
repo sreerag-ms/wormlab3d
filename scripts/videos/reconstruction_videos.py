@@ -502,16 +502,14 @@ def _make_traces_plots(
     }
     logger.info('Fetching posture planarities.')
     pcas, meta = generate_or_load_pca_cache(**common_args, window_size=1)
-    r = pcas.explained_variance_ratio.T
-    nonp_postures = r[2] / np.sqrt(r[1] * r[0])
+    nonp_postures = pcas.nonp
 
     logger.info('Fetching trajectory planarities.')
     nonp_trajectories = np.zeros((len(args.planarity_windows), N))
     for i, ws in enumerate(args.planarity_windows):
         pcas, meta = generate_or_load_pca_cache(**common_args, window_size=round(ws * trial.fps))
-        r = pcas.explained_variance_ratio.T
         t0 = int(np.floor((N - len(pcas)) / 2))
-        nonp_trajectories[i, t0:t0 + len(pcas)] = r[2] / np.sqrt(r[1] * r[0])
+        nonp_trajectories[i, t0:t0 + len(pcas)] = pcas.nonp
 
     # Plot
     fig, axes = plt.subplots(6, figsize=(width / 100, height / 100), gridspec_kw={
