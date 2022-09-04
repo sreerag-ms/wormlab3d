@@ -244,11 +244,15 @@ def generate_midline3d_dataset(args: DatasetMidline3DArgs) -> DatasetMidline3D:
         lengths = np.linalg.norm(X[:, 1:] - X[:, :-1], axis=-1).sum(axis=-1)
         if args.min_length is not None:
             too_short = lengths < args.min_length
-            X = X[~too_short]
-            lengths = lengths[~too_short]
+            if too_short.sum() > 0:
+                logger.warning(f'Discarding {too_short.sum()}/{len(X)} too short midlines.')
+                X = X[~too_short]
+                lengths = lengths[~too_short]
         if args.max_length is not None:
             too_long = lengths > args.max_length
-            X = X[~too_long]
+            if too_long.sum() > 0:
+                logger.warning(f'Discarding {too_long.sum()}/{len(X)} too long midlines.')
+                X = X[~too_long]
             lengths = lengths[~too_long]
 
         # Normalise lengths
