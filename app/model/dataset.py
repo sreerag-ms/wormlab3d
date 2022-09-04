@@ -213,4 +213,26 @@ class DatasetView(DocumentView):
                     }
                 },
             ),
+            (
+                self.prefix + 'normalise_lengths', {
+                    'title': 'Normalise Lengths',
+                    'type': 'boolean',
+                },
+            ),
+            (
+                self.prefix + 'min_length', {
+                    'title': 'Min. Length',
+                    'type': 'float',
+                    'precision': 2,
+                    'filter_type': 'choice_query',
+                },
+            ),
+            (
+                self.prefix + 'max_length', {
+                    'title': 'Max. Length',
+                    'type': 'float',
+                    'precision': 2,
+                    'filter_type': 'choice_query',
+                },
+            ),
         ])

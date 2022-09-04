@@ -27,6 +27,9 @@ class DatasetArgs(BaseArgs):
             augment: bool = False,
             n_dataloader_workers: int = 4,
             preload_from_database: bool = False,
+            normalise_lengths: bool = False,
+            min_length: float = None,
+            max_length: float = None,
             **kwargs
     ):
         self.dataset_type = None
@@ -67,17 +70,15 @@ class DatasetArgs(BaseArgs):
             include_trials = []
         self.include_trials = include_trials
         self.min_trial_quality = min_trial_quality
-        if reconstructions is not None:
-            assert len(self.include_experiments) == 0, 'reconstructions cannot be defined with include_experiments!'
-            assert len(self.exclude_experiments) == 0, 'reconstructions cannot be defined with exclude_experiments!'
-            assert len(self.include_trials) == 0, 'reconstructions cannot be defined with include_trials!'
-            assert len(self.exclude_trials) == 0, 'reconstructions cannot be defined with exclude_trials!'
-        else:
+        if reconstructions is None:
             reconstructions = []
         self.reconstructions = reconstructions
         self.augment = augment
         self.n_dataloader_workers = n_dataloader_workers
         self.preload_from_database = preload_from_database
+        self.normalise_lengths = normalise_lengths
+        self.min_length = min_length
+        self.max_length = max_length
 
     @classmethod
     def add_args(cls, parser: ArgumentParser) -> _ArgumentGroup:
@@ -123,6 +124,12 @@ class DatasetArgs(BaseArgs):
                            help='Number of dataloader worker processes.')
         group.add_argument('--preload-from-database', type=str2bool, default=False,
                            help='Preload all data from the database before starting, as opposed to loading on demand.')
+        group.add_argument('--normalise-lengths', type=str2bool, default=False,
+                           help='Normalise worm lengths to 1.')
+        group.add_argument('--min-length', type=float,
+                           help='Discard any worms below this length.')
+        group.add_argument('--max-length', type=float,
+                           help='Discard any worms above this length.')
         return group
 
     def get_info(self) -> List[str]:
@@ -141,4 +148,7 @@ class DatasetArgs(BaseArgs):
             f'Exclude trials={self.exclude_trials}.',
             f'Minimum trial quality={self.min_trial_quality}.',
             f'Reconstructions={self.reconstructions}.',
+            f'Normalise lengths={"Yes" if self.normalise_lengths else "No"}.',
+            f'Min length={self.min_length}.',
+            f'Max length={self.max_length}.',
         ]

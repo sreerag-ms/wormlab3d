@@ -68,6 +68,9 @@ class Dataset(Document):
     min_trial_quality = IntField()
     reconstructions = ListField(ReferenceField('Reconstruction'))
     tag_info = EmbeddedDocumentListField(TagInfo)
+    normalise_lengths = BooleanField(default=False)
+    min_length = FloatField()
+    max_length = FloatField()
 
     meta = {
         'allow_inheritance': True,
@@ -104,6 +107,9 @@ class Dataset(Document):
             restrict_sources=args.restrict_sources,
             min_reconstruction_frames=args.min_reconstruction_frames,
             mf_depth=args.mf_depth,
+            normalise_lengths=args.normalise_lengths,
+            min_length=args.min_length,
+            max_length=args.max_length,
         )
 
     @staticmethod
@@ -135,6 +141,10 @@ class Dataset(Document):
                 exclude_trials=args.exclude_trials,
                 include_trials=args.include_trials,
                 min_trial_quality=args.min_trial_quality,
+                reconstructions=args.reconstructions,
+                normalise_lengths=args.normalise_lengths,
+                min_length=args.min_length,
+                max_length=args.max_length
             )
 
             if args.dataset_type == DATASET_TYPE_2D_MIDLINE:

@@ -202,8 +202,9 @@ def generate_midline3d_dataset(args: DatasetMidline3DArgs) -> DatasetMidline3D:
             trial_ids_used.append(r.trial.id)
             reconstruction_ids.append(r.id)
 
-        # Set include_trials
-        args.include_trials = trial_ids_used
+        # Set the include-trials argument to the used trial ids if none were defined.
+        if len(args.include_trials) == 0:
+            args.include_trials = trial_ids_used
     else:
         reconstruction_ids = fetch_matching_reconstruction_ids(trial_ids, args)
     if len(reconstruction_ids) == 0:
@@ -239,8 +240,24 @@ def generate_midline3d_dataset(args: DatasetMidline3DArgs) -> DatasetMidline3D:
             logger.warning(f'Discarding {len(is_nan.nonzero()[0])}/{len(X)} bad midlines.')
             X = X[~is_nan]
 
-        # todo: check worm lengths and discard any out of range
-        # todo: rescale worms to all have length 1?
+        # Discard too short/long worms
+        lengths = np.linalg.norm(X[:, 1:] - X[:, :-1], axis=-1).sum(axis=-1)
+        if args.min_length is not None:
+            too_short = lengths < args.min_length
+            X = X[~too_short]
+            lengths = lengths[~too_short]
+        if args.max_length is not None:
+            too_long = lengths > args.max_length
+            X = X[~too_long]
+            lengths = lengths[~too_long]
+
+        # Normalise lengths
+        if args.normalise_lengths:
+            # Centre at the midpoints, scale and reposition
+            mp = X[:, int(X.shape[1]/2)][:, None, :]
+            X_mp_centred = X - mp
+            X_scaled = X_mp_centred / lengths[:, None, None]
+            X = X_scaled + mp
 
         # Resample if required
         if X.shape[1] != args.n_worm_points:
