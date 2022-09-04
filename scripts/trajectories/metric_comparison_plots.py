@@ -22,7 +22,7 @@ img_extension = 'png'
 def make_filename(metric_a: str, metric_b: str, args: Namespace, excludes: List[str] = None):
     if excludes is None:
         excludes = []
-    fn = START_TIMESTAMP + f'{metric_a}_vs_{metric_b}'
+    fn = START_TIMESTAMP + f'_{metric_a}_vs_{metric_b}'
 
     for k in ['dataset', 'trial', 'frames', 'src', 'u', 'smoothing_window', 'directionality', 'projection']:
         if k in excludes:
