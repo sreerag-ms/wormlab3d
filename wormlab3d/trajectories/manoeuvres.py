@@ -22,6 +22,10 @@ def get_manoeuvres(
     reversal_centre_idxs, reversal_props = find_peaks(signed_speeds < 0, width=min_reversal_frames)
     manoeuvres = []
 
+    def nonp(pca_):
+        r = pca_.explained_variance_ratio_.T
+        return r[2] / np.where(r[2] == 0, 1, np.sqrt(r[1] * r[0]))
+
     # Loop over reversal events
     for i, reversal_centre_idx in enumerate(reversal_centre_idxs):
         # Identify the plane of motion prior to the reversal
@@ -34,6 +38,13 @@ def get_manoeuvres(
             continue
         pca_prev = PCA(svd_solver='full', copy=True, n_components=3)
         pca_prev.fit(X_prev)
+
+        # Identify the plane of motion during the reversal
+        rev_start_idx = reversal_props['left_bases'][i] + 1
+        rev_end_idx = reversal_props['right_bases'][i]
+        X_rev = X_slice[rev_start_idx:rev_end_idx]
+        pca_rev = PCA(svd_solver='full', copy=True, n_components=3)
+        pca_rev.fit(X_rev)
 
         # Identify the plane of motion subsequent to the reversal
         next_start_idx = reversal_props['right_bases'][i] - 1
@@ -51,6 +62,17 @@ def get_manoeuvres(
         n2 = pca_next.components_[2]
         angle = calculate_angle(n1, n2)
 
+        # Calculate the trajectory angles (between first PCA components)
+        t1 = pca_prev.components_[0]
+        t2 = pca_next.components_[0]
+        angle_traj = calculate_angle(t1, t2)
+
+        # Calculate angles between prev->rev, rev->next
+        angle_prev_rev_t = calculate_angle(pca_prev.components_[0], pca_rev.components_[0])
+        angle_prev_rev_n = calculate_angle(pca_prev.components_[2], pca_rev.components_[2])
+        angle_rev_next_t = calculate_angle(pca_rev.components_[0], pca_next.components_[0])
+        angle_rev_next_n = calculate_angle(pca_rev.components_[2], pca_next.components_[2])
+
         manoeuvres.append({
             'centre_idx': reversal_centre_idx,
             'start_idx': prev_start_idx,
@@ -60,7 +82,17 @@ def get_manoeuvres(
             'pca_prev': pca_prev,
             'pca_next': pca_next,
             'reversal_duration': reversal_props['widths'][i],
-            'angle': angle
+            'reversal_distance': np.linalg.norm(X_rev[0] - X_rev[-1], axis=-1),
+            'angle': angle,
+            'angle_prev_rev_t': angle_prev_rev_t,
+            'angle_prev_rev_n': angle_prev_rev_n,
+            'angle_rev_next_t': angle_rev_next_t,
+            'angle_rev_next_n': angle_rev_next_n,
+            'angle_prev_next_t': angle_traj,
+            'angle_prev_next_n': angle,
+            'nonp_prev': nonp(pca_prev),
+            'nonp_rev': nonp(pca_rev),
+            'nonp_next': nonp(pca_next),
         })
 
     return manoeuvres

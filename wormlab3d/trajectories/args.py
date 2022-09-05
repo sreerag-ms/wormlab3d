@@ -14,6 +14,7 @@ def get_args(
         include_planarity_options: bool = True,
         include_helicity_options: bool = True,
         include_manoeuvre_options: bool = True,
+        include_approximation_options: bool = True,
         include_pe_options: bool = True,
         validate_source: bool = True
 ) -> Namespace:
@@ -91,6 +92,21 @@ def get_args(
         parser.add_argument('--manoeuvre-window', type=int, default=500,
                             help='Number of frames to include either side of a detected manoeuvre.')
 
+    # Approximation arguments
+    if include_approximation_options:
+        parser.add_argument('--approx-error-limit', type=float,
+                            help='Target approximation error.')
+        parser.add_argument('--smoothing-window-K', type=int, default=101,
+                            help='Curvature smoothing window.')
+        parser.add_argument('--planarity-window-vertices', type=int, default=5,
+                            help='Number of vertices to use when calculating the planarity measure.')
+        parser.add_argument('--approx-distance', type=int, default=500,
+                            help='Min distance between vertices.')
+        parser.add_argument('--approx-curvature-height', type=int, default=50,
+                            help='Min height of curvature peaks to detect vertices.')
+        parser.add_argument('--approx-max-attempts', type=int, default=50,
+                            help='Max attempts to find an approximation.')
+
     # Particle explorer arguments
     if include_pe_options:
         ParameterArgs.add_args(parser)
@@ -112,8 +128,8 @@ def get_args(
                             help='Maximum duration to use for sweeping (in minutes). Ignored if durations-intervals=quadratic.')
         parser.add_argument('--durations-num', type=int, default=3,
                             help='Number of durations to use for sweeping.')
-        parser.add_argument('--durations-intervals', type=str, choices=['quadratic', 'exponential'], default='quadratic',
-                            help='Interval between durations.')
+        parser.add_argument('--durations-intervals', type=str, choices=['quadratic', 'exponential'],
+                            default='quadratic', help='Interval between durations.')
         parser.add_argument('--pauses-min', type=int, default=0,
                             help='Minimum pause to use for sweeping (in seconds).')
         parser.add_argument('--pauses-max', type=int, default=60,
@@ -122,7 +138,6 @@ def get_args(
                             help='Number of pauses to use for sweeping.')
         parser.add_argument('--pauses-intervals', type=str, choices=['quadratic', 'exponential'], default='quadratic',
                             help='Interval between pauses.')
-
 
     args = parser.parse_args()
 

@@ -4,21 +4,25 @@ from typing import List, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+from PIL import Image
 from matplotlib import animation
-from matplotlib.axes import Axes
+from matplotlib.axes import Axes, GridSpec
+from mayavi import mlab
 from mpl_toolkits.mplot3d.art3d import Line3DCollection, Poly3DCollection
 
 from simple_worm.frame import FrameSequenceNumpy
 from simple_worm.plot3d import FrameArtist, Arrow3D, MidpointNormalize
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.data.model import Dataset, Reconstruction, Trial
+from wormlab3d.postures.natural_frame import NaturalFrame
+from wormlab3d.postures.plot_utils import plot_natural_frame_3d_mlab
 from wormlab3d.toolkit.plot_utils import equal_aspect_ratio, make_box_from_pca
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.manoeuvres import get_manoeuvres, get_forward_durations
 from wormlab3d.trajectories.util import calculate_speeds
 
-animate = True
+animate = False
 show_plots = False
 save_plots = True
 img_extension = 'svg'
@@ -90,6 +94,7 @@ def plot_manoeuvre_3d(
         cb = fig.colorbar(s, shrink=0.5)
         cb.ax.tick_params(labelsize=12)
         cb.ax.set_ylabel('Speed (mm/s)', rotation=270, fontsize=14)
+        cb.solids.set(alpha=1)
 
     # Draw lines connecting points
     points = X_slice[:, None, :]
@@ -516,17 +521,140 @@ def plot_dataset_distributions():
         plt.show()
 
 
+def plot_dataset_reversal_durations_vs_angles():
+    """
+    Plot the distributions of reversal durations against angles for a dataset.
+    """
+    args = get_args(validate_source=False)
+    hist_args = dict(bins=20, density=True, rwidth=0.9)
+
+    # Get dataset
+    assert args.dataset is not None
+    ds = Dataset.objects.get(id=args.dataset)
+
+    # Unset trial and midline source args
+    args.trial = None
+    args.midline3d_source = None
+    args.midline3d_source_file = None
+
+    # Loop over manoeuvres
+    angles = {
+        'prev_rev_t': [],
+        'prev_rev_n': [],
+        'rev_next_t': [],
+        'rev_next_n': [],
+        'prev_next_t': [],
+        'prev_next_n': [],
+    }
+    durations = []
+    distances = []
+
+    # Loop over reconstructions
+    for r_ref in ds.reconstructions:
+        reconstruction = Reconstruction.objects.get(id=r_ref.id)
+        args.reconstruction = reconstruction.id
+        fps = reconstruction.trial.fps
+
+        X_full, X_slice = get_trajectory(args)
+        manoeuvres = get_manoeuvres(
+            X_full,
+            X_slice,
+            min_reversal_frames=args.min_reversal_frames,
+            window_size=args.manoeuvre_window,
+            cut_windows_at_manoeuvres=True
+        )
+
+        # Loop over manoeuvres
+        for i, m in enumerate(manoeuvres):
+            for k in angles.keys():
+                angles[k].append(m[f'angle_{k}'])
+            durations.append(m['reversal_duration'] / fps)
+            distances.append(m['reversal_distance'])
+
+    def _plot_hist(ax_scat_, ax_histx_, ax_histy_, ax_cb_, x, y, c):
+        # Scatter plot
+        s = ax_scat_.scatter(x, y, c=c)
+        ax_scat_.set_xlabel('Angle')
+        ax_scat_.set_xlim(left=-0.1, right=np.pi + 0.1)
+        ax_scat_.set_xticks([0, np.pi])
+        ax_scat_.set_xticklabels(['0', '$\pi$'])
+        ax_scat_.spines['top'].set_visible(False)
+        ax_scat_.spines['right'].set_visible(False)
+
+        ax_histx_.hist(x, **hist_args)
+        ax_histx_.tick_params(axis='x', bottom=False, labelbottom=False)
+        ax_histx_.spines['bottom'].set(linestyle='--', color='grey')
+
+        ax_histy_.hist(y, orientation='horizontal', **hist_args)
+        ax_histy_.tick_params(axis='y', left=False, labelleft=False)
+        ax_histy_.spines['left'].set(linestyle='--', color='grey')
+
+        cax = ax_cb_.inset_axes([0.06, 0.06, 0.2, 0.88], transform=ax_cb_.transAxes)
+        cb = fig.colorbar(s, ax=ax_cb_, cax=cax)
+        cb.set_label('Distance (mm)', rotation=270, labelpad=15)
+        ax_cb_.spines['left'].set_visible(False)
+        ax_cb_.spines['bottom'].set_visible(False)
+        ax_cb_.axis('off')
+
+    for k, angles in angles.items():
+        # Set up plots
+        gs = GridSpec(
+            nrows=2,
+            ncols=2,
+            width_ratios=(7, 2),
+            height_ratios=(2, 7),
+            wspace=0,
+            hspace=0,
+            top=0.93,
+            bottom=0.08,
+            left=0.08,
+            right=0.98,
+        )
+        fig = plt.figure(figsize=(8, 8))
+        fig.suptitle({
+                         'prev_rev_t': 'Trajectory angles between incoming and reversal.',
+                         'prev_rev_n': 'Planar angles between incoming and reversal.',
+                         'rev_next_t': 'Trajectory angles between reversal and outgoing.',
+                         'rev_next_n': 'Planar angles between reversal and outgoing.',
+                         'prev_next_t': 'Trajectory angles between incoming and outgoing.',
+                         'prev_next_n': 'Planar angles between incoming and outgoing.',
+                     }[k])
+
+        # Plot angles vs reversal durations
+        ax_scat = fig.add_subplot(gs[1, 0])
+        ax_scat.set_ylabel('Reversal duration (s)')
+        ax_histx = fig.add_subplot(gs[0, 0], sharex=ax_scat)
+        ax_histy = fig.add_subplot(gs[1, 1], sharey=ax_scat)
+        ax_cb = fig.add_subplot(gs[0, 1])
+        _plot_hist(ax_scat, ax_histx, ax_histy, ax_cb, angles, durations, distances)
+
+        if save_plots:
+            fn = START_TIMESTAMP \
+                 + f'_rev_vs_angles_{k}' \
+                   f'_ds={args.dataset}' \
+                   f'_rev={args.min_reversal_frames}'
+            save_path = LOGS_PATH / (fn + f'.{img_extension}')
+            logger.info(f'Saving plot to {save_path}.')
+            plt.savefig(save_path)
+
+        if show_plots:
+            plt.show()
+        plt.close(fig)
+
+
 def plot_single_manoeuvre(
         index: int = None,
-        frame_num: int = None
+        frame_num: int = None,
+        plot_mlab_postures: bool = False
 ):
     """
     Plot a single manoeuvres detected in the trajectory.
     """
-    args = get_args()
+    args = get_args(validate_source=False)
     X_full, X_slice = get_trajectory(args)
     trial = Trial.objects.get(id=args.trial)
     signed_speeds = calculate_speeds(X_full, signed=True) * trial.fps
+    worm_idxs = [500, 900]
 
     manoeuvres = get_manoeuvres(
         X_full,
@@ -562,11 +690,83 @@ def plot_single_manoeuvre(
         colours=signed_speeds[m['start_idx']:m['end_idx']],
         cmap='PRGn',
         show_colourbar=True,
-        worm_idxs=8700 - m['start_idx'],  # 0,  # [500, 900],
+        worm_idxs=worm_idxs,  #8700 - m['start_idx'],  # 0,  # [500, 900],
         planes=[plane_prev, plane_next],
-        azim=-58,  # 55,
-        elev=30,  # -5
+        # azim=-58,  # 55,
+        # elev=30,  # -5
+        azim=55,
+        elev=-5
     )
+
+    if plot_mlab_postures and len(worm_idxs) > 0:
+        interactive = False
+        transparent_bg = True
+
+        plot_options = {
+            0: {
+                # (azimuth, elevation, distance, focalpoint)
+                'azimuth': 54,
+                'elevation': 73,
+                'distance': 1,
+                'roll': -126,
+            },
+            1: {
+                # (azimuth, elevation, distance, focalpoint)
+                'azimuth': 113,
+                'elevation': 134,
+                'distance': 0.9,
+                'roll': -0.6,
+            }
+        }
+
+        for i, worm_idx in enumerate(worm_idxs):
+            if i == 1:
+                continue
+            X = X_full[m['start_idx'] + worm_idx]
+            NF = NaturalFrame(X)
+
+            # 3D plot of eigenworm
+            fig = plot_natural_frame_3d_mlab(
+                NF,
+                **plot_options[i],
+                midline_opts={'line_width': 20},
+                show_frame_arrows=False,
+                show_outline=False,
+                show_axis=False,
+                show_pca_arrows=False,
+                offscreen=not interactive,
+            )
+
+            if save_plots:
+                path = LOGS_PATH / f'{START_TIMESTAMP}_{filename}_wi={worm_idx}.png'
+                logger.info(f'Saving plot to {path}.')
+
+                if not transparent_bg:
+                    mlab.savefig(str(path), figure=fig)
+                else:
+                    fig.scene._lift()
+                    img = mlab.screenshot(figure=fig, mode='rgba', antialiased=True)
+                    img = Image.fromarray((img * 255).astype(np.uint8), 'RGBA')
+                    img.save(path)
+                    if not show_plots:
+                        mlab.clf(fig)
+                        mlab.close()
+
+            if show_plots:
+                if interactive:
+                    mlab.show()
+                else:
+                    fig.scene._lift()
+                    img = mlab.screenshot(figure=fig, mode='rgba', antialiased=True)
+                    mlab.clf(fig)
+                    mlab.close()
+                    fig_mpl = plt.figure(figsize=(10, 10))
+                    ax = fig_mpl.add_subplot()
+                    ax.imshow(img)
+                    ax.axis('off')
+                    fig_mpl.tight_layout()
+                    plt.show()
+                    plt.close(fig_mpl)
 
 
 if __name__ == '__main__':
@@ -580,8 +780,9 @@ if __name__ == '__main__':
     # plot_angles_and_durations_varying_parameters()
     # plot_manoeuvre_rate()
     # plot_dataset_distributions()
+    # plot_dataset_reversal_durations_vs_angles()
 
-    # plot_single_manoeuvre(index=7)
+    plot_single_manoeuvre(index=2, plot_mlab_postures=True)
     # plot_single_manoeuvre(frame_num=11400)
     # plot_single_manoeuvre(frame_num=15100)
-    plot_single_manoeuvre(frame_num=8700)
+    # plot_single_manoeuvre(frame_num=8700)

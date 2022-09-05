@@ -480,7 +480,7 @@ def plot_natural_frame_3d_mlab(
         arrow_scale=arrow_scale,
         use_centred_midline=use_centred_midline
     )
-    centre = fa.X.mean(axis=0)
+    centre = fa.X.min(axis=0) + fa.X.ptp(axis=0) / 2
     if show_frame_arrows:
         fa.add_component_vectors(fig, draw_e0=False)
     fa.add_midline(fig, cmap_name=midline_cmap)
@@ -525,11 +525,11 @@ def plot_natural_frame_3d_mlab(
 
     # # Useful for getting the view parameters when recording from the gui:
     # scene = mlab.get_engine().scenes[0]
-    # scene.scene.camera.position = [-0.22882408164660478, 0.3015073944478576, -1.0862516659511565]
-    # scene.scene.camera.focal_point = [0.10072373567797888, 0.15345832376500054, 0.3325747923468798]
+    # scene.scene.camera.position = [-0.056627444635577756, 0.5919369307500081, -0.40565610534344765]
+    # scene.scene.camera.focal_point = [0.16923413053154945, 0.06871700007468462, 0.15579509735107422]
     # scene.scene.camera.view_angle = 30.0
-    # scene.scene.camera.view_up = [-0.4541512399773104, -0.8908364976462779, 0.01252939297748773]
-    # scene.scene.camera.clipping_range = [0.7203740696263817, 2.3976973567212854]
+    # scene.scene.camera.view_up = [0.25412043647039007, 0.7564286845750556, 0.602692665394353]
+    # scene.scene.camera.clipping_range = [0.24939435045734276, 1.4669799173586755]
     # scene.scene.camera.compute_view_plane_normal()
     # scene.scene.render()
     # print(mlab.view())  # (azimuth, elevation, distance, focalpoint)

@@ -161,6 +161,7 @@ def find_approximation(
         error_limit: float,
         planarity_window: int = 3,
         distance_first: int = 500,
+        distance_min: int = 3,
         height_first: int = 50,
         smooth_e0_first: int = 101,
         smooth_K_first: int = 101,
@@ -178,6 +179,7 @@ def find_approximation(
     if X.ndim == 3:
         X = X.mean(axis=1)
 
+    approx = None
     distance = distance_first
     height = height_first
     smooth_e0 = smooth_e0_first
@@ -191,17 +193,21 @@ def find_approximation(
             approx = get_approximate(X, k, distance=distance, height=height, planarity_window=planarity_window,
                                      quiet=quiet)
             mse = np.mean(np.sum((X - approx[0])**2, axis=-1))
-        except RuntimeError:
+        except RuntimeError as e:
+            logger.warning(e)
             mse = np.inf
 
         attempts += 1
 
         if mse > error_limit:
-            distance = max(3, distance - 10)
+            distance = max(distance_min, distance - 10)
             if attempts > 5:
                 height = max(10, height - 1)
             smooth_e0 = max(11, smooth_e0 - 6)
             smooth_K = max(11, smooth_K - 6)
+
+    if approx is None:
+        raise RuntimeError('Failed to find approximation!')
 
     return approx, distance, height, smooth_e0, smooth_K
 

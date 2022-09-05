@@ -19,7 +19,7 @@ from wormlab3d.trajectories.manoeuvres import get_manoeuvres
 from wormlab3d.trajectories.pca import get_pca_cache_from_args
 from wormlab3d.trajectories.util import get_deltas_from_args, calculate_speeds, smooth_trajectory
 
-show_plots = False
+show_plots = True
 save_plots = True
 img_extension = 'svg'
 
@@ -44,7 +44,7 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
                 end_frame = args.end_frame if args.end_frame is not None else -1
                 frames_str_fn = f'_f={start_frame}-{end_frame}'
             fn += frames_str_fn
-        elif k == 'src':
+        elif k == 'src' and not args.tracking_only:
             fn += f'_{args.midline3d_source}'
         elif k == 'directionality' and args.directionality is not None:
             fn += f'_dir={args.directionality}'
@@ -1325,7 +1325,7 @@ def nonplanarity_and_displacement_over_time(x_label: str = 'time'):
     if x_label == 'time':
         ts = ts / 25
     # fig, axes = plt.subplots(2, 1 + len(deltas), figsize=(4 + 5 * len(deltas), 8))
-    fig, axes = plt.subplots(2, len(deltas), figsize=(4 + 4 * len(deltas), 8))
+    fig, axes = plt.subplots(2, len(deltas), figsize=(10, 4))
     for i, delta in enumerate(deltas):
         d = displacements[delta][:max_i]
         p = nonp[delta][:max_i]
@@ -1337,10 +1337,11 @@ def nonplanarity_and_displacement_over_time(x_label: str = 'time'):
             ax.set_title(f'$\Delta={delta_ts[i]}s$')
         else:
             ax.set_title(f'$\Delta={delta_ts[i]}\ frames$')
-        if args.aggregation == DISPLACEMENT_AGGREGATION_L2:
-            ax.set_ylabel('$d=|x(t)-x(t+\Delta)|$')
-        else:
-            ax.set_ylabel('$d=(x(t)-x(t+\Delta))^2$')
+        # if args.aggregation == DISPLACEMENT_AGGREGATION_L2:
+        #     ax.set_ylabel('$d=|x(t)-x(t+\Delta)|$')
+        # else:
+        #     ax.set_ylabel('$d=(x(t)-x(t+\Delta))^2$')
+        ax.set_ylabel('Displacement')
         avg = d.mean()
         ax.axhline(y=avg, color='red')
         ax.set_xlim(left=0, right=ts[-1])
@@ -1351,6 +1352,14 @@ def nonplanarity_and_displacement_over_time(x_label: str = 'time'):
         else:
             ax.set_xlabel('Frame')
         ax.locator_params(axis='y', nbins=6)
+        ax.set_xticks([0, 300, 600, 900])
+        if i == 0:
+            ax.set_yticks([0, 0.2, 0.4])
+        elif i == 1:
+            ax.set_yticks([0, 0.5, 1])
+        elif i == 2:
+            ax.set_yticks([0, 1, 2])
+            ax.set_yticklabels([f'{x:.1f}' for x in [0, 1, 2]])
 
         # Nonplanarity trace over time
         ax = axes[1, i]
@@ -1366,6 +1375,7 @@ def nonplanarity_and_displacement_over_time(x_label: str = 'time'):
             ax.set_xlabel('Time (s)')
         else:
             ax.set_xlabel('Frame')
+        ax.set_xticks([0, 300, 600, 900])
         ax.set_yticks([0, 0.2, 0.4, 0.6])
 
     # # Plot lambdas
@@ -1385,7 +1395,8 @@ def nonplanarity_and_displacement_over_time(x_label: str = 'time'):
 
     if save_plots:
         plt.savefig(
-            make_filename(f'traces_nonp_and_disp', args, excludes=['delta_range', 'delta_step'])
+            make_filename(f'traces_nonp_and_disp', args, excludes=['delta_range', 'delta_step']),
+            transparent=True
         )
     if show_plots:
         plt.show()
@@ -1693,11 +1704,11 @@ if __name__ == '__main__':
     # nonplanarity_over_time()
     # speed_over_time()
     # posture_helicity_over_time()
-    trajectory_helicity_over_time()
+    # trajectory_helicity_over_time()
 
     # displacement_over_time_with_stats()
 
-    # nonplanarity_and_displacement_over_time(x_label='time')
+    nonplanarity_and_displacement_over_time(x_label='time')
     # if args_.dataset is not None:
     #     transition_rates_dataset()
     # else:

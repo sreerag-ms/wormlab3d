@@ -8,7 +8,7 @@ import numpy as np
 from simple_worm.plot3d import Arrow3D
 from wormlab3d import START_TIMESTAMP, LOGS_PATH, logger
 from wormlab3d.data.model import Trial, Dataset
-from wormlab3d.toolkit.plot_utils import equal_aspect_ratio, make_box_from_pca
+from wormlab3d.toolkit.plot_utils import equal_aspect_ratio, make_box_from_pca, tex_mode
 from wormlab3d.toolkit.util import hash_data, to_dict
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
@@ -19,7 +19,7 @@ save_plots = True
 img_extension = 'svg'
 
 
-# tex_mode()
+tex_mode()
 
 
 def plot_trial_turns():
@@ -185,16 +185,11 @@ def plot_trial_turn_correlations():
 
 def _generate_or_load_dataset_stats(
         args: Namespace,
-        smooth_K: int,
         window_size: int,
-        curvature_height: int,
         ds: Dataset,
         rebuild_cache: bool = False
 ) -> Dict[str, np.ndarray]:
     spec = to_dict(args)
-    spec['smooth_K'] = smooth_K
-    spec['window_size'] = window_size
-    spec['curvature_height'] = curvature_height
     stat_keys = ['distances', 'speeds', 'thetas', 'phis', 'psis', 'nonp', 'etas']
 
     cache_path = LOGS_PATH / hash_data(spec)
@@ -212,7 +207,7 @@ def _generate_or_load_dataset_stats(
             args.trial = trial.id
             args.reconstruction = ds.get_reconstruction_id_for_trial(trial)
             try:
-                stats = calculate_trial_turn_statistics(args, smooth_K, window_size, curvature_height)
+                stats = calculate_trial_turn_statistics(args, window_size)
             except RuntimeError as e:
                 logger.warning(f'Failed to find approximation: "{e}"')
             for k in stat_keys:
@@ -493,8 +488,8 @@ def plot_dataset_turn_nonp():
 
     ax.scatter(stats['nonp'], stats['speeds'], s=2, alpha=0.4)
 
-    ax.set_yscale('log')
-    ax.set_xscale('log')
+    # ax.set_yscale('log')
+    # ax.set_xscale('log')
 
     # Add fit line
     def funcinv(x_, a_, b_, k_):
@@ -526,8 +521,7 @@ if __name__ == '__main__':
 
     # plot_trial_turns()
     # plot_trial_turn_correlations()
-    plot_dataset_turn_correlations()
+    # plot_dataset_turn_correlations()
     # plot_dataset_turn_correlations_across_windows()
-    plot_dataset_run_stats()
-    # plot_dataset_turns_vs_runs()
-    # plot_dataset_turn_nonp()
+    # plot_dataset_run_stats()
+    plot_dataset_turn_nonp()
