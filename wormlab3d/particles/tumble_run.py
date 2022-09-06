@@ -269,7 +269,9 @@ def generate_or_load_ds_msds(
             msds_all = data['msds_all']
             msds = {}
             for trial in ds.include_trials:
-                msds[trial.id] = data[f'msd_{trial.id}']
+                k = f'msd_{trial.id}'
+                if k in data:
+                    msds[trial.id] = data[k]
         except Exception as e:
             logger.warning(f'Could not load MSDs: {e}')
             msds = None
