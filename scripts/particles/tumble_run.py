@@ -616,10 +616,8 @@ def plot_dataset_angle_comparisons():
 
 
 def dataset_against_three_state_comparison(
-        planarity_window: int = 7,
         use_approximation_stats: bool = True,
         noise_scale: float = 0.1,
-        smoothing_window: int = 25,
 ):
     """
     Plot comparisons between simulation runs and the experimental data.
@@ -646,8 +644,7 @@ def dataset_against_three_state_comparison(
 
     # Generate or load tumble/run values
     trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles \
-        = generate_or_load_ds_statistics(ds, error_limits, planarity_window=planarity_window,
-                                         min_run_speed_duration=min_run_speed_duration, rebuild_cache=False)
+        = generate_or_load_ds_statistics(ds, error_limits, min_run_speed_duration=min_run_speed_duration, rebuild_cache=False)
 
     # Generate or load MSDs
     msds_all_real, msds_real = generate_or_load_ds_msds(ds, args, rebuild_cache=False)
@@ -662,8 +659,8 @@ def dataset_against_three_state_comparison(
         stats = SS.get_approximation_statistics(
             error_limits=error_limits,
             noise_scale=noise_scale,
-            smoothing_window=smoothing_window,
-            planarity_window=planarity_window,
+            smoothing_window=args.smoothing_window,
+            planarity_window=args.planarity_window_vertices,
         )
     else:
         stats = {
@@ -678,8 +675,8 @@ def dataset_against_three_state_comparison(
     if 1:
         fig, axes = plt.subplots(len(error_limits), 6, figsize=(14, 2 + 2 * len(error_limits)), squeeze=False)
         fig.suptitle(f'Dataset={ds.id}. '
-                     f'Planarity windows={args.planarity_window} frames, {planarity_window} vertices.' +
-                     (f' Approximation statistics; noise_scale={noise_scale}, smoothing_window={smoothing_window}.'
+                     f'Planarity windows={args.planarity_window} frames, {args.planarity_window_vertices} vertices.' +
+                     (f' Approximation statistics; noise_scale={noise_scale}, smoothing_window={args.smoothing_window}.'
                       if use_approximation_stats else ''))
 
         for i, (param_name, values) in enumerate({
@@ -699,7 +696,6 @@ def dataset_against_three_state_comparison(
 
                 values_ds = np.array(values[0][j])
                 values_sim = np.array(values[1][j])
-                # values_sim = np.concatenate(values[1])
 
                 if param_name not in ['Planar angles', 'Non-planar angles', 'Twist angles']:
                     ax.set_yscale('log')
@@ -1012,8 +1008,6 @@ if __name__ == '__main__':
     # dataset_distributions()
     # plot_dataset_angle_comparisons()
     dataset_against_three_state_comparison(
-        planarity_window=7,
         use_approximation_stats=True,
         noise_scale=0.1,
-        smoothing_window=25,
     )
