@@ -328,14 +328,15 @@ def _calculate_dataset_values(
 
         # Calculate coefficients of variation for all params for all trials at all distances
         distance = 500
+        distance_min = 3
         height = 100
         smooth_e0 = 201
         smooth_K = 201
 
         for j, error_limit in enumerate(error_limits):
             approx, distance, height, smooth_e0, smooth_K \
-                = find_approximation(X, e0, error_limit, args.planarity_window_vertices, distance, height,
-                                     smooth_e0, smooth_K, max_attempts=50)
+                = find_approximation(X, e0, error_limit, args.planarity_window_vertices, distance, distance_min,
+                                     height, smooth_e0, smooth_K, max_attempts=50)
             X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles_j, nonplanar_angles_j, twist_angles_j, _, _, _ = approx
 
             # Put in time units
