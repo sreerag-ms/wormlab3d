@@ -1,6 +1,6 @@
 import os
 from argparse import Namespace
-from typing import List
+from typing import List, Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,6 +9,7 @@ from matplotlib.gridspec import GridSpec
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d import logger
 from wormlab3d.data.model import Dataset, Reconstruction
+from wormlab3d.toolkit.util import to_dict, hash_data
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.pca import get_pca_cache_from_args
 from wormlab3d.trajectories.statistics import calculate_trial_turn_statistics, calculate_trial_run_statistics
@@ -26,7 +27,8 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
         excludes = []
     fn = START_TIMESTAMP + f'_{method}'
 
-    for k in ['dataset', 'trial', 'frames', 'src', 'deltas', 'delta_step', 'u', 'smoothing_window', 'directionality']:
+    for k in ['dataset', 'trial', 'frames', 'src', 'deltas', 'delta_step', 'window_size', 'u', 'smoothing_window',
+              'directionality', 'error_limit', 'smooth_K', 'pw_vertices', 'approx_distance', 'approx_height']:
         if k in excludes:
             continue
         if k == 'dataset' and args.dataset is not None:
@@ -42,6 +44,8 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
             fn += frames_str_fn
         elif k == 'src':
             fn += f'_{args.midline3d_source}'
+        elif k == 'window_size':
+            fn += f'_ws={args.window_size}'
         elif k == 'deltas':
             fn += f'_d={args.min_delta}-{args.max_delta}'
         elif k == 'delta_step':
@@ -52,6 +56,16 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
             fn += f'_sw={args.smoothing_window}'
         elif k == 'directionality' and args.directionality is not None:
             fn += f'_dir={args.directionality}'
+        elif k == 'error_limit' and args.approx_error_limit is not None:
+            fn += f'_err={args.approx_error_limit}'
+        elif k == 'smooth_K':
+            fn += f'_smooth_K={args.smoothing_window_K}'
+        elif k == 'pw_vertices':
+            fn += f'_pwv={args.planarity_window_vertices}'
+        elif k == 'approx_distance':
+            fn += f'_dist={args.approx_distance}'
+        elif k == 'approx_height':
+            fn += f'_height={args.approx_curvature_height}'
 
     return LOGS_PATH / (fn + '.' + img_extension)
 
@@ -374,6 +388,117 @@ def nonplanarity_postures_vs_trajectories():
         plt.show()
 
 
+def _generate_or_load_dataset_turn_stats(
+        args: Namespace,
+        ds: Dataset,
+        rebuild_cache: bool = False
+) -> Dict[str, np.ndarray]:
+    spec = to_dict(args)
+    stat_keys = ['distances', 'speeds', 'nonp', 'run_distances', 'run_speeds', 'nonp_runs']
+
+    cache_path = LOGS_PATH / hash_data(spec)
+    cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
+    data = None
+    if not rebuild_cache and cache_fn.exists():
+        try:
+            data = np.load(cache_fn)
+            outputs = {k: data[k] for k in stat_keys}
+            logger.info('Loaded stats from cache.')
+        except Exception as e:
+            logger.warning(f'Failed to load stats: {e}')
+            data = None
+    if data is None:
+        logger.info('Generating dataset stats.')
+
+        # Calculate the model for all trials
+        outputs = {k: [] for k in stat_keys}
+        for trial in ds.include_trials:
+            args.trial = trial.id
+            args.reconstruction = ds.get_reconstruction_id_for_trial(trial)
+            args.tracking_only = args.reconstruction is None
+            try:
+                stats = calculate_trial_turn_statistics(args, args.window_size)
+            except RuntimeError as e:
+                logger.warning(f'Failed to find approximation: "{e}"')
+            for k in stat_keys:
+                outputs[k].append(stats[k])
+
+        n_trajectories = len(outputs['distances'])
+        logger.info(f'Calculated turn statistics for {n_trajectories} out of a possible {len(ds.include_trials)}.')
+
+        # Join outputs
+        for k in stat_keys:
+            outputs[k] = np.concatenate(outputs[k])
+
+        logger.info(f'Saving stats to {cache_path}.')
+        np.savez(cache_path, **outputs)
+
+    return outputs
+
+
+def speed_vs_nonplanarity_of_turns():
+    """
+    Plot the dataset turn non-planarities.
+    """
+    args = get_args()
+    assert args.dataset is not None
+    assert args.planarity_window is not None
+    ds = Dataset.objects.get(id=args.dataset)
+    # args.dataset = None
+    dt = 1 / 25
+    ws = 5
+    args.window_size = int(ws / dt)
+
+    stats = _generate_or_load_dataset_turn_stats(args, ds, rebuild_cache=False)
+
+    # Plot correlations
+    fig, axes = plt.subplots(1, 2, figsize=(8, 4))
+    fig.suptitle(f'Speed vs non-planarity. Window={ws}s.')
+    scatter_args = dict(s=10, alpha=0.4, linewidths=0)
+
+    ax_turns = axes[0]
+    ax_turns.set_title('Turns.')
+    ax_turns.set_xlabel('Non-planarity')
+    ax_turns.set_ylabel('Speed (mm/s)')
+    s = ax_turns.scatter(stats['nonp'], stats['speeds'], c=stats['distances'], **scatter_args)
+    cb = fig.colorbar(s, ax=ax_turns)
+    cb.solids.set(alpha=1)
+    cb.set_label('Distance (mm)', rotation=270, labelpad=15)
+
+    ax_runs = axes[1]
+    ax_runs.set_title('Runs.')
+    ax_runs.set_xlabel('Non-planarity')
+    ax_runs.set_ylabel('Speed (mm/s)')
+    s = ax_runs.scatter(stats['nonp_runs'], stats['run_speeds'], c=stats['run_distances'], **scatter_args)
+    cb = fig.colorbar(s, ax=ax_runs)
+    cb.solids.set(alpha=1)
+    cb.set_label('Distance (mm)', rotation=270, labelpad=15)
+
+    # ax.set_yscale('log')
+    # ax.set_xscale('log')
+
+    # Add fit line
+    def funcinv(x_, a_, b_, k_):
+        return a_ + k_ / (x_ + b_)
+
+    x = np.linspace(0.0001, 0.4, 1000)
+    # ax.plot(x, funcinv(x, 0.02, 0.001, 0.001), color='red', linewidth=3, linestyle='--')
+
+    # ax.set_xlim(right=0.3)
+    # ax.set_ylim(top=0.6)
+
+    fig.tight_layout()
+
+    # Save / show
+    if save_plots:
+        plt.savefig(
+            make_filename('speed_vs_nonp', args, excludes=['trial', 'frames', 'src', 'deltas', 'delta_step']),
+            transparent=True
+        )
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
@@ -381,4 +506,5 @@ if __name__ == '__main__':
     # interactive()
     # nonplanarity_dataset()
     # nonplanarity_trajectory()
-    nonplanarity_postures_vs_trajectories()
+    # nonplanarity_postures_vs_trajectories()
+    speed_vs_nonplanarity_of_turns()

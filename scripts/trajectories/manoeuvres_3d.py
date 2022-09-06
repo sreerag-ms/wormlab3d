@@ -9,6 +9,7 @@ from matplotlib import animation
 from matplotlib.axes import Axes, GridSpec
 from mayavi import mlab
 from mpl_toolkits.mplot3d.art3d import Line3DCollection, Poly3DCollection
+from scipy.stats import levy_stable
 
 from simple_worm.frame import FrameSequenceNumpy
 from simple_worm.plot3d import FrameArtist, Arrow3D, MidpointNormalize
@@ -19,7 +20,7 @@ from wormlab3d.postures.plot_utils import plot_natural_frame_3d_mlab
 from wormlab3d.toolkit.plot_utils import equal_aspect_ratio, make_box_from_pca
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
-from wormlab3d.trajectories.manoeuvres import get_manoeuvres, get_forward_durations
+from wormlab3d.trajectories.manoeuvres import get_manoeuvres, get_forward_durations, get_forward_stats
 from wormlab3d.trajectories.util import calculate_speeds
 
 animate = False
@@ -642,6 +643,184 @@ def plot_dataset_reversal_durations_vs_angles():
         plt.close(fig)
 
 
+def plot_dataset_speeds_vs_nonp():
+    """
+    Plot the distributions of speeds against nonp for turns and runs in a dataset.
+    Similar to the method in trajectories/planarity but using reversals to identify turn events instead of approximations.
+    """
+    args = get_args(validate_source=False)
+
+    # Get dataset
+    assert args.dataset is not None
+    ds = Dataset.objects.get(id=args.dataset)
+
+    # Unset trial and midline source args
+    args.trial = None
+    args.midline3d_source = None
+    args.midline3d_source_file = None
+
+    nonp_turns = []
+    durations_turns = []
+    distances_turns = []
+    speeds_turns = []
+    nonp_runs = []
+    durations_runs = []
+    distances_runs = []
+    speeds_runs = []
+
+    # Loop over reconstructions
+    for r_ref in ds.reconstructions:
+        reconstruction = Reconstruction.objects.get(id=r_ref.id)
+        args.reconstruction = reconstruction.id
+        fps = reconstruction.trial.fps
+        X_full, X_slice = get_trajectory(args)
+
+        # Loop over manoeuvres to get the turn statistics
+        manoeuvres = get_manoeuvres(
+            X_full,
+            X_slice,
+            min_reversal_frames=args.min_reversal_frames,
+            window_size=args.manoeuvre_window,
+            cut_windows_at_manoeuvres=False
+        )
+        for i, m in enumerate(manoeuvres):
+            nonp_turns.append(m['nonp_all'])
+            durations_turns.append(m['duration_all'] / fps)
+            distances_turns.append(m['distance_all'])
+            speeds_turns.append(m['speed_all'])
+
+        runs = get_forward_stats(
+            X_full,
+            X_slice,
+            min_forward_frames=args.min_forward_frames,
+            min_speed=args.min_forward_speed
+        )
+        for i, r in enumerate(runs):
+            nonp_runs.append(r['nonp'])
+            durations_runs.append(r['duration'] / fps)
+            distances_runs.append(r['distance'])
+            speeds_runs.append(r['speed'])
+
+    speeds_turns = np.array(speeds_turns) * fps
+    speeds_runs = np.array(speeds_runs) * fps
+
+    # Plot correlations
+    fig, axes = plt.subplots(1, 2, figsize=(8, 4))
+    fig.suptitle(f'Speed vs non-planarity.')
+    scatter_args = dict(s=10, alpha=0.4, linewidths=0)
+
+    ax_turns = axes[0]
+    ax_turns.set_title(f'Turns. Window={args.manoeuvre_window * 2 / fps:.1f}s.')
+    ax_turns.set_xlabel('Non-planarity')
+    ax_turns.set_ylabel('Distance (mm)')
+    # s = ax_turns.scatter(nonp, speeds, c=distances, **scatter_args)
+    s = ax_turns.scatter(nonp_turns, distances_turns, c=speeds_turns, **scatter_args)
+    cb = fig.colorbar(s, ax=ax_turns)
+    cb.solids.set(alpha=1)
+    cb.set_label('Speed (mm/s)', rotation=270, labelpad=15)
+    # cb.set_label('Distance (mm)', rotation=270, labelpad=15)
+
+    ax_runs = axes[1]
+    ax_runs.set_title(f'Runs. Min duration={args.min_forward_frames / fps:.1f}s.')
+    ax_runs.set_xlabel('Non-planarity')
+    ax_runs.set_ylabel('Distance (mm)')
+    s = ax_runs.scatter(nonp_runs, distances_runs, c=speeds_runs, **scatter_args)
+    cb = fig.colorbar(s, ax=ax_runs)
+    cb.solids.set(alpha=1)
+    cb.set_label('Speed (mm/s)', rotation=270, labelpad=15)
+
+    fig.tight_layout()
+
+    if save_plots:
+        fn = START_TIMESTAMP \
+             + f'_speeds_vs_nonp' \
+               f'_ds={args.dataset}' \
+               f'_sw={args.smoothing_window}' \
+               f'_ff={args.min_forward_frames}' \
+               f'_fs={args.min_forward_speed}' \
+               f'_rf={args.min_reversal_frames}' \
+               f'_mw={args.manoeuvre_window}'
+        save_path = LOGS_PATH / (fn + f'.{img_extension}')
+        logger.info(f'Saving plot to {save_path}.')
+        plt.savefig(save_path)
+
+    if show_plots:
+        plt.show()
+    plt.close(fig)
+
+
+def plot_dataset_run_durations():
+    """
+    Plot the distributions of run durations in a dataset.
+    """
+    args = get_args(validate_source=False)
+
+    # Get dataset
+    assert args.dataset is not None
+    ds = Dataset.objects.get(id=args.dataset)
+
+    # Unset trial and midline source args
+    args.trial = None
+    args.midline3d_source = None
+    args.midline3d_source_file = None
+
+    nonp = []
+    durations = []
+    distances = []
+    speeds = []
+
+    # Loop over reconstructions
+    for r_ref in ds.reconstructions:
+        reconstruction = Reconstruction.objects.get(id=r_ref.id)
+        args.reconstruction = reconstruction.id
+        fps = reconstruction.trial.fps
+        X_full, X_slice = get_trajectory(args)
+        runs = get_forward_stats(
+            X_full,
+            X_slice,
+            min_forward_frames=args.min_forward_frames,
+            min_speed=args.min_forward_speed
+        )
+        for r in runs:
+            nonp.append(r['nonp'])
+            durations.append(r['duration'] / fps)
+            distances.append(r['distance'])
+            speeds.append(r['speed'])
+
+    speeds = np.array(speeds) * fps
+
+    # Fit distribution
+    logger.info('Fitting distribution.')
+    x = np.linspace(min(distances), max(distances), 200)
+    dist = levy_stable(*levy_stable.fit(distances))
+
+    # Plot correlations
+    logger.info('Plotting')
+    fig, ax = plt.subplots(1, figsize=(4, 4))
+    ax.hist(distances, bins=20, density=True, rwidth=0.9)
+    ax.plot(x, dist.pdf(x))
+    ax.set_title(f'Run distances. Min={args.min_forward_frames / fps:.1f}s.')
+    ax.set_xlabel('Distance (mm)')
+    ax.set_ylabel('P')
+
+    fig.tight_layout()
+
+    if save_plots:
+        fn = START_TIMESTAMP \
+             + f'_run_distances' \
+               f'_ds={args.dataset}' \
+               f'_sw={args.smoothing_window}' \
+               f'_ff={args.min_forward_frames}' \
+               f'_fs={args.min_forward_speed}'
+        save_path = LOGS_PATH / (fn + f'.{img_extension}')
+        logger.info(f'Saving plot to {save_path}.')
+        plt.savefig(save_path)
+
+    if show_plots:
+        plt.show()
+    plt.close(fig)
+
+
 def plot_single_manoeuvre(
         index: int = None,
         frame_num: int = None,
@@ -690,7 +869,7 @@ def plot_single_manoeuvre(
         colours=signed_speeds[m['start_idx']:m['end_idx']],
         cmap='PRGn',
         show_colourbar=True,
-        worm_idxs=worm_idxs,  #8700 - m['start_idx'],  # 0,  # [500, 900],
+        worm_idxs=worm_idxs,  # 8700 - m['start_idx'],  # 0,  # [500, 900],
         planes=[plane_prev, plane_next],
         # azim=-58,  # 55,
         # elev=30,  # -5
@@ -781,8 +960,10 @@ if __name__ == '__main__':
     # plot_manoeuvre_rate()
     # plot_dataset_distributions()
     # plot_dataset_reversal_durations_vs_angles()
+    # plot_dataset_speeds_vs_nonp()
+    plot_dataset_run_durations()
 
-    plot_single_manoeuvre(index=2, plot_mlab_postures=True)
+    # plot_single_manoeuvre(index=2, plot_mlab_postures=True)
     # plot_single_manoeuvre(frame_num=11400)
     # plot_single_manoeuvre(frame_num=15100)
     # plot_single_manoeuvre(frame_num=8700)

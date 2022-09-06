@@ -8,6 +8,11 @@ from wormlab3d.trajectories.angles import calculate_angle
 from wormlab3d.trajectories.util import calculate_speeds
 
 
+def _nonp(pca: PCA) -> np.ndarray:
+    r = pca.explained_variance_ratio_.T
+    return r[2] / np.where(r[2] == 0, 1, np.sqrt(r[1] * r[0]))
+
+
 def get_manoeuvres(
         X_full: np.ndarray,
         X_slice: np.ndarray,
@@ -21,10 +26,6 @@ def get_manoeuvres(
     signed_speeds = calculate_speeds(X_full, signed=True)
     reversal_centre_idxs, reversal_props = find_peaks(signed_speeds < 0, width=min_reversal_frames)
     manoeuvres = []
-
-    def nonp(pca_):
-        r = pca_.explained_variance_ratio_.T
-        return r[2] / np.where(r[2] == 0, 1, np.sqrt(r[1] * r[0]))
 
     # Loop over reversal events
     for i, reversal_centre_idx in enumerate(reversal_centre_idxs):
@@ -73,6 +74,15 @@ def get_manoeuvres(
         angle_rev_next_t = calculate_angle(pca_rev.components_[0], pca_next.components_[0])
         angle_rev_next_n = calculate_angle(pca_rev.components_[2], pca_next.components_[2])
 
+        # Calculate the distance, speed and non-planarity for the whole manoeuvre window
+        X_window = X_slice[prev_start_idx:next_end_idx]
+        pca_all = PCA(svd_solver='full', copy=True, n_components=3)
+        pca_all.fit(X_window)
+        duration_all = next_end_idx - prev_start_idx
+        # distance_all = np.linalg.norm(X_window[1:] - X_window[:-1], axis=-1).sum()
+        distance_all = np.linalg.norm(X_window[0] - X_window[-1], axis=-1)
+        speed_all = distance_all / duration_all
+
         manoeuvres.append({
             'centre_idx': reversal_centre_idx,
             'start_idx': prev_start_idx,
@@ -90,9 +100,13 @@ def get_manoeuvres(
             'angle_rev_next_n': angle_rev_next_n,
             'angle_prev_next_t': angle_traj,
             'angle_prev_next_n': angle,
-            'nonp_prev': nonp(pca_prev),
-            'nonp_rev': nonp(pca_rev),
-            'nonp_next': nonp(pca_next),
+            'nonp_prev': _nonp(pca_prev),
+            'nonp_rev': _nonp(pca_rev),
+            'nonp_next': _nonp(pca_next),
+            'nonp_all': _nonp(pca_all),
+            'duration_all': duration_all,
+            'distance_all': distance_all,
+            'speed_all': speed_all,
         })
 
     return manoeuvres
@@ -105,3 +119,45 @@ def get_forward_durations(
     signed_speeds = calculate_speeds(X_full, signed=True)
     _, forward_props = find_peaks(signed_speeds > 0, width=min_forward_frames)
     return forward_props['widths']
+
+
+def get_forward_stats(
+        X_full: np.ndarray,
+        X_slice: np.ndarray,
+        min_forward_frames: int = 25,
+        min_speed: float = 0.,
+) -> np.ndarray:
+    """
+    Get some stats on the forward sections between manoeuvres.
+    """
+    signed_speeds = calculate_speeds(X_full, signed=True)
+    fwd_centre_idxs, fwd_props = find_peaks(signed_speeds > min_speed, width=min_forward_frames)
+
+    runs = []
+
+    # Loop over forward sections
+    for i, fwd_centre_idx in enumerate(fwd_centre_idxs):
+        start_idx = fwd_props['left_bases'][i] + 1
+        end_idx = fwd_props['right_bases'][i]
+
+        # Calculate the distance, speed and non-planarity for the whole manoeuvre window
+        X_window = X_slice[start_idx:end_idx]
+        pca = PCA(svd_solver='full', copy=True, n_components=3)
+        pca.fit(X_window)
+        duration = end_idx - start_idx
+        distance = np.linalg.norm(X_window[1:] - X_window[:-1], axis=-1).sum()
+        # distance = np.linalg.norm(X_window[0] - X_window[-1], axis=-1)
+        speed = distance / duration
+
+        runs.append({
+            'centre_idx': fwd_centre_idx,
+            'start_idx': start_idx,
+            'end_idx': end_idx,
+            'pca': pca,
+            'duration': duration,
+            'distance': distance,
+            'speed': speed,
+            'nonp': _nonp(pca),
+        })
+
+    return runs

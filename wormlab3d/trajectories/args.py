@@ -87,6 +87,8 @@ def get_args(
     if include_manoeuvre_options:
         parser.add_argument('--min-forward-frames', type=int, default=25,
                             help='Minimum number of forward frames before counting a forward locomotion section.')
+        parser.add_argument('--min-forward-speed', type=float, default=0.,
+                            help='Minimum speed of forward frames before counting a forward locomotion section.')
         parser.add_argument('--min-reversal-frames', type=int, default=25,
                             help='Minimum number of reversal frames to use to identify a manoeuvre.')
         parser.add_argument('--manoeuvre-window', type=int, default=500,
