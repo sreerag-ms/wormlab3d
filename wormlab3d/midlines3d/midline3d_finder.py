@@ -12,6 +12,7 @@ from matplotlib.gridspec import GridSpec
 from mongoengine import DoesNotExist
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 from torch.backends import cudnn
+from torch.nn import Parameter
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.tensorboard import SummaryWriter
@@ -355,7 +356,7 @@ class Midline3DFinder:
         for i in range(self.parameters.window_size):
             if i == 0:
                 frame_num = start_frame
-            elif ra.finetune_mode:
+            elif ra.finetune_mode or self.parameters.window_image_diff_threshold <= 0:
                 # Use contiguous batches in finetune mode
                 frame_num += 1
             else:
@@ -375,6 +376,11 @@ class Midline3DFinder:
                 use_master_points=i == 0,
                 device=self.device
             )
+
+            # Set the curves to the same
+            if i > 0 and not ra.resume:
+                for k in CURVATURE_PARAMETER_NAMES:
+                    fs.set_state(k, self.frame_batch[0].get_state(k))
 
             # Zero-out the initial curvature-deltas
             if i > 0 and self.parameters.curvature_mode and self.parameters.curvature_deltas:
@@ -448,13 +454,22 @@ class Midline3DFinder:
 
         # Merge the curvature parameters into a single parameter group
         lbfgs_params = []
-        lbfgs_keys = ['curvatures', 'T0', 'M10', 'T0ht', 'M10ht']
+        lbfgs_keys = ['X0', 'T0', 'M10', 'X0ht', 'T0ht', 'M10ht', 'curvatures']
         if p.curvature_mode:
             del params['points']
             point_params = []
             for ck in CURVATURE_PARAMETER_NAMES:
                 if ck in lbfgs_keys and p.algorithm == OPTIMISER_LBFGS_NEW:
-                    lbfgs_params.extend(params[ck])
+                    def add_params(p_):
+                        if type(p_) == list:
+                            for p2 in p_:
+                                add_params(p2)
+                        elif type(p_) == Parameter:
+                            lbfgs_params.append(p_)
+
+                    add_params(params[ck])
+                elif ck == 'curvatures':
+                    continue
                 else:
                     point_params.extend(params[ck])
             params['points'] = point_params
@@ -470,6 +485,11 @@ class Midline3DFinder:
             {'params': params['camera_intensities'], 'lr': p.lr_intensities},
             {'params': params['filters'], 'lr': p.lr_filters},
         ]
+
+        if p.curvature_mode and p.algorithm != OPTIMISER_LBFGS_NEW:
+            opt_params.append({
+                'params': params['curvatures'], 'lr': p.lr_curvatures
+            })
 
         # Merge the other parameters into flat lists
         for i, pg in enumerate(opt_params):
@@ -510,8 +530,12 @@ class Midline3DFinder:
         p = self.parameters
         if p.lr_decay is None or p.lr_decay <= 0:
             return None
+        if p.algorithm == OPTIMISER_LBFGS_NEW:
+            optim = self.optimiser_gd
+        else:
+            optim = self.optimiser
         scheduler = ReduceLROnPlateau(
-            self.optimiser,
+            optim,
             mode='min',
             factor=p.lr_decay,
             patience=p.lr_patience,
@@ -601,7 +625,7 @@ class Midline3DFinder:
             frame_nums = frame_nums[1:-1]
         frame_skip = 1 if p.frame_skip is None else p.frame_skip
         first_frame = self.checkpoint.frame_num
-        if not ra.finetune_mode:
+        if not ra.finetune_mode and p.window_image_diff_threshold > 0 and p.use_master:
             frame_nums = frame_nums[::frame_skip]
         n_frames = len(frame_nums)
         w2 = int(p.window_size / 2)
@@ -640,7 +664,8 @@ class Midline3DFinder:
             self.reconstruction.save()
 
             # Interpolate skipped frame parameters
-            if p.frame_skip and self.last_frame_state is not None and not ra.finetune_mode:
+            if p.frame_skip and self.last_frame_state is not None and not ra.finetune_mode \
+                    and (p.window_image_diff_threshold > 0 or p.use_master):
                 logger.info('Interpolating skipped frames.')
                 if direction == 1:
                     start_frame = self.last_frame_state.frame_num
@@ -692,7 +717,7 @@ class Midline3DFinder:
                                 skipped = True
                             self._make_plots(final_step=True, frame_state=fs, skipped=skipped)
 
-            if ra.finetune_mode:
+            if ra.finetune_mode or (p.window_image_diff_threshold == 0 and not p.use_master):
                 # In finetune mode just shift the batch along and append the next frames
                 f0 = self.frame_batch[0].frame_num + frame_skip
                 f1 = min(frame_nums[-1] - 1, self.frame_batch[-1].frame_num + frame_skip)
@@ -716,8 +741,9 @@ class Midline3DFinder:
                     f = self.trial_state.init_frame_state(
                         frame_num=fn,
                         trainable=True,
-                        load=True,
-                        device=self.device
+                        load=ra.finetune_mode,
+                        prev_frame_state=None if ra.finetune_mode else self.frame_batch[-1],
+                        device=self.device,
                     )
                     new_batch.append(f)
                 self.frame_batch = new_batch
@@ -820,7 +846,10 @@ class Midline3DFinder:
             loss, loss_global, losses_depths, stats = self._train_step()
 
             # Update lr
-            stats['lr'] = self.optimiser.param_groups[1]['lr']
+            if p.algorithm == OPTIMISER_LBFGS_NEW:
+                stats['lr'] = self.optimiser_gd.param_groups[1]['lr']
+            else:
+                stats['lr'] = self.optimiser.param_groups[1]['lr']
             if lr_scheduler is not None:
                 lr_scheduler.step(loss.item())
 
@@ -986,6 +1015,7 @@ class Midline3DFinder:
 
             # Collect parameters
             cam_coeffs = torch.stack([f.get_state('cam_coeffs') for f in self.frame_batch])
+            cam_shifts = torch.stack([f.get_state('cam_shifts') for f in self.frame_batch])
             cam_rotation_preangles = torch.stack([f.get_state('cam_rotation_preangles') for f in self.frame_batch])
             points_3d_base = torch.stack([f.get_state('points_3d_base') for f in self.frame_batch])
             points_2d_base = torch.stack([f.get_state('points_2d_base') for f in self.frame_batch])
@@ -1091,6 +1121,7 @@ class Midline3DFinder:
                 camera_sigmas=camera_sigmas,
                 camera_exponents=camera_exponents,
                 camera_intensities=camera_intensities,
+                cam_shifts=cam_shifts,
                 masks=masks,
                 scores=scores,
                 curvatures_smoothed=curvatures_smoothed,
@@ -1242,6 +1273,7 @@ class Midline3DFinder:
             camera_sigmas: torch.Tensor,
             camera_exponents: torch.Tensor,
             camera_intensities: torch.Tensor,
+            cam_shifts: torch.Tensor,
             masks: List[torch.Tensor],
             scores: List[torch.Tensor],
             curvatures_smoothed: List[torch.Tensor],
@@ -1275,6 +1307,7 @@ class Midline3DFinder:
             length_prev = self.last_frame_state.get_state('length')
             curvatures_prev = self.last_frame_state.get_state('curvatures')
             points_prev = self.last_frame_state.get_state('points')
+            cam_shifts_prev = self.last_frame_state.get_state('cam_shifts')
         else:
             X0_prev = None
             T0_prev = None
@@ -1285,6 +1318,7 @@ class Midline3DFinder:
             length_prev = None
             curvatures_prev = None
             points_prev = None
+            cam_shifts_prev = None
 
         # Losses calculated at each depth
         losses = {
@@ -1303,7 +1337,7 @@ class Midline3DFinder:
                 ),
                 'alignment': calculate_alignment_losses_curvatures(curvatures, curvatures_prev),
                 # 'consistency': calculate_consistency_losses_curvatures(X_raw, T_raw, M1_raw),
-                'consistency': calculate_consistency_losses_curvatures_ht(X_raw),
+                'consistency': calculate_consistency_losses_curvatures_ht(X_raw, T_raw, M1_raw),
             }}
             if p.curvature_deltas:
                 losses['temporal'] = calculate_temporal_losses_curvature_deltas(
@@ -1314,13 +1348,14 @@ class Midline3DFinder:
             else:
                 if p.curvature_integration == CURVATURE_INTEGRATION_MIDPOINT:
                     losses['temporal'] = calculate_temporal_losses_curvatures(
-                        length, curvatures, X0, T0, M10, None, None, None,
-                        length_prev, curvatures_prev, X0_prev, T0_prev, M10_prev, None, None, None
+                        length, curvatures, X0, T0, M10, None, None, None, cam_shifts,
+                        length_prev, curvatures_prev, X0_prev, T0_prev, M10_prev, None, None, None, cam_shifts_prev
                     )
                 else:
                     losses['temporal'] = calculate_temporal_losses_curvatures(
-                        length, curvatures, None, None, None, X0ht, T0ht, M10ht,
-                        length_prev, curvatures_prev, None, None, None, X0ht_prev, T0ht_prev, M10ht_prev
+                        length, curvatures, None, None, None, X0ht, T0ht, M10ht, cam_shifts,
+                        length_prev, curvatures_prev, None, None, None, X0ht_prev, T0ht_prev, M10ht_prev,
+                        cam_shifts_prev
                     )
                 losses['curvature'] = calculate_curvature_losses_curvatures(curvatures)
         else:

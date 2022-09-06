@@ -90,6 +90,7 @@ class ParameterArgs(BaseArgs):
 
             lr_cam_coeffs: float = 1e-5,
             lr_points: float = 1e-3,
+            lr_curvatures: float = 1e-3,
             lr_sigmas: float = 1e-3,
             lr_exponents: float = 1e-3,
             lr_intensities: float = 1e-3,
@@ -247,6 +248,7 @@ class ParameterArgs(BaseArgs):
 
         self.lr_cam_coeffs = lr_cam_coeffs
         self.lr_points = lr_points
+        self.lr_curvatures = lr_curvatures
         self.lr_sigmas = lr_sigmas
         self.lr_exponents = lr_exponents
         self.lr_intensities = lr_intensities
@@ -414,6 +416,8 @@ class ParameterArgs(BaseArgs):
                            help='Learning rate for the camera coefficients.')
         group.add_argument('--lr-points', type=float, default=1e-3,
                            help='Learning rate for the curve points.')
+        group.add_argument('--lr-curvatures', type=float, default=1e-3,
+                           help='Learning rate for the curvatures.')
         group.add_argument('--lr-sigmas', type=float, default=1e-2,
                            help='Learning rate for the rendering sigmas.')
         group.add_argument('--lr-exponents', type=float, default=1e-3,

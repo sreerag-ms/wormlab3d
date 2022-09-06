@@ -827,6 +827,7 @@ def calculate_temporal_losses_curvatures(
         X0ht: Optional[List[torch.Tensor]],
         T0ht: Optional[List[torch.Tensor]],
         M10ht: Optional[List[torch.Tensor]],
+        cam_shifts: Optional[torch.Tensor],
         length_prev: Optional[List[torch.Tensor]],
         curvatures_prev: Optional[List[torch.Tensor]],
         X0_prev: Optional[List[torch.Tensor]],
@@ -835,6 +836,7 @@ def calculate_temporal_losses_curvatures(
         X0ht_prev: Optional[List[torch.Tensor]],
         T0ht_prev: Optional[List[torch.Tensor]],
         M10ht_prev: Optional[List[torch.Tensor]],
+        cam_shifts_prev: Optional[torch.Tensor],
 ) -> List[torch.Tensor]:
     """
     The curvatures should change smoothly in time.
@@ -922,7 +924,16 @@ def calculate_temporal_losses_curvatures(
             curvatures_d = torch.cat([curvatures_prev_d, curvatures_d], dim=0)
         loss_K = torch.sum((curvatures_d[1:] - curvatures_d[:-1])**2)
 
-        loss = loss_X0 + loss_T0 + loss_M10 + loss_X0ht + loss_T0ht + loss_M10ht + loss_l + loss_K
+        # Camera shifts should be close
+        if cam_shifts is not None:
+            if cam_shifts_prev is not None:
+                shifts_prev = cam_shifts_prev.unsqueeze(0).detach()
+                cam_shifts = torch.cat([shifts_prev, cam_shifts])
+            loss_shifts = torch.sum((cam_shifts[1:] - cam_shifts[:-1])**2)
+        else:
+            loss_shifts = torch.tensor(0., device=device)
+
+        loss = loss_X0 + loss_T0 + loss_M10 + loss_X0ht + loss_T0ht + loss_M10ht + loss_l + loss_K + loss_shifts
         losses.append(loss)
 
     return losses
@@ -956,11 +967,13 @@ def calculate_temporal_losses_curvature_deltas(
         None,
         None,
         None,
+        None,
         length_prev,
         curvatures_prev,
         X0_prev,
         T0_prev,
         M10_prev,
+        None,
         None,
         None,
         None,
@@ -1106,6 +1119,8 @@ def calculate_consistency_losses_curvatures(
 @torch.jit.script
 def calculate_consistency_losses_curvatures_ht(
         X: List[torch.Tensor],
+        T: List[torch.Tensor],
+        M1: List[torch.Tensor],
 ) -> List[torch.Tensor]:
     """
     Curves should be consistent with integration from head or tail.
@@ -1115,7 +1130,16 @@ def calculate_consistency_losses_curvatures_ht(
 
     for d in range(D):
         X_d = X[d]
-        L_ht = (X_d[:, 1] - X_d[:, 2]).norm(dim=-1, p=2).sum(dim=-1).mean()
-        losses.append(L_ht)
+        LX = (X_d[:, 1] - X_d[:, 2]).norm(dim=-1, p=2).sum(dim=-1).mean()
+
+        T_d = T[d]
+        LT = (T_d[:, 1] - T_d[:, 2]).norm(dim=-1, p=2).sum(dim=-1).mean()
+
+        M1_d = M1[d]
+        LM1 = (M1_d[:, 1] - M1_d[:, 2]).norm(dim=-1, p=2).sum(dim=-1).mean()
+
+        Ld = LX + 0.001 * LT + 0.001 * LM1
+
+        losses.append(Ld)
 
     return losses

@@ -105,6 +105,7 @@ class MFParameters(Document):
 
     lr_cam_coeffs = FloatField()
     lr_points = FloatField()
+    lr_curvatures = FloatField()
     lr_sigmas = FloatField()
     lr_exponents = FloatField()
     lr_intensities = FloatField()
