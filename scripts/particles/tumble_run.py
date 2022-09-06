@@ -332,13 +332,15 @@ def plot_coefficients_of_variation():
 
         # Calculate coefficients of variation for all params for all trials at all distances
         distance = 500
+        distance_min = 3
         height = 50
         smooth_e0 = 101
         smooth_K = 101
 
         for j, error_limit in enumerate(error_limits):
             approx, distance, height, smooth_e0, smooth_K \
-                = find_approximation(X, e0, error_limit, distance, height, smooth_e0, smooth_K, max_attempts=10)
+                = find_approximation(X, e0, error_limit, args.planarity_window_vertices,
+                                     distance, distance_min, height, smooth_e0, smooth_K, max_attempts=10)
             X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles, nonplanar_angles, twist_angles, _, _, _ = approx
 
             # cov[:, i, j] = [
@@ -865,10 +867,10 @@ def dataset_against_three_state_comparison(
         fig, axes = plt.subplots(1, 4, figsize=(12, 3))
 
         for i, (param_name, values) in enumerate({
-                                                     'Run durations': [durations, TC.intervals],
-                                                     'Run speeds': [speeds, TC.speeds],
-                                                     'Planar angles': [planar_angles, TC.thetas],
-                                                     'Non-planar angles': [nonplanar_angles, TC.phis]
+                                                     'Run durations': [durations, stats['durations']],
+                                                     'Run speeds': [speeds, stats['speeds']],
+                                                     'Planar angles': [planar_angles, stats['planar_angles']],
+                                                     'Non-planar angles': [nonplanar_angles, stats['nonplanar_angles']]
                                                  }.items()):
             ax = axes[i]
             ax.set_title(param_name)
@@ -877,14 +879,14 @@ def dataset_against_three_state_comparison(
                 ax.set_ylabel(f'Error ~ {error_limit:.4f}')
 
             values_ds = np.array(values[0][j])
-            values_sim = np.concatenate(values[1])
+            values_sim = np.array(values[1][j])
 
             if param_name not in ['Planar angles', 'Non-planar angles']:
                 ax.set_yscale('log')
             if param_name == 'Speeds':
                 weights = [
                     np.array(durations[j]),
-                    np.concatenate(TC.intervals),
+                    stats['durations'][j],
                 ]
             else:
                 weights = [

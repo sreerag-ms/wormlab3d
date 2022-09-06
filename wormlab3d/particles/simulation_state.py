@@ -68,7 +68,7 @@ def _compute_approximation_statistics(
         e0: np.ndarray,
         dt: float,
         error_limits: List[float],
-        planarity_window: int,
+        planarity_window_vertices: int,
         min_run_speed_duration: Tuple[float, float],
         distance_first,
         height_first,
@@ -82,14 +82,15 @@ def _compute_approximation_statistics(
     results = {k: {j: [] for j in range(len(error_limits))} for k in keys}
 
     distance = distance_first
+    distance_min = 3
     height = height_first
     smooth_e0 = smooth_e0_first
     smooth_K = smooth_K_first
 
     for j, error_limit in enumerate(error_limits):
         approx, distance, height, smooth_e0, smooth_K \
-            = find_approximation(X, e0, error_limit, planarity_window, distance, height, smooth_e0,
-                                 smooth_K, max_attempts=50, quiet=True)
+            = find_approximation(X, e0, error_limit, planarity_window_vertices, distance, distance_min, height,
+                                 smooth_e0, smooth_K, max_attempts=50, quiet=True)
         X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles_j, nonplanar_angles_j, twist_angles_j, _, _, _ = approx
 
         # Put in time units

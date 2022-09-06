@@ -159,7 +159,7 @@ def find_approximation(
         X: np.ndarray,
         e0: np.ndarray,
         error_limit: float,
-        planarity_window: int = 3,
+        planarity_window_vertices: int = 3,
         distance_first: int = 500,
         distance_min: int = 3,
         height_first: int = 50,
@@ -190,7 +190,7 @@ def find_approximation(
 
         # Calculate the approximation, tumbles and runs
         try:
-            approx = get_approximate(X, k, distance=distance, height=height, planarity_window=planarity_window,
+            approx = get_approximate(X, k, distance=distance, height=height, planarity_window=planarity_window_vertices,
                                      quiet=quiet)
             mse = np.mean(np.sum((X - approx[0])**2, axis=-1))
         except RuntimeError as e:

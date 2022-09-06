@@ -58,7 +58,7 @@ def calculate_trial_turn_statistics(
             X=X,
             e0=e0,
             error_limit=args.approx_error_limit,
-            planarity_window=args.planarity_window_vertices,
+            planarity_window_vertices=args.planarity_window_vertices,
             distance_first=args.approx_distance,
             distance_min=w2,
             max_attempts=args.approx_max_attempts,
