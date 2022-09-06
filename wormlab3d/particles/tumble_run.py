@@ -262,13 +262,18 @@ def generate_or_load_ds_msds(
     # Generate or load MSDs
     msds_path = LOGS_PATH / f'ds={ds.id}_msds_d={args.min_delta}-{args.max_delta}_ds={args.delta_step}'
     msds_fn = msds_path.with_suffix(msds_path.suffix + '.npz')
+    msds = None
     if not rebuild_cache and msds_fn.exists():
-        data = np.load(msds_fn)
-        msds_all = data['msds_all']
-        msds = {}
-        for trial in ds.include_trials:
-            msds[trial.id] = data[f'msd_{trial.id}']
-    else:
+        try:
+            data = np.load(msds_fn)
+            msds_all = data['msds_all']
+            msds = {}
+            for trial in ds.include_trials:
+                msds[trial.id] = data[f'msd_{trial.id}']
+        except Exception as e:
+            logger.warning(f'Could not load MSDs: {e}')
+            msds = None
+    if msds is None:
         msds, msds_all = _calculate_dataset_msds()
         save_arrs = {'msds_all': msds_all}
         for trial in ds.include_trials:
