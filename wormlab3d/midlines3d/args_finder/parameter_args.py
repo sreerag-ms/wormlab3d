@@ -138,8 +138,6 @@ class ParameterArgs(BaseArgs):
         self.curvature_integration = curvature_integration
         if curvature_integration != CURVATURE_INTEGRATION_MIDPOINT:
             assert not curvature_deltas, 'Only midpoint integration supported for curvature-deltas!'
-            assert centre_shift_every_n_steps is None or centre_shift_every_n_steps <= 0, \
-                'Centre shift only supported for midpoint integration!'
             assert not clamp_X0, 'clamp-X0 is only supported for midpoint integration!'
             assert not curvature_smoothing, 'curvature-smoothing is only supported for midpoint integration!'
 

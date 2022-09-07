@@ -974,6 +974,9 @@ class Midline3DFinder:
                     curvatures[d].data = curvatures_shifted
                     points_shifted += shift.abs()
 
+                # Update the HT data
+                fs.update_ht_data_from_mp()
+
             stats['shifts'] = points_shifted
 
         return stats
@@ -2173,7 +2176,7 @@ class Midline3DFinder:
                 m2_ax.scatter(x=positions[d], y=m2, **scatter_args)
 
                 # deltas
-                if i > 0:
+                if self.parameters.curvature_deltas and i > 0:
                     curvatures_prev = self.frame_batch[i - 1].get_state('curvatures_smoothed')
                     Kp = to_numpy(curvatures_prev[j]) * (2**d - 1)
 
