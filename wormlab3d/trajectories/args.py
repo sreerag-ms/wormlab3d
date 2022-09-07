@@ -112,6 +112,8 @@ def get_args(
     # Particle explorer arguments
     if include_pe_options:
         ParameterArgs.add_args(parser)
+        parser.add_argument('--approx-noise', type=float,
+                            help='Noise level to add to trajectories when used.')
         parser.add_argument('--npas-min', type=float, default=1e-6,
                             help='Minimum non-planar angle sigma to use for sweeping.')
         parser.add_argument('--npas-max', type=float, default=1e1,

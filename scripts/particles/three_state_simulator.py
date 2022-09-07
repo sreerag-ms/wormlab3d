@@ -26,7 +26,7 @@ from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.displacement import calculate_displacements
 from wormlab3d.trajectories.util import smooth_trajectory
 
-plot_n_examples = 3
+plot_n_examples = 50
 show_plots = False
 save_plots = True
 img_extension = 'png'
@@ -105,8 +105,8 @@ def _plot_angle_pdfs(pe: ThreeStateExplorer):
     # ax.set_xticklabels(['$-\pi$', '0', '$\pi$'])
 
     # ax.set_yticks([])
-    ax.set_yticks([0.6])
-    ax.set_yticklabels([0.6])
+    ax.set_yticks([1, ])
+    # ax.set_yticklabels([0.6])
 
     # Pauses
     phis = np.linspace(-np.pi / 2, np.pi / 2, 1000)
@@ -408,6 +408,7 @@ def _plot_msd(
 
 def _plot_trajectories(
         SS: SimulationState,
+        args: Namespace
 ):
     """
     Plot some simulation trajectories.
@@ -419,15 +420,29 @@ def _plot_trajectories(
     colours = np.linspace(0, 1, SS.X.shape[1])
     cmap = plt.get_cmap('viridis_r')
     c = [cmap(c_) for c_ in colours]
+    # cmaplist = np.array([cmap(i) for i in range(cmap.N)]) * 255
+    # plot_idxs = [33, 36, 56, 72]
+    # plot_idxs = [72, ]
+    plot_idxs = range(min(SS.parameters.batch_size, plot_n_examples))
 
-    for i in range(min(SS.parameters.batch_size, plot_n_examples)):
-        logger.info(f'Plotting sim run {i}.')
+    for idx in plot_idxs:
+        logger.info(f'Plotting sim run {idx}.')
+        X = SS.X[idx].copy().astype(np.float64)
+
+        # Add some noise to the trajectory then smooth
+        if args.approx_noise is not None and args.approx_noise > 0:
+            X = X + np.random.normal(np.zeros_like(X), args.approx_noise)
+        if args.smoothing_window is not None and args.smoothing_window > 0:
+            X = smooth_trajectory(X, window_len=args.smoothing_window)
 
         # Plot the trajectory
+        # s = np.linspace(0, 1, len(X))
+        # path = mlab.plot3d(*X.T, s, opacity=0.4, tube_radius=0.05)
+        # path.module_manager.scalar_lut_manager.lut.table = cmaplist
+        # mlab.show()
         fig = plt.figure(figsize=(10, 10))
-        ax = fig.add_subplot(projection='3d')
-        x, y, z = SS.X[i].T
-        ax.scatter(x, y, z, c=c, s=100, alpha=1, zorder=1)
+        ax = fig.add_subplot(projection='3d', azim=105, elev=-80)
+        ax.scatter(*X.T, c=c, s=100, alpha=1, zorder=1)
         equal_aspect_ratio(ax)
         ax.grid(False)
         ax.set_xticks([])
@@ -437,8 +452,9 @@ def _plot_trajectories(
         fig.tight_layout()
 
         if save_plots:
-            plt.savefig(LOGS_PATH / f'{START_TIMESTAMP}_sim_{i}.{img_extension}', transparent=True)
-            np.savez(LOGS_PATH / f'{START_TIMESTAMP}_sim_{i}', X=SS.X[i])
+            plt.savefig(LOGS_PATH / f'{START_TIMESTAMP}_ss_{SS.parameters.id}_sim_{idx}.{img_extension}',
+                        transparent=True)
+            np.savez(LOGS_PATH / f'{START_TIMESTAMP}_{SS.parameters.id}_sim_{idx}', X=X)
 
         if show_plots:
             plt.show()
@@ -461,7 +477,7 @@ def simulate():
     _plot_histograms(SS)
     _plot_msd(args, SS)
     _plot_simulations(SS)
-    _plot_trajectories(SS)
+    _plot_trajectories(SS, args)
 
 
 def _check_trajectory_for_nice_regions(
