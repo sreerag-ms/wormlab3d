@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.gridspec import GridSpec
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
+from progress.bar import Bar
 from scipy.stats import expon
 
 from simple_worm.frame import FrameNumpy
@@ -617,50 +618,206 @@ def plot_dataset_angle_comparisons():
     plt.show()
 
 
-def dataset_against_three_state_comparison(
-        use_approximation_stats: bool = True,
-        noise_scale: float = 0.1,
+def dataset_against_three_state_msd_comparison(
+        resample_durations: bool = False
 ):
     """
-    Plot comparisons between simulation runs and the experimental data.
+    Plot MSD comparisons between simulation runs and the experimental data.
     """
-    args = get_args()
+    args = get_args(validate_source=False)
     assert args.dataset is not None
     ds = Dataset.objects.get(id=args.dataset)
     deltas, delta_ts = get_deltas_from_args(args)
-
-    min_run_speed_duration = (0.01, 60.)
 
     # Unset midline source args
     args.midline3d_source = None
     args.midline3d_source_file = None
     args.tracking_only = True
 
-    # error_limits = [0.001, 0.002, 0.004, 0.008, 0.016]
-    # error_limits = np.array([0.016, 0.008, 0.004, 0.002, 0.001])
-    # error_limits = np.array([0.01,0.001,0.0001])
-    error_limits = np.array([0.5, 0.2, 0.1, 0.05, 0.01])
-    # error_limits = np.array([0.2, 0.1, 0.05])
-    # error_limits = np.array([0.2,])
-    # error_limits = [0.05,]
-
-    # Generate or load tumble/run values
-    trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles \
-        = generate_or_load_ds_statistics(ds, error_limits, min_run_speed_duration=min_run_speed_duration, rebuild_cache=False)
-
     # Generate or load MSDs
     msds_all_real, msds_real = generate_or_load_ds_msds(ds, args, rebuild_cache=False)
 
     # Now make a simulator to match the results
+    trajectory_lengths, _, _, _, _, _ = generate_or_load_ds_statistics(ds, [100], rebuild_cache=False)
     args.sim_dt = 1 / 25
     args.sim_duration = max(trajectory_lengths) * args.sim_dt
     SS = get_sim_state_from_args(args)
+    bs = SS.parameters.batch_size
+
+    msds_all_sim = np.zeros(len(deltas))
+    msds_sim = {i: {} for i in range(bs)}
+
+    if resample_durations:
+        logger.info(f'Calculating MSDs for simulation runs.')
+
+        # Model the distribution of trajectory lengths with a exponential dist
+        T_dist = expon(*expon.fit(trajectory_lengths))
+        T_sim_lengths = T_dist.rvs(args.batch_size).round().astype(np.uint32)
+
+        d_all_sim = {delta: [] for delta in deltas}
+
+        bar = Bar('Calculating', max=bs)
+        bar.check_tty = False
+        for i, X in enumerate(SS.X):
+            # Pick a random length
+            X = X[:T_sim_lengths[i]]
+            msds_i = []
+            for delta in deltas:
+                if delta > X.shape[0] / 3:
+                    continue
+                d = np.sum((X[delta:] - X[:-delta])**2, axis=-1)
+                d_all_sim[delta].append(d)
+                msds_i.append(d.mean())
+            msds_sim[i] = np.array(msds_i)
+            bar.next()
+        bar.finish()
+
+        for i, delta in enumerate(deltas):
+            msds_all_sim[i] = np.concatenate(d_all_sim[delta]).mean()
+
+    else:
+        msds_all_sim, msds_sim_array = SS.get_msds(deltas)
+        if SS.needs_save:
+            SS.save()
+        for i in range(bs):
+            msds_sim[i] = msds_sim_array[i]
+
+    # Set up plots and colours
+    logger.info('Plotting MSD.')
+    fig, ax = plt.subplots(1, figsize=(12, 10))
+    cmap = plt.get_cmap('winter')
+    colours_real = cmap(np.linspace(0, 1, len(ds.include_trials)))
+    cmap = plt.get_cmap('autumn')
+    colours_sim = cmap(np.linspace(0, 1, bs))
+
+    # Plot average of the real MSDs
+    ax.plot(delta_ts, msds_all_real, label='Trajectory average',
+            alpha=0.8, c='black', linestyle='--', linewidth=3, zorder=60)
+
+    # Plot MSD for each real trajectory
+    for i, (trial_id, msd_vals_real) in enumerate(msds_real.items()):
+        ax.plot(delta_ts[:len(msd_vals_real)], msd_vals_real, alpha=0.4, c=colours_real[i])
+
+    # Plot MSD for each simulation
+    for i, (idx, msd_vals_sim) in enumerate(msds_sim.items()):
+        ax.plot(delta_ts[:len(msd_vals_sim)], msd_vals_sim, alpha=0.4, c=colours_sim[i])
+
+    # Plot average of the simulation MSDs
+    ax.plot(delta_ts, msds_all_sim, label='Simulation average',
+            alpha=0.9, c='black', linestyle=':', linewidth=3, zorder=80)
+
+    # Complete MSD plot
+    ax.set_ylabel('MSD$=<(x(t+\Delta)-x(t))^2>_t$')
+    ax.set_xlabel('$\Delta\ (s)$')
+    ax.set_yscale('log')
+    ax.set_xscale('log')
+    ax.grid()
+    ax.legend()
+
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            LOGS_PATH / f'{START_TIMESTAMP}'
+                        f'_msd_comparison'
+                        f'_{"randomised_lengths" if resample_durations else ""}'
+                        f'_ds={ds.id}'
+                        f'_ss={SS.parameters.id}'
+                        f'.{img_extension}',
+            transparent=True
+        )
+
+    if show_plots:
+        plt.show()
+
+    # Set up plots and colours
+    logger.info('Plotting MSD ranges.')
+    fig, ax = plt.subplots(1, figsize=(12, 10))
+
+    # Calculate stds
+    msds_real_std = np.zeros(len(delta_ts))
+    msds_sim_std = np.zeros(len(delta_ts))
+    for i, delta in enumerate(delta_ts):
+        vals_d = []
+        for trial_id, msd_vals_real in msds_real.items():
+            if len(msd_vals_real) > i:
+                vals_d.append(msd_vals_real[i])
+        msds_real_std[i] = np.std(vals_d)
+
+        vals_d = []
+        for sim_idx, msd_vals_sim in msds_sim.items():
+            if len(msd_vals_sim) > i:
+                vals_d.append(msd_vals_sim[i])
+        msds_sim_std[i] = np.std(vals_d)
+
+    # Plot average of the real MSDs
+    ax.plot(delta_ts, msds_all_real, label='Real',
+            alpha=0.8, c='blue', linestyle='--', linewidth=3, zorder=60)
+    ax.fill_between(delta_ts, msds_all_real - msds_real_std, msds_all_real + msds_real_std, color='blue', alpha=0.2)
+
+    # Plot average of the simulation MSDs
+    ax.plot(delta_ts, msds_all_sim, label='Simulation',
+            alpha=0.9, c='orange', linestyle=':', linewidth=3, zorder=80)
+    ax.fill_between(delta_ts, msds_all_sim - msds_sim_std, msds_all_sim + msds_sim_std, color='orange', alpha=0.2)
+
+    # Complete MSD plot
+    ax.set_ylabel('MSD$=<(x(t+\Delta)-x(t))^2>_t$')
+    ax.set_xlabel('$\Delta\ (s)$')
+    ax.set_yscale('log')
+    ax.set_xscale('log')
+    ax.grid()
+    ax.legend()
+
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(
+            LOGS_PATH / f'{START_TIMESTAMP}'
+                        f'_msd_range_comparison'
+                        f'_{"randomised_lengths" if resample_durations else ""}'
+                        f'_ds={ds.id}'
+                        f'_ss={SS.parameters.id}'
+                        f'.{img_extension}',
+            transparent=True
+        )
+
+    if show_plots:
+        plt.show()
+
+
+def dataset_against_three_state_histogram_comparison(
+        use_approximation_stats: bool = True,
+        plot_sweep: bool = False,
+        plot_basic: bool = False,
+):
+    """
+    Plot comparisons between simulation runs and the experimental data.
+    """
+    args = get_args(validate_source=False)
+    assert args.dataset is not None
+    ds = Dataset.objects.get(id=args.dataset)
+    min_run_speed_duration = (0.01, 60.)
+    error_limits = np.array([0.5, 0.2, 0.1, 0.05, 0.01])
+    SS = get_sim_state_from_args(args)
+
+    # Unset midline source args
+    args.midline3d_source = None
+    args.midline3d_source_file = None
+    args.tracking_only = True
+
+    # Generate or load tumble/run values
+    trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles = generate_or_load_ds_statistics(
+        ds=ds,
+        error_limits=error_limits,
+        min_run_speed_duration=min_run_speed_duration,
+        rebuild_cache=args.regenerate
+    )
 
     # Use the same approximation methods for the simulation runs as for real data
     if use_approximation_stats:
         stats = SS.get_approximation_statistics(
             error_limits=error_limits,
-            noise_scale=noise_scale,
+            noise_scale=args.approx_noise,
             smoothing_window=args.smoothing_window,
             planarity_window=args.planarity_window_vertices,
         )
@@ -673,13 +830,14 @@ def dataset_against_three_state_comparison(
             'twist_angles': {i: twist_angles[i] for i in range(len(error_limits))},
         }
 
-    # Plot histograms
-    if 1:
+    # Plot histograms across different error limits
+    if plot_sweep:
         fig, axes = plt.subplots(len(error_limits), 6, figsize=(14, 2 + 2 * len(error_limits)), squeeze=False)
         fig.suptitle(f'Dataset={ds.id}. '
                      f'Planarity windows={args.planarity_window} frames, {args.planarity_window_vertices} vertices.' +
-                     (f' Approximation statistics; noise_scale={noise_scale}, smoothing_window={args.smoothing_window}.'
-                      if use_approximation_stats else ''))
+                     (
+                         f' Approximation statistics; noise_scale={args.approx_noise}, smoothing_window={args.smoothing_window}.'
+                         if use_approximation_stats else ''))
 
         for i, (param_name, values) in enumerate({
                                                      'Durations': [durations, stats['durations']],
@@ -728,133 +886,22 @@ def dataset_against_three_state_comparison(
 
         if save_plots:
             plt.savefig(
-                LOGS_PATH / f'{START_TIMESTAMP}_histograms_comparison_ds={ds.id}.{img_extension}',
+                LOGS_PATH / f'{START_TIMESTAMP}'
+                            f'_histograms_comparison'
+                            f'_errs={",".join([f"{x:.3f}" for x in error_limits])}'
+                            f'{"_approx" if use_approximation_stats else ""}'
+                            f'_noise={args.approx_noise:.2f}'
+                            f'_ds={ds.id}'
+                            f'_ss={SS.parameters.id}'
+                            f'.{img_extension}',
                 transparent=True
             )
 
         if show_plots:
             plt.show()
 
-    exit()
-
-    rs = len(ds.include_trials)
-
-    # Model the distribution of trajectory lengths with a skewnorm
-    # T_dist = skewnorm(*skewnorm.fit(trajectory_lengths))
-    T_dist = expon(*expon.fit(trajectory_lengths))
-
-    # Sample some trajectory lengths
-    T_sim_lengths = T_dist.rvs(args.batch_size).round().astype(np.uint32)
-
-    msds_all_sim = np.zeros(len(deltas))
-    msds_sim = {}
-    d_all_sim = {delta: [] for delta in deltas}
-
-    # logger.info(f'Calculating MSDs for simulation runs.')
-    # bar = Bar('Calculating', max=args.batch_size)
-    # bar.check_tty = False
-    # for i, X in enumerate(TC.X):
-    #     # Pick a random length
-    #     X = X[:T_sim_lengths[i]]
-    #
-    #     msds_i = []
-    #     for delta in deltas:
-    #         if delta > X.shape[0] / 3:
-    #             continue
-    #         d = np.sum((X[delta:] - X[:-delta])**2, axis=-1)
-    #         d_all_sim[delta].append(d)
-    #         msds_i.append(d.mean())
-    #     msds_sim[i] = np.array(msds_i)
-    #     bar.next()
-    # bar.finish()
-    #
-    # for i, delta in enumerate(deltas):
-    #     msds_all_sim[i] = np.concatenate(d_all_sim[delta]).mean()
-
-    # Plot MSDs
-    if 0:
-        # Set up plots and colours
-        logger.info('Plotting MSD.')
-        fig, ax = plt.subplots(1, figsize=(12, 10))
-        cmap = plt.get_cmap('winter')
-        colours_real = cmap(np.linspace(0, 1, rs))
-        cmap = plt.get_cmap('autumn')
-        colours_sim = cmap(np.linspace(0, 1, args.batch_size))
-
-        # Plot average of the real MSDs
-        ax.plot(delta_ts, msds_all_real, label='Trajectory average',
-                alpha=0.8, c='black', linestyle='--', linewidth=3, zorder=60)
-
-        # Plot MSD for each real trajectory
-        for i, (trial_id, msd_vals_real) in enumerate(msds_real.items()):
-            ax.plot(delta_ts[:len(msd_vals_real)], msd_vals_real, alpha=0.4, c=colours_real[i])
-
-        # Plot MSD for each simulation
-        for i, (idx, msd_vals_sim) in enumerate(msds_sim.items()):
-            # msd_vals = np.array(list(msd_vals_sim.values()))
-            ax.plot(delta_ts[:len(msd_vals_sim)], msd_vals_sim, alpha=0.4, c=colours_sim[i])
-
-        # Plot average of the simulation MSDs
-        # msd_vals_all_sim = np.array(list(msds_all_sim.values()))
-        ax.plot(delta_ts, msds_all_sim, label='Simulation average',
-                alpha=0.9, c='black', linestyle=':', linewidth=3, zorder=80)
-
-        # Complete MSD plot
-        ax.set_ylabel('MSD$=<(x(t+\Delta)-x(t))^2>_t$')
-        ax.set_xlabel('$\Delta\ (s)$')
-        ax.set_yscale('log')
-        ax.set_xscale('log')
-        ax.grid()
-        ax.legend()
-
-        fig.tight_layout()
-        plt.show()
-
-        # Set up plots and colours
-        logger.info('Plotting MSD ranges.')
-        fig, ax = plt.subplots(1, figsize=(12, 10))
-
-        # Calculate stds
-        msds_real_std = np.zeros(len(delta_ts))
-        msds_sim_std = np.zeros(len(delta_ts))
-        for i, delta in enumerate(delta_ts):
-            vals_d = []
-            for trial_id, msd_vals_real in msds_real.items():
-                if len(msd_vals_real) > i:
-                    vals_d.append(msd_vals_real[i])
-            msds_real_std[i] = np.std(vals_d)
-
-            vals_d = []
-            for sim_idx, msd_vals_sim in msds_sim.items():
-                if len(msd_vals_sim) > i:
-                    vals_d.append(msd_vals_sim[i])
-            msds_sim_std[i] = np.std(vals_d)
-
-        # Plot average of the real MSDs
-        ax.plot(delta_ts, msds_all_real, label='Real',
-                alpha=0.8, c='blue', linestyle='--', linewidth=3, zorder=60)
-        ax.fill_between(delta_ts, msds_all_real - msds_real_std, msds_all_real + msds_real_std, color='blue', alpha=0.2)
-
-        # Plot average of the simulation MSDs
-        ax.plot(delta_ts, msds_all_sim, label='Simulation',
-                alpha=0.9, c='orange', linestyle=':', linewidth=3, zorder=80)
-        ax.fill_between(delta_ts, msds_all_sim - msds_sim_std, msds_all_sim + msds_sim_std, color='orange', alpha=0.2)
-
-        # Complete MSD plot
-        ax.set_ylabel('MSD$=<(x(t+\Delta)-x(t))^2>_t$')
-        ax.set_xlabel('$\Delta\ (s)$')
-        ax.set_yscale('log')
-        ax.set_xscale('log')
-        ax.grid()
-        ax.legend()
-
-        fig.tight_layout()
-        plt.show()
-
-    # exit()
-
     # Paper quality plots
-    if 1:
+    if plot_basic:
         error_limit = 0.05
         assert error_limit in error_limits
         j = np.argmin(np.abs(error_limits - error_limit))
@@ -934,59 +981,14 @@ def dataset_against_three_state_comparison(
 
         if save_plots:
             plt.savefig(
-                LOGS_PATH / f'{START_TIMESTAMP}_histogram_comparison_ds={ds.id}_err={error_limit:.2f}.{img_extension}',
-                transparent=True
-            )
-
-        if show_plots:
-            plt.show()
-
-        exit()
-
-        # Set up MSD plot
-        logger.info('Plotting MSD ranges.')
-        fig, ax = plt.subplots(1, figsize=(5, 4))
-
-        # Calculate stds
-        msds_real_std = np.zeros(len(delta_ts))
-        msds_sim_std = np.zeros(len(delta_ts))
-        for i, delta in enumerate(delta_ts):
-            vals_d = []
-            for trial_id, msd_vals_real in msds_real.items():
-                if len(msd_vals_real) > i:
-                    vals_d.append(msd_vals_real[i])
-            msds_real_std[i] = np.std(vals_d)
-
-            vals_d = []
-            for sim_idx, msd_vals_sim in msds_sim.items():
-                if len(msd_vals_sim) > i:
-                    vals_d.append(msd_vals_sim[i])
-            msds_sim_std[i] = np.std(vals_d)
-
-        # Plot average of the real MSDs
-        ax.plot(delta_ts, msds_all_real, label='Real',
-                alpha=0.8, c=colour_real, linestyle='--', linewidth=3, zorder=60)
-        ax.fill_between(delta_ts, msds_all_real - msds_real_std, msds_all_real + msds_real_std, color=colour_real,
-                        alpha=0.2)
-
-        # Plot average of the simulation MSDs
-        ax.plot(delta_ts, msds_all_sim, label='Simulation',
-                alpha=0.9, c=colour_sim, linestyle=':', linewidth=3, zorder=80)
-        ax.fill_between(delta_ts, msds_all_sim - msds_sim_std, msds_all_sim + msds_sim_std, color=colour_sim, alpha=0.2)
-
-        # Complete MSD plot
-        ax.set_ylabel('MSD$=<(x(t+\Delta)-x(t))^2>_t$')
-        ax.set_xlabel('$\Delta\ (s)$')
-        ax.set_yscale('log')
-        ax.set_xscale('log')
-        ax.grid()
-        ax.legend()
-
-        fig.tight_layout()
-
-        if save_plots:
-            plt.savefig(
-                LOGS_PATH / f'{START_TIMESTAMP}_msd_comparison_ds={ds.id}_err={error_limit:.2f}.{img_extension}',
+                LOGS_PATH / f'{START_TIMESTAMP}'
+                            f'_histograms_comparison_basic'
+                            f'_err={error_limit:.2f}'
+                            f'{"_approx" if use_approximation_stats else ""}'
+                            f'_noise={args.approx_noise:.2f}'
+                            f'_ds={ds.id}'
+                            f'_ss={SS.parameters.id}'
+                            f'.{img_extension}',
                 transparent=True
             )
 
@@ -1009,7 +1011,9 @@ if __name__ == '__main__':
 
     # dataset_distributions()
     # plot_dataset_angle_comparisons()
-    dataset_against_three_state_comparison(
+    # dataset_against_three_state_msd_comparison(resample_durations=True)
+    dataset_against_three_state_histogram_comparison(
         use_approximation_stats=True,
-        noise_scale=0.1,
+        plot_sweep=True,
+        plot_basic=True,
     )

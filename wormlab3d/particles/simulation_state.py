@@ -556,7 +556,7 @@ class SimulationState:
 
         return coverage
 
-    def get_msds(self, deltas: np.ndarray) -> Tuple[Dict[int, float], Dict[int, Dict[int, float]]]:
+    def get_msds(self, deltas: np.ndarray) -> Tuple[Dict[int, np.ndarray], Dict[int, np.ndarray]]:
         """
         Calculate the msds for the trajectories.
         """

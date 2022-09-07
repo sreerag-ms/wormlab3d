@@ -222,7 +222,7 @@ def generate_or_load_ds_statistics(
     """
     Generate or load tumble/run values
     """
-    args = get_args()
+    args = get_args(validate_source=False)
     cache_path = LOGS_PATH / f'ds={ds.id}_errors={",".join([str(err) for err in error_limits])}' \
                              f'_pw={args.planarity_window_vertices}' \
                              f'_mrsd={min_run_speed_duration[0]:.2f},{min_run_speed_duration[1]:.1f}'
@@ -294,7 +294,7 @@ def _calculate_dataset_values(
     """
     Calculate the tumble/run approximation values across a dataset.
     """
-    args = get_args()
+    args = get_args(validate_source=False)
     assert args.planarity_window is not None
 
     # Unset midline source args
