@@ -890,7 +890,7 @@ def dataset_against_three_state_histogram_comparison(
                             f'_histograms_comparison'
                             f'_errs={",".join([f"{x:.3f}" for x in error_limits])}'
                             f'{"_approx" if use_approximation_stats else ""}'
-                            f'_noise={args.approx_noise:.2f}'
+                            f'_noise={f"{args.approx_noise:.2f}" if args.approx_noise is not None else "0"}'
                             f'_ds={ds.id}'
                             f'_ss={SS.parameters.id}'
                             f'.{img_extension}',
@@ -985,7 +985,7 @@ def dataset_against_three_state_histogram_comparison(
                             f'_histograms_comparison_basic'
                             f'_err={error_limit:.2f}'
                             f'{"_approx" if use_approximation_stats else ""}'
-                            f'_noise={args.approx_noise:.2f}'
+                            f'_noise={f"{args.approx_noise:.2f}" if args.approx_noise is not None else "0"}'
                             f'_ds={ds.id}'
                             f'_ss={SS.parameters.id}'
                             f'.{img_extension}',
