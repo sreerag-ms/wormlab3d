@@ -911,7 +911,20 @@ def dataset_against_three_state_histogram_comparison(
         colour_real = default_colours[0]
         colour_sim = default_colours[1]
 
-        fig, axes = plt.subplots(1, 4, figsize=(12, 3))
+        plt.rc('axes', titlesize=7)  # fontsize of the title
+        plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
+        plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+        plt.rc('legend', fontsize=6)  # fontsize of the legend
+
+        fig, axes = plt.subplots(2, 2, figsize=(2.7, 2.6), gridspec_kw={
+            'hspace': 0.6,
+            'wspace': 0.45,
+            'top': 0.92,
+            'bottom': 0.14,
+            'left': 0.15,
+            'right': 0.98,
+        })
 
         for i, (param_name, values) in enumerate({
                                                      'Run durations': [durations, stats['durations']],
@@ -919,11 +932,8 @@ def dataset_against_three_state_histogram_comparison(
                                                      'Planar angles': [planar_angles, stats['planar_angles']],
                                                      'Non-planar angles': [nonplanar_angles, stats['nonplanar_angles']]
                                                  }.items()):
-            ax = axes[i]
+            ax = axes[[(0, 0), (0, 1), (1, 0), (1, 1)][i]]
             ax.set_title(param_name)
-
-            if i == 0:
-                ax.set_ylabel(f'Error ~ {error_limit:.4f}')
 
             values_ds = np.array(values[0][j])
             values_sim = np.array(values[1][j])
@@ -952,7 +962,8 @@ def dataset_against_three_state_histogram_comparison(
             )
             ax.set_title(param_name)
             ax.set_ylabel('Density')
-            ax.legend()
+            if i == 0:
+                ax.legend()
 
             if param_name == 'Run durations':
                 ax.set_xticks([0, 50, 100])
@@ -969,15 +980,13 @@ def dataset_against_three_state_histogram_comparison(
                 ax.set_xticks([-np.pi, np.pi])
                 ax.set_xticklabels(['$-\pi$', '$\pi$'])
                 ax.set_xlabel('$\\theta$')
-                ax.set_yticks([0, 0.25])
+                ax.set_yticks([0, 0.2])
             if param_name == 'Non-planar angles':
                 ax.set_xlim(left=-np.pi / 2 - 0.1, right=np.pi / 2 + 0.1)
                 ax.set_xticks([-np.pi / 2, np.pi / 2])
                 ax.set_xticklabels(['$-\\frac{\pi}{2}$', '$\\frac{\pi}{2}$'])
                 ax.set_xlabel('$\\phi$')
                 ax.set_yticks([0, 0.6])
-
-        fig.tight_layout()
 
         if save_plots:
             plt.savefig(
@@ -1014,6 +1023,6 @@ if __name__ == '__main__':
     # dataset_against_three_state_msd_comparison(resample_durations=True)
     dataset_against_three_state_histogram_comparison(
         use_approximation_stats=True,
-        plot_sweep=True,
+        plot_sweep=False,
         plot_basic=True,
     )
