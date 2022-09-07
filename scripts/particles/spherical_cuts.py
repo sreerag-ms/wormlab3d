@@ -287,7 +287,7 @@ def spherical_cut_plot():
 
     n_points = 100
     n_radius_line_points = 100
-    plot_n_trajectories_per_sigma = 1
+    plot_n_trajectories_per_sigma = 3
 
     # # Sweep over the nonplanarity angle sigmas
     # for i, npas in enumerate(npa_sigmas):
@@ -311,6 +311,12 @@ def spherical_cut_plot():
     # Plot the sphere-slices
     logger.info('Plotting results.')
     fig = mlab.figure(size=(1000, 1000), bgcolor=(1, 1, 1))
+    fig.scene.renderer.use_depth_peeling = True
+    fig.scene.renderer.maximum_number_of_peels = 16
+    fig.scene.render_window.point_smoothing = True
+    fig.scene.render_window.line_smoothing = True
+    fig.scene.render_window.polygon_smoothing = True
+    fig.scene.render_window.multi_samples = 20
     fig.scene.anti_aliasing_frames = 20
     visual.set_viewer(fig)
 
@@ -334,12 +340,12 @@ def spherical_cut_plot():
     # sphere_colours = plt.get_cmap('Blues')(np.linspace(0, 1, n_sigmas))  # best
     # sphere_colours = plt.get_cmap('cubehelix')(np.linspace(0.3, 0.9, n_sigmas))
     sphere_colours = np.array([
-        [38, 83, 31, 1],
+        [30, 73, 21, 1],
         [210, 140, 190, 1],
         [220, 230, 235, 1],
     ]) / 255
 
-    alphas = np.linspace(0.2, 0.6, n_sigmas)
+    alphas = np.linspace(0.6, 0.3, n_sigmas)
     for i, npas in enumerate(npa_sigmas):
         colour = tuple(sphere_colours[i][:3])
 
@@ -859,6 +865,6 @@ def spherical_cut_stacked_animation():
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
-    # spherical_cut_plot()
+    spherical_cut_plot()
     # spherical_cut_animation()
-    spherical_cut_stacked_animation()
+    # spherical_cut_stacked_animation()
