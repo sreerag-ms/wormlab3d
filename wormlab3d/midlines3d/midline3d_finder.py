@@ -745,6 +745,7 @@ class Midline3DFinder:
                         prev_frame_state=None if ra.finetune_mode else self.frame_batch[-1],
                         device=self.device,
                     )
+                    f.update_ht_data_from_mp()
                     new_batch.append(f)
                 self.frame_batch = new_batch
 
