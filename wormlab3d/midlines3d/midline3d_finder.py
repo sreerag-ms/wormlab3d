@@ -1103,6 +1103,16 @@ class Midline3DFinder:
                     for d in range(D)
                 ]
 
+            # In the first half of the initialisation stage zero-out masks/scores losses except for the first frame
+            if self.checkpoint.step < self.parameters.n_steps_init / 2:
+                masks_for_loss = [masks[d][0][None, ...] for d in range(D)]
+                mtr_for_loss = [masks_target_residuals[d][0][None, ...] for d in range(D)]
+                scores_for_loss = [scores[d][0][None, ...] for d in range(D)]
+            else:
+                masks_for_loss = masks
+                mtr_for_loss = masks_target_residuals
+                scores_for_loss = scores
+
             # Calculate the losses
             loss, loss_global, losses_depths, stats = self._calculate_losses(
                 cam_rotation_preangles=cam_rotation_preangles,
@@ -1118,7 +1128,7 @@ class Midline3DFinder:
                 T_raw=T_raw,
                 M1_raw=M1_raw,
                 points=points,
-                masks_target=masks_target_residuals,
+                masks_target=mtr_for_loss,
                 sigmas=sigmas,
                 exponents=exponents,
                 intensities=intensities,
@@ -1126,8 +1136,8 @@ class Midline3DFinder:
                 camera_exponents=camera_exponents,
                 camera_intensities=camera_intensities,
                 cam_shifts=cam_shifts,
-                masks=masks,
-                scores=scores,
+                masks=masks_for_loss,
+                scores=scores_for_loss,
                 curvatures_smoothed=curvatures_smoothed,
                 points_smoothed=points_smoothed,
                 sigmas_smoothed=sigmas_smoothed,
