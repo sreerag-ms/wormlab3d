@@ -415,7 +415,7 @@ def loss_(m: str, x: torch.Tensor, y: torch.Tensor, reduce: bool = True) -> torc
     elif m == 'kl':
         l = F.kl_div(x, y, reduction='batchmean' if reduce else 'none')
     elif m == 'logdiff':
-        l = torch.sum((torch.log(1 + x) - torch.log(1 + y))**2)
+        l = ((torch.log(1 + x) - torch.log(1 + y))**2).sum(dim=(1, 2, 3)).mean()
         # todo: is this worth it? if so needs parametrising
         # l = torch.sum(
         #     torch.where(
@@ -1132,13 +1132,13 @@ def calculate_consistency_losses_curvatures_ht(
         X_d = X[d]
         LX = (X_d[:, 1] - X_d[:, 2]).norm(dim=-1, p=2).sum(dim=-1).mean()
 
-        T_d = T[d]
-        LT = (T_d[:, 1] - T_d[:, 2]).norm(dim=-1, p=2).sum(dim=-1).mean()
+        # T_d = T[d]
+        # LT = (T_d[:, 1] - T_d[:, 2]).norm(dim=-1, p=2).sum(dim=-1).mean()
+        #
+        # M1_d = M1[d]
+        # LM1 = (M1_d[:, 1] - M1_d[:, 2]).norm(dim=-1, p=2).sum(dim=-1).mean()
 
-        M1_d = M1[d]
-        LM1 = (M1_d[:, 1] - M1_d[:, 2]).norm(dim=-1, p=2).sum(dim=-1).mean()
-
-        Ld = LX + 0.001 * LT + 0.001 * LM1
+        Ld = LX  # + 0.001 * LT + 0.001 * LM1
 
         losses.append(Ld)
 
