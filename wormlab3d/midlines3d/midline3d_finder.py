@@ -1366,9 +1366,14 @@ class Midline3DFinder:
                         length_prev, curvatures_prev, X0_prev, T0_prev, M10_prev, None, None, None, cam_shifts_prev
                     )
                 else:
+                    # losses['temporal'] = calculate_temporal_losses_curvatures(
+                    #     length, curvatures, None, None, None, X0ht, T0ht, M10ht, cam_shifts,
+                    #     length_prev, curvatures_prev, None, None, None, X0ht_prev, T0ht_prev, M10ht_prev,
+                    #     cam_shifts_prev
+                    # )
                     losses['temporal'] = calculate_temporal_losses_curvatures(
-                        length, curvatures, None, None, None, X0ht, T0ht, M10ht, cam_shifts,
-                        length_prev, curvatures_prev, None, None, None, X0ht_prev, T0ht_prev, M10ht_prev,
+                        length, curvatures, None, None, None, X0ht, None, None, cam_shifts,
+                        length_prev, curvatures_prev, None, None, None, X0ht_prev, None, None,
                         cam_shifts_prev
                     )
                 losses['curvature'] = calculate_curvature_losses_curvatures(curvatures)
