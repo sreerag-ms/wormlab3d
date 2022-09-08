@@ -643,13 +643,14 @@ def calculate_scores_losses(
         scaled_scores = scores_d * sf[None, ...]
 
         # Scores should be maximised
-        loss = torch.sum(torch.amax(scores_d, dim=-1).detach() / (torch.mean(scaled_scores, dim=-1) + 1e-8))
+        loss = (torch.amax(scores_d, dim=-1).detach() / (torch.mean(scaled_scores, dim=-1) + 1e-8)).mean()
 
         # Symmetry loss
         N2 = int(scores_d.shape[1] / 2)
         loss_sym = torch.sum(
-            ((scores_d[:, :N2].flip(dims=(1,)) - scores_d[:, N2:]) / torch.amax(scores_d, dim=-1, keepdim=True))**2
-        )
+            ((scores_d[:, :N2].flip(dims=(1,)) - scores_d[:, N2:]) / torch.amax(scores_d, dim=-1, keepdim=True))**2,
+            dim=-1
+        ).mean()
         loss = loss + loss_sym
 
         losses.append(loss)
