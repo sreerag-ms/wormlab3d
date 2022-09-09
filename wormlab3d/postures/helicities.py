@@ -48,25 +48,35 @@ def calculate_helicities(X: np.ndarray, parallel: bool = True) -> np.ndarray:
     return h
 
 
-def calculate_trajectory_helicities(X: np.ndarray, window_size: int, parallel: bool = True) -> np.ndarray:
+def calculate_trajectory_helicities(
+        X: np.ndarray,
+        window_size: int,
+        match_length: bool = True,
+        parallel: bool = True
+) -> np.ndarray:
     """
     Calculate helicities along a trajectory.
     """
-    logger.info('Calculating trajectory helicities.')
+    logger.info(f'Calculating trajectory helicities for window size={window_size}.')
     assert X.ndim == 2, 'Only point trajectories supported!'
-    N = len(X)
-    w2 = int((window_size + 1) / 2)
-    h = np.zeros(N)
     Xw = sliding_window_view(X, window_size, axis=0).transpose(0, 2, 1)
-    h[w2 - 1:N - window_size + w2] = calculate_helicities(Xw, parallel=parallel)
+    Hw = calculate_helicities(Xw, parallel=parallel)
 
-    # Fill in the ends
-    for i in range(w2 - 1):
-        ws = window_size - i - 1
-        if ws < 5:
-            break
-        h[w2 - 2 - i] = calculate_helicity(X[:ws])
-        h[-w2 + i] = calculate_helicity(X[-ws:])
+    if match_length:
+        N = len(X)
+        w2 = int((window_size + 1) / 2)
+        h = np.zeros(N)
+        h[w2 - 1:N - window_size + w2] = Hw
+
+        # Fill in the ends
+        for i in range(w2 - 1):
+            ws = window_size - i - 1
+            if ws < 5:
+                break
+            h[w2 - 2 - i] = calculate_helicity(X[:ws])
+            h[-w2 + i] = calculate_helicity(X[-ws:])
+    else:
+        h = Hw
 
     return h
 

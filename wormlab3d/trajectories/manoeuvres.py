@@ -17,6 +17,7 @@ def get_manoeuvres(
         X_full: np.ndarray,
         X_slice: np.ndarray,
         min_reversal_frames: int = 25,
+        min_reversal_distance: float = 0.,
         window_size: int = 500,
         cut_windows_at_manoeuvres: bool = False
 ) -> List[Dict[str, Any]]:
@@ -29,6 +30,19 @@ def get_manoeuvres(
 
     # Loop over reversal events
     for i, reversal_centre_idx in enumerate(reversal_centre_idxs):
+        # Identify the plane of motion during the reversal
+        rev_start_idx = reversal_props['left_bases'][i] + 1
+        rev_end_idx = reversal_props['right_bases'][i]
+        X_rev = X_slice[rev_start_idx:rev_end_idx]
+
+        # Skip if not reversed far enough
+        reversal_distance = np.linalg.norm(X_rev[0] - X_rev[-1], axis=-1)
+        if reversal_distance < min_reversal_distance:
+            continue
+
+        pca_rev = PCA(svd_solver='full', copy=True, n_components=3)
+        pca_rev.fit(X_rev)
+
         # Identify the plane of motion prior to the reversal
         prev_end_idx = reversal_props['left_bases'][i]
         prev_start_idx = max(0, prev_end_idx - window_size)
@@ -39,13 +53,6 @@ def get_manoeuvres(
             continue
         pca_prev = PCA(svd_solver='full', copy=True, n_components=3)
         pca_prev.fit(X_prev)
-
-        # Identify the plane of motion during the reversal
-        rev_start_idx = reversal_props['left_bases'][i] + 1
-        rev_end_idx = reversal_props['right_bases'][i]
-        X_rev = X_slice[rev_start_idx:rev_end_idx]
-        pca_rev = PCA(svd_solver='full', copy=True, n_components=3)
-        pca_rev.fit(X_rev)
 
         # Identify the plane of motion subsequent to the reversal
         next_start_idx = reversal_props['right_bases'][i] - 1
@@ -79,9 +86,10 @@ def get_manoeuvres(
         pca_all = PCA(svd_solver='full', copy=True, n_components=3)
         pca_all.fit(X_window)
         duration_all = next_end_idx - prev_start_idx
-        # distance_all = np.linalg.norm(X_window[1:] - X_window[:-1], axis=-1).sum()
-        distance_all = np.linalg.norm(X_window[0] - X_window[-1], axis=-1)
-        speed_all = distance_all / duration_all
+        distance_all = np.linalg.norm(X_window[1:] - X_window[:-1], axis=-1).sum()
+        # distance_all = np.linalg.norm(X_window[0] - X_window[-1], axis=-1)
+        # speed_all = distance_all / duration_all
+        speed_all = np.abs(signed_speeds[prev_start_idx:next_end_idx]).mean()
 
         manoeuvres.append({
             'centre_idx': reversal_centre_idx,
@@ -147,7 +155,7 @@ def get_forward_stats(
         duration = end_idx - start_idx
         distance = np.linalg.norm(X_window[1:] - X_window[:-1], axis=-1).sum()
         # distance = np.linalg.norm(X_window[0] - X_window[-1], axis=-1)
-        speed = distance / duration
+        speed = signed_speeds[start_idx:end_idx].mean()  # distance / duration
 
         runs.append({
             'centre_idx': fwd_centre_idx,

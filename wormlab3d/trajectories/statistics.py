@@ -1,7 +1,8 @@
 from argparse import Namespace
-from typing import Dict
+from typing import Dict, List
 
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 from scipy.signal import find_peaks
 from sklearn.decomposition import PCA
 
@@ -9,10 +10,12 @@ from wormlab3d import logger
 from wormlab3d.data.model import Trial
 from wormlab3d.particles.tumble_run import calculate_curvature, get_approximate, find_approximation
 from wormlab3d.particles.util import calculate_trajectory_frame
+from wormlab3d.postures.helicities import calculate_helicities, calculate_trajectory_helicities
 from wormlab3d.toolkit.util import orthogonalise
 from wormlab3d.trajectories.angles import calculate_angle
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.pca import get_pca_cache_from_args
+from wormlab3d.trajectories.util import calculate_speeds
 
 
 def _calculate_posture_nonplanarity(X: np.ndarray) -> np.ndarray:
@@ -176,14 +179,24 @@ def calculate_trial_turn_statistics(
     # Calculate run stats
     nonp_runs = []
     run_distances = []
+    run_speeds = []
     for i, tumble_idx in enumerate(tumble_idxs):
         # Skip the first tumble
         if i == 0:
             continue
-        X_window = X[tumble_idxs[i - 1] + w2:tumble_idxs[i] - w2]
+        start_idx = tumble_idxs[i - 1] + w2
+        end_idx = tumble_idxs[i] - w2
+        X_window = X[start_idx:end_idx]
 
-        # Calculate distance travelled across windowed trajectory
-        run_distances.append(np.linalg.norm(X_window[1:] - X_window[:-1], axis=-1).sum())
+        # Calculate distance and speed
+        distance = np.linalg.norm(X_window[1:] - X_window[:-1], axis=-1).sum()
+        speed = np.mean(distance / (end_idx - start_idx) * trial.fps)
+        if args.approx_min_run_distance is not None and distance < args.approx_min_run_distance:
+            continue
+        if args.approx_min_run_speed is not None and speed < args.approx_min_run_speed:
+            continue
+        run_distances.append(distance)
+        run_speeds.append(speed)
 
         # Calculate the non-planarity of the run
         pca_run = PCA(svd_solver='full', copy=True, n_components=3)
@@ -216,7 +229,7 @@ def calculate_trial_turn_statistics(
         'nonp_postures': np.array(nonp_postures),
         'nonp_postures_max': np.array(nonp_postures_max),
         'run_durations': run_durations,
-        'run_speeds': run_speeds,
+        'run_speeds': np.array(run_speeds),
         'run_distances': np.array(run_distances),
         'nonp_runs': np.array(nonp_runs),
     }
@@ -224,11 +237,6 @@ def calculate_trial_turn_statistics(
 
 def calculate_trial_run_statistics(
         args: Namespace,
-        smooth_K: int,
-        k_max: int,
-        min_run_duration: int,
-        min_run_distance: int = None,
-        min_run_speed: int = None,
 ) -> Dict[str, np.ndarray]:
     """
     Calculate the run statistics for each turn in a trial trajectory.
@@ -251,11 +259,11 @@ def calculate_trial_run_statistics(
     X -= X.mean(axis=0)
 
     # Calculate the curvature and threshold
-    k = calculate_curvature(e0, smooth_e0=smooth_K, smooth_K=smooth_K)
-    r_state = np.r_[[0], k < k_max, [0]]
+    k = calculate_curvature(e0, smooth_e0=args.smoothing_window_K, smooth_K=args.smoothing_window_K)
+    r_state = np.r_[[0], k < args.approx_run_max_K, [0]]
 
     # Find straight line sections
-    run_idxs, section_props = find_peaks(r_state, width=min_run_duration, height=1)
+    run_idxs, section_props = find_peaks(r_state, width=args.approx_min_run_duration, height=1)
     N = len(run_idxs)
     if N <= 1:
         raise RuntimeError('Too few peaks found! Try decreasing duration / increasing height.')
@@ -279,9 +287,9 @@ def calculate_trial_run_statistics(
         # Calculate distance and average speed travelled across windowed trajectory
         distance = np.linalg.norm(X_window[1:] - X_window[:-1], axis=-1).sum()
         speed = np.mean(distance / (end_idx - start_idx) * trial.fps)
-        if min_run_distance is not None and distance < min_run_distance:
+        if args.approx_min_run_distance is not None and distance < args.approx_min_run_distance:
             continue
-        if min_run_speed is not None and speed < min_run_speed:
+        if args.approx_min_run_speed is not None and speed < args.approx_min_run_speed:
             continue
         distances.append(distance)
         speeds.append(speed)
@@ -311,4 +319,109 @@ def calculate_trial_run_statistics(
         'nonp': nonp,
         'nonp_postures': nonp_postures,
         'nonp_postures_max': nonp_postures_max,
+    }
+
+
+def calculate_windowed_statistics(
+        args: Namespace,
+        window_sizes: List[int],
+        smooth_postures: bool = False
+) -> Dict[str, Dict[int, np.ndarray]]:
+    """
+    Calculate statistics for a trajectory window.
+    """
+    assert args.trajectory_point is not None, '--trajectory-point needs to be defined!'
+    trial = Trial.objects.get(id=args.trial)
+    logger.info(f'Calculating trajectory window statistics for trial={trial.id}.')
+
+    # Get the full postures for signed speed calculation and posture planarities
+    u = args.trajectory_point
+    args.trajectory_point = None
+    X = get_trajectory_from_args(args)
+    speeds_all = calculate_speeds(X, signed=True)
+
+    # Posture planarities
+    logger.info('Fetching posture planarities.')
+    args.planarity_window = 1
+    sw = args.smoothing_window
+    if not smooth_postures:
+        args.smoothing_window = None
+    pcas = get_pca_cache_from_args(args)
+    args.smoothing_window = sw
+    nonp_postures_all = pcas.nonp
+
+    speeds = {}
+    nonp_trajectories = {}
+    nonp_postures_mean = {}
+    nonp_postures_max = {}
+
+    logger.info('Fetching trajectory planarities.')
+    args.trajectory_point = u
+    for ws in window_sizes:
+        args.planarity_window = int(ws)
+        pcas = get_pca_cache_from_args(args)
+        speeds_window = sliding_window_view(speeds_all, ws, axis=0)
+        nonp_postures_window = sliding_window_view(nonp_postures_all, ws, axis=0)
+
+        speeds[ws] = speeds_window.mean(axis=-1)
+        nonp_trajectories[ws] = pcas.nonp
+        nonp_postures_mean[ws] = nonp_postures_window.mean(axis=1)
+        nonp_postures_max[ws] = nonp_postures_window.max(axis=1)
+
+    return {
+        'speeds': speeds,
+        'nonp_trajectories': nonp_trajectories,
+        'nonp_postures_mean': nonp_postures_mean,
+        'nonp_postures_max': nonp_postures_max,
+    }
+
+
+def calculate_windowed_helicity(
+        args: Namespace,
+        window_sizes: List[int],
+        smooth_postures: bool = False
+) -> Dict[str, Dict[int, np.ndarray]]:
+    """
+    Calculate helicity statistics for a trajectory window.
+    """
+    assert args.trajectory_point is not None, '--trajectory-point needs to be defined!'
+    trial = Trial.objects.get(id=args.trial)
+    logger.info(f'Calculating trajectory window statistics for trial={trial.id}.')
+
+    # Get the full postures for signed speed calculation and posture helicities
+    u = args.trajectory_point
+    args.trajectory_point = None
+    X = get_trajectory_from_args(args)
+    speeds_all = calculate_speeds(X, signed=True)
+
+    # Posture planarities
+    logger.info('Calculating posture helicities.')
+    if not smooth_postures and args.smoothing_window is not None:
+        args.smoothing_window = None
+        X = get_trajectory_from_args(args)
+    Hp = calculate_helicities(X)
+
+    speeds = {}
+    Ht = {}
+    Hp_mean = {}
+    Hp_max = {}
+
+    logger.info('Calculating trajectory helicities.')
+    args.trajectory_point = u
+    X = get_trajectory_from_args(args)
+    for ws in window_sizes:
+        Ht_window = calculate_trajectory_helicities(X, ws, match_length=False)
+        speeds_window = sliding_window_view(speeds_all, ws, axis=0)
+        Hp_window = sliding_window_view(Hp, ws, axis=0)
+
+        speeds[ws] = speeds_window.mean(axis=-1)
+        Ht[ws] = Ht_window
+        Hp_mean[ws] = Hp_window.mean(axis=1)
+        Hp_max[ws] = Hp_window.max(axis=1)
+
+    return {
+        'speeds': speeds,
+        'Ht': Ht,
+        'Hp_mean': Hp_mean,
+        'Hp_max': Hp_max,
     }

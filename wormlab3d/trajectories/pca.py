@@ -85,7 +85,7 @@ def _calculate_pcas_parallel(X: np.ndarray, window_size: int) -> List[PCA]:
     with Pool(processes=N_WORKERS) as pool:
         pcas = pool.map(
             calculate_pca_wrapper,
-            [[X, i, window_size] for i in range(w2, N - w2)]
+            [[X, i, window_size] for i in range(w2, N - window_size + w2 + 1)]
         )
     return pcas
 
@@ -94,7 +94,7 @@ def _calculate_pcas(X: np.ndarray, window_size: int) -> List[PCA]:
     N = X.shape[0]
     w2 = int(window_size / 2)
     pcas = []
-    for i in range(w2, N - w2):
+    for i in range(w2, N - window_size + w2 + 1):
         pca = calculate_pca(X, i, window_size)
         pcas.append(pca)
     return pcas

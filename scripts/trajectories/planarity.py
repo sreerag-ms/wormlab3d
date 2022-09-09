@@ -6,13 +6,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.gridspec import GridSpec
 
+from simple_worm.plot3d import MidpointNormalize
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d import logger
 from wormlab3d.data.model import Dataset, Reconstruction
 from wormlab3d.toolkit.util import to_dict, hash_data
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.pca import get_pca_cache_from_args
-from wormlab3d.trajectories.statistics import calculate_trial_turn_statistics, calculate_trial_run_statistics
+from wormlab3d.trajectories.statistics import calculate_trial_turn_statistics, calculate_trial_run_statistics, \
+    calculate_windowed_statistics, calculate_windowed_helicity
 from wormlab3d.trajectories.util import get_deltas_from_args
 
 # tex_mode()
@@ -44,7 +46,7 @@ def make_filename(method: str, args: Namespace, excludes: List[str] = None):
             fn += frames_str_fn
         elif k == 'src':
             fn += f'_{args.midline3d_source}'
-        elif k == 'window_size':
+        elif k == 'window_size' and hasattr(args, 'window_size'):
             fn += f'_ws={args.window_size}'
         elif k == 'deltas':
             fn += f'_d={args.min_delta}-{args.max_delta}'
@@ -219,11 +221,6 @@ def nonplanarity_postures_vs_trajectories():
     args.trajectory_point = None
     dt = 1 / 25
     window_size = int(2 / dt)
-    min_run_duration = int(2 / dt)
-    min_run_distance = 1
-    min_run_speed = None  # 0.1
-    smooth_K = 201
-    k_threshold = 50
 
     # Outputs
     speeds_turns = []
@@ -244,7 +241,7 @@ def nonplanarity_postures_vs_trajectories():
 
         # Calculate turn statistics
         try:
-            turn_stats = calculate_trial_turn_statistics(args, smooth_K, window_size, k_threshold)
+            turn_stats = calculate_trial_turn_statistics(args, window_size)
             speeds_turns.append(turn_stats['speeds'])
             distances_turns.append(turn_stats['distances'])
             nonp_trajectories_turns.append(turn_stats['nonp'])
@@ -256,8 +253,7 @@ def nonplanarity_postures_vs_trajectories():
 
         # Calculate runs statistics
         try:
-            run_stats = calculate_trial_run_statistics(args, smooth_K, k_threshold, min_run_duration, min_run_distance,
-                                                       min_run_speed)
+            run_stats = calculate_trial_run_statistics(args)
             speeds_runs.append(run_stats['speeds'])
             distances_runs.append(run_stats['distances'])
             nonp_trajectories_runs.append(run_stats['nonp'])
@@ -298,7 +294,7 @@ def nonplanarity_postures_vs_trajectories():
 
     # Scatter plot of NP-T vs NP-P during runs
     ax = fig.add_subplot(gs[0, 0])
-    ax.set_title(f'Runs (min={min_run_duration * dt:.2f}s).')
+    ax.set_title(f'Runs (min={args.approx_min_run_duration * dt:.2f}s).')
     ax.set_xlabel('NP-trajectories')
     ax.set_ylabel('NP-postures')
     s = ax.scatter(nonp_trajectories_runs, nonp_postures_runs, c=speeds_runs, s=2)
@@ -318,7 +314,7 @@ def nonplanarity_postures_vs_trajectories():
 
     # Scatter plot of speed vs NP-P during runs
     ax = fig.add_subplot(gs[0, 1])
-    ax.set_title(f'Runs (min={min_run_duration * dt:.2f}s).')
+    ax.set_title(f'Runs (min={args.approx_min_run_duration * dt:.2f}s).')
     ax.set_xlabel('Speed (mm/s)')
     ax.set_ylabel('NP-postures')
     s = ax.scatter(speeds_runs, nonp_postures_runs, c=distances_runs, s=2)
@@ -338,7 +334,7 @@ def nonplanarity_postures_vs_trajectories():
 
     # Scatter plot of NP-T vs MAX(NP-P) during runs
     ax = fig.add_subplot(gs[0, 2])
-    ax.set_title(f'Runs (min={min_run_duration * dt:.2f}s).')
+    ax.set_title(f'Runs (min={args.approx_min_run_duration * dt:.2f}s).')
     ax.set_xlabel('NP-trajectories')
     ax.set_ylabel('MAX(NP-postures)')
     s = ax.scatter(nonp_trajectories_runs, nonp_postures_max_runs, c=speeds_runs, s=2)
@@ -358,7 +354,7 @@ def nonplanarity_postures_vs_trajectories():
 
     # Scatter plot of speed vs MAX(NP-P) during runs
     ax = fig.add_subplot(gs[0, 3])
-    ax.set_title(f'Runs (min={min_run_duration * dt:.2f}s).')
+    ax.set_title(f'Runs (min={args.approx_min_run_duration * dt:.2f}s).')
     ax.set_xlabel('Speed (mm/s)')
     ax.set_ylabel('MAX(NP-postures)')
     s = ax.scatter(speeds_runs, nonp_postures_max_runs, c=distances_runs, s=2)
@@ -383,6 +379,164 @@ def nonplanarity_postures_vs_trajectories():
         args.reconstruction = None
         plt.savefig(
             make_filename('nonplanarity_postures_vs_trajectories', args, excludes=['trial', 'deltas'])
+        )
+    if show_plots:
+        plt.show()
+
+
+def nonplanarity_postures_vs_trajectory_windows():
+    """
+    Plot the non-planarity of postures vs trajectory windows.
+    """
+    args = get_args()
+    assert args.dataset is not None
+    ds = Dataset.objects.get(id=args.dataset)
+    args.tracking_only = False
+
+    dt = 1 / 25
+    # window_sizes = (np.array([1,2,4,8])/dt).astype(np.int32)
+    window_sizes = (np.array([8, 16, 32, 64]) / dt).astype(np.int32)
+
+    # Outputs
+    speeds = {ws: [] for ws in window_sizes}
+    distances = {ws: [] for ws in window_sizes}
+    nonp_trajectories = {ws: [] for ws in window_sizes}
+    nonp_postures_mean = {ws: [] for ws in window_sizes}
+    nonp_postures_max = {ws: [] for ws in window_sizes}
+
+    for r_ref in ds.reconstructions:
+        reconstruction = Reconstruction.objects.get(id=r_ref.id)
+        args.reconstruction = reconstruction.id
+        args.trial = reconstruction.trial.id
+
+        # Calculate windowed statistics
+        stats = calculate_windowed_statistics(args, window_sizes)
+        for ws in window_sizes:
+            speeds[ws].append(stats['speeds'][ws])
+            # distances[ws].append(stats['distances'][ws])
+            nonp_trajectories[ws].append(stats['nonp_trajectories'][ws])
+            nonp_postures_mean[ws].append(stats['nonp_postures_mean'][ws])
+            nonp_postures_max[ws].append(stats['nonp_postures_max'][ws])
+
+    # Join outputs
+    for ws in window_sizes:
+        speeds[ws] = np.concatenate(speeds[ws])
+        # distances[ws] = np.concatenate(distances[ws])
+        nonp_trajectories[ws] = np.concatenate(nonp_trajectories[ws])
+        nonp_postures_mean[ws] = np.concatenate(nonp_postures_mean[ws])
+        nonp_postures_max[ws] = np.concatenate(nonp_postures_max[ws])
+
+    # Plot
+    fig = plt.figure(figsize=(len(window_sizes) * 4, 10))
+    gs = GridSpec(2, len(window_sizes))
+
+    for i, ws in enumerate(window_sizes):
+        # Scatter plot of NP-T vs MEAN NP-P
+        ax = fig.add_subplot(gs[0, i])
+        ax.set_title(f'Window size = {ws}')
+        ax.set_xlabel('NP-trajectories')
+        ax.set_ylabel('MEAN(NP-postures)')
+        s = ax.scatter(nonp_trajectories[ws], nonp_postures_mean[ws], c=speeds[ws], s=2, cmap='PRGn',
+                       norm=MidpointNormalize(midpoint=0))
+        cb = fig.colorbar(s)
+        cb.ax.tick_params(labelsize=12)
+        cb.ax.set_ylabel('Speed (mm/s)', rotation=270)
+
+        # Scatter plot of NP-T vs MAX NP-P
+        ax = fig.add_subplot(gs[1, i])
+        ax.set_title(f'Window size = {ws}')
+        ax.set_xlabel('NP-trajectories')
+        ax.set_ylabel('MAX(NP-postures)')
+        s = ax.scatter(nonp_trajectories[ws], nonp_postures_max[ws], c=speeds[ws], s=2, cmap='PRGn',
+                       norm=MidpointNormalize(midpoint=0))
+        cb = fig.colorbar(s)
+        cb.ax.tick_params(labelsize=12)
+        cb.ax.set_ylabel('Speed (mm/s)', rotation=270)
+
+    fig.tight_layout()
+
+    if save_plots:
+        args.trial = None
+        args.reconstruction = None
+        plt.savefig(
+            make_filename('nonplanarity_postures_vs_trajectory_windows', args, excludes=['trial', 'deltas'])
+        )
+    if show_plots:
+        plt.show()
+
+
+def helicity_postures_vs_trajectory_windows():
+    """
+    Plot the helicity of postures vs trajectory windows.
+    """
+    args = get_args()
+    assert args.dataset is not None
+    ds = Dataset.objects.get(id=args.dataset)
+    args.tracking_only = False
+
+    dt = 1 / 25
+    # window_sizes = (np.array([1,4])/dt).astype(np.int32)
+    window_sizes = (np.array([1, 2, 4, 8, 16]) / dt).astype(np.int32)
+    # window_sizes = (np.array([8, 16, 32, 64])/dt).astype(np.int32)
+
+    # Outputs
+    speeds = {ws: [] for ws in window_sizes}
+    Ht = {ws: [] for ws in window_sizes}
+    Hp_mean = {ws: [] for ws in window_sizes}
+    Hp_max = {ws: [] for ws in window_sizes}
+
+    for r_ref in ds.reconstructions:
+        reconstruction = Reconstruction.objects.get(id=r_ref.id)
+        args.reconstruction = reconstruction.id
+        args.trial = reconstruction.trial.id
+
+        # Calculate windowed statistics
+        stats = calculate_windowed_helicity(args, window_sizes)
+        for ws in window_sizes:
+            speeds[ws].append(stats['speeds'][ws])
+            Ht[ws].append(stats['Ht'][ws])
+            Hp_mean[ws].append(stats['Hp_mean'][ws])
+            Hp_max[ws].append(stats['Hp_max'][ws])
+
+    # Join outputs
+    for ws in window_sizes:
+        speeds[ws] = np.concatenate(speeds[ws])
+        Ht[ws] = np.concatenate(Ht[ws])
+        Hp_mean[ws] = np.concatenate(Hp_mean[ws])
+        Hp_max[ws] = np.concatenate(Hp_max[ws])
+
+    # Plot
+    fig = plt.figure(figsize=(len(window_sizes) * 4, 10))
+    gs = GridSpec(2, len(window_sizes))
+
+    for i, ws in enumerate(window_sizes):
+        # Scatter plot of Ht vs MEAN Hp
+        ax = fig.add_subplot(gs[0, i])
+        ax.set_title(f'Window size = {ws}')
+        ax.set_xlabel('Ht')
+        ax.set_ylabel('MEAN(Hp)')
+        s = ax.scatter(Ht[ws], Hp_mean[ws], c=speeds[ws], s=1, cmap='PRGn', norm=MidpointNormalize(midpoint=0))
+        cb = fig.colorbar(s)
+        cb.ax.tick_params(labelsize=12)
+        cb.ax.set_ylabel('Speed (mm/s)', rotation=270)
+
+        # Scatter plot of Ht vs MAX Hp
+        ax = fig.add_subplot(gs[1, i])
+        ax.set_title(f'Window size = {ws}')
+        ax.set_xlabel('Ht')
+        ax.set_ylabel('MAX(Hp)')
+        s = ax.scatter(Ht[ws], Hp_max[ws], c=speeds[ws], s=1, cmap='PRGn', norm=MidpointNormalize(midpoint=0))
+        cb = fig.colorbar(s)
+        cb.ax.tick_params(labelsize=12)
+        cb.ax.set_ylabel('Speed (mm/s)', rotation=270)
+
+    fig.tight_layout()
+
+    if save_plots:
+        args.trial = None
+        args.reconstruction = None
+        plt.savefig(
+            make_filename('helicities_postures_vs_trajectory_windows', args, excludes=['trial', 'deltas'])
         )
     if show_plots:
         plt.show()
@@ -436,9 +590,9 @@ def _generate_or_load_dataset_turn_stats(
     return outputs
 
 
-def speed_vs_nonplanarity_of_turns():
+def speed_vs_nonplanarity_of_turns_and_runs():
     """
-    Plot the dataset turn non-planarities.
+    Plot the dataset non-planarities of turns and runs using approximations.
     """
     args = get_args()
     assert args.dataset is not None
@@ -481,8 +635,9 @@ def speed_vs_nonplanarity_of_turns():
     def funcinv(x_, a_, b_, k_):
         return a_ + k_ / (x_ + b_)
 
-    x = np.linspace(0.0001, 0.4, 1000)
-    # ax.plot(x, funcinv(x, 0.02, 0.001, 0.001), color='red', linewidth=3, linestyle='--')
+    x = np.linspace(0.001, 0.4, 1000)
+    ax_turns.plot(x, funcinv(x, 0.02, 0.001, 0.001), color='red', linewidth=3, linestyle='--')
+    ax_runs.plot(x, funcinv(x, 0.02, 0.001, 0.001), color='red', linewidth=3, linestyle='--')
 
     # ax.set_xlim(right=0.3)
     # ax.set_ylim(top=0.6)
@@ -507,4 +662,6 @@ if __name__ == '__main__':
     # nonplanarity_dataset()
     # nonplanarity_trajectory()
     # nonplanarity_postures_vs_trajectories()
-    speed_vs_nonplanarity_of_turns()
+    # nonplanarity_postures_vs_trajectory_windows()
+    # helicity_postures_vs_trajectory_windows()
+    speed_vs_nonplanarity_of_turns_and_runs()

@@ -91,6 +91,8 @@ def get_args(
                             help='Minimum speed of forward frames before counting a forward locomotion section.')
         parser.add_argument('--min-reversal-frames', type=int, default=25,
                             help='Minimum number of reversal frames to use to identify a manoeuvre.')
+        parser.add_argument('--min-reversal-distance', type=float, default=0.,
+                            help='Minimum reversal distance to use to identify a manoeuvre.')
         parser.add_argument('--manoeuvre-window', type=int, default=500,
                             help='Number of frames to include either side of a detected manoeuvre.')
 
@@ -106,6 +108,14 @@ def get_args(
                             help='Min distance between vertices.')
         parser.add_argument('--approx-curvature-height', type=int, default=50,
                             help='Min height of curvature peaks to detect vertices.')
+        parser.add_argument('--approx-run-max-K', type=int, default=50,
+                            help='Max curvature for detecting runs.')
+        parser.add_argument('--approx-min-run-duration', type=int, default=50,
+                            help='Min duration for detecting runs (in frames).')
+        parser.add_argument('--approx-min-run-distance', type=float,
+                            help='Min distance for detecting runs.')
+        parser.add_argument('--approx-min-run-speed', type=float,
+                            help='Min speed for detecting runs.')
         parser.add_argument('--approx-max-attempts', type=int, default=50,
                             help='Max attempts to find an approximation.')
 
