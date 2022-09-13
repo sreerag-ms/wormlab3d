@@ -1080,6 +1080,8 @@ class Midline3DFinder:
             )
 
             # Generate targets with added residuals
+            if not p.use_detection_masks:
+                detection_masks = [torch.ones_like(dmd) for dmd in detection_masks]
             masks_target_residuals = generate_residual_targets(masks_target, masks, detection_masks)
 
             # Update HT data

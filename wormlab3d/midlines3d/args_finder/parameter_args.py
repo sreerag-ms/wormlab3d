@@ -20,6 +20,7 @@ class ParameterArgs(BaseArgs):
             window_image_diff_threshold: float = 3e3,
             use_master: bool = True,
             masks_threshold: float = 0.4,
+            use_detection_masks: bool = True,
             render_mode: str = RENDER_MODE_GAUSSIANS,
             second_render_prob: float = 0.5,
             filter_size: int = None,
@@ -114,6 +115,7 @@ class ParameterArgs(BaseArgs):
         self.window_image_diff_threshold = window_image_diff_threshold
         self.use_master = use_master
         self.masks_threshold = masks_threshold
+        self.use_detection_masks = use_detection_masks
         self.render_mode = render_mode
         self.second_render_prob = second_render_prob
         if filter_size == 0:
@@ -287,6 +289,8 @@ class ParameterArgs(BaseArgs):
                            help='Optimise a single parameter set for the full window. Default = True.')
         group.add_argument('--masks-threshold', type=float, default=0.4,
                            help='Threshold value to use for binarising the frame images. Default=0.4.')
+        group.add_argument('--use-detection-masks', type=str2bool, default=True,
+                           help='Use detection masks limiting the target to just around the current curve. Default=True.')
         group.add_argument('--render-mode', type=str, default=RENDER_MODE_GAUSSIANS, choices=RENDER_MODES,
                            help='How to render the points, either as gaussian blobs (gaussians) or as circles (circles). Default=gaussians.')
         group.add_argument('--second-render-prob', type=float, default=0.5,

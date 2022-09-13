@@ -38,6 +38,7 @@ class MFParameters(Document):
     window_image_diff_threshold = FloatField()
     use_master = BooleanField()
     masks_threshold = FloatField()
+    use_detection_masks = BooleanField(default=True)
     render_mode = StringField(choices=RENDER_MODES)
     second_render_prob = FloatField()
     filter_size = IntField()
@@ -75,7 +76,7 @@ class MFParameters(Document):
 
     frame_skip = IntField()
     n_steps_init = IntField()
-    n_steps_batch_locked = IntField()
+    n_steps_batch_locked = IntField(default=0)
     n_steps_max = IntField()
     convergence_tau_fast = IntField()
     convergence_tau_slow = IntField()
