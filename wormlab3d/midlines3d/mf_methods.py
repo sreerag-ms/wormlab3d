@@ -232,6 +232,7 @@ def _update_frame(
     """
     k1 = m1[:, idx][:, None]
     k2 = m2[:, idx][:, None]
+    h = h[:, None, None]
 
     if direction == 1:
         idx_prev = idx - 1
@@ -278,6 +279,7 @@ def _update_frame_mp(
         idx_prev = idx
         idx_next = idx - 1
         ss = -1
+    h = h[:, None, None]
 
     # Solution at start
     u0 = torch.stack([
@@ -337,6 +339,7 @@ def _update_frame_rk4(
         idx_prev = idx
         idx_next = idx - 1
         ss = -1
+    h = h[:, None, None]
 
     # Solution at start
     u0 = torch.stack([
@@ -457,9 +460,9 @@ def integrate_curvature(
     # Calculate curve coordinates
     X[:, start_idx] = X0
     for i in range(start_idx - 1, -1, -1):
-        X[:, i] = X[:, i + 1] - h * T[:, i]
+        X[:, i] = X[:, i + 1] - h[:, None] * T[:, i]
     for i in range(start_idx + 1, N):
-        X[:, i] = X[:, i - 1] + h * T[:, i - 1]
+        X[:, i] = X[:, i - 1] + h[:, None] * T[:, i - 1]
 
     return X, T, M1
 
