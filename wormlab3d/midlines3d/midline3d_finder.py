@@ -291,10 +291,11 @@ class Midline3DFinder:
         logger.info('Initialising trial state.')
         sa = self.source_args
         ra = self.runtime_args
+        p = self.parameters
         self.trial: Trial = self.reconstruction.trial
 
         # Copy state across from previous reconstruction
-        if self.runtime_args.copy_state is not None:
+        if ra.copy_state is not None:
             copy_state = TrialState(reconstruction=self.reconstruction.copied_from)
         else:
             copy_state = None
@@ -352,18 +353,18 @@ class Midline3DFinder:
 
         # Prepare batch state
         self.frame_batch: List[FrameState] = []
-        mfs = self.master_frame_state if self.parameters.use_master else None
-        for i in range(self.parameters.window_size):
+        mfs = self.master_frame_state if p.use_master else None
+        for i in range(p.window_size):
             if i == 0:
                 frame_num = start_frame
-            elif ra.finetune_mode or self.parameters.window_image_diff_threshold <= 0:
+            elif ra.finetune_mode or p.window_image_diff_threshold <= 0:
                 # Use contiguous batches in finetune mode
                 frame_num += 1
             else:
                 # Try to find a frame with sufficiently different images
                 diff_frame = self.trial.find_next_frame_with_different_images(
                     self.frame_batch[-1].frame_num,
-                    threshold=self.parameters.window_image_diff_threshold,
+                    threshold=p.window_image_diff_threshold,
                     direction=sa.direction
                 )
                 frame_num = diff_frame.frame_num
@@ -383,7 +384,7 @@ class Midline3DFinder:
                     fs.set_state(k, self.frame_batch[0].get_state(k))
 
             # Zero-out the initial curvature-deltas
-            if i > 0 and self.parameters.curvature_mode and self.parameters.curvature_deltas:
+            if i > 0 and p.curvature_mode and p.curvature_deltas:
                 with torch.no_grad():
                     for k in CURVATURE_PARAMETER_NAMES:
                         for v in fs.get_state(k):
@@ -395,7 +396,10 @@ class Midline3DFinder:
         self.last_frame_state: FrameState = None
 
         # Shrunken lengths
-        self.shrunken_lengths = torch.stack(self.master_frame_state.get_state('length')).detach()
+        if p.use_master:
+            self.shrunken_lengths = torch.stack(self.master_frame_state.get_state('length')).detach()
+        else:
+            self.shrunken_lengths = torch.tensor([fs.get_state('length') for fs in self.frame_batch]).detach()
 
     def _init_model(self) -> ProjectRenderScoreModel:
         """
@@ -746,9 +750,26 @@ class Midline3DFinder:
                         prev_frame_state=None if ra.finetune_mode else self.frame_batch[-1],
                         device=self.device,
                     )
+
+                    if not ra.finetune_mode:
+                        # Reduce curvature
+                        if p.curvature_mode and p.curvature_relaxation_factor is not None:
+                            K = f.get_state('curvatures')
+                            with torch.no_grad():
+                                for K_d in K:
+                                    K_d.data = K_d * p.curvature_relaxation_factor
+
+                        # Shrink length
+                        if p.curvature_mode and p.length_shrink_factor is not None:
+                            l = f.get_state('length')
+                            with torch.no_grad():
+                                for d, l_d in enumerate(l):
+                                    l_d.data = l_d * p.length_shrink_factor
+
                     f.update_ht_data_from_mp()
                     new_batch.append(f)
                 self.frame_batch = new_batch
+                self.shrunken_lengths = torch.tensor([fs.get_state('length') for fs in self.frame_batch]).detach()
 
                 # Abort if the new batch is too small
                 if len(self.frame_batch) < w2:
@@ -1129,7 +1150,7 @@ class Midline3DFinder:
                 T_raw=T_raw,
                 M1_raw=M1_raw,
                 points=points,
-                masks_target=mtr_for_loss,
+                masks_target=masks_target_residuals,
                 sigmas=sigmas,
                 exponents=exponents,
                 intensities=intensities,
@@ -1137,8 +1158,8 @@ class Midline3DFinder:
                 camera_exponents=camera_exponents,
                 camera_intensities=camera_intensities,
                 cam_shifts=cam_shifts,
-                masks=masks_for_loss,
-                scores=scores_for_loss,
+                masks=masks,
+                scores=scores,
                 curvatures_smoothed=curvatures_smoothed,
                 points_smoothed=points_smoothed,
                 sigmas_smoothed=sigmas_smoothed,
@@ -1565,10 +1586,18 @@ class Midline3DFinder:
                         # In regrowth phase, linearly grow the length from length_init to length_min
                         elif p.length_regrow_steps is not None \
                                 and self.checkpoint.step_frame < p.length_regrow_steps \
-                                and self.shrunken_lengths[d] < p.length_min:
-                            l = self.shrunken_lengths[d] \
-                                + (p.length_min - self.shrunken_lengths[d]) \
-                                * self.checkpoint.step_frame / p.length_regrow_steps
+                                and (
+                                (p.use_master and self.shrunken_lengths[d] < p.length_min)
+                                or (not p.use_master and self.shrunken_lengths[i, d] < p.length_min)
+                        ):
+                            if p.use_master:
+                                l = self.shrunken_lengths[d] \
+                                    + (p.length_min - self.shrunken_lengths[d]) \
+                                    * self.checkpoint.step_frame / p.length_regrow_steps
+                            else:
+                                l = self.shrunken_lengths[i, d] \
+                                    + (p.length_min - self.shrunken_lengths[i, d]).clamp(min=0) \
+                                    * self.checkpoint.step_frame / p.length_regrow_steps
 
                         # Otherwise, ensure that the worm does not get too long/short.
                         else:
