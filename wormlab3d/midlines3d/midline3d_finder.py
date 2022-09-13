@@ -1129,15 +1129,15 @@ class Midline3DFinder:
             # Update midpoint data
             elif p.curvature_integration == CURVATURE_INTEGRATION_HT:
                 X0 = [
-                    X_raw[d][:, 0, int((2**(p.depth_min + d)) / 2)]
+                    X_raw[d][:, 0, int((2**(p.depth_min + d) - 1) / 2)]
                     for d in range(D)
                 ]
                 T0 = [
-                    T_raw[d][:, 0, int((2**(p.depth_min + d)) / 2)]
+                    T_raw[d][:, 0, int((2**(p.depth_min + d) - 1) / 2)]
                     for d in range(D)
                 ]
                 M10 = [
-                    M1_raw[d][:, 0, int((2**(p.depth_min + d)) / 2)]
+                    M1_raw[d][:, 0, int((2**(p.depth_min + d) - 1) / 2)]
                     for d in range(D)
                 ]
 

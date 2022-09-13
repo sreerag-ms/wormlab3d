@@ -216,7 +216,7 @@ def calculate_curvature(
 
 
 @torch.jit.script
-def _update_frame(
+def _update_frame_euler(
         m1: torch.Tensor,
         m2: torch.Tensor,
         M1: torch.Tensor,
@@ -232,7 +232,7 @@ def _update_frame(
     """
     k1 = m1[:, idx][:, None]
     k2 = m2[:, idx][:, None]
-    h = h[:, None, None]
+    h = h[:, None]
 
     if direction == 1:
         idx_prev = idx - 1
@@ -448,14 +448,14 @@ def integrate_curvature(
         elif integration_algorithm == 'rk4':
             _update_frame_rk4(*args, i, 1)
         else:
-            _update_frame(*args, i, 1)
+            _update_frame_euler(*args, i, 1)
     for i in range(start_idx, 0, -1):
         if integration_algorithm == 'midpoint':
             _update_frame_mp(*args, i, -1)
         elif integration_algorithm == 'rk4':
             _update_frame_rk4(*args, i, -1)
         else:
-            _update_frame(*args, i, -1)
+            _update_frame_euler(*args, i, -1)
 
     # Calculate curve coordinates
     X[:, start_idx] = X0
