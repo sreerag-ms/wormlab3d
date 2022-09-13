@@ -6,7 +6,7 @@ from torch import nn
 
 from wormlab3d import PREPARED_IMAGE_SIZE_DEFAULT
 from wormlab3d.data.model.mf_parameters import RENDER_MODE_GAUSSIANS, RENDER_MODES, CURVATURE_INTEGRATION_MIDPOINT, \
-    CURVATURE_INTEGRATION_HT
+    CURVATURE_INTEGRATION_ALGORITHM_EULER
 from wormlab3d.midlines3d.dynamic_cameras import DynamicCameras
 from wormlab3d.midlines3d.mf_methods import calculate_curvature, integrate_curvature, normalise, smooth_parameter
 
@@ -179,6 +179,7 @@ class ProjectRenderScoreModel(nn.Module):
             curvature_deltas: bool = False,
             curvature_smoothing: bool = True,
             curvature_integration: str = CURVATURE_INTEGRATION_MIDPOINT,
+            curvature_integration_algorithm: str = CURVATURE_INTEGRATION_ALGORITHM_EULER,
             length_min: float = 0.5,
             length_max: float = 2,
             curvature_max: float = 2.,
@@ -204,6 +205,7 @@ class ProjectRenderScoreModel(nn.Module):
         self.curvature_deltas = curvature_deltas
         self.curvature_smoothing = curvature_smoothing
         self.midpoint_integration = curvature_integration == CURVATURE_INTEGRATION_MIDPOINT
+        self.curvature_integration_algorithm = curvature_integration_algorithm
         self.length_min = length_min
         self.length_max = length_max
         self.curvature_max = curvature_max
@@ -407,13 +409,16 @@ class ProjectRenderScoreModel(nn.Module):
 
                     if self.midpoint_integration:
                         # Integrate the curvature to get the midline coordinates
-                        Xc_d, Tc_d, M1c_d = integrate_curvature(X0_d, T0_d, length_d, curvatures_d, M10_d)
+                        Xc_d, Tc_d, M1c_d = integrate_curvature(X0_d, T0_d, length_d, curvatures_d, M10_d,
+                                                                integration_algorithm=self.curvature_integration_algorithm)
 
                         # Rebuild it again from the head and the tail
                         Xh_d, Th_d, M1h_d = integrate_curvature(Xc_d[:, 1], Tc_d[:, 1], length_d, curvatures_d,
-                                                                M1c_d[:, 1], start_idx=1)
+                                                                M1c_d[:, 1], start_idx=1,
+                                                                integration_algorithm=self.curvature_integration_algorithm)
                         Xt_d, Tt_d, M1t_d = integrate_curvature(Xc_d[:, -2], Tc_d[:, -2], length_d, curvatures_d,
-                                                                M1c_d[:, -2], start_idx=N - 2)
+                                                                M1c_d[:, -2], start_idx=N - 2,
+                                                                integration_algorithm=self.curvature_integration_algorithm)
 
                         # Use the average of the head and tail curves
                         points_d = (Xh_d + Xt_d) / 2
@@ -425,9 +430,11 @@ class ProjectRenderScoreModel(nn.Module):
 
                         # Build the curves from head and tail
                         Xh_d, Th_d, M1h_d = integrate_curvature(X0ht_d[:, 0], T0ht_d[:, 0], length_d, curvatures_d,
-                                                                M10ht_d[:, 0], start_idx=0)
+                                                                M10ht_d[:, 0], start_idx=0,
+                                                                integration_algorithm=self.curvature_integration_algorithm)
                         Xt_d, Tt_d, M1t_d = integrate_curvature(X0ht_d[:, 1], T0ht_d[:, 1], length_d, curvatures_d,
-                                                                M10ht_d[:, 1], start_idx=N - 1)
+                                                                M10ht_d[:, 1], start_idx=N - 1,
+                                                                integration_algorithm=self.curvature_integration_algorithm)
 
                         # Build again from the midpoint
                         N2 = int((N - 1) / 2)
@@ -435,7 +442,8 @@ class ProjectRenderScoreModel(nn.Module):
                         Tht_d = (Th_d + Tt_d) / 2
                         M1ht_d = (M1h_d + M1t_d) / 2
                         Xc_d, Tc_d, M1c_d = integrate_curvature(points_d[:, N2], Tht_d[:, N2], length_d, curvatures_d,
-                                                                M1ht_d[:, N2], start_idx=N2)
+                                                                M1ht_d[:, N2], start_idx=N2,
+                                                                integration_algorithm=self.curvature_integration_algorithm)
 
                     # Log centre, head and tail curves
                     X_raw_d = torch.stack([Xc_d, Xh_d, Xt_d], dim=1)

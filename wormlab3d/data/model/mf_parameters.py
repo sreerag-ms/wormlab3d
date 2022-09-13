@@ -18,6 +18,15 @@ CURVATURE_INTEGRATION_OPTIONS = [
     CURVATURE_INTEGRATION_HT
 ]
 
+CURVATURE_INTEGRATION_ALGORITHM_EULER = 'euler'
+CURVATURE_INTEGRATION_ALGORITHM_MIDPOINT = 'midpoint'
+CURVATURE_INTEGRATION_ALGORITHM_RK4 = 'rk4'
+CURVATURE_INTEGRATION_ALGORITHM_OPTIONS = [
+    CURVATURE_INTEGRATION_ALGORITHM_EULER,
+    CURVATURE_INTEGRATION_ALGORITHM_MIDPOINT,
+    CURVATURE_INTEGRATION_ALGORITHM_RK4,
+]
+
 
 class MFParameters(Document):
     created = DateTimeField(required=True, default=datetime.datetime.utcnow)
@@ -43,7 +52,10 @@ class MFParameters(Document):
     curvature_max = FloatField()
     curvature_relaxation_factor = FloatField()
     curvature_smoothing = BooleanField()
-    curvature_integration = StringField(choices=CURVATURE_INTEGRATION_OPTIONS, default=CURVATURE_INTEGRATION_MIDPOINT)
+    curvature_integration = StringField(choices=CURVATURE_INTEGRATION_OPTIONS,
+                                        default=CURVATURE_INTEGRATION_MIDPOINT)
+    curvature_integration_algorithm = StringField(choices=CURVATURE_INTEGRATION_ALGORITHM_OPTIONS,
+                                                  default=CURVATURE_INTEGRATION_ALGORITHM_EULER)
 
     length_min = FloatField()
     length_max = FloatField()

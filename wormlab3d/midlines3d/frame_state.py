@@ -428,7 +428,8 @@ class FrameState(nn.Module):
                 T0s[i].unsqueeze(0),
                 lengths[i].unsqueeze(0),
                 K.unsqueeze(0),
-                M10=M10s[i].unsqueeze(0)
+                M10=M10s[i].unsqueeze(0),
+                integration_algorithm=mp.curvature_integration_algorithm
             )
             self.register_buffer(f'points_{d}', X_d[0].detach())
             self.register_buffer(f'curvatures_smoothed_{d}', K.detach())
@@ -444,7 +445,8 @@ class FrameState(nn.Module):
                 lengths[i].unsqueeze(0),
                 K.unsqueeze(0),
                 M10=M10ht[0][0].unsqueeze(0),
-                start_idx=0
+                start_idx=0,
+                integration_algorithm=mp.curvature_integration_algorithm
             )
             Xt, Tt, M1t = integrate_curvature(
                 X0ht[0][1].unsqueeze(0),
@@ -452,7 +454,8 @@ class FrameState(nn.Module):
                 lengths[i].unsqueeze(0),
                 K.unsqueeze(0),
                 M10=M10ht[0][1].unsqueeze(0),
-                start_idx=N - 1
+                start_idx=N - 1,
+                integration_algorithm=mp.curvature_integration_algorithm
             )
             assert torch.allclose(X_d, Xh, atol=1e-2)
             assert torch.allclose(X_d, Xt, atol=1e-2)
@@ -653,7 +656,8 @@ class FrameState(nn.Module):
                 self.T0[i].unsqueeze(0),
                 self.length[i].unsqueeze(0),
                 self.curvatures[i].unsqueeze(0),
-                self.M10[i].unsqueeze(0)
+                self.M10[i].unsqueeze(0),
+                integration_algorithm=mp.curvature_integration_algorithm
             )
 
             X0ht.append(torch.stack([X_d[0, 0], X_d[0, -1]]))
@@ -667,7 +671,8 @@ class FrameState(nn.Module):
                 self.length[i].unsqueeze(0),
                 self.curvatures[i].unsqueeze(0),
                 M10=M10ht[0][0].unsqueeze(0),
-                start_idx=0
+                start_idx=0,
+                integration_algorithm=mp.curvature_integration_algorithm
             )
             Xt, Tt, M1t = integrate_curvature(
                 X0ht[i][1].unsqueeze(0),
@@ -675,7 +680,8 @@ class FrameState(nn.Module):
                 self.length[i].unsqueeze(0),
                 self.curvatures[i].unsqueeze(0),
                 M10=M10ht[i][1].unsqueeze(0),
-                start_idx=N - 1
+                start_idx=N - 1,
+                integration_algorithm=mp.curvature_integration_algorithm
             )
 
             L_Xh = (X_d - Xh).abs().max()

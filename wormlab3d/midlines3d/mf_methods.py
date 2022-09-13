@@ -228,6 +228,7 @@ def _update_frame(
 ):
     """
     Update the orthonormal frame (T/M1/M2) from idx moving either forwards or backwards along the curve.
+    Uses one-step Euler.
     """
     k1 = m1[:, idx][:, None]
     k2 = m2[:, idx][:, None]
@@ -255,6 +256,139 @@ def _update_frame(
 
 
 @torch.jit.script
+def _update_frame_mp(
+        m1: torch.Tensor,
+        m2: torch.Tensor,
+        M1: torch.Tensor,
+        M2: torch.Tensor,
+        T: torch.Tensor,
+        h: torch.Tensor,
+        idx: int,
+        direction: int,
+):
+    """
+    Update the orthonormal frame (T/M1/M2) from idx moving either forwards or backwards along the curve.
+    Uses two-step Midpoint method.
+    """
+    if direction == 1:
+        idx_prev = idx - 1
+        idx_next = idx
+        ss = 1
+    else:
+        idx_prev = idx
+        idx_next = idx - 1
+        ss = -1
+
+    # Solution at start
+    u0 = torch.stack([
+        T[:, idx_prev].clone(),
+        M1[:, idx_prev].clone(),
+        M2[:, idx_prev].clone()
+    ], dim=1)
+
+    # Evaluate gradient at start and take half-way step
+    k10 = m1[:, idx_prev]
+    k20 = m2[:, idx_prev]
+    z = torch.zeros_like(k10)
+    F0 = torch.stack([
+        torch.stack([z, k10, k20], dim=-1),
+        torch.stack([-k10, z, z], dim=-1),
+        torch.stack([-k20, z, z], dim=-1),
+    ], dim=1)
+    uh = u0 + ss * 0.5 * h * F0 @ u0
+
+    # Evaluate gradient at midpoint and take full step
+    k1h = (m1[:, idx_prev] + m1[:, idx_next]) / 2
+    k2h = (m2[:, idx_prev] + m2[:, idx_next]) / 2
+    Fh = torch.stack([
+        torch.stack([z, k1h, k2h], dim=-1),
+        torch.stack([-k1h, z, z], dim=-1),
+        torch.stack([-k2h, z, z], dim=-1),
+    ], dim=1)
+    u1 = u0 + ss * h * Fh @ uh
+
+    # Unpack and normalise
+    T_tilde, M1_tilde, M2_tilde = u1[:, 0], u1[:, 1], u1[:, 2]
+    T[:, idx_next] = normalise(T_tilde)
+    M1[:, idx_next] = normalise(M1_tilde)
+    M2[:, idx_next] = normalise(M2_tilde)
+
+
+@torch.jit.script
+def _update_frame_rk4(
+        m1: torch.Tensor,
+        m2: torch.Tensor,
+        M1: torch.Tensor,
+        M2: torch.Tensor,
+        T: torch.Tensor,
+        h: torch.Tensor,
+        idx: int,
+        direction: int,
+):
+    """
+    Update the orthonormal frame (T/M1/M2) from idx moving either forwards or backwards along the curve.
+    Uses Runge-Kutta-4 method.
+    """
+    if direction == 1:
+        idx_prev = idx - 1
+        idx_next = idx
+        ss = 1
+    else:
+        idx_prev = idx
+        idx_next = idx - 1
+        ss = -1
+
+    # Solution at start
+    u0 = torch.stack([
+        T[:, idx_prev].clone(),
+        M1[:, idx_prev].clone(),
+        M2[:, idx_prev].clone()
+    ], dim=1)
+
+    # Evaluate gradient at start and take half-way step
+    k11 = m1[:, idx_prev]
+    k21 = m2[:, idx_prev]
+    z = torch.zeros_like(k11)
+    F1 = torch.stack([
+        torch.stack([z, k11, k21], dim=-1),
+        torch.stack([-k11, z, z], dim=-1),
+        torch.stack([-k21, z, z], dim=-1),
+    ], dim=1)
+    g1 = F1 @ u0
+    uh1 = u0 + ss * 0.5 * h * g1
+
+    k12 = (m1[:, idx_prev] + m1[:, idx_next]) / 2
+    k22 = (m2[:, idx_prev] + m2[:, idx_next]) / 2
+    F2 = torch.stack([
+        torch.stack([z, k12, k22], dim=-1),
+        torch.stack([-k12, z, z], dim=-1),
+        torch.stack([-k22, z, z], dim=-1),
+    ], dim=1)
+    g2 = F2 @ uh1
+    uh2 = u0 + ss * 0.5 * h * g2
+
+    g3 = F2 @ uh2
+    uh3 = u0 + ss * h * g3
+
+    k14 = m1[:, idx_next]
+    k24 = m2[:, idx_next]
+    F4 = torch.stack([
+        torch.stack([z, k14, k24], dim=-1),
+        torch.stack([-k14, z, z], dim=-1),
+        torch.stack([-k24, z, z], dim=-1),
+    ], dim=1)
+    g4 = F4 @ uh3
+
+    u1 = u0 + ss * h / 6 * (g1 + 2 * g2 + 2 * g3 + g4)
+
+    # Unpack and normalise
+    T_tilde, M1_tilde, M2_tilde = u1[:, 0], u1[:, 1], u1[:, 2]
+    T[:, idx_next] = normalise(T_tilde)
+    M1[:, idx_next] = normalise(M1_tilde)
+    M2[:, idx_next] = normalise(M2_tilde)
+
+
+@torch.jit.script
 def integrate_curvature(
         X0: torch.Tensor,
         T0: torch.Tensor,
@@ -262,6 +396,7 @@ def integrate_curvature(
         K: torch.Tensor,
         M10: Optional[torch.Tensor] = None,
         start_idx: Optional[int] = None,
+        integration_algorithm: str = 'euler'
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Starting from vertex point X0 with tangent T0 and optional frame direction M10 at start_idx,
@@ -283,13 +418,13 @@ def integrate_curvature(
     M2 = torch.zeros(shape, device=device)
 
     # Step size to build a curve of length l
-    h = (l / (N - 1))[:, None]
+    h = l / (N - 1)  # [:, None]
 
     # Curvature is in units assuming length 1
     # m1 = K[:, :, 0] / l[:, None]
     # m2 = K[:, :, 1] / l[:, None]
-    m1 = K[:, :, 0] / h
-    m2 = K[:, :, 1] / h
+    m1 = K[:, :, 0] / h[:, None]
+    m2 = K[:, :, 1] / h[:, None]
 
     # Initial frame values
     T0 = normalise(T0)
@@ -303,10 +438,21 @@ def integrate_curvature(
     M2[:, start_idx] = torch.linalg.cross(T[:, start_idx].clone(), M1[:, start_idx].clone())
 
     # Calculate orthonormal frame from the middle-out
+    args = (m1, m2, M1, M2, T, h)
     for i in range(start_idx + 1, N):
-        _update_frame(m1, m2, M1, M2, T, h, i, 1)
+        if integration_algorithm == 'midpoint':
+            _update_frame_mp(*args, i, 1)
+        elif integration_algorithm == 'rk4':
+            _update_frame_rk4(*args, i, 1)
+        else:
+            _update_frame(*args, i, 1)
     for i in range(start_idx, 0, -1):
-        _update_frame(m1, m2, M1, M2, T, h, i, -1)
+        if integration_algorithm == 'midpoint':
+            _update_frame_mp(*args, i, -1)
+        elif integration_algorithm == 'rk4':
+            _update_frame_rk4(*args, i, -1)
+        else:
+            _update_frame(*args, i, -1)
 
     # Calculate curve coordinates
     X[:, start_idx] = X0

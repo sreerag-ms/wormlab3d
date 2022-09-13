@@ -415,6 +415,7 @@ class Midline3DFinder:
             curvature_deltas=p.curvature_deltas,
             curvature_smoothing=p.curvature_smoothing,
             curvature_integration=p.curvature_integration,
+            curvature_integration_algorithm=p.curvature_integration_algorithm,
             length_min=p.length_min,
             length_max=p.length_max,
             curvature_max=p.curvature_max,
@@ -946,6 +947,7 @@ class Midline3DFinder:
                         length[d].unsqueeze(0),
                         curvatures_d.unsqueeze(0),
                         M10[d].unsqueeze(0),
+                        integration_algorithm=p.curvature_integration_algorithm,
                     )
 
                     # Get the new position, tangent and frame values at the new midpoint

@@ -1,7 +1,8 @@
 from argparse import ArgumentParser, _ArgumentGroup
 
 from wormlab3d.data.model.mf_parameters import MFParameters, RENDER_MODE_GAUSSIANS, RENDER_MODES, \
-    CURVATURE_INTEGRATION_MIDPOINT, CURVATURE_INTEGRATION_OPTIONS
+    CURVATURE_INTEGRATION_MIDPOINT, CURVATURE_INTEGRATION_OPTIONS, CURVATURE_INTEGRATION_ALGORITHM_EULER, \
+    CURVATURE_INTEGRATION_ALGORITHM_OPTIONS
 from wormlab3d.nn.args.base_args import BaseArgs
 from wormlab3d.nn.args.optimiser_args import OPTIMISER_ALGORITHMS, LOSS_MSE, OPTIMISER_ADAM, LOSSES
 from wormlab3d.toolkit.util import str2bool
@@ -34,6 +35,7 @@ class ParameterArgs(BaseArgs):
             curvature_relaxation_factor: float = None,
             curvature_smoothing: bool = True,
             curvature_integration: str = CURVATURE_INTEGRATION_MIDPOINT,
+            curvature_integration_algorithm: str = CURVATURE_INTEGRATION_ALGORITHM_EULER,
 
             length_min: float = None,
             length_max: float = None,
@@ -140,6 +142,7 @@ class ParameterArgs(BaseArgs):
             assert not curvature_deltas, 'Only midpoint integration supported for curvature-deltas!'
             assert not clamp_X0, 'clamp-X0 is only supported for midpoint integration!'
             assert not curvature_smoothing, 'curvature-smoothing is only supported for midpoint integration!'
+        self.curvature_integration_algorithm = curvature_integration_algorithm
 
         if not curvature_mode:
             length_min = None
@@ -312,7 +315,10 @@ class ParameterArgs(BaseArgs):
         group.add_argument('--curvature-integration', type=str,
                            default=CURVATURE_INTEGRATION_MIDPOINT, choices=CURVATURE_INTEGRATION_OPTIONS,
                            help='Integrate using a single midpoint-out ("mp", default) or from both ends ("ht").')
-
+        group.add_argument('--curvature-integration-algorithm', type=str,
+                           default=CURVATURE_INTEGRATION_ALGORITHM_EULER,
+                           choices=CURVATURE_INTEGRATION_ALGORITHM_OPTIONS,
+                           help='Numerical method for integrating the curve; euler (default), midpoint or rk4.')
         group.add_argument('--length-min', type=float,
                            help='Minimum worm length (only used in curvature mode). Default=0.5.')
         group.add_argument('--length-max', type=float,
