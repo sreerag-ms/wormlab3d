@@ -5,6 +5,7 @@ from typing import List, Dict
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.gridspec import GridSpec
+from scipy.optimize import curve_fit, minimize
 
 from simple_worm.plot3d import MidpointNormalize
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
@@ -21,7 +22,7 @@ from wormlab3d.trajectories.util import get_deltas_from_args
 
 show_plots = True
 save_plots = True
-img_extension = 'png'
+img_extension = 'svg'
 
 
 def make_filename(method: str, args: Namespace, excludes: List[str] = None):
@@ -600,49 +601,79 @@ def speed_vs_nonplanarity_of_turns_and_runs():
     ds = Dataset.objects.get(id=args.dataset)
     # args.dataset = None
     dt = 1 / 25
-    ws = 5
+    ws = 10
     args.window_size = int(ws / dt)
 
     stats = _generate_or_load_dataset_turn_stats(args, ds, rebuild_cache=False)
 
+    # Set up plots
+    plt.rc('axes', titlesize=7)  # fontsize of the title
+    plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
+    plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+    plt.rc('legend', fontsize=5)  # fontsize of the legend
+
+    gs = GridSpec(
+        nrows=1,
+        ncols=1,
+        wspace=0,
+        hspace=0,
+        top=0.91,
+        bottom=0.15,
+        left=0.16,
+        right=0.97,
+    )
+    fig = plt.figure(figsize=(2.56, 2.13))
+
     # Plot correlations
-    fig, axes = plt.subplots(1, 2, figsize=(8, 4))
-    fig.suptitle(f'Speed vs non-planarity. Window={ws}s.')
-    scatter_args = dict(s=10, alpha=0.4, linewidths=0)
+    scatter_args = dict(s=4, alpha=0.3)
+    ax = fig.add_subplot(gs[0, 0])
+    ax.set_title('Speed vs non-planarity')
+    ax.set_xlabel('Non-planarity')
+    ax.set_ylabel('Speed (mm/s)')
+    ax.scatter(stats['nonp'], stats['speeds'], c='fuchsia', marker='o', facecolors='none', label='Turns',
+               **scatter_args)
+    ax.scatter(stats['nonp_runs'], stats['run_speeds'], c='lawngreen', marker='x', label='Runs', **scatter_args)
+    legend = ax.legend()
+    legend.legendHandles[0].set_sizes([10.0])
+    legend.legendHandles[0].set_alpha(1.)
+    legend.legendHandles[0].set_facecolors('none')
+    legend.legendHandles[0].set_edgecolors('purple')
+    legend.legendHandles[1].set_sizes([10.0])
+    legend.legendHandles[1].set_alpha(1.)
+    legend.legendHandles[1].set_edgecolors('green')
 
-    ax_turns = axes[0]
-    ax_turns.set_title('Turns.')
-    ax_turns.set_xlabel('Non-planarity')
-    ax_turns.set_ylabel('Speed (mm/s)')
-    s = ax_turns.scatter(stats['nonp'], stats['speeds'], c=stats['distances'], **scatter_args)
-    cb = fig.colorbar(s, ax=ax_turns)
-    cb.solids.set(alpha=1)
-    cb.set_label('Distance (mm)', rotation=270, labelpad=15)
-
-    ax_runs = axes[1]
-    ax_runs.set_title('Runs.')
-    ax_runs.set_xlabel('Non-planarity')
-    ax_runs.set_ylabel('Speed (mm/s)')
-    s = ax_runs.scatter(stats['nonp_runs'], stats['run_speeds'], c=stats['run_distances'], **scatter_args)
-    cb = fig.colorbar(s, ax=ax_runs)
-    cb.solids.set(alpha=1)
-    cb.set_label('Distance (mm)', rotation=270, labelpad=15)
-
-    # ax.set_yscale('log')
-    # ax.set_xscale('log')
-
-    # Add fit line
+    # Add fit lines
     def funcinv(x_, a_, b_, k_):
         return a_ + k_ / (x_ + b_)
 
-    x = np.linspace(0.001, 0.4, 1000)
-    ax_turns.plot(x, funcinv(x, 0.02, 0.001, 0.001), color='red', linewidth=3, linestyle='--')
-    ax_runs.plot(x, funcinv(x, 0.02, 0.001, 0.001), color='red', linewidth=3, linestyle='--')
+    # Filter the data
+    z_turns = stats['nonp'] * stats['speeds']
+    idxs_turns = np.argsort(z_turns)[-100:]
+    nonp_turns = stats['nonp'][idxs_turns]
+    speeds_turns = stats['speeds'][idxs_turns]
+    z_runs = stats['nonp_runs'] * stats['run_speeds']
+    idxs_runs = np.argsort(z_runs)[-100:]
+    nonp_runs = stats['nonp_runs'][idxs_runs]
+    speeds_runs = stats['run_speeds'][idxs_runs]
 
-    # ax.set_xlim(right=0.3)
-    # ax.set_ylim(top=0.6)
+    bounds = ([-np.inf, 0, -np.inf], [np.inf, np.inf, np.inf])
+    p_turns = curve_fit(funcinv, nonp_turns, speeds_turns, bounds=bounds)[0]
+    p_runs = curve_fit(funcinv, nonp_runs, speeds_runs, bounds=bounds)[0]
 
-    fig.tight_layout()
+    def func_min_turns(x0_):
+        return (stats['speeds'].max() - funcinv(x0_, *p_turns))**2
+
+    def func_min_runs(x0_):
+        return (stats['run_speeds'].max() - funcinv(x0_, *p_runs))**2
+
+    res_turns = minimize(func_min_turns, 0.)
+    x_turns = np.linspace(res_turns.x[0], stats['nonp'].max(), 1000)
+    ax.plot(x_turns, funcinv(x_turns, *p_turns), color='purple', linewidth=3, linestyle='--')
+
+    res_runs = minimize(func_min_runs, 0.)
+    x_runs = np.linspace(res_runs.x[0], stats['nonp_runs'].max() * 1.2, 1000)
+    ax.plot(x_runs, funcinv(x_runs, *p_runs), color='green', linewidth=3, linestyle=':')
 
     # Save / show
     if save_plots:
