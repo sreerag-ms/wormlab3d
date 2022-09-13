@@ -9,7 +9,7 @@ from matplotlib import animation
 from matplotlib.axes import Axes, GridSpec
 from mayavi import mlab
 from mpl_toolkits.mplot3d.art3d import Line3DCollection, Poly3DCollection
-from scipy.stats import levy_stable
+from scipy.stats import levy_stable, cauchy
 
 from simple_worm.frame import FrameSequenceNumpy
 from simple_worm.plot3d import FrameArtist, Arrow3D, MidpointNormalize
@@ -24,7 +24,7 @@ from wormlab3d.trajectories.manoeuvres import get_manoeuvres, get_forward_durati
 from wormlab3d.trajectories.util import calculate_speeds
 
 animate = False
-show_plots = False
+show_plots = True
 save_plots = True
 img_extension = 'svg'
 fps_anim = 25
@@ -692,62 +692,96 @@ def plot_dataset_reversal_durations_vs_prev_next_traj_angles():
             durations.append(m['reversal_duration'] / fps)
             distances.append(m['reversal_distance'])
 
-        break
-
     # Set up plots
+    plt.rc('axes', titlesize=7)  # fontsize of the title
+    plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
+    plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+    plt.rc('legend', fontsize=5)  # fontsize of the legend
+
     gs = GridSpec(
         nrows=2,
         ncols=2,
-        width_ratios=(7, 2),
-        height_ratios=(2, 5),
+        width_ratios=(4, 2),
+        height_ratios=(2, 3),
         wspace=0,
         hspace=0,
         top=0.93,
-        bottom=0.08,
-        left=0.08,
-        right=0.98,
+        bottom=0.12,
+        left=0.12,
+        right=0.95,
     )
-    fig = plt.figure(figsize=(8, 8))
-    fig.suptitle('Angles between incoming and outgoing sections.')
+    fig = plt.figure(figsize=(2.94, 2.176))
+    fig.suptitle('Angles between pre- and post-manoeuvre trajectories.', fontsize=6)
 
     cmap_traj = plt.get_cmap('autumn_r')
     cmap_planar = plt.get_cmap('winter_r')
+    colour_traj = cmap_traj(.6)
+    colour_planar = cmap_planar(.6)
 
     # Scatter plot
     ax_scat = fig.add_subplot(gs[1, 0])
-    s = ax_scat.scatter(traj_angles, distances, c=durations, marker='x', cmap=cmap_traj, label='Trajectory angles')
-    s2 = ax_scat.scatter(planar_angles, distances, c=durations, marker='o', cmap=cmap_planar, label='Planar angles')
+    scatter_args = dict(s=10, c=durations, alpha=0.6)
+    s = ax_scat.scatter(traj_angles, distances, marker='x', cmap=cmap_traj, label='Trajectory angles', **scatter_args)
+    s2 = ax_scat.scatter(planar_angles, distances, marker='o', cmap=cmap_planar, label='Planar angles', **scatter_args)
     ax_scat.set_xlabel('Angle')
     ax_scat.set_xlim(left=-0.1, right=np.pi + 0.1)
     ax_scat.set_xticks([0, np.pi])
     ax_scat.set_xticklabels(['0', '$\pi$'])
+    ax_scat.xaxis.set_label_coords(.5, -.1)
     ax_scat.set_ylabel('Reversal distance (mm)')
+    ax_scat.yaxis.set_label_coords(-.15, .5)
+    ax_scat.set_yticks([0.5, 1, 1.5])
     legend = ax_scat.legend()
-    legend.legendHandles[0].set_color(cmap_traj(.8))
-    legend.legendHandles[1].set_color(cmap_planar(.8))
+    legend.legendHandles[0].set_color(colour_traj)
+    legend.legendHandles[0].set_sizes([6.0])
+    legend.legendHandles[0].set_alpha(1.)
+    legend.legendHandles[1].set_color(colour_planar)
+    legend.legendHandles[1].set_sizes([6.0])
+    legend.legendHandles[1].set_alpha(1.)
     ax_scat.spines['top'].set_visible(False)
     ax_scat.spines['right'].set_visible(False)
 
     ax_hist_angles = fig.add_subplot(gs[0, 0], sharex=ax_scat)
-    ax_hist_angles.hist([traj_angles, planar_angles], color=['red', 'blue'], **hist_args)
+    ax_hist_angles.hist([traj_angles, planar_angles],
+                        color=[colour_traj, colour_planar], **hist_args)
     ax_hist_angles.tick_params(axis='x', bottom=False, labelbottom=False)
     ax_hist_angles.spines['bottom'].set(linestyle='--', color='grey')
+    ax_hist_angles.set_ylabel('Density')
+    ax_hist_angles.set_yticks([0, 0.2, 0.4])
+    ax_hist_angles.yaxis.set_label_coords(-.15, .5)
 
-    ax_histy = fig.add_subplot(gs[1, 1], sharey=ax_scat)
-    ax_histy.hist(distances, orientation='horizontal', color='green', **hist_args)
-    ax_histy.tick_params(axis='y', left=False, labelleft=False)
-    ax_histy.spines['left'].set(linestyle='--', color='grey')
+    ax_hist_dists = fig.add_subplot(gs[1, 1], sharey=ax_scat)
+    ax_hist_dists.hist(distances, orientation='horizontal', color='green', **hist_args)
+    ax_hist_dists.tick_params(axis='y', left=False, labelleft=False)
+    ax_hist_dists.spines['left'].set(linestyle='--', color='grey')
+    ax_hist_dists.set_xlabel('Density')
+    ax_hist_dists.set_xticks([0, 2])
+    ax_hist_dists.xaxis.set_label_coords(.5, -.15)
 
     ax_cb = fig.add_subplot(gs[0, 1])
-    cax = ax_cb.inset_axes([0.06, 0.06, 0.12, 0.88], transform=ax_cb.transAxes)
-    cb = fig.colorbar(s, ax=ax_cb, cax=cax)
-    # cb.set_label('Reversal\nDuration (s)', rotation=270, labelpad=15)
-    cax2 = ax_cb.inset_axes([0.18, 0.06, 0.12, 0.88], transform=ax_cb.transAxes)
+    cax = ax_cb.inset_axes([0.04, 0.02, 0.14, 0.6], transform=ax_cb.transAxes)
+    cax.spines['right'].set_visible(False)
+    cb = fig.colorbar(s, ax=ax_cb, cax=cax, ticks=None)
+    cb.set_ticks([])
+    cb.set_label('Reversal\nDuration (s)', rotation=270, labelpad=35, fontsize=5)
+    cb.outline.set_visible(False)
+    cb.solids.set(alpha=1)
+    cax2 = ax_cb.inset_axes([0.18, 0.02, 0.14, 0.6], transform=ax_cb.transAxes)
+    cax2.spines['left'].set_visible(False)
     cb2 = fig.colorbar(s2, ax=ax_cb, cax=cax2)
-    cb2.set_label('Reversal\nDuration (s)', rotation=270, labelpad=15)
+    cb2.outline.set_visible(False)
+    cb2.solids.set(alpha=1)
+    cb2.set_ticks([5, 15, 25])
     ax_cb.spines['left'].set_visible(False)
     ax_cb.spines['bottom'].set_visible(False)
     ax_cb.axis('off')
+
+    handles = legend.legendHandles
+    labels = [t.get_text() for t in legend.get_texts()]
+    ax_cb.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.83, 0.96),
+                 bbox_transform=fig.transFigure)
+    legend.remove()
 
     if save_plots:
         fn = START_TIMESTAMP \
@@ -1001,9 +1035,9 @@ def plot_dataset_distances_vs_nonp():
     plt.close(fig)
 
 
-def plot_dataset_run_durations():
+def plot_dataset_run_distances():
     """
-    Plot the distributions of run durations in a dataset.
+    Plot the distributions of run distances in a dataset.
     """
     args = get_args(validate_source=False)
 
@@ -1044,18 +1078,38 @@ def plot_dataset_run_durations():
     # Fit distribution
     logger.info('Fitting distribution.')
     x = np.linspace(min(distances), max(distances), 200)
-    dist = levy_stable(*levy_stable.fit(distances))
+    levy_dist = levy_stable(*levy_stable.fit(distances))
+    cauchy_dist = cauchy(*cauchy.fit(distances))
+
+    # Set up plots
+    plt.rc('axes', titlesize=7)  # fontsize of the title
+    plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
+    plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+    plt.rc('legend', fontsize=5)  # fontsize of the legend
+
+    gs = GridSpec(
+        nrows=1,
+        ncols=1,
+        top=0.92,
+        bottom=0.16,
+        left=0.2,
+        right=0.96,
+    )
+    fig = plt.figure(figsize=(1.74, 2.19))
 
     # Plot correlations
     logger.info('Plotting')
-    fig, ax = plt.subplots(1, figsize=(4, 4))
+    ax = fig.add_subplot(gs[0, 0])
     ax.hist(distances, bins=20, density=True, rwidth=0.9)
-    ax.plot(x, dist.pdf(x))
-    ax.set_title(f'Run distances. Min={args.min_forward_frames / fps:.1f}s.')
+    ax.plot(x, cauchy_dist.pdf(x),
+            label=f'Cauchy fit\n($x_0=${cauchy_dist.args[0]:.1f}, $\gamma=${cauchy_dist.args[1]:.1f})')
+    ax.plot(x, levy_dist.pdf(x),
+            label=f'Levy fit\n($\\alpha=${levy_dist.args[0]:.1f}, $\\beta=${levy_dist.args[1]:.1f})')
+    ax.set_title(f'Run distances ($\geq$ {args.min_forward_frames / fps:.1f}s)')
     ax.set_xlabel('Distance (mm)')
-    ax.set_ylabel('P')
-
-    fig.tight_layout()
+    ax.set_ylabel('Density')
+    ax.legend()
 
     if save_plots:
         fn = START_TIMESTAMP \
@@ -1211,10 +1265,10 @@ if __name__ == '__main__':
     # plot_angles_and_durations_varying_parameters()
     # plot_manoeuvre_rate()
     # plot_dataset_distributions()
-    plot_dataset_reversal_durations_vs_angles()
+    # plot_dataset_reversal_durations_vs_angles()
     # plot_dataset_reversal_durations_vs_prev_next_traj_angles()
     # plot_dataset_speeds_vs_nonp()
-    # plot_dataset_run_durations()
+    plot_dataset_run_distances()
 
     # plot_single_manoeuvre(index=2, plot_mlab_postures=True)
     # plot_single_manoeuvre(frame_num=11400)
