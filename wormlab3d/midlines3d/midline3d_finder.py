@@ -399,7 +399,10 @@ class Midline3DFinder:
         if p.use_master:
             self.shrunken_lengths = torch.stack(self.master_frame_state.get_state('length')).detach()
         else:
-            self.shrunken_lengths = torch.tensor([fs.get_state('length') for fs in self.frame_batch]).detach()
+            self.shrunken_lengths = torch.tensor(
+                [fs.get_state('length') for fs in self.frame_batch],
+                device=self.device
+            ).detach()
 
     def _init_model(self) -> ProjectRenderScoreModel:
         """
@@ -769,7 +772,10 @@ class Midline3DFinder:
                     f.update_ht_data_from_mp()
                     new_batch.append(f)
                 self.frame_batch = new_batch
-                self.shrunken_lengths = torch.tensor([fs.get_state('length') for fs in self.frame_batch]).detach()
+                self.shrunken_lengths = torch.tensor(
+                    [fs.get_state('length') for fs in self.frame_batch],
+                    device=self.device
+                ).detach()
 
                 # Abort if the new batch is too small
                 if len(self.frame_batch) < w2:
