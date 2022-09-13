@@ -75,6 +75,7 @@ class MFParameters(Document):
 
     frame_skip = IntField()
     n_steps_init = IntField()
+    n_steps_batch_locked = IntField()
     n_steps_max = IntField()
     convergence_tau_fast = IntField()
     convergence_tau_slow = IntField()

@@ -56,6 +56,7 @@ class ParameterArgs(BaseArgs):
 
             frame_skip: int = None,
             n_steps_init: int = 5000,
+            n_steps_batch_locked: int = 100,
             n_steps_max: int = 500,
             convergence_tau_fast: int = 10,
             convergence_tau_slow: int = 100,
@@ -206,6 +207,7 @@ class ParameterArgs(BaseArgs):
             frame_skip = None
         self.frame_skip = frame_skip
         self.n_steps_init = n_steps_init
+        self.n_steps_batch_locked = n_steps_batch_locked
         self.n_steps_max = n_steps_max
         self.convergence_tau_fast = convergence_tau_fast
         self.convergence_tau_slow = convergence_tau_slow
@@ -353,6 +355,8 @@ class ParameterArgs(BaseArgs):
                            help='Number of frames to skip between optimisations. Interim frames will populate parameters with linear interpolation.')
         group.add_argument('--n-steps-init', type=int, default=5000,
                            help='Fixed number of steps to train on the first batch/frame.')
+        group.add_argument('--n-steps-batch-locked', type=int, default=0,
+                           help='Number of steps to lock the batch to the first frame.')
         group.add_argument('--n-steps-max', type=int, default=500,
                            help='Maximum number of steps to train on each frame.')
         group.add_argument('--convergence-tau-fast', type=int, default=10,

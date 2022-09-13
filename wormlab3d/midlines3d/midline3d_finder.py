@@ -847,6 +847,13 @@ class Midline3DFinder:
             # Calculate losses and optimise
             loss, loss_global, losses_depths, stats = self._train_step()
 
+            # At the start of the initialisation stage lock batch to the first frame
+            if self.checkpoint.step < self.parameters.n_steps_batch_locked:
+                for i, fs in enumerate(self.frame_batch):
+                    if i > 0:
+                        for k in PARAMETER_NAMES:
+                            fs.set_state(k, self.frame_batch[0].get_state(k))
+
             # Update lr
             if p.algorithm == OPTIMISER_LBFGS_NEW:
                 stats['lr'] = self.optimiser_gd.param_groups[1]['lr']
@@ -1104,16 +1111,6 @@ class Midline3DFinder:
                     M1_raw[d][:, 0, int((2**(p.depth_min + d)) / 2)]
                     for d in range(D)
                 ]
-
-            # In the first half of the initialisation stage zero-out masks/scores losses except for the first frame
-            if self.checkpoint.step < self.parameters.n_steps_init / 2:
-                masks_for_loss = [masks[d][0][None, ...] for d in range(D)]
-                mtr_for_loss = [masks_target_residuals[d][0][None, ...] for d in range(D)]
-                scores_for_loss = [scores[d][0][None, ...] for d in range(D)]
-            else:
-                masks_for_loss = masks
-                mtr_for_loss = masks_target_residuals
-                scores_for_loss = scores
 
             # Calculate the losses
             loss, loss_global, losses_depths, stats = self._calculate_losses(
