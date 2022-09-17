@@ -139,6 +139,7 @@ def _make_3d_plot(
         curvature: np.ndarray,
         curvature_postures: np.ndarray,
         lengths: np.ndarray,
+        azim_offset: int,
         args: Namespace,
 ) -> Tuple[Figure, Callable]:
     """
@@ -195,7 +196,7 @@ def _make_3d_plot(
 
     # Aspects
     n_revolutions = T / trial.fps / 60 * args.revolution_rate
-    azims = np.linspace(start=0, stop=360 * n_revolutions, num=T)
+    azims = azim_offset + np.linspace(start=0, stop=360 * n_revolutions, num=T)
     mlab.view(figure=fig, azimuth=azims[0], distance=distance, focalpoint=mps[0])
 
     def update(frame_idx: int):
@@ -339,7 +340,7 @@ def _generate_annotated_images(
     if images.shape[0] * rw > height:
         images = cv2.resize(images, None, fx=rh, fy=rh)
         new_width = images.shape[1]
-        offset = width - new_width
+        offset = int((width - new_width) / 2)
         panel[:, offset:offset + new_width] = images
     else:
         images = cv2.resize(images, None, fx=rw, fy=rw)
@@ -357,6 +358,7 @@ def prepare_reconstruction_panel(
         end_frame: int,
         width: int,
         height: int,
+        azim_offset: int,
 ):
     """
     Prepare the panel of plots for the given reconstruction.
@@ -462,9 +464,10 @@ def prepare_reconstruction_panel(
         X_postures=Xp,
         speeds=speeds,
         curvature=curvature_traj,
-        args=args,
         curvature_postures=curvature_postures,
-        lengths=lengths
+        lengths=lengths,
+        azim_offset=azim_offset,
+        args=args,
     )
     fig_traces, update_traces_plot = _make_traces_plots(
         width=width,
@@ -590,7 +593,8 @@ def generate_locomotion_strategies_video(
             start_frame=panel['start'],
             end_frame=panel['end'],
             width=int(args.width / len(panels)),
-            height=args.height
+            height=args.height,
+            azim_offset=panel['azim_offset'] if 'azim_offset' in panel else 0
         )
         reconstructions.append(reconstruction)
         frames.append(frame_nums)
