@@ -309,6 +309,9 @@ class FrameArtistMLab:
                     # self.arrows[k][i].set_verts(origin=X[:, j], vec=vec[:, j])
                     # self.arrows[k][i].set_color(colours[j])
 
+    def get_midpoint(self):
+        return self.X.min(axis=0) + np.ptp(self.X, axis=0) / 2
+
     def _get_vectors_and_colours(self, k: str, C: ControlsNumpy = None) -> Tuple[np.ndarray, np.ndarray]:
         """
         Get the component vectors for the frame.

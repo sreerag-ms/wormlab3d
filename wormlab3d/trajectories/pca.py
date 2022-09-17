@@ -166,6 +166,8 @@ def generate_or_load_pca_cache(
     """
     if start_frame is None:
         start_frame = 0
+    if smoothing_window is not None and smoothing_window <= 1:
+        smoothing_window = None
     args = {
         'reconstruction_id': str(reconstruction_id) if reconstruction_id is not None else None,
         'trial_id': trial_id,
