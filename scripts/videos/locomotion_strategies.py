@@ -1,6 +1,4 @@
-import json
 import os
-import shutil
 import time
 from argparse import ArgumentParser, Namespace
 from pathlib import PosixPath
@@ -88,8 +86,6 @@ def get_args() -> Namespace:
 
     args = parser.parse_args()
     assert args.spec is not None, 'This script requires setting --spec=path.'
-
-    print_args(args)
 
     return args
 
@@ -644,12 +640,6 @@ def generate_locomotion_strategies_video(
     process.stdin.close()
     process.wait()
 
-    # Write meta data
-    meta = to_dict(args)
-    meta['created'] = START_TIMESTAMP
-    with open(output_path.with_suffix('.meta'), 'w') as f:
-        json.dump(meta, f, indent=2, separators=(',', ': '))
-
     logger.info(f'Generated video.')
 
 
@@ -662,15 +652,19 @@ def generate_from_spec():
     with open(spec_dir / 'spec.yml') as f:
         spec = yaml.load(f, Loader=yaml.FullLoader)
 
-    # Copy the spec to the output dir
-    output_dir = spec_dir / START_TIMESTAMP
-    os.makedirs(output_dir, exist_ok=True)
-    shutil.copy(spec_dir / 'spec.yml', output_dir / 'spec.yml')
-
     # Load arguments
     for k, v in spec['args'].items():
         assert hasattr(args, k), f'{k} is not a valid argument!'
         setattr(args, k, v)
+    print_args(args)
+
+    # Copy the spec with final args to the output dir
+    output_dir = spec_dir / START_TIMESTAMP
+    os.makedirs(output_dir, exist_ok=True)
+    with open(output_dir / 'spec.yml', 'w') as f:
+        spec['created'] = START_TIMESTAMP
+        spec['args'] = to_dict(args)
+        yaml.dump(spec, f)
 
     # Generate clips
     clips = spec['clips']
