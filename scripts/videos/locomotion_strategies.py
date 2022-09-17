@@ -225,7 +225,7 @@ def _make_traces_plots(
     N = len(speeds)
     trial = reconstruction.trial
     if args.x_label == 'time':
-        ts = start_frame + np.linspace(0, N / trial.fps, N)
+        ts = (start_frame + np.linspace(0, N, N)) / trial.fps
         t_range = args.time_range_traces
     else:
         ts = start_frame + np.arange(N)
@@ -635,6 +635,7 @@ def generate_locomotion_strategies_video(
         frame = np.concatenate(panels, axis=1)
         frame[:, [int(j * (args.width / len(panels))) for j in range(1, len(panels))]] = 0
         process.stdin.write(frame.tobytes())
+        break
 
     # Flush video
     process.stdin.close()
