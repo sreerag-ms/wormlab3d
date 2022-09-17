@@ -676,6 +676,7 @@ def generate_from_spec():
             output_dir=output_dir,
             clip_idx=i
         )
+        plt.close('all')
 
 
 if __name__ == '__main__':
