@@ -175,6 +175,12 @@ def _make_3d_plot(
     path = mlab.plot3d(*X_trajectory.T, s, opacity=0.4, tube_radius=None, line_width=8)
     path.module_manager.scalar_lut_manager.lut.table = cmaplist
 
+    # Smooth the midpoints for nicer camera tracking
+    mps = np.zeros((T, 3))
+    for i, X in enumerate(X_postures):
+        mps[i] = X.min(axis=0) + np.ptp(X, axis=0) / 2
+    mps = smooth_trajectory(mps, window_len=51)
+
     # Set up the artist and add the pieces
     NF = NaturalFrame(X_postures[0])
     fa = FrameArtistMLab(
@@ -190,14 +196,14 @@ def _make_3d_plot(
     # Aspects
     n_revolutions = T / trial.fps / 60 * args.revolution_rate
     azims = np.linspace(start=0, stop=360 * n_revolutions, num=T)
-    mlab.view(figure=fig, azimuth=azims[0], distance=distance, focalpoint=fa.get_midpoint())
+    mlab.view(figure=fig, azimuth=azims[0], distance=distance, focalpoint=mps[0])
 
     def update(frame_idx: int):
         fig.scene.disable_render = True
         NF = NaturalFrame(X_postures[frame_idx])
         fa.update(NF)
         fig.scene.disable_render = False
-        mlab.view(figure=fig, azimuth=azims[frame_idx], distance=distance, focalpoint=fa.get_midpoint())
+        mlab.view(figure=fig, azimuth=azims[frame_idx], distance=distance, focalpoint=mps[frame_idx])
         fig.scene.render()
 
     return fig, update
@@ -528,7 +534,7 @@ def prepare_reconstruction_panel(
             )
 
             # Get 2D projections
-            points_2d = np.round(m3d.prepare_2d_coordinates(X=Xp[i])).astype(np.int32)
+            points_2d = np.round(m3d.prepare_2d_coordinates(X=Xr[i])).astype(np.int32)
             points_2d = points_2d.transpose(1, 0, 2)
 
         # Prepare images
