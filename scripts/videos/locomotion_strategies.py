@@ -297,6 +297,7 @@ def _make_traces_plots(
     ax_curvature.set_ylabel('Curvature', labelpad=10)
     ax_curvature.set_yticks([0, 1])
     ax_curvature.set_yticklabels([])
+    ax_curvature.xaxis.get_major_locator().set_params(integer=True)
     ax_curvature.spines['top'].set_visible(False)
     ax_curvature_marker = ax_curvature.axvline(x=0, color='red')
 
