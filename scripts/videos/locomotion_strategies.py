@@ -635,7 +635,6 @@ def generate_locomotion_strategies_video(
         frame = np.concatenate(panels, axis=1)
         frame[:, [int(j * (args.width / len(panels))) for j in range(1, len(panels))]] = 0
         process.stdin.write(frame.tobytes())
-        break
 
     # Flush video
     process.stdin.close()
