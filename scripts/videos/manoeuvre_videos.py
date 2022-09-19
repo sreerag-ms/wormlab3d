@@ -146,7 +146,7 @@ def _make_3d_plot(
     Returns an update function to call which rotates the view and updates the worm.
     """
     logger.info('Building 3D plot.')
-    distance = lengths.max() * 2
+    distance = lengths.max() * 4
     T = len(X_postures)
 
     # Construct colours
