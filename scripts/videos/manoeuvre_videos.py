@@ -752,8 +752,6 @@ def generate_manoeuvre_video(
         frame[:, [int(j * (args.width / len(panels))) for j in range(1, len(panels))]] = 0
         process.stdin.write(frame.tobytes())
 
-        break
-
     # Flush video
     process.stdin.close()
     process.wait()
