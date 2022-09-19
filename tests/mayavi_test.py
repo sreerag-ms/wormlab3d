@@ -256,8 +256,6 @@ def animate_sphere():
     Test to animate a sphere to different radii.
     Ideally the outline and axes should follow automatically, but they don't.
     """
-    from mayavi import mlab
-
     phi, theta = np.mgrid[0:2 * np.pi:12j, 0:np.pi:12j]
 
     def make_sphere(r):
@@ -292,6 +290,59 @@ def animate_sphere():
     mlab.show()
 
 
+def cuboid():
+    """
+    Test the cuboid generating functions.
+    """
+    from wormlab3d.toolkit.plot_utils import make_box_from_pca_mlab
+    length = 1
+    N = 128
+    u = np.linspace(0, length, N)
+
+    # Midline as a spiral
+    X = np.zeros((N, 3))
+    X[:, 0] = np.sin(2 * np.pi * u) / 10
+    X[:, 1] = np.cos(2 * np.pi * u) / 10
+    X[:, 2] = np.linspace(1 / np.sqrt(3), 0, N)
+    NF = NaturalFrame(X)
+
+    # Add midline
+    x, y, z = X.T
+    t = np.linspace(0, 1, N)
+    pts = mlab.plot3d(x, y, z, t, opacity=1, tube_radius=0.02)
+    cmap = plt.get_cmap(MIDLINE_CMAP_DEFAULT)
+    cmaplist = np.array([cmap(i) for i in range(cmap.N)]) * 255
+    pts.module_manager.scalar_lut_manager.lut.table = cmaplist
+
+    # Add box containing the worm
+    box1 = make_box_from_pca_mlab(
+        X=X,
+        pca=NF.pca,
+        colour='red',
+        opacity=0.3,
+        dimensions='pca',
+        draw_outline=True,
+        outline_colour='darkred',
+        outline_opacity=0.8,
+        outline_tube_radius=0.005
+    )
+
+    # Add PCA box
+    box2 = make_box_from_pca_mlab(
+        X=X,
+        pca=NF.pca,
+        colour='blue',
+        opacity=0.2,
+        dimensions='extents',
+        draw_outline=True,
+        outline_colour='darkblue',
+        outline_opacity=0.8,
+        outline_tube_radius=0.01
+    )
+
+    mlab.show()
+
+
 if __name__ == '__main__':
     example()
     sphere_slice_border()
@@ -303,3 +354,4 @@ if __name__ == '__main__':
     antialiasing(False)
     antialiasing(True)
     animate_sphere()
+    cuboid()

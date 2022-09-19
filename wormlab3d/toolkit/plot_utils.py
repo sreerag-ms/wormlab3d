@@ -1,12 +1,11 @@
-from typing import List, Callable, Optional, Union
-from typing import Tuple
+import itertools
+from typing import List, Callable, Optional, Union, Tuple
 
 import cv2
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib import animation
-from matplotlib import cm
+from matplotlib import animation, cm
 from matplotlib.axes import Axes
 from matplotlib.backend_bases import Event
 from matplotlib.collections import PathCollection
@@ -14,6 +13,9 @@ from matplotlib.figure import Figure
 from matplotlib.image import AxesImage
 from matplotlib.patches import Rectangle
 from matplotlib.widgets import Slider
+from mayavi import mlab
+from mayavi.core.scene import Scene
+from mayavi.modules.surface import Surface
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from scipy.cluster.hierarchy import dendrogram
 from sklearn.decomposition import PCA
@@ -437,17 +439,27 @@ def make_3d_posture_plot_for_animation(
     return fig, update
 
 
-def make_box_from_pca(X: np.ndarray, pca: PCA, colour: str, scale: Tuple[float] = (1., 1., 1.)) -> Poly3DCollection:
+def make_box_faces_from_pca(
+        X: np.ndarray,
+        pca: PCA,
+        scale: np.ndarray = np.array([1., 1., 1.]),
+        use_extents: bool = False
+) -> List[np.ndarray]:
     """
-    Make a 3D polygon centred at the centre of X with shape and orientation taken from the PCA components.
+    Make a list of cuboid faces as 3D polygons centred at the centre of X
+    with shape and orientation taken from the PCA components.
     """
-    centre = X.mean(axis=0)
+    R = np.stack(pca.components_, axis=1)
+    Xt = np.einsum('ij,bj->bi', R.T, X)
+    dims = np.ptp(Xt, axis=0)
+    centre = Xt.min(axis=0) + dims / 2
+
+    if use_extents:
+        v0, v1, v2 = np.eye(3) * scale * dims / 2
+    else:
+        v0, v1, v2 = np.eye(3) * scale * pca.explained_variance_ratio_
+
     polygons = []
-
-    v0 = scale[0] * pca.components_[0] * pca.explained_variance_ratio_[0]
-    v1 = scale[1] * pca.components_[1] * pca.explained_variance_ratio_[1]
-    v2 = scale[2] * pca.components_[2] * pca.explained_variance_ratio_[2]
-
     for i in range(3):
         va = [v0, v1, v2][i]
         vb = [v1, v2, v0][i]
@@ -464,10 +476,128 @@ def make_box_from_pca(X: np.ndarray, pca: PCA, colour: str, scale: Tuple[float] 
                     centre[k] + va[k] + vb[k] - vc[k],
                     centre[k] - va[k] + vb[k] - vc[k]
                 ]
-            polygons.append(verts)
+            polygons.append(verts @ R.T)
 
+    return polygons
+
+
+def make_box_from_pca(X: np.ndarray, pca: PCA, colour: str, scale: Tuple[float] = (1., 1., 1.)) -> Poly3DCollection:
+    """
+    Make a 3D polygon centred at the centre of X with shape and orientation taken from the PCA components.
+    """
+    polygons = make_box_faces_from_pca(X, pca, scale)
     plane = Poly3DCollection(polygons, alpha=0.2, facecolors=colour, edgecolors='dark' + colour)
     return plane
+
+
+def make_box_from_pca_mlab(
+        X: np.ndarray,
+        pca: PCA = None,
+        colour: str = None,
+        opacity: float = 1.,
+        dimensions: str = 'pca',
+        scale: Union[int, float, Tuple[float]] = 1,
+        draw_outline: bool = False,
+        outline_colour: str = None,
+        outline_opacity: float = 1.,
+        outline_tube_radius: float = 0.01,
+        fig: Scene = None,
+) -> List[Surface]:
+    """
+    Make a cuboid using mayavi centred at the centre of X with orientation taken from the PCA components
+    and dimensions either from the PCA singular values or the extents of the data X.
+    """
+    if pca is None:
+        pca = PCA()
+        pca.fit(X)
+    if type(scale) == int or type(scale) == float:
+        scale = np.array([1., 1., 1.])
+    faces = make_box_faces_from_pca(X=X, pca=pca, scale=scale, use_extents=dimensions == 'extents')
+    meshes = []
+    for face in faces:
+        x, y, z = face.T
+        mesh = mlab.mesh([
+            [x[0], x[3]],
+            [x[1], x[2]],
+        ], [
+            [y[0], y[3]],
+            [y[1], y[2]],
+        ], [
+            [z[0], z[3]],
+            [z[1], z[2]],
+        ],
+            opacity=opacity,
+            color=to_rgb(colour),
+            figure=fig,
+        )
+        meshes.append(mesh)
+
+    outline = []
+    if draw_outline:
+        lines = make_box_outline(X=X, pca=pca, scale=scale, use_extents=dimensions == 'extents')
+        for l in lines:
+            line_obj = mlab.plot3d(
+                *l.T,
+                figure=fig,
+                opacity=outline_opacity,
+                color=to_rgb(outline_colour),
+                tube_radius=outline_tube_radius
+            )
+            outline.append(line_obj)
+
+    return meshes, outline
+
+
+def make_box_outline(
+        X: np.ndarray,
+        pca: PCA = None,
+        scale: np.ndarray = np.array([1., 1., 1.]),
+        use_extents: bool = False,
+) -> List[np.ndarray]:
+    """
+    Make a cuboid outline using mayavi centred at the centre of X with orientation taken from the PCA components
+    and dimensions either from the PCA singular values or the extents of the data X.
+    """
+    if pca is None:
+        pca = PCA()
+        pca.fit(X)
+
+    # Get the bounds relative to the PCA components
+    R = np.stack(pca.components_, axis=1)
+    Xt = np.einsum('ij,bj->bi', R.T, X)
+    dims = np.ptp(Xt, axis=0)
+    centre = Xt.min(axis=0) + dims / 2
+
+    if not use_extents:
+        dims = pca.explained_variance_ratio_ * 2
+    dims *= scale
+
+    # Calculate box vertices
+    M = np.array(list(itertools.product(*[[-1, 1]] * 3)))
+    v = (centre + M * dims[None, :] / 2) @ R.T
+
+    # Bottom face outline
+    l1 = np.stack([v[0], v[1]])
+    l2 = np.stack([v[1], v[3]])
+    l3 = np.stack([v[3], v[2]])
+    l4 = np.stack([v[2], v[0]])
+
+    # Top face outline
+    l5 = np.stack([v[4], v[5]])
+    l6 = np.stack([v[5], v[7]])
+    l7 = np.stack([v[7], v[6]])
+    l8 = np.stack([v[6], v[4]])
+
+    # Connecting vertical lines
+    l9 = np.stack([v[0], v[4]])
+    l10 = np.stack([v[1], v[5]])
+    l11 = np.stack([v[2], v[6]])
+    l12 = np.stack([v[3], v[7]])
+
+    # Stack the lines together
+    lines = np.array([l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12])
+
+    return lines
 
 
 def overlay_image(

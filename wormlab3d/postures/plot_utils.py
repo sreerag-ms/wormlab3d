@@ -1,4 +1,3 @@
-import itertools
 from typing import Union, Dict, Tuple
 
 import matplotlib.pyplot as plt
@@ -16,7 +15,7 @@ from simple_worm.controls import ControlsNumpy
 from simple_worm.frame import FrameNumpy, FRAME_COMPONENT_KEYS
 from simple_worm.plot3d import FrameArtist, Arrow3D, MIDLINE_CMAP_DEFAULT
 from wormlab3d.postures.natural_frame import NaturalFrame, normalise
-from wormlab3d.toolkit.plot_utils import to_rgb
+from wormlab3d.toolkit.plot_utils import to_rgb, make_box_outline
 
 SURFACE_CMAP_DEFAULT = 'coolwarm'
 
@@ -200,43 +199,16 @@ class FrameArtistMLab:
         """
         Calculate the outline points.
         """
-
-        # Get the bounds for the mesh points relative to the PCA components
         mesh_pts = np.stack([
             self.surface.mlab_source.x.flatten(),
             self.surface.mlab_source.y.flatten(),
             self.surface.mlab_source.z.flatten()
         ], axis=-1)
-        R = np.stack(self.NF.pca.components_, axis=1)
-        Xt = np.einsum('ij,bj->bi', R.T, mesh_pts)
-
-        # Calculate box vertices
-        dims = np.ptp(Xt, axis=0)
-        midpoint = Xt.min(axis=0) + dims / 2
-        M = np.array(list(itertools.product(*[[-1, 1]] * 3)))
-        v = (midpoint + M * dims[None, :] / 2) @ R.T
-
-        # Bottom face outline
-        l1 = np.stack([v[0], v[1]])
-        l2 = np.stack([v[1], v[3]])
-        l3 = np.stack([v[3], v[2]])
-        l4 = np.stack([v[2], v[0]])
-
-        # Top face outline
-        l5 = np.stack([v[4], v[5]])
-        l6 = np.stack([v[5], v[7]])
-        l7 = np.stack([v[7], v[6]])
-        l8 = np.stack([v[6], v[4]])
-
-        # Connecting vertical lines
-        l9 = np.stack([v[0], v[4]])
-        l10 = np.stack([v[1], v[5]])
-        l11 = np.stack([v[2], v[6]])
-        l12 = np.stack([v[3], v[7]])
-
-        # Stack the lines together
-        lines = np.array([l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12])
-
+        lines = make_box_outline(
+            X=mesh_pts,
+            pca=self.NF.pca,
+            use_extents=True
+        )
         return lines
 
     def add_component_vectors(
