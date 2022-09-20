@@ -519,20 +519,20 @@ def prepare_reconstruction_panel(
         man_start_idx = rev_props['left_bases'][rev_idx] + 10
         man_end_idx = rev_props['right_bases'][rev_idx] - 10
     else:
-        man_start_idx = man_start_frame - traj_start_frame
-        man_end_idx = man_end_frame - traj_start_frame
+        man_start_idx = man_start_frame - r_start_frame
+        man_end_idx = man_end_frame - r_start_frame
     if inc_start_frame is None:
         inc_end_idx = man_start_idx - 20
         inc_start_idx = max(0, inc_end_idx - 250)
     else:
-        inc_start_idx = inc_start_frame - traj_start_frame
-        inc_end_idx = inc_end_frame - traj_start_frame
+        inc_start_idx = inc_start_frame - r_start_frame
+        inc_end_idx = inc_end_frame - r_start_frame
     if out_start_frame is None:
         out_start_idx = man_end_idx + 20
         out_end_idx = min(len(Xr), out_start_idx + 250)
     else:
-        out_start_idx = out_start_frame - traj_start_frame
-        out_end_idx = out_end_frame - traj_start_frame
+        out_start_idx = out_start_frame - r_start_frame
+        out_end_idx = out_end_frame - r_start_frame
 
     # Build plots
     fig_info, update_info_plot = _make_info_panel(
