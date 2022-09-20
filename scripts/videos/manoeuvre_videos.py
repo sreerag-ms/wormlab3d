@@ -69,6 +69,8 @@ def get_args() -> Namespace:
                         help='Show axis on the 3D plot.')
     parser.add_argument('--revolution-rate', type=float, default=1 / 3,
                         help='Rate of 3D plot revolution in revolutions/minute.')
+    parser.add_argument('--distance', type=float, default=4.,
+                        help='Camera distance in worm lengths.')
 
     # Lambdas
     parser.add_argument('--eigenworms', type=str, help='Eigenworms by id.')
@@ -130,8 +132,8 @@ def _make_3d_plot(
         X_trajectory: np.ndarray,
         inc_start_idx: int,
         inc_end_idx: int,
-        rev_start_idx: int,
-        rev_end_idx: int,
+        man_start_idx: int,
+        man_end_idx: int,
         out_start_idx: int,
         out_end_idx: int,
         speeds: np.ndarray,
@@ -139,6 +141,7 @@ def _make_3d_plot(
         curvature_postures: np.ndarray,
         lengths: np.ndarray,
         azim_offset: int,
+        distance: float,
         args: Namespace,
 ) -> Tuple[Figure, Callable]:
     """
@@ -146,7 +149,7 @@ def _make_3d_plot(
     Returns an update function to call which rotates the view and updates the worm.
     """
     logger.info('Building 3D plot.')
-    distance = lengths.max() * 4
+    distance = lengths.max() * distance
     T = len(X_postures)
 
     # Construct colours
@@ -191,7 +194,7 @@ def _make_3d_plot(
         **cuboid_args
     )
     make_box_from_pca_mlab(
-        X=X_trajectory[rev_start_idx:rev_end_idx],
+        X=X_trajectory[man_start_idx:man_end_idx],
         colour='plum',
         outline_colour='hotpink',
         **cuboid_args
@@ -413,13 +416,14 @@ def prepare_reconstruction_panel(
         traj_end_frame: Optional[int],
         inc_start_frame: Optional[int],
         inc_end_frame: Optional[int],
-        rev_start_frame: Optional[int],
-        rev_end_frame: Optional[int],
+        man_start_frame: Optional[int],
+        man_end_frame: Optional[int],
         out_start_frame: Optional[int],
         out_end_frame: Optional[int],
         width: int,
         height: int,
         azim_offset: int,
+        distance: float,
 ):
     """
     Prepare the panel of plots for the given reconstruction.
@@ -508,23 +512,23 @@ def prepare_reconstruction_panel(
     curvature_postures = np.abs(Z)
 
     # Guess missing ranges
-    if rev_start_frame is None:
+    if man_start_frame is None:
         rev_peaks, rev_props = find_peaks(speeds < 0, width=5)
         assert len(rev_peaks) > 0, 'No reversals found in clip!'
         rev_idx = rev_props['widths'].argmax()
-        rev_start_idx = rev_props['left_bases'][rev_idx] + 10
-        rev_end_idx = rev_props['right_bases'][rev_idx] - 10
+        man_start_idx = rev_props['left_bases'][rev_idx] + 10
+        man_end_idx = rev_props['right_bases'][rev_idx] - 10
     else:
-        rev_start_idx = rev_start_frame - traj_start_frame
-        rev_end_idx = rev_end_frame - traj_start_frame
+        man_start_idx = man_start_frame - traj_start_frame
+        man_end_idx = man_end_frame - traj_start_frame
     if inc_start_frame is None:
-        inc_end_idx = rev_start_idx - 20
+        inc_end_idx = man_start_idx - 20
         inc_start_idx = max(0, inc_end_idx - 250)
     else:
         inc_start_idx = inc_start_frame - traj_start_frame
         inc_end_idx = inc_end_frame - traj_start_frame
     if out_start_frame is None:
-        out_start_idx = rev_end_idx + 20
+        out_start_idx = man_end_idx + 20
         out_end_idx = min(len(Xr), out_start_idx + 250)
     else:
         out_start_idx = out_start_frame - traj_start_frame
@@ -544,8 +548,8 @@ def prepare_reconstruction_panel(
         X_postures=Xp,
         inc_start_idx=inc_start_idx,
         inc_end_idx=inc_end_idx,
-        rev_start_idx=rev_start_idx,
-        rev_end_idx=rev_end_idx,
+        man_start_idx=man_start_idx,
+        man_end_idx=man_end_idx,
         out_start_idx=out_start_idx,
         out_end_idx=out_end_idx,
         speeds=speeds,
@@ -553,6 +557,7 @@ def prepare_reconstruction_panel(
         curvature_postures=curvature_postures,
         lengths=lengths,
         azim_offset=azim_offset,
+        distance=distance,
         args=args,
     )
     fig_traces, update_traces_plot = _make_traces_plots(
@@ -687,7 +692,7 @@ def generate_manoeuvre_video(
     fns = []
     for panel in panels:
         for k in ['traj_start', 'traj_end', 'inc_start', 'inc_end',
-                  'rev_start', 'rev_end', 'out_start', 'out_end']:
+                  'man_start', 'man_end', 'out_start', 'out_end']:
             if k not in panel:
                 panel[k] = None
         reconstruction = Reconstruction.objects.get(id=panel['reconstruction'])
@@ -700,13 +705,14 @@ def generate_manoeuvre_video(
             traj_end_frame=panel['traj_end'],
             inc_start_frame=panel['inc_start'],
             inc_end_frame=panel['inc_end'],
-            rev_start_frame=panel['rev_start'],
-            rev_end_frame=panel['rev_end'],
+            man_start_frame=panel['man_start'],
+            man_end_frame=panel['man_end'],
             out_start_frame=panel['out_start'],
             out_end_frame=panel['out_end'],
             width=int(args.width / len(panels)),
             height=args.height,
-            azim_offset=panel['azim_offset'] if 'azim_offset' in panel else 0
+            azim_offset=panel['azim_offset'] if 'azim_offset' in panel else 0,
+            distance=panel['distance'] if 'distance' in panel else args.distance
         )
         reconstructions.append(reconstruction)
         frames.append(frame_nums)
