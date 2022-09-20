@@ -153,12 +153,18 @@ def _make_3d_plot(
     T = len(X_postures)
 
     # Construct colours
+    vmax = None
+    vmin = None
     if args.trajectory_colouring == 'time':
         s = np.linspace(0, 1, T)
         cmap = plt.get_cmap('viridis_r')
     elif args.trajectory_colouring == 'speed':
         s = speeds
         cmap = plt.get_cmap('PRGn')
+
+        # Colourmap needs to be symmetric
+        vmax = np.abs(s).max()
+        vmin = -vmax
     elif args.trajectory_colouring == 'curvature':
         s = curvature
         cmap = plt.get_cmap('Reds')
@@ -177,7 +183,7 @@ def _make_3d_plot(
     fig.scene.anti_aliasing_frames = 20
 
     # Render the trajectory with simple lines
-    path = mlab.plot3d(*X_trajectory.T, s, opacity=0.8, tube_radius=None, line_width=9)
+    path = mlab.plot3d(*X_trajectory.T, s, vmax=vmax, vmin=vmin, opacity=0.8, tube_radius=None, line_width=9)
     path.module_manager.scalar_lut_manager.lut.table = cmaplist
 
     # Add the cuboids
