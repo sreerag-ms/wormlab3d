@@ -167,7 +167,9 @@ def _make_3d_plot(
     # Set up mlab figure
     fig = mlab.figure(size=(width * 2, height * 2), bgcolor=(1, 1, 1))
 
-    # Doesn't really seem to make any difference
+    # Depth peeling required for nice opacity, the rest don't seem to make any difference
+    fig.scene.renderer.use_depth_peeling = True
+    fig.scene.renderer.maximum_number_of_peels = 32
     fig.scene.render_window.point_smoothing = True
     fig.scene.render_window.line_smoothing = True
     fig.scene.render_window.polygon_smoothing = True
@@ -525,14 +527,14 @@ def prepare_reconstruction_panel(
         inc_end_idx = man_start_idx - 20
         inc_start_idx = max(0, inc_end_idx - 250)
     else:
-        inc_start_idx = inc_start_frame - r_start_frame
+        inc_start_idx = max(0, inc_start_frame - r_start_frame)
         inc_end_idx = inc_end_frame - r_start_frame
     if out_start_frame is None:
         out_start_idx = man_end_idx + 20
         out_end_idx = min(len(Xr), out_start_idx + 250)
     else:
         out_start_idx = out_start_frame - r_start_frame
-        out_end_idx = out_end_frame - r_start_frame
+        out_end_idx = min(len(Xr), out_end_frame - r_start_frame)
 
     # Build plots
     fig_info, update_info_plot = _make_info_panel(
