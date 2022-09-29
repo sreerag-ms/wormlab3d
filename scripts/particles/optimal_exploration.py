@@ -1,6 +1,6 @@
 import os
 from argparse import Namespace
-from typing import List, Tuple
+from typing import List
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,7 +33,7 @@ def make_filename(
         timestamp = START_TIMESTAMP
     fn = f'{timestamp}_{method}'
 
-    for k in ['npas', 'voxel_sizes', 'duration', 'durations', 'dt', 'batch_size', 'deltas', 'delta_step',
+    for k in ['npas', 'vxs', 'voxel_sizes', 'duration', 'durations', 'dt', 'batch_size', 'deltas', 'delta_step',
               'targets_radii', 'n_targets', 'epsilon', 'max_nonplanar_pause_duration', 'detection_area',
               'pauses', 'volume_metric']:
         if k in excludes:
@@ -50,6 +50,8 @@ def make_filename(
             else:
                 voxel_sizes = ','.join(f'{vs:.1E}' for vs in args.voxel_sizes)
             fn += f'_vs={voxel_sizes}'
+        elif k == 'vxs' and not hasattr(args, 'voxel_sizes'):
+            fn += f'_vs={args.vxs}'
         elif k == 'duration':
             fn += f'_T={args.sim_duration:.1f}'
         elif k == 'durations' and hasattr(args, 'sim_durations'):
@@ -255,7 +257,7 @@ def coverage_scores():
         args.npas = npa_sigmas
         args.voxel_sizes = voxel_sizes
         plt.savefig(
-            make_filename('coverage_results', args, excludes=['targets_radii', 'n_targets', 'epsilon']),
+            make_filename('coverage_results', args, excludes=['targets_radii', 'n_targets', 'epsilon', 'vxs']),
             transparent=True
         )
 
@@ -407,7 +409,7 @@ def search_scores():
 
     if save_plots:
         plt.savefig(
-            make_filename('search_results', args, excludes=['voxel_sizes', 'deltas', 'delta_step']),
+            make_filename('search_results', args, excludes=['voxel_sizes', 'deltas', 'delta_step', 'vxs']),
             transparent=True
         )
 
@@ -555,7 +557,7 @@ def search_t_tests():
 
     if save_plots:
         plt.savefig(
-            make_filename('search_t_tests', args, excludes=['voxel_sizes', 'deltas', 'delta_step']),
+            make_filename('search_t_tests', args, excludes=['voxel_sizes', 'deltas', 'delta_step', 'vxs']),
             transparent=True
         )
 
@@ -655,7 +657,8 @@ def surface_coverage_scores():
 
     if save_plots:
         plt.savefig(
-            make_filename('crossings', args, excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon']),
+            make_filename('crossings', args,
+                          excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon', 'vxs']),
             transparent=True
         )
 
@@ -754,7 +757,7 @@ def crossings_nonp():
     if save_plots:
         plt.savefig(
             make_filename('crossings_nonp', args,
-                          excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon']),
+                          excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon', 'vxs']),
             transparent=True
         )
 
@@ -940,7 +943,7 @@ def volume_metric():
     if save_plots:
         plt.savefig(
             make_filename('volume_metric', args,
-                          excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon']),
+                          excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon', 'vxs']),
             transparent=True
         )
 
@@ -1032,7 +1035,7 @@ def volume_metric_sweeps():
     if save_plots:
         plt.savefig(
             make_filename('volume_sweep_volumes', args,
-                          excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon', 'duration']),
+                          excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon', 'duration', 'vxs']),
             transparent=True
         )
     if show_plots:
@@ -1053,7 +1056,7 @@ def volume_metric_sweeps():
     if save_plots:
         plt.savefig(
             make_filename('volume_sweep_surface', args,
-                          excludes=['voxel_sizes', 'deltas', 'delta_step',
+                          excludes=['voxel_sizes', 'deltas', 'delta_step', 'vxs',
                                     'n_targets', 'epsilon', 'duration', 'max_nonplanar_pause_duration']),
             transparent=True
         )
@@ -1085,7 +1088,7 @@ def volume_metric_sweeps():
     if save_plots:
         plt.savefig(
             make_filename('volume_sweep_peaks', args,
-                          excludes=['voxel_sizes', 'deltas', 'delta_step',
+                          excludes=['voxel_sizes', 'deltas', 'delta_step', 'vxs',
                                     'n_targets', 'epsilon', 'duration', 'max_nonplanar_pause_duration']),
             transparent=True
         )
@@ -1163,20 +1166,20 @@ def _generate_or_load_r_values(
             r_values = data['r_values']
             assert r_values.shape == (len(args.npas), len(args.sim_durations), len(args.pauses), 3, 4), \
                 'Invalid r_values shape.'
-            logger.info('Loaded r and z values from cache.')
+            logger.info(f'Loaded r values from cache: {cache_fn}')
         except Exception as e:
             r_values = None
             logger.warning(f'Could not load cache: {e}')
 
     if r_values is None:
         if cache_only:
-            raise RuntimeError(f'Cache "{cache_fn}" does not exist!')
-        logger.info('Generating r and z values.')
+            raise RuntimeError(f'Cache "{cache_fn}" could not be loaded!')
+        logger.info('Generating r values.')
         r_values = _calculate_r_values(args)
         save_arrs = {
             'r_values': r_values,
         }
-        logger.info(f'Saving r and z values to {cache_path}.')
+        logger.info(f'Saving r values to {cache_path}.')
         np.savez(cache_path, **save_arrs)
 
     return r_values
@@ -1263,7 +1266,8 @@ def volume_metric_sweeps2():
         if save_plots:
             plt.savefig(
                 make_filename('volume_sweep_2a', args,
-                              excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon', 'duration']),
+                              excludes=['voxel_sizes', 'vxs', 'deltas', 'delta_step', 'n_targets', 'epsilon',
+                                        'duration']),
                 transparent=True
             )
         if show_plots:
@@ -1314,7 +1318,8 @@ def volume_metric_sweeps2():
         if save_plots:
             plt.savefig(
                 make_filename('volume_sweep_2b', args,
-                              excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon', 'duration']),
+                              excludes=['voxel_sizes', 'vxs', 'deltas', 'delta_step', 'n_targets', 'epsilon',
+                                        'duration']),
                 transparent=True
             )
         if show_plots:
@@ -1416,7 +1421,8 @@ def volume_metric_sweeps2():
         if save_plots:
             plt.savefig(
                 make_filename('volume_sweep_2c', args,
-                              excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon', 'duration']),
+                              excludes=['voxel_sizes', 'vxs', 'deltas', 'delta_step', 'n_targets', 'epsilon',
+                                        'duration']),
                 transparent=True
             )
         if show_plots:
@@ -1443,7 +1449,7 @@ def _calculate_voxel_scores_for_spec(params):
 
 def _calculate_voxel_scores(
         args: Namespace
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> np.ndarray:
     """
     Calculate the voxel scores across a range of sigmas, durations, pauses and voxel sizes.
     """
@@ -1453,7 +1459,10 @@ def _calculate_voxel_scores(
     n_durations = len(sim_durations)
     pauses = args.pauses
     n_pauses = len(pauses)
-    voxel_sizes = args.voxel_sizes
+    if hasattr(args, 'voxel_sizes'):
+        voxel_sizes = args.voxel_sizes
+    else:
+        voxel_sizes = [args.vxs, ]
     n_voxel_sizes = len(voxel_sizes)
 
     # Outputs
@@ -1474,7 +1483,7 @@ def _calculate_voxel_scores(
                 args.nonp_pause_max = pause
                 SS = get_sim_state_from_args(args)
 
-                # Calculate optimality
+                # Calculate coverage
                 for l, vs in enumerate(voxel_sizes):
                     vc = SS.get_coverage(vs) / vs
                     scores[i, j, k, l] = [vc.mean(), vc.min(), vc.max(), vc.std()]
@@ -1488,21 +1497,31 @@ def _calculate_voxel_scores(
 
 def _generate_or_load_voxel_scores(
         args: Namespace,
-        rebuild_cache: bool = False
-) -> Tuple[np.ndarray, np.ndarray]:
+        rebuild_cache: bool = False,
+        cache_only: bool = False
+) -> np.ndarray:
+    if hasattr(args, 'voxel_sizes'):
+        vs = [f'{p:.3E}' for p in args.voxel_sizes]
+    else:
+        vs = [f'{args.vxs:.3E}', ]
+
     keys = {
         'npas': [f'{s:.3E}' for s in args.npas],
         'durations': [f'{d:.4f}' for d in args.sim_durations],
         'pauses': [f'{p:.4f}' for p in args.pauses],
-        'vs': [f'{p:.3E}' for p in args.voxel_sizes],
+        'vs': vs,
     }
     cache_path = LOGS_PATH / hash_data(keys)
     cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
+    scores = None
     if not rebuild_cache and cache_fn.exists():
         data = np.load(cache_fn)
         scores = data['scores']
-        logger.info('Loaded scores from cache.')
-    else:
+        logger.info(f'Loaded scores from cache: {cache_fn}')
+
+    if scores is None:
+        if cache_only:
+            raise RuntimeError(f'Cache "{cache_fn}" could not be loaded!')
         logger.info('Generating voxel coverage values.')
         scores = _calculate_voxel_scores(args)
         save_arrs = {
@@ -1573,7 +1592,7 @@ def voxel_scores_sweeps():
         if save_plots:
             plt.savefig(
                 make_filename('voxels_sweep_a', args,
-                              excludes=['deltas', 'delta_step', 'n_targets', 'epsilon', 'duration']),
+                              excludes=['deltas', 'delta_step', 'n_targets', 'epsilon', 'duration', 'vxs']),
                 transparent=True
             )
         if show_plots:
@@ -1616,11 +1635,190 @@ def voxel_scores_sweeps():
         if save_plots:
             plt.savefig(
                 make_filename('voxel_sweep_b', args,
-                              excludes=['deltas', 'delta_step', 'n_targets', 'epsilon', 'duration']),
+                              excludes=['deltas', 'delta_step', 'n_targets', 'epsilon', 'duration', 'vxs']),
                 transparent=True
             )
         if show_plots:
             plt.show()
+
+
+def volume_metric_sweeps_cuboids_voxels():
+    """
+    Estimate the volume explored by a typical trajectory by cuboids and voxels.
+    """
+    args = get_args(validate_source=False)
+    model_phi = args.phi_dist_params[1]
+
+    # Set parameter ranges
+    npa_sigmas = _get_npas_from_args(args)
+    args.npas = npa_sigmas
+    sim_durations = _get_durations_from_args(args)
+    pauses = _get_pauses_from_args(args)
+    fix_duration = args.sim_duration
+    fix_pause = args.nonp_pause_max
+    assert args.volume_metric == 'cuboids'
+
+    def _calculate_volumes(r_):
+        if args.volume_metric == 'disks':
+            radius = r_[:, :, :, 0]
+            height = r_[:, :, :, 2]
+            sphere_vols = 4 / 3 * np.pi * radius**3
+            cap_vols = 1 / 3 * np.pi * (radius - height)**2 * (2 * radius + height)
+            return sphere_vols - 2 * cap_vols
+        elif args.volume_metric == 'cuboids':
+            r1 = r_[:, :, :, 0]
+            r2 = r_[:, :, :, 1]
+            r3 = r_[:, :, :, 2]
+            return r1 * r2 * r3
+
+    # Plot combined
+    plt.rc('axes', titlesize=7)  # fontsize of the title
+    plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
+    plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+    plt.rc('legend', fontsize=6)  # fontsize of the legend
+
+    fig, axes = plt.subplots(2, 2, figsize=(8, 4), gridspec_kw={
+        'hspace': 0.35,
+        'wspace': 0.15,
+        'top': 0.94,
+        'bottom': 0.08,
+        'left': 0.05,
+        'right': 0.93,
+    })
+
+    # Fix the pause and sweep over the durations
+    args.sim_durations = sim_durations
+    args.pauses = [fix_pause]
+    r_values = _generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
+    vols = _calculate_volumes(r_values)
+    optimal_sigmas_vols_idxs = vols[..., 0].argmax(axis=0).squeeze()
+    optimal_sigmas_vols = npa_sigmas[optimal_sigmas_vols_idxs]
+    scores = _generate_or_load_voxel_scores(args, cache_only=True, rebuild_cache=False)
+    optimal_sigmas_scores_idxs = scores[..., 0].argmax(axis=0).squeeze()
+    optimal_sigmas_scores = npa_sigmas[optimal_sigmas_scores_idxs]
+
+    plot_start = 0
+    plot_end = 6
+    sim_durations = sim_durations[plot_start:plot_end]
+    optimal_sigmas_vols = optimal_sigmas_vols[plot_start:plot_end]
+    optimal_sigmas_scores = optimal_sigmas_scores[plot_start:plot_end]
+    cmap = plt.get_cmap('winter')
+    colours = cmap(np.linspace(0, 1, len(sim_durations)))
+
+    # Plot the volumes
+    ax = axes[0, 0]
+    optimal_vols = []
+    for j, duration in enumerate(sim_durations):
+        vols_j = vols[:, j, 0].T
+        optimal_vols.append(vols_j[0, optimal_sigmas_vols_idxs[j]])
+        ax.plot(npa_sigmas, vols_j[0], label=f'{duration / 60:.0f}m', c=colours[j], marker='o', alpha=0.7)
+    ax.scatter(optimal_sigmas_vols, optimal_vols, marker='o', zorder=100, s=50, facecolors='none', edgecolors='red',
+               linewidths=2)
+    ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=3, zorder=-1)
+    ax.set_title(f'$\delta_{{max}}={fix_pause:.1f}$s')
+    ax.set_xlabel(f'$\sigma_\phi$')
+    ax.set_xscale('log')
+    ax.set_xticks([1e-3, 1e-1, 1e1])
+    trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
+    ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=7, fontweight='bold',
+            horizontalalignment='center', verticalalignment='top', transform=trans)
+    ax.set_ylabel('Cuboid volume explored')
+    ax.set_yticks([0, 100, 200])
+    ax.grid()
+
+    # Plot the voxel scores
+    ax = axes[0, 1]
+    optimal_scores = []
+    for j, duration in enumerate(sim_durations):
+        score = scores[:, j, 0, 0, 0]
+        optimal_scores.append(score[optimal_sigmas_scores_idxs[j]])
+        ax.plot(npa_sigmas, score, label=f'{duration / 60:.0f}m', c=colours[j], marker='o', alpha=0.7)
+    ax.scatter(optimal_sigmas_scores, optimal_scores, marker='o', zorder=100, s=50, facecolors='none', edgecolors='red',
+               linewidths=2)
+    ax.axvline(x=model_phi, c='orange', linestyle='--')
+    ax.legend(loc='upper left', bbox_to_anchor=(1, 1), bbox_transform=ax.transAxes)
+    ax.set_title(f'$\delta_{{max}}={fix_pause:.1f}$s')
+    ax.set_xlabel(f'$\sigma_\psi$')
+    ax.set_xscale('log')
+    ax.set_xticks([1e-3, 1e-1, 1e1])
+    trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
+    ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=7, fontweight='bold',
+            horizontalalignment='center', verticalalignment='top', transform=trans)
+    ax.set_ylabel('Voxels visited')
+    ax.set_yticks([0, 100, 200])
+    ax.grid()
+
+    # Fix the duration and sweep over the pauses
+    args.sim_durations = [fix_duration]
+    args.pauses = pauses
+    r_values = _generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
+    vols = _calculate_volumes(r_values)
+    optimal_sigmas_vols_idxs = vols[..., 0].argmax(axis=0).squeeze()
+    optimal_sigmas_vols = npa_sigmas[optimal_sigmas_vols_idxs]
+    scores = _generate_or_load_voxel_scores(args, cache_only=True, rebuild_cache=False)
+    optimal_sigmas_scores_idxs = scores[..., 0].argmax(axis=0).squeeze()
+    optimal_sigmas_scores = npa_sigmas[optimal_sigmas_scores_idxs]
+
+    plot_start = 0
+    plot_end = 6
+    pauses = pauses[plot_start:plot_end]
+    optimal_sigmas_vols = optimal_sigmas_vols[plot_start:plot_end]
+    optimal_sigmas_scores = optimal_sigmas_scores[plot_start:plot_end]
+    cmap = plt.get_cmap('summer')
+    colours = cmap(np.linspace(0, 1, len(pauses)))
+
+    # Plot the volumes
+    ax = axes[1, 0]
+    optimal_vols = []
+    for k, pause in enumerate(pauses):
+        vols_k = vols[:, 0, k].T
+        optimal_vols.append(vols_k[0, optimal_sigmas_vols_idxs[k]])
+        ax.plot(npa_sigmas, vols_k[0], label=f'{pause:.0f}s', c=colours[k], marker='o', alpha=0.7)
+    ax.scatter(optimal_sigmas_vols, optimal_vols, marker='o', zorder=100, s=50, facecolors='none', edgecolors='red',
+               linewidths=2)
+    ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=3, zorder=-1)
+    ax.set_title(f'T={fix_duration}s')
+    ax.set_xlabel(f'$\sigma_\phi$')
+    ax.set_xscale('log')
+    ax.set_xticks([1e-3, 1e-1, 1e1])
+    trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
+    ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=7, fontweight='bold',
+            horizontalalignment='center', verticalalignment='top', transform=trans)
+    ax.set_ylabel('Cuboid volume explored')
+    ax.set_yticks([0, 10, 20])
+    ax.grid()
+
+    # Plot the voxel scores
+    ax = axes[1, 1]
+    optimal_scores = []
+    for k, pause in enumerate(pauses):
+        score = scores[:, 0, k, 0, 0]
+        optimal_scores.append(score[optimal_sigmas_scores_idxs[k]])
+        ax.plot(npa_sigmas, score, label=f'{pause:.0f}s', c=colours[k], marker='o', alpha=0.7)
+    ax.scatter(optimal_sigmas_scores, optimal_scores, marker='o', zorder=100, s=50, facecolors='none', edgecolors='red',
+               linewidths=2)
+    ax.axvline(x=model_phi, c='orange', linestyle='--')
+    ax.legend(loc='upper left', bbox_to_anchor=(1, 1), bbox_transform=ax.transAxes)
+    ax.set_title(f'T={fix_duration}s')
+    ax.set_xlabel(f'$\sigma_\psi$')
+    ax.set_xscale('log')
+    ax.set_xticks([1e-3, 1e-1, 1e1])
+    trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
+    ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=7, fontweight='bold',
+            horizontalalignment='center', verticalalignment='top', transform=trans)
+    ax.set_ylabel('Voxels visited')
+    ax.set_yticks([0, 25, 50])
+    ax.grid()
+
+    if save_plots:
+        plt.savefig(
+            make_filename('volume_sweep_cuboids_voxels', args,
+                          excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon', 'duration']),
+            transparent=True
+        )
+    if show_plots:
+        plt.show()
 
 
 if __name__ == '__main__':
@@ -1636,5 +1834,6 @@ if __name__ == '__main__':
     # crossings_nonp()
     # volume_metric()
     # volume_metric_sweeps()
-    volume_metric_sweeps2()
+    # volume_metric_sweeps2()
     # voxel_scores_sweeps()
+    volume_metric_sweeps_cuboids_voxels()

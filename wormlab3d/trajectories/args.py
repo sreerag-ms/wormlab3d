@@ -130,6 +130,8 @@ def get_args(
                             help='Maximum non-planar angle sigma to use for sweeping.')
         parser.add_argument('--npas-num', type=int, default=3,
                             help='Number of non-planar angle sigmas to use for sweeping.')
+        parser.add_argument('--vxs', type=float, default=1e-1,
+                            help='Single voxel size to use.')
         parser.add_argument('--vxs-min', type=float, default=1e-1,
                             help='Minimum voxel size to use for sweeping.')
         parser.add_argument('--vxs-max', type=float, default=1e1,
