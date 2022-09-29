@@ -152,6 +152,8 @@ def get_args(
                             help='Number of pauses to use for sweeping.')
         parser.add_argument('--pauses-intervals', type=str, choices=['quadratic', 'exponential'], default='quadratic',
                             help='Interval between pauses.')
+        parser.add_argument('--volume-metric', type=str, choices=['disks', 'cuboids'], default='disks',
+                            help='How to calculate the volume estimates.')
 
     args = parser.parse_args()
 
