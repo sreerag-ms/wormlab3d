@@ -14,100 +14,14 @@ from mayavi.core.scene import Scene
 from tvtk.tools import visual
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
+from wormlab3d.particles.cache import generate_or_load_r_values, get_sim_state_from_args, get_npas_from_args
 from wormlab3d.toolkit.plot_utils import overlay_image, to_rgb
 from wormlab3d.trajectories.args import get_args
 
 show_plots = False
 save_plots = True
 img_extension = 'png'
-
-# These are precomputed r and z values for these values of sigma and the paper model parameters
-npa_sigmas_paper = np.exp(-np.linspace(np.log(1 / 1e-3), np.log(1 / 10), 40))
-r_values_paper = np.array([
-    [26.37047768, 6.84866905, 70.91493225],
-    [27.19985962, 7.74319458, 72.75009155],
-    [26.91914368, 8.41468239, 68.18685913],
-    [26.36344528, 7.57023907, 64.47218323],
-    [27.34775734, 7.5232935, 65.14431],
-    [26.24323273, 7.579772, 64.04511261],
-    [26.69629288, 8.04461288, 68.75421143],
-    [27.00673866, 8.23388767, 65.1728363],
-    [26.4631176, 7.39619112, 62.38437653],
-    [27.02355003, 6.8745985, 67.19996643],
-    [26.49530411, 9.71176338, 65.22090912],
-    [27.03031731, 9.03608131, 67.66876984],
-    [26.97320557, 9.03722572, 68.81982422],
-    [26.10933304, 8.33324814, 68.69045258],
-    [26.47162437, 9.14206982, 63.11143112],
-    [26.31864929, 8.24293709, 66.95050049],
-    [25.86649704, 8.35997486, 67.63995361],
-    [26.26771164, 8.50308418, 55.94869614],
-    [26.22031403, 8.10858822, 58.816185],
-    [25.63489532, 7.80216837, 59.96321487],
-    [25.50696564, 6.69798708, 61.31138229],
-    [25.24788284, 7.69211674, 63.32733154],
-    [25.43347359, 7.82677364, 60.58054733],
-    [24.5610199, 7.82066059, 61.56003189],
-    [24.34826469, 7.49853516, 58.16346741],
-    [24.5643959, 8.99473953, 59.14283752],
-    [23.24162102, 7.33277702, 53.19667816],
-    [22.79305458, 7.15097713, 54.79700089],
-    [21.61912918, 7.62393951, 62.38457108],
-    [20.44259644, 6.73174572, 50.67710876],
-    [19.97979736, 6.60961008, 51.74533463],
-    [20.12223816, 6.02390242, 52.63835144],
-    [19.81240654, 7.09848022, 44.82326508],
-    [19.81694984, 6.48989868, 44.4970932],
-    [19.61680984, 6.26188135, 46.92141342],
-    [19.62089539, 5.56906462, 42.59923935],
-    [19.76632881, 6.74197769, 42.18218231],
-    [19.98529625, 5.59029579, 44.85945892],
-    [19.52000427, 6.24363708, 44.64799118],
-    [19.71105385, 6.21947765, 46.49293518],
-])
-
-z_values_paper = np.array([
-    [1.08439319e-01, 1.87683702e-02, 6.01948261e-01, ],
-    [1.41735539e-01, 3.08232307e-02, 6.11835480e-01, ],
-    [1.77712068e-01, 3.77369523e-02, 6.16229773e-01, ],
-    [2.25317895e-01, 5.17663956e-02, 8.93105507e-01, ],
-    [2.82044739e-01, 5.75218201e-02, 1.21878231e+00, ],
-    [3.64291877e-01, 8.59701633e-02, 1.65892792e+00, ],
-    [4.72018182e-01, 9.90438461e-02, 2.67598438e+00, ],
-    [5.79967558e-01, 1.13871574e-01, 2.49173665e+00, ],
-    [7.50766039e-01, 1.72143698e-01, 2.91986942e+00, ],
-    [9.23524320e-01, 1.80970252e-01, 3.47769451e+00, ],
-    [1.15508449e+00, 2.55134583e-01, 5.03332901e+00, ],
-    [1.48506308e+00, 3.76707554e-01, 8.42977333e+00, ],
-    [1.89409244e+00, 4.10907745e-01, 9.44216537e+00, ],
-    [2.37065363e+00, 5.48722506e-01, 8.62445450e+00, ],
-    [2.86767054e+00, 6.58947468e-01, 9.88036060e+00, ],
-    [3.58742666e+00, 7.11676121e-01, 1.66881027e+01, ],
-    [4.54275608e+00, 8.75735998e-01, 1.63172379e+01, ],
-    [5.42247248e+00, 1.32271576e+00, 1.72629490e+01, ],
-    [6.22321367e+00, 1.88727093e+00, 1.58069534e+01, ],
-    [7.10748529e+00, 1.93884349e+00, 1.95304203e+01, ],
-    [7.66998672e+00, 2.59216404e+00, 1.76536484e+01, ],
-    [8.16336536e+00, 2.01386356e+00, 1.94519310e+01, ],
-    [8.27294540e+00, 3.10204148e+00, 1.81460800e+01, ],
-    [8.35521507e+00, 3.16583729e+00, 2.00180779e+01, ],
-    [8.39850426e+00, 3.53299546e+00, 2.14322472e+01, ],
-    [8.13499165e+00, 3.26218414e+00, 2.00810871e+01, ],
-    [7.76640797e+00, 3.31614304e+00, 1.72585583e+01, ],
-    [7.56845236e+00, 3.23078966e+00, 1.81797028e+01, ],
-    [7.25984192e+00, 3.31856561e+00, 1.74473343e+01, ],
-    [6.92943573e+00, 2.69637632e+00, 1.60080967e+01, ],
-    [6.64932537e+00, 2.12277746e+00, 1.77084217e+01, ],
-    [6.67393494e+00, 2.92974925e+00, 1.60686054e+01, ],
-    [6.75314474e+00, 2.66229773e+00, 1.38273354e+01, ],
-    [6.64066124e+00, 2.80084324e+00, 1.52757807e+01, ],
-    [6.61620855e+00, 2.96917820e+00, 1.61377792e+01, ],
-    [6.48537922e+00, 2.43766141e+00, 1.49967880e+01, ],
-    [6.70059824e+00, 2.64727187e+00, 1.63553982e+01, ],
-    [6.48779869e+00, 2.55504751e+00, 1.69105816e+01, ],
-    [6.56086636e+00, 2.55093932e+00, 1.62724724e+01, ],
-    [6.57849884e+00, 2.51942348e+00, 1.49009752e+01, ],
-])
+use_sigma_idxs = [3, 11, 19]
 
 
 def _calculate_volumes(r: np.ndarray, z: np.ndarray) -> np.ndarray:
@@ -278,10 +192,16 @@ def spherical_cut_plot():
     """
     args = get_args(validate_source=False)
 
-    use_idxs = [4, 16, 28]
-    npa_sigmas = npa_sigmas_paper[use_idxs]
-    z_values = z_values_paper[use_idxs]
-    r_values = r_values_paper[use_idxs]
+    npa_sigmas = get_npas_from_args(args)
+    args.npas = npa_sigmas
+    args.pauses = [args.nonp_pause_max]
+    args.sim_durations = [args.sim_duration]
+    r_values = generate_or_load_r_values(args, rebuild_cache=False, cache_only=False)
+    # r_values = np.zeros((n_sigmas, n_durations, n_pauses, 3, 4))
+
+    npa_sigmas = npa_sigmas[use_sigma_idxs]
+    r0 = r_values[use_sigma_idxs, 0, 0, 0, 0]
+    r2 = r_values[use_sigma_idxs, 0, 0, 2, 0]
     n_sigmas = len(npa_sigmas)
     args.npas = npa_sigmas
 
@@ -289,27 +209,9 @@ def spherical_cut_plot():
     n_radius_line_points = 100
     plot_n_trajectories_per_sigma = 3
 
-    # # Sweep over the nonplanarity angle sigmas
-    # for i, npas in enumerate(npa_sigmas):
-    #     logger.info(f'Simulating exploration with nonplanar angles sigma = {npas:.2E} ({i + 1}/{n_sigmas}).')
-    #     args.phi_dist_params[1] = npas
-    #     pe, TC = get_trajectories_from_args(args)
-    #
-    #     # Find the maximums in each relative directions
-    #     Xt = TC.get_Xt()
-    #     Xs.append(Xt)
-    #     # Xt_max = np.abs(Xt).max(axis=1)
-    #
-    #     # # Use first component as radius and third as height of explored disk
-    #     # r_values[i] = [Xt_max[:, 0].mean(), Xt_max[:, 0].min(), Xt_max[:, 0].max()]
-    #     # z_values[i] = [Xt_max[:, 2].mean(), Xt_max[:, 2].min(), Xt_max[:, 2].max()]
-    #     #
-    #     # if TC.needs_save:
-    #     #     TC.save()
-    Xs = np.load(LOGS_PATH / 'trajectories.npz', mmap_mode=True)['Xs']
-
     # Plot the sphere-slices
     logger.info('Plotting results.')
+    mlab.options.offscreen = save_plots
     fig = mlab.figure(size=(1000, 1000), bgcolor=(1, 1, 1))
     fig.scene.renderer.use_depth_peeling = True
     fig.scene.renderer.maximum_number_of_peels = 16
@@ -321,8 +223,8 @@ def spherical_cut_plot():
     visual.set_viewer(fig)
 
     # Axis arrows
-    r_max = r_values[:, 0].max()
-    z_max = z_values.max()
+    r_max = r0.max()
+    z_max = r2.max()
     angle = np.pi / 2
     z_max_offset = 4
     axis_colour = to_rgb('red')
@@ -349,20 +251,25 @@ def spherical_cut_plot():
     for i, npas in enumerate(npa_sigmas):
         colour = tuple(sphere_colours[i][:3])
 
+        # Fetch trajectories
+        args.phi_dist_params[1] = npas
+        SS = get_sim_state_from_args(args)
+        Xt = SS.get_Xt()
+
         # Pick trajectories which come closest to the average r and z values
-        r_dist = np.abs(np.max(np.abs(Xs[i][:, :, 0]), axis=1) - r_values[i, 0])
-        z_dist = np.abs(np.max(np.abs(Xs[i][:, :, 2]), axis=1) - z_values[i, 0])
-        best_fit_idxs = np.argsort(r_dist * z_dist)[:plot_n_trajectories_per_sigma]
+        r0_dist = np.abs(np.max(np.abs(Xt[:, :, 0]), axis=1) - r0[i])
+        r2_dist = np.abs(np.max(np.abs(Xt[:, :, 2]), axis=1) - r2[i])
+        best_fit_idxs = np.argsort(r0_dist * r2_dist)[:plot_n_trajectories_per_sigma]
         for idx in best_fit_idxs:
-            _plot_trajectory(Xs[i][idx], c=colour)
-        _plot_sphere_slice(r_values[i, 0], z_values[i, 0], colour, n_points, alphas[i])
+            _plot_trajectory(Xt[idx], c=colour)
+        _plot_sphere_slice(r0[i], r2[i], colour, n_points, alphas[i])
 
         # Plot arrows to the radius
-        # _plot_arrow(*(r_arrow_coords[i]*r_values[i, 0]), c=_get_rgb('red'))
-        # _plot_arrow(*(r_arrow_coords[i] * r_values[i, 0]), c=colour)
+        # _plot_arrow(*(r_arrow_coords[i]*r0[i]), c=_get_rgb('red'))
+        # _plot_arrow(*(r_arrow_coords[i] * r0[i]), c=colour)
 
-        x = r_values[i, 0] * np.sin(angle) * np.ones(n_radius_line_points)
-        y = r_values[i, 0] * np.cos(angle) * np.ones(n_radius_line_points)
+        x = r0[i] * np.sin(angle) * np.ones(n_radius_line_points)
+        y = r0[i] * np.cos(angle) * np.ones(n_radius_line_points)
         z = np.linspace(0, z_max - z_max_offset, n_radius_line_points)
         mlab.plot3d(x, y, z, color=colour, tube_radius=0.1, tube_sides=12, opacity=alphas[i])
 
@@ -403,26 +310,35 @@ def spherical_cut_animation():
     """
     args = get_args(validate_source=False)
 
-    use_idxs = [4, 16, 28]
-    npa_sigmas = npa_sigmas_paper[use_idxs]
-    z_values = z_values_paper[use_idxs]
-    r_values = r_values_paper[use_idxs]
+    npa_sigmas = get_npas_from_args(args)
+    args.npas = npa_sigmas
+    args.pauses = [args.nonp_pause_max]
+    args.sim_durations = [args.sim_duration]
+    r_values = generate_or_load_r_values(args, rebuild_cache=False, cache_only=True)
+
+    npa_sigmas = npa_sigmas[use_sigma_idxs]
+    r0 = r_values[use_sigma_idxs, 0, 0, 0, 0]
+    r2 = r_values[use_sigma_idxs, 0, 0, 2, 0]
     n_sigmas = len(npa_sigmas)
     args.npas = npa_sigmas
-    args.sim_duration = 60 * 60
 
     width = 1280
     height = 720
     n_points = 100
     args.plot_n_trajectories_per_sigma = 10
     traj_anim_rate = 100
-    Xs = np.load(LOGS_PATH / 'trajectories.npz', mmap_mode=True)['Xs']
-    T = Xs.shape[2]
+    T = int(args.sim_duration / args.sim_dt)
 
     # Set up plot
     logger.info('Instantiating renderer.')
     mlab.options.offscreen = save_plots
     fig = mlab.figure(size=(width, height), bgcolor=(1, 1, 1))
+    fig.scene.renderer.use_depth_peeling = True
+    fig.scene.renderer.maximum_number_of_peels = 16
+    fig.scene.render_window.point_smoothing = True
+    fig.scene.render_window.line_smoothing = True
+    fig.scene.render_window.polygon_smoothing = True
+    fig.scene.render_window.multi_samples = 20
     fig.scene.anti_aliasing_frames = 20
     visual.set_viewer(fig)
 
@@ -448,12 +364,17 @@ def spherical_cut_animation():
     for i, npas in enumerate(npa_sigmas):
         colour = tuple(sphere_colours[i][:3])
 
+        # Fetch trajectories
+        args.phi_dist_params[1] = npas
+        SS = get_sim_state_from_args(args)
+        Xt = SS.get_Xt()
+
         # Pick trajectories which come closest to the average r and z values
-        r_dist = np.abs(np.max(np.abs(Xs[i][:, :, 0]), axis=1) - r_values[i, 0])
-        z_dist = np.abs(np.max(np.abs(Xs[i][:, :, 2]), axis=1) - z_values[i, 0])
-        best_fit_idxs = np.argsort(r_dist * z_dist)[:args.plot_n_trajectories_per_sigma]
+        r0_dist = np.abs(np.max(np.abs(Xt[:, :, 0]), axis=1) - r0[i])
+        r2_dist = np.abs(np.max(np.abs(Xt[:, :, 2]), axis=1) - r2[i])
+        best_fit_idxs = np.argsort(r0_dist * r2_dist)[:args.plot_n_trajectories_per_sigma]
         for idx in best_fit_idxs:
-            traj = Xs[i][idx]
+            traj = Xt[idx]
             trajectories[i].append(traj)
             x, y, z = traj[0].T
             path = mlab.plot3d(x, y, z, color=colour, tube_radius=0.08)
@@ -651,15 +572,20 @@ def spherical_cut_stacked_animation():
     """
     args = get_args(validate_source=False)
 
-    # use_idxs = [4, 16, 28]
-    use_idxs = [4, 27, -1]
-    npa_sigmas = npa_sigmas_paper[use_idxs]
-    sigma_labels = ['0.003', '0.6', '10']
-    z_values = z_values_paper[use_idxs]
-    r_values = r_values_paper[use_idxs]
+    npa_sigmas = get_npas_from_args(args)
+    args.npas = npa_sigmas
+    args.pauses = [args.nonp_pause_max]
+    args.sim_durations = [args.sim_duration]
+    r_values = generate_or_load_r_values(args, rebuild_cache=False, cache_only=True)
+
+    npa_sigmas = npa_sigmas[use_sigma_idxs]
+    r0 = r_values[use_sigma_idxs, 0, 0, 0, 0]
+    r2 = r_values[use_sigma_idxs, 0, 0, 2, 0]
     n_sigmas = len(npa_sigmas)
     args.npas = npa_sigmas
-    args.sim_duration = 60 * 60
+
+    # sigma_labels = ['0.003', '0.6', '10']
+    sigma_labels = [f'{s:.2E}' for s in npa_sigmas]
 
     width = 1280
     height = 720
@@ -667,8 +593,7 @@ def spherical_cut_stacked_animation():
     traj_anim_rate = 100
     args.plot_n_trajectories_per_sigma = 1  # 5
     args.pick_trajectories_on = ['averages', 'extremes'][1]
-    Xs = np.load(LOGS_PATH / 'trajectories.npz', mmap_mode=True)['Xs']
-    T = Xs.shape[2]
+    T = int(args.sim_duration / args.sim_dt)
 
     # Set up plot
     logger.info('Instantiating renderer.')
@@ -692,19 +617,31 @@ def spherical_cut_stacked_animation():
     # Generate separate figures for each sigma
     for i, npas in enumerate(npa_sigmas):
         fig = mlab.figure(size=(width, height / n_sigmas * 2), bgcolor=(1, 1, 1))
+        fig.scene.renderer.use_depth_peeling = True
+        fig.scene.renderer.maximum_number_of_peels = 16
+        fig.scene.render_window.point_smoothing = True
+        fig.scene.render_window.line_smoothing = True
+        fig.scene.render_window.polygon_smoothing = True
+        fig.scene.render_window.multi_samples = 20
+        fig.scene.anti_aliasing_frames = 20
         fig.scene.anti_aliasing_frames = 20
         figs[i] = fig
         colour = tuple(colours[i][:3])
 
+        # Fetch trajectories
+        args.phi_dist_params[1] = npas
+        SS = get_sim_state_from_args(args)
+        Xt = SS.get_Xt()
+
         if args.pick_trajectories_on == 'average':
             # Pick trajectories which come closest to the average r and z values
-            r_dist = np.abs(np.max(np.abs(Xs[i][:, :, 0]), axis=1) - r_values[i, 0])
-            z_dist = np.abs(np.max(np.abs(Xs[i][:, :, 2]), axis=1) - z_values[i, 0])
+            r_dist = np.abs(np.max(np.abs(Xt[:, :, 0]), axis=1) - r0[i])
+            z_dist = np.abs(np.max(np.abs(Xt[:, :, 2]), axis=1) - r2[i])
             best_fit_idxs = np.argsort(r_dist * z_dist)[:args.plot_n_trajectories_per_sigma]
         elif args.pick_trajectories_on == 'extremes':
             # Pick trajectories which find the extremes
-            r_dist = np.max(np.abs(Xs[i][:, :, 0]), axis=1)
-            z_dist = np.max(np.abs(Xs[i][:, :, 2]), axis=1)
+            r_dist = np.max(np.abs(Xt[:, :, 0]), axis=1)
+            z_dist = np.max(np.abs(Xt[:, :, 2]), axis=1)
 
             if i == 0:
                 best_fit_idxs = np.argsort(r_dist)[-args.plot_n_trajectories_per_sigma:]
@@ -719,7 +656,7 @@ def spherical_cut_stacked_animation():
             raise RuntimeError(f'Unrecognised pick_trajectories_on option: "{args.pick_trajectories_on}".')
 
         for j, idx in enumerate(best_fit_idxs):
-            traj = Xs[i][idx]
+            traj = Xt[idx]
             trajectories[i, j] = traj
             x, y, z = traj[0].T
             path = mlab.plot3d(x, y, z, color=colour, tube_radius=0.08, figure=figs[i])
@@ -866,5 +803,5 @@ if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
     spherical_cut_plot()
-    # spherical_cut_animation()
-    # spherical_cut_stacked_animation()
+    spherical_cut_animation()
+    spherical_cut_stacked_animation()

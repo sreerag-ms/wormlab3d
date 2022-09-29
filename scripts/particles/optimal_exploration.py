@@ -10,9 +10,9 @@ from scipy.stats import ttest_ind
 
 from simple_worm.plot3d import MidpointNormalize
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
-from wormlab3d.particles.cache import get_sim_state_from_args
+from wormlab3d.particles.cache import get_sim_state_from_args, generate_or_load_voxel_scores, generate_or_load_r_values, \
+    get_npas_from_args, get_voxel_sizes_from_args, get_durations_from_args, get_pauses_from_args
 from wormlab3d.toolkit.plot_utils import tex_mode
-from wormlab3d.toolkit.util import hash_data
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.util import get_deltas_from_args
 
@@ -94,35 +94,6 @@ def make_filename(
     return LOGS_PATH / (fn + '.' + extension)
 
 
-def _get_npas_from_args(args: Namespace) -> np.ndarray:
-    return np.exp(-np.linspace(np.log(1 / args.npas_min), np.log(1 / args.npas_max), args.npas_num))
-
-
-def _get_voxel_sizes_from_args(args: Namespace) -> np.ndarray:
-    return np.exp(-np.linspace(np.log(1 / args.vxs_max), np.log(1 / args.vxs_min), args.vxs_num))
-
-
-def _get_durations_from_args(args: Namespace) -> np.ndarray:
-    if args.durations_intervals == 'exponential':
-        durations = np.exp(-np.linspace(np.log(1 / (args.durations_min * 60)), np.log(1 / (args.durations_min * 60)),
-                                        args.durations_num))
-    else:
-        durations = np.arange(args.durations_min, args.durations_min + args.durations_num)**2 * 60
-    durations = np.round(durations / args.sim_dt) * args.sim_dt
-    return durations
-
-
-def _get_pauses_from_args(args: Namespace) -> np.ndarray:
-    if args.pauses_intervals == 'exponential':
-        if args.pauses_min == 0:
-            pauses = np.r_[[0, ], np.exp(-np.linspace(np.log(1 / 1), np.log(1 / args.pauses_max), args.pauses_num - 1))]
-        else:
-            pauses = np.exp(-np.linspace(np.log(1 / args.pauses_min), np.log(1 / args.pauses_max), args.pauses_num))
-    else:
-        pauses = np.arange(args.pauses_min, args.pauses_min + args.pauses_num)**2
-    return pauses
-
-
 def coverage_scores():
     """
     Simulate across a range of non-planarities and score trajectories based on how many unique voxels have been visited.
@@ -130,9 +101,9 @@ def coverage_scores():
     tex_mode()
     args = get_args(validate_source=False)
     deltas, delta_ts = get_deltas_from_args(args)
-    npa_sigmas = _get_npas_from_args(args)
+    npa_sigmas = get_npas_from_args(args)
     n_sigmas = args.npas_num
-    voxel_sizes = _get_voxel_sizes_from_args(args)
+    voxel_sizes = get_voxel_sizes_from_args(args)
     n_vs = args.vxs_num
 
     # Outputs
@@ -570,7 +541,7 @@ def surface_coverage_scores():
     Simulate across a range of non-planarities and count frequency of trajectories crossing different radii.
     """
     args = get_args(validate_source=False)
-    npa_sigmas = _get_npas_from_args(args)
+    npa_sigmas = get_npas_from_args(args)
     n_sigmas = args.npas_num
     targets_radii = np.linspace(0, 50, 51)
     n_radii = len(targets_radii)
@@ -671,7 +642,7 @@ def crossings_nonp():
     Non-planarities of crossing points relative to principal plane.
     """
     args = get_args(validate_source=False)
-    npa_sigmas = _get_npas_from_args(args)
+    npa_sigmas = get_npas_from_args(args)
     n_sigmas = args.npas_num
     targets_radii = np.linspace(0, 30, 31)
     n_radii = len(targets_radii)
@@ -770,7 +741,7 @@ def volume_metric():
     Estimate the volume explored by a typical trajectory.
     """
     args = get_args(validate_source=False)
-    npa_sigmas = _get_npas_from_args(args)
+    npa_sigmas = get_npas_from_args(args)
     n_sigmas = args.npas_num
     args.npas = npa_sigmas
 
@@ -956,17 +927,17 @@ def volume_metric_sweeps():
     Estimate the volume explored by a typical trajectory.
     """
     args = get_args(validate_source=False)
-    npa_sigmas = _get_npas_from_args(args)
+    npa_sigmas = get_npas_from_args(args)
     n_sigmas = args.npas_num
     args.npas = npa_sigmas
 
     # Sweep over sim durations
-    sim_durations = _get_durations_from_args(args)
+    sim_durations = get_durations_from_args(args)
     n_durations = len(sim_durations)
     args.sim_durations = sim_durations
 
     # Sweep over the pauses
-    pauses = _get_pauses_from_args(args)
+    pauses = get_pauses_from_args(args)
     n_pauses = len(pauses)
     args.pauses = pauses
 
@@ -1096,95 +1067,6 @@ def volume_metric_sweeps():
         plt.show()
 
 
-def _calculate_r_values(
-        args: Namespace
-) -> np.ndarray:
-    """
-    Calculate the r values across a range of sigmas, durations and pauses.
-    """
-    npa_sigmas = args.npas
-    n_sigmas = len(npa_sigmas)
-    sim_durations = args.sim_durations
-    n_durations = len(sim_durations)
-    pauses = args.pauses
-    n_pauses = len(pauses)
-
-    # Outputs
-    r_values = np.zeros((n_sigmas, n_durations, n_pauses, 3, 4))
-    n_sims = n_sigmas * n_durations * n_pauses
-    sim_idx = 0
-
-    # Sweep over the combinations
-    for i, npas in enumerate(npa_sigmas):
-        for j, duration in enumerate(sim_durations):
-            for k, pause in enumerate(pauses):
-                logger.info(
-                    f'Simulating exploration with sigma={npas:.2E}, duration={duration:.2f}, pause={pause:.2f}. '
-                    f'({sim_idx + 1}/{n_sims}).'
-                )
-
-                args.phi_dist_params[1] = npas
-                args.sim_duration = duration
-                args.nonp_pause_max = pause
-                SS = get_sim_state_from_args(args)
-
-                # Find the maximums in each relative directions
-                Xt = SS.get_Xt()
-                Xt_max = np.abs(Xt).max(axis=1)
-
-                # Collect the batch-mean, min, max and std.
-                r_values[i, j, k] = np.array([
-                    Xt_max.mean(axis=0),
-                    Xt_max.min(axis=0),
-                    Xt_max.max(axis=0),
-                    Xt_max.std(axis=0)
-                ]).T
-
-                if SS.needs_save:
-                    SS.save()
-                sim_idx += 1
-
-    return r_values
-
-
-def _generate_or_load_r_values(
-        args: Namespace,
-        rebuild_cache: bool = False,
-        cache_only: bool = False
-) -> np.ndarray:
-    keys = {
-        'npas': [f'{s:.3E}' for s in args.npas],
-        'durations': [f'{d:.4f}' for d in args.sim_durations],
-        'pauses': [f'{p:.4f}' for p in args.pauses],
-    }
-    cache_path = LOGS_PATH / hash_data(keys)
-    cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
-    r_values = None
-    if not rebuild_cache and cache_fn.exists():
-        try:
-            data = np.load(cache_fn)
-            r_values = data['r_values']
-            assert r_values.shape == (len(args.npas), len(args.sim_durations), len(args.pauses), 3, 4), \
-                'Invalid r_values shape.'
-            logger.info(f'Loaded r values from cache: {cache_fn}')
-        except Exception as e:
-            r_values = None
-            logger.warning(f'Could not load cache: {e}')
-
-    if r_values is None:
-        if cache_only:
-            raise RuntimeError(f'Cache "{cache_fn}" could not be loaded!')
-        logger.info('Generating r values.')
-        r_values = _calculate_r_values(args)
-        save_arrs = {
-            'r_values': r_values,
-        }
-        logger.info(f'Saving r values to {cache_path}.')
-        np.savez(cache_path, **save_arrs)
-
-    return r_values
-
-
 def volume_metric_sweeps2():
     """
     Estimate the volume explored by a typical trajectory.
@@ -1193,12 +1075,12 @@ def volume_metric_sweeps2():
     model_phi = args.phi_dist_params[1]
 
     # Set parameter ranges
-    npa_sigmas = _get_npas_from_args(args)
+    npa_sigmas = get_npas_from_args(args)
     n_sigmas = args.npas_num
     args.npas = npa_sigmas
-    sim_durations = _get_durations_from_args(args)
+    sim_durations = get_durations_from_args(args)
     n_durations = args.durations_num
-    pauses = _get_pauses_from_args(args)
+    pauses = get_pauses_from_args(args)
     n_pauses = args.pauses_num
 
     fix_duration = args.sim_duration
@@ -1221,7 +1103,7 @@ def volume_metric_sweeps2():
         # Fix the pause and sweep over the durations
         args.sim_durations = sim_durations
         args.pauses = [fix_pause]
-        r_values = _generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
+        r_values = generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
 
         start_idx = 1
         end_idx = n_durations - 1
@@ -1277,7 +1159,7 @@ def volume_metric_sweeps2():
         # Fix the duration and sweep over the pauses
         args.sim_durations = [fix_duration]
         args.pauses = pauses
-        r_values = _generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
+        r_values = generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
         vols = _calculate_volumes(r_values)
         optimal_sigmas_idxs = vols[..., 0].argmax(axis=0).squeeze()
         optimal_sigmas = npa_sigmas[optimal_sigmas_idxs]
@@ -1344,7 +1226,7 @@ def volume_metric_sweeps2():
         # Fix the pause and sweep over the durations
         args.sim_durations = sim_durations
         args.pauses = [fix_pause]
-        r_values = _generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
+        r_values = generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
         vols = _calculate_volumes(r_values)
         optimal_sigmas_idxs = vols[..., 0].argmax(axis=0).squeeze()
         optimal_sigmas = npa_sigmas[optimal_sigmas_idxs]
@@ -1383,7 +1265,7 @@ def volume_metric_sweeps2():
         # Fix the duration and sweep over the pauses
         args.sim_durations = [fix_duration]
         args.pauses = pauses
-        r_values = _generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
+        r_values = generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
         vols = _calculate_volumes(r_values)
         optimal_sigmas_idxs = vols[..., 0].argmax(axis=0).squeeze()
         optimal_sigmas = npa_sigmas[optimal_sigmas_idxs]
@@ -1429,110 +1311,6 @@ def volume_metric_sweeps2():
             plt.show()
 
 
-def _calculate_voxel_scores_for_spec(params):
-    args, npas, duration, pause, voxel_sizes = params
-    args.phi_dist_params[1] = npas
-    args.sim_duration = duration
-    args.nonp_pause_max = pause
-    pe, TC = get_sim_state_from_args(args)
-    scores = np.zeros((len(voxel_sizes), 4))
-
-    # Calculate optimality
-    for l, vs in enumerate(voxel_sizes):
-        vc = TC.get_coverage(vs) / vs
-        scores[l] = [vc.mean(), vc.min(), vc.max(), vc.std()]
-    if TC.needs_save:
-        TC.save()
-
-    return scores
-
-
-def _calculate_voxel_scores(
-        args: Namespace
-) -> np.ndarray:
-    """
-    Calculate the voxel scores across a range of sigmas, durations, pauses and voxel sizes.
-    """
-    npa_sigmas = args.npas
-    n_sigmas = len(npa_sigmas)
-    sim_durations = args.sim_durations
-    n_durations = len(sim_durations)
-    pauses = args.pauses
-    n_pauses = len(pauses)
-    if hasattr(args, 'voxel_sizes'):
-        voxel_sizes = args.voxel_sizes
-    else:
-        voxel_sizes = [args.vxs, ]
-    n_voxel_sizes = len(voxel_sizes)
-
-    # Outputs
-    scores = np.zeros((n_sigmas, n_durations, n_pauses, n_voxel_sizes, 4))
-    n_sims = n_sigmas * n_durations * n_pauses
-    sim_idx = 0
-
-    # Sweep over the combinations
-    for i, npas in enumerate(npa_sigmas):
-        for j, duration in enumerate(sim_durations):
-            for k, pause in enumerate(pauses):
-                logger.info(
-                    f'{sim_idx + 1}/{n_sims}: '
-                    f'sigma={npas:.2E}, duration={duration:.2f}, pause={pause:.2f}.'
-                )
-                args.phi_dist_params[1] = npas
-                args.sim_duration = duration
-                args.nonp_pause_max = pause
-                SS = get_sim_state_from_args(args)
-
-                # Calculate coverage
-                for l, vs in enumerate(voxel_sizes):
-                    vc = SS.get_coverage(vs) / vs
-                    scores[i, j, k, l] = [vc.mean(), vc.min(), vc.max(), vc.std()]
-                if SS.needs_save:
-                    SS.save()
-
-                sim_idx += 1
-
-    return scores
-
-
-def _generate_or_load_voxel_scores(
-        args: Namespace,
-        rebuild_cache: bool = False,
-        cache_only: bool = False
-) -> np.ndarray:
-    if hasattr(args, 'voxel_sizes'):
-        vs = [f'{p:.3E}' for p in args.voxel_sizes]
-    else:
-        vs = [f'{args.vxs:.3E}', ]
-
-    keys = {
-        'npas': [f'{s:.3E}' for s in args.npas],
-        'durations': [f'{d:.4f}' for d in args.sim_durations],
-        'pauses': [f'{p:.4f}' for p in args.pauses],
-        'vs': vs,
-    }
-    cache_path = LOGS_PATH / hash_data(keys)
-    cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
-    scores = None
-    if not rebuild_cache and cache_fn.exists():
-        data = np.load(cache_fn)
-        scores = data['scores']
-        logger.info(f'Loaded scores from cache: {cache_fn}')
-
-    if scores is None:
-        if cache_only:
-            raise RuntimeError(f'Cache "{cache_fn}" could not be loaded!')
-        logger.info('Generating voxel coverage values.')
-        scores = _calculate_voxel_scores(args)
-        save_arrs = {
-            'scores': scores,
-        }
-        logger.info(f'Saving voxel scores to {cache_path}.')
-        np.savez(cache_path, **save_arrs)
-
-    return scores
-
-
 def voxel_scores_sweeps():
     """
     Simulate across a range of non-planarities and count unique voxels visited.
@@ -1541,14 +1319,14 @@ def voxel_scores_sweeps():
     model_phi = args.phi_dist_params[1]
 
     # Set parameter ranges
-    npa_sigmas = _get_npas_from_args(args)
+    npa_sigmas = get_npas_from_args(args)
     n_sigmas = args.npas_num
     args.npas = npa_sigmas
-    sim_durations = _get_durations_from_args(args)
+    sim_durations = get_durations_from_args(args)
     n_durations = args.durations_num
-    pauses = _get_pauses_from_args(args)
+    pauses = get_pauses_from_args(args)
     n_pauses = args.pauses_num
-    voxel_sizes = _get_voxel_sizes_from_args(args)
+    voxel_sizes = get_voxel_sizes_from_args(args)
     args.voxel_sizes = voxel_sizes
     n_vs = args.vxs_num
 
@@ -1559,7 +1337,7 @@ def voxel_scores_sweeps():
         # Fix the pause and sweep over the durations
         args.sim_durations = sim_durations
         args.pauses = [fix_pause]
-        scores = _generate_or_load_voxel_scores(args, rebuild_cache=False)
+        scores = generate_or_load_voxel_scores(args, rebuild_cache=False)
         optimal_sigmas_idxs = scores[..., 0].argmax(axis=0).squeeze()
         optimal_sigmas = npa_sigmas[optimal_sigmas_idxs]
 
@@ -1602,7 +1380,7 @@ def voxel_scores_sweeps():
         # Fix the duration and sweep over the pauses
         args.sim_durations = [fix_duration]
         args.pauses = pauses
-        scores = _generate_or_load_voxel_scores(args, rebuild_cache=False)
+        scores = generate_or_load_voxel_scores(args, rebuild_cache=False)
         optimal_sigmas_idxs = scores[..., 0].argmax(axis=0).squeeze()
         optimal_sigmas = npa_sigmas[optimal_sigmas_idxs]
 
@@ -1650,10 +1428,10 @@ def volume_metric_sweeps_cuboids_voxels():
     model_phi = args.phi_dist_params[1]
 
     # Set parameter ranges
-    npa_sigmas = _get_npas_from_args(args)
+    npa_sigmas = get_npas_from_args(args)
     args.npas = npa_sigmas
-    sim_durations = _get_durations_from_args(args)
-    pauses = _get_pauses_from_args(args)
+    sim_durations = get_durations_from_args(args)
+    pauses = get_pauses_from_args(args)
     fix_duration = args.sim_duration
     fix_pause = args.nonp_pause_max
     assert args.volume_metric == 'cuboids'
@@ -1690,11 +1468,11 @@ def volume_metric_sweeps_cuboids_voxels():
     # Fix the pause and sweep over the durations
     args.sim_durations = sim_durations
     args.pauses = [fix_pause]
-    r_values = _generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
+    r_values = generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
     vols = _calculate_volumes(r_values)
     optimal_sigmas_vols_idxs = vols[..., 0].argmax(axis=0).squeeze()
     optimal_sigmas_vols = npa_sigmas[optimal_sigmas_vols_idxs]
-    scores = _generate_or_load_voxel_scores(args, cache_only=True, rebuild_cache=False)
+    scores = generate_or_load_voxel_scores(args, cache_only=True, rebuild_cache=False)
     optimal_sigmas_scores_idxs = scores[..., 0].argmax(axis=0).squeeze()
     optimal_sigmas_scores = npa_sigmas[optimal_sigmas_scores_idxs]
 
@@ -1752,11 +1530,11 @@ def volume_metric_sweeps_cuboids_voxels():
     # Fix the duration and sweep over the pauses
     args.sim_durations = [fix_duration]
     args.pauses = pauses
-    r_values = _generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
+    r_values = generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
     vols = _calculate_volumes(r_values)
     optimal_sigmas_vols_idxs = vols[..., 0].argmax(axis=0).squeeze()
     optimal_sigmas_vols = npa_sigmas[optimal_sigmas_vols_idxs]
-    scores = _generate_or_load_voxel_scores(args, cache_only=True, rebuild_cache=False)
+    scores = generate_or_load_voxel_scores(args, cache_only=True, rebuild_cache=False)
     optimal_sigmas_scores_idxs = scores[..., 0].argmax(axis=0).squeeze()
     optimal_sigmas_scores = npa_sigmas[optimal_sigmas_scores_idxs]
 

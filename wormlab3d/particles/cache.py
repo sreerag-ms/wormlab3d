@@ -1,10 +1,13 @@
 from argparse import Namespace
 from typing import Union
 
-from wormlab3d import logger
+import numpy as np
+
+from wormlab3d import PE_CACHE_PATH, logger
 from wormlab3d.data.model import PEParameters
 from wormlab3d.particles.args.parameter_args import ParameterArgs
 from wormlab3d.particles.simulation_state import SimulationState
+from wormlab3d.toolkit.util import hash_data
 
 
 def _init_parameters(args: ParameterArgs) -> PEParameters:
@@ -47,3 +50,237 @@ def get_sim_state_from_args(args: Union[ParameterArgs, Namespace]) -> Simulation
     params = _init_parameters(args)
     SS = SimulationState(params, read_only=False, regenerate=args.regenerate)
     return SS
+
+
+def get_npas_from_args(args: Namespace) -> np.ndarray:
+    return np.exp(-np.linspace(np.log(1 / args.npas_min), np.log(1 / args.npas_max), args.npas_num))
+
+
+def get_voxel_sizes_from_args(args: Namespace) -> np.ndarray:
+    return np.exp(-np.linspace(np.log(1 / args.vxs_max), np.log(1 / args.vxs_min), args.vxs_num))
+
+
+def get_durations_from_args(args: Namespace) -> np.ndarray:
+    if args.durations_intervals == 'exponential':
+        durations = np.exp(-np.linspace(np.log(1 / (args.durations_min * 60)), np.log(1 / (args.durations_min * 60)),
+                                        args.durations_num))
+    else:
+        durations = np.arange(args.durations_min, args.durations_min + args.durations_num)**2 * 60
+    durations = np.round(durations / args.sim_dt) * args.sim_dt
+    return durations
+
+
+def get_pauses_from_args(args: Namespace) -> np.ndarray:
+    if args.pauses_intervals == 'exponential':
+        if args.pauses_min == 0:
+            pauses = np.r_[[0, ], np.exp(-np.linspace(np.log(1 / 1), np.log(1 / args.pauses_max), args.pauses_num - 1))]
+        else:
+            pauses = np.exp(-np.linspace(np.log(1 / args.pauses_min), np.log(1 / args.pauses_max), args.pauses_num))
+    else:
+        pauses = np.arange(args.pauses_min, args.pauses_min + args.pauses_num)**2
+    return pauses
+
+
+def _calculate_r_values(
+        args: Namespace
+) -> np.ndarray:
+    """
+    Calculate the r values across a range of sigmas, durations and pauses.
+    """
+    npa_sigmas = args.npas
+    n_sigmas = len(npa_sigmas)
+    sim_durations = args.sim_durations
+    n_durations = len(sim_durations)
+    pauses = args.pauses
+    n_pauses = len(pauses)
+
+    # Outputs
+    r_values = np.zeros((n_sigmas, n_durations, n_pauses, 3, 4))
+    n_sims = n_sigmas * n_durations * n_pauses
+    sim_idx = 0
+
+    # Sweep over the combinations
+    for i, npas in enumerate(npa_sigmas):
+        for j, duration in enumerate(sim_durations):
+            for k, pause in enumerate(pauses):
+                logger.info(
+                    f'Simulating exploration with sigma={npas:.2E}, duration={duration:.2f}, pause={pause:.2f}. '
+                    f'({sim_idx + 1}/{n_sims}).'
+                )
+
+                args.phi_dist_params[1] = npas
+                args.sim_duration = duration
+                args.nonp_pause_max = pause
+                SS = get_sim_state_from_args(args)
+
+                # Find the maximums in each relative directions
+                Xt = SS.get_Xt()
+                Xt_max = np.abs(Xt).max(axis=1)
+
+                # Collect the batch-mean, min, max and std.
+                r_values[i, j, k] = np.array([
+                    Xt_max.mean(axis=0),
+                    Xt_max.min(axis=0),
+                    Xt_max.max(axis=0),
+                    Xt_max.std(axis=0)
+                ]).T
+
+                if SS.needs_save:
+                    SS.save()
+                sim_idx += 1
+
+    return r_values
+
+
+def generate_or_load_r_values(
+        args: Namespace,
+        rebuild_cache: bool = False,
+        cache_only: bool = False
+) -> np.ndarray:
+    """
+    Generate or load the r values - distances travelled along each of the principal component axes.
+    """
+    if not hasattr(args, 'npas'):
+        npas = get_npas_from_args(args)
+    else:
+        npas = args.npas
+    if not hasattr(args, 'sim_durations'):
+        durations = get_durations_from_args(args)
+    else:
+        durations = args.sim_durations
+    if not hasattr(args, 'pauses'):
+        pauses = get_pauses_from_args(args)
+    else:
+        pauses = args.pauses
+
+    keys = {
+        'npas': [f'{s:.3E}' for s in npas],
+        'durations': [f'{d:.4f}' for d in durations],
+        'pauses': [f'{p:.4f}' for p in pauses],
+    }
+    cache_path = PE_CACHE_PATH / f'r_vals_{hash_data(keys)}'
+    cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
+    r_values = None
+    if not rebuild_cache and cache_fn.exists():
+        try:
+            data = np.load(cache_fn)
+            r_values = data['r_values']
+            assert r_values.shape == (len(args.npas), len(args.sim_durations), len(args.pauses), 3, 4), \
+                'Invalid r_values shape.'
+            logger.info(f'Loaded r values from cache: {cache_fn}')
+        except Exception as e:
+            r_values = None
+            logger.warning(f'Could not load cache: {e}')
+
+    if r_values is None:
+        if cache_only:
+            raise RuntimeError(f'Cache "{cache_fn}" could not be loaded!')
+        logger.info('Generating r values.')
+        r_values = _calculate_r_values(args)
+        save_arrs = {
+            'r_values': r_values,
+        }
+        logger.info(f'Saving r values to {cache_path}.')
+        np.savez(cache_path, **save_arrs)
+
+    return r_values
+
+
+def _calculate_voxel_scores(
+        args: Namespace
+) -> np.ndarray:
+    """
+    Calculate the voxel scores across a range of sigmas, durations, pauses and voxel sizes.
+    """
+    npa_sigmas = args.npas
+    n_sigmas = len(npa_sigmas)
+    sim_durations = args.sim_durations
+    n_durations = len(sim_durations)
+    pauses = args.pauses
+    n_pauses = len(pauses)
+    if hasattr(args, 'voxel_sizes'):
+        voxel_sizes = args.voxel_sizes
+    else:
+        voxel_sizes = [args.vxs, ]
+    n_voxel_sizes = len(voxel_sizes)
+
+    # Outputs
+    scores = np.zeros((n_sigmas, n_durations, n_pauses, n_voxel_sizes, 4))
+    n_sims = n_sigmas * n_durations * n_pauses
+    sim_idx = 0
+
+    # Sweep over the combinations
+    for i, npas in enumerate(npa_sigmas):
+        for j, duration in enumerate(sim_durations):
+            for k, pause in enumerate(pauses):
+                logger.info(
+                    f'{sim_idx + 1}/{n_sims}: '
+                    f'sigma={npas:.2E}, duration={duration:.2f}, pause={pause:.2f}.'
+                )
+                args.phi_dist_params[1] = npas
+                args.sim_duration = duration
+                args.nonp_pause_max = pause
+                SS = get_sim_state_from_args(args)
+
+                # Calculate coverage
+                for l, vs in enumerate(voxel_sizes):
+                    vc = SS.get_coverage(vs) / vs
+                    scores[i, j, k, l] = [vc.mean(), vc.min(), vc.max(), vc.std()]
+                if SS.needs_save:
+                    SS.save()
+
+                sim_idx += 1
+
+    return scores
+
+
+def generate_or_load_voxel_scores(
+        args: Namespace,
+        rebuild_cache: bool = False,
+        cache_only: bool = False
+) -> np.ndarray:
+    """
+    Generate or load the voxel coverage of trajectories.
+    """
+    if not hasattr(args, 'npas'):
+        npas = get_npas_from_args(args)
+    else:
+        npas = args.npas
+    if not hasattr(args, 'sim_durations'):
+        durations = get_durations_from_args(args)
+    else:
+        durations = args.sim_durations
+    if not hasattr(args, 'pauses'):
+        pauses = get_pauses_from_args(args)
+    else:
+        pauses = args.pauses
+    if hasattr(args, 'voxel_sizes'):
+        vs = [f'{p:.3E}' for p in args.voxel_sizes]
+    else:
+        vs = [f'{args.vxs:.3E}', ]
+    keys = {
+        'npas': [f'{s:.3E}' for s in npas],
+        'durations': [f'{d:.4f}' for d in durations],
+        'pauses': [f'{p:.4f}' for p in pauses],
+        'vs': vs,
+    }
+    cache_path = PE_CACHE_PATH / f'vox_vals_{hash_data(keys)}'
+    cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
+    scores = None
+    if not rebuild_cache and cache_fn.exists():
+        data = np.load(cache_fn)
+        scores = data['scores']
+        logger.info(f'Loaded scores from cache: {cache_fn}')
+
+    if scores is None:
+        if cache_only:
+            raise RuntimeError(f'Cache "{cache_fn}" could not be loaded!')
+        logger.info('Generating voxel coverage values.')
+        scores = _calculate_voxel_scores(args)
+        save_arrs = {
+            'scores': scores,
+        }
+        logger.info(f'Saving voxel scores to {cache_path}.')
+        np.savez(cache_path, **save_arrs)
+
+    return scores
