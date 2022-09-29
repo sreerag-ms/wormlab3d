@@ -1808,7 +1808,7 @@ def volume_metric_sweeps_cuboids_voxels():
     ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=7, fontweight='bold',
             horizontalalignment='center', verticalalignment='top', transform=trans)
     ax.set_ylabel('Voxels visited')
-    ax.set_yticks([0, 25, 50])
+    ax.set_yticks([20, 40, 60])
     ax.grid()
 
     if save_plots:
