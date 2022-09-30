@@ -17,6 +17,7 @@ from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.particles.cache import generate_or_load_r_values, get_sim_state_from_args, get_npas_from_args
 from wormlab3d.toolkit.plot_utils import overlay_image, to_rgb
 from wormlab3d.trajectories.args import get_args
+from wormlab3d.trajectories.util import smooth_trajectory
 
 show_plots = False
 save_plots = True
@@ -28,6 +29,7 @@ def _calculate_volumes(r: np.ndarray, z: np.ndarray) -> np.ndarray:
     """
     Calculate the spherical cut volumes.
     """
+    z = np.clip(z, a_min=0, a_max=r)
     sphere_vols = 4 / 3 * np.pi * r**3
     cap_vols = 1 / 3 * np.pi * (r - z)**2 * (2 * r + z)
     return sphere_vols - 2 * cap_vols
@@ -47,7 +49,7 @@ def make_filename(
 
     for k in ['npas', 'voxel_sizes', 'duration', 'dt', 'batch_size', 'deltas', 'delta_step',
               'targets_radii', 'n_targets', 'epsilon', 'max_nonplanar_pause_duration', 'detection_area',
-              'plot_n_trajectories_per_sigma', 'pick_trajectories_on']:
+              'plot_n_trajectories_per_sigma', 'pick_trajectories_on', 'approx_noise', 'smoothing_window']:
         if k in excludes:
             continue
         if k == 'npas':
@@ -90,6 +92,10 @@ def make_filename(
             fn += f'_nt={args.plot_n_trajectories_per_sigma}'
         elif k == 'pick_trajectories_on' and hasattr(args, 'pick_trajectories_on'):
             fn += f'_{args.pick_trajectories_on}'
+        elif k == 'approx_noise' and args.approx_noise is not None:
+            fn += f'_ns={args.approx_noise}'
+        elif k == 'smoothing_window' and args.smoothing_window is not None:
+            fn += f'_sw={args.smoothing_window}'
 
     if extension is not None:
         fn += '.' + extension
@@ -592,7 +598,7 @@ def spherical_cut_stacked_animation():
     n_points = 100
     traj_anim_rate = 100
     args.plot_n_trajectories_per_sigma = 1  # 5
-    args.pick_trajectories_on = ['averages', 'extremes'][1]
+    args.pick_trajectories_on = ['averages', 'extremes', 'exemplars'][2]
     T = int(args.sim_duration / args.sim_dt)
 
     # Set up plot
@@ -614,8 +620,100 @@ def spherical_cut_stacked_animation():
     alphas = [0.5, 0.5, 0.5]
     label_overlays = {}
 
+    # Select trajectories
+    Xt_all = []
+    for i, npas in enumerate(npa_sigmas):
+        args.phi_dist_params[1] = npas
+        SS = get_sim_state_from_args(args)
+        Xt_all.append(SS.get_Xt())
+
+    if args.pick_trajectories_on == 'exemplars':
+
+        # For the low-sigma case we want a large r0, pick one closest to the average
+        Xt_low = Xt_all[0]
+        r0_low = np.max(np.abs(Xt_low[:, :, 0]), axis=1)
+        r2_low = np.max(np.abs(Xt_low[:, :, 2]), axis=1)
+        # best_fit_idxs = np.argsort(np.abs(r0_low - r0[0]))[:args.plot_n_trajectories_per_sigma]
+        best_fit_idxs = np.argsort(r0_low)[-args.plot_n_trajectories_per_sigma:]
+        Xt_low = Xt_low[best_fit_idxs]
+        r0_low = r0_low[best_fit_idxs]
+        r2_low = r2_low[best_fit_idxs]
+        r_low = np.max(np.linalg.norm(Xt_low, axis=-1), axis=1)
+
+        # For the high-sigma case we want large r2/r0 ratio
+        Xt_high = Xt_all[2]
+        r0_high = np.max(np.abs(Xt_high[:, :, 0]), axis=1)
+        r2_high = np.max(np.abs(Xt_high[:, :, 2]), axis=1)
+        best_fit_idxs = np.argsort(r2_high / r0_high)[-args.plot_n_trajectories_per_sigma:]
+        Xt_high = Xt_high[best_fit_idxs]
+        r0_high = r0_high[best_fit_idxs]
+        r2_high = r2_high[best_fit_idxs]
+        r_high = np.max(np.linalg.norm(Xt_high, axis=-1), axis=1)
+
+        # For the middle case we want to have largest volume, but lower r0 than low-case and lower r2 than high-case
+        # Eliminate out of range cases and then find example that fits closest to the middle of the other two.
+        Xt_mid = Xt_all[1]
+        r0_mid = np.max(np.abs(Xt_mid[:, :, 0]), axis=1)
+        r2_mid = np.max(np.abs(Xt_mid[:, :, 2]), axis=1)
+        min_vol = max(_calculate_volumes(r0_high, r2_high))
+        vols_mid = _calculate_volumes(r0_mid, r2_mid)
+        idxs_out_of_range = (vols_mid < min_vol) | (r0_mid > min(r0_low)) | (r2_mid > min(r2_high))
+        r0_mid[idxs_out_of_range] = 0
+        r2_mid[idxs_out_of_range] = 0
+        r_mid = np.max(np.linalg.norm(Xt_mid, axis=-1), axis=1)
+        best_r0 = np.abs(r_mid - (min(r_low) + max(r_high)) / 2)
+        # best_r0 = np.abs(r0_mid - (min(r0_low) + max(r0_high)) / 2)
+        best_r2 = np.abs(r2_mid - (max(r2_low) + min(r2_high)) / 2)
+        best_fit_idxs = np.argsort(best_r0 * best_r2)[:args.plot_n_trajectories_per_sigma]
+        Xt_mid = Xt_mid[best_fit_idxs]
+
+        trajectories[0] = Xt_low
+        trajectories[1] = Xt_mid
+        trajectories[2] = Xt_high
+
+    else:
+        for i, npas in enumerate(npa_sigmas):
+            Xt = Xt_all[i]
+            if args.pick_trajectories_on == 'averages':
+                # Pick trajectories which come closest to the average r and z values
+                r_dist = np.abs(np.max(np.abs(Xt[:, :, 0]), axis=1) - r0[i])
+                z_dist = np.abs(np.max(np.abs(Xt[:, :, 2]), axis=1) - r2[i])
+                best_fit_idxs = np.argsort(r_dist * z_dist)[:args.plot_n_trajectories_per_sigma]
+            elif args.pick_trajectories_on == 'extremes':
+                # Pick trajectories which find the extremes
+                r_dist = np.max(np.abs(Xt[:, :, 0]), axis=1)
+                z_dist = np.max(np.abs(Xt[:, :, 2]), axis=1)
+
+                if i == 0:
+                    best_fit_idxs = np.argsort(r_dist)[-args.plot_n_trajectories_per_sigma:]
+                elif i == 1:
+                    vs = _calculate_volumes(r_dist, z_dist)
+                    best_fit_idxs = np.argsort(vs)[-args.plot_n_trajectories_per_sigma:]
+                elif i == 2:
+                    best_fit_idxs = np.argsort(z_dist)[-args.plot_n_trajectories_per_sigma:]
+                else:
+                    raise RuntimeError('Extreme picking only works with 3 sigmas!')
+            else:
+                raise RuntimeError(f'Unrecognised pick_trajectories_on option: "{args.pick_trajectories_on}".')
+
+            for j, idx in enumerate(best_fit_idxs):
+                trajectories[i, j] = Xt[idx]
+
+    # Add some noise and smooth
+    if args.approx_noise is not None and args.approx_noise > 0:
+        trajectories = trajectories + np.random.normal(np.zeros_like(trajectories), args.approx_noise)
+    if args.smoothing_window is not None and args.smoothing_window > 0:
+        for i in range(n_sigmas):
+            trajectories[i] = smooth_trajectory(
+                trajectories[i].transpose(1, 0, 2),
+                window_len=args.smoothing_window
+            ).transpose(1, 0, 2)
+
     # Generate separate figures for each sigma
     for i, npas in enumerate(npa_sigmas):
+        colour = tuple(colours[i][:3])
+
+        # Setup figure
         fig = mlab.figure(size=(width, height / n_sigmas * 2), bgcolor=(1, 1, 1))
         fig.scene.renderer.use_depth_peeling = True
         fig.scene.renderer.maximum_number_of_peels = 16
@@ -626,50 +724,23 @@ def spherical_cut_stacked_animation():
         fig.scene.anti_aliasing_frames = 20
         fig.scene.anti_aliasing_frames = 20
         figs[i] = fig
-        colour = tuple(colours[i][:3])
 
-        # Fetch trajectories
-        args.phi_dist_params[1] = npas
-        SS = get_sim_state_from_args(args)
-        Xt = SS.get_Xt()
-
-        if args.pick_trajectories_on == 'average':
-            # Pick trajectories which come closest to the average r and z values
-            r_dist = np.abs(np.max(np.abs(Xt[:, :, 0]), axis=1) - r0[i])
-            z_dist = np.abs(np.max(np.abs(Xt[:, :, 2]), axis=1) - r2[i])
-            best_fit_idxs = np.argsort(r_dist * z_dist)[:args.plot_n_trajectories_per_sigma]
-        elif args.pick_trajectories_on == 'extremes':
-            # Pick trajectories which find the extremes
-            r_dist = np.max(np.abs(Xt[:, :, 0]), axis=1)
-            z_dist = np.max(np.abs(Xt[:, :, 2]), axis=1)
-
-            if i == 0:
-                best_fit_idxs = np.argsort(r_dist)[-args.plot_n_trajectories_per_sigma:]
-            elif i == 1:
-                vs = _calculate_volumes(r_dist, z_dist)
-                best_fit_idxs = np.argsort(vs)[-args.plot_n_trajectories_per_sigma:]
-            elif i == 2:
-                best_fit_idxs = np.argsort(z_dist)[-args.plot_n_trajectories_per_sigma:]
-            else:
-                raise RuntimeError('Extreme picking only works with 3 sigmas!')
-        else:
-            raise RuntimeError(f'Unrecognised pick_trajectories_on option: "{args.pick_trajectories_on}".')
-
-        for j, idx in enumerate(best_fit_idxs):
-            traj = Xt[idx]
-            trajectories[i, j] = traj
-            x, y, z = traj[0].T
+        # Add trajectory path
+        for j in range(args.plot_n_trajectories_per_sigma):
+            x, y, z = trajectories[i, j, 0].T
             path = mlab.plot3d(x, y, z, color=colour, tube_radius=0.08, figure=figs[i])
             paths[i].append(path)
+
+        # Add sphere slice
         vols[i] = _plot_sphere_slice_border(0.1, 0.1, colour, n_points, alphas[i], fig=figs[i])
 
         # Build label overlays
-        label_overlays[i] = _make_label_overlay(width / 2, height / n_sigmas, f'$\sigma$ = {sigma_labels[i]}')
+        label_overlays[i] = _make_label_overlay(width / 2, height / n_sigmas, f'$\sigma_{{\phi}}$ = {sigma_labels[i]}')
 
     # Calculate the max r and z values over time
     logger.info('Calculating r and z values over time.')
     rs = np.maximum.accumulate(
-        np.max(np.linalg.norm(trajectories[..., :2], axis=-1), axis=1),
+        np.max(np.linalg.norm(trajectories, axis=-1), axis=1),
         axis=-1
     )
     zs = np.maximum.accumulate(
@@ -802,6 +873,6 @@ def spherical_cut_stacked_animation():
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
-    spherical_cut_plot()
-    spherical_cut_animation()
+    # spherical_cut_plot()
+    # spherical_cut_animation()
     spherical_cut_stacked_animation()
