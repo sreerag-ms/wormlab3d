@@ -655,9 +655,12 @@ def spherical_cut_stacked_animation():
         Xt_mid = Xt_all[1]
         r0_mid = np.max(np.abs(Xt_mid[:, :, 0]), axis=1)
         r2_mid = np.max(np.abs(Xt_mid[:, :, 2]), axis=1)
-        min_vol = max(_calculate_volumes(r0_high, r2_high))
+        vols_low = max(_calculate_volumes(r0_low, r2_low))
+        vols_high = max(_calculate_volumes(r0_high, r2_high))
         vols_mid = _calculate_volumes(r0_mid, r2_mid)
-        idxs_out_of_range = (vols_mid < min_vol) | (r0_mid > min(r0_low)) | (r2_mid > min(r2_high))
+        idxs_out_of_range = (vols_mid < max(vols_low, vols_high)) | (r0_mid > min(r0_low)) | (r2_mid > min(r2_high))
+        if idxs_out_of_range.sum() == Xt_mid.shape[0]:
+            raise RuntimeError('Unable to find mid-sigma exemplar.')
         r0_mid[idxs_out_of_range] = 0
         r2_mid[idxs_out_of_range] = 0
         r_mid = np.max(np.linalg.norm(Xt_mid, axis=-1), axis=1)
