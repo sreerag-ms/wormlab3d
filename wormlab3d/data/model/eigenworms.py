@@ -14,6 +14,7 @@ class Eigenworms(Document):
     updated = DateTimeField(required=True, default=datetime.datetime.now)
     dataset = ReferenceField('Dataset')
     reconstruction = ReferenceField('Reconstruction')
+    restrict_concs = ListField(FloatField())
 
     n_components = IntField(required=True)
     n_samples = IntField(required=True)
@@ -27,7 +28,7 @@ class Eigenworms(Document):
             'dataset',
             'reconstruction',
             {
-                'fields': ['dataset', 'reconstruction', 'n_components', 'n_samples', 'n_features'],
+                'fields': ['dataset', 'reconstruction', 'restrict_concs', 'n_components', 'n_samples', 'n_features'],
                 'unique': True
             },
         ]

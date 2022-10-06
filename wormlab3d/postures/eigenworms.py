@@ -1,13 +1,48 @@
-from typing import Union
+from multiprocessing import Pool
+from typing import Union, List
 
 import numpy as np
 
-from wormlab3d import logger
+from wormlab3d import logger, N_WORKERS
 from wormlab3d.data.model import Eigenworms, Dataset
 from wormlab3d.postures.cpca import CPCA
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.trajectories.cache import get_trajectory
 from wormlab3d.trajectories.util import fetch_reconstruction
+
+
+def calculate_nf_mc(X: np.ndarray) -> np.ndarray:
+    """
+    Calculate the natural frame curvature.
+    """
+    NF = NaturalFrame(X)
+    return NF.mc
+
+
+def _calculate_nf_mc_parallel(X: np.ndarray) -> np.ndarray:
+    """
+    Calculate natural frame curvatures in parallel.
+    """
+    with Pool(processes=N_WORKERS) as pool:
+        res = pool.map(
+            calculate_nf_mc,
+            [Xi for Xi in X]
+        )
+    return np.array(res)
+
+
+def calculate_natural_frame_curvatures(X: np.ndarray, parallel: bool = True) -> np.ndarray:
+    """
+    Calculate the natural frame curvatures for all the postures.
+    """
+    assert X.ndim == 3, 'Full postures required!'
+    if parallel and N_WORKERS > 1:
+        Z = _calculate_nf_mc_parallel(X)
+    else:
+        Z = np.zeros(len(X))
+        for i, Xi in enumerate(X):
+            Z[i] = calculate_nf_mc(Xi)
+    return Z
 
 
 def calculate_cpca(X: np.ndarray, n_components: int = None) -> CPCA:
@@ -22,22 +57,24 @@ def calculate_cpca(X: np.ndarray, n_components: int = None) -> CPCA:
 
     # Calculate the natural frame representations for all midlines
     logger.info('Calculating natural frame representations.')
-    Z = []
-    bad_idxs = []
-    for i, Xi in enumerate(X):
-        if (i + 1) % 100 == 0:
-            logger.info(f'Calculating for midline {i + 1}/{M}.')
-        try:
-            nf = NaturalFrame(Xi)
-            Z.append(nf.mc)
-        except Exception:
-            bad_idxs.append(i)
-    if len(bad_idxs):
-        logger.warning(f'Failed to calculate {len(bad_idxs)} midline idxs: {bad_idxs}.')
+    Z = calculate_natural_frame_curvatures(X)
+
+    # Z = []
+    # bad_idxs = []
+    # for i, Xi in enumerate(X):
+    #     if (i + 1) % 100 == 0:
+    #         logger.info(f'Calculating for midline {i + 1}/{M}.')
+    #     try:
+    #         nf = NaturalFrame(Xi)
+    #         Z.append(nf.mc)
+    #     except Exception:
+    #         bad_idxs.append(i)
+    # if len(bad_idxs):
+    #     logger.warning(f'Failed to calculate {len(bad_idxs)} midline idxs: {bad_idxs}.')
+    # Z = np.array(Z)
 
     # Calculate CPCA components
     logger.info('Calculating basis.')
-    Z = np.array(Z)
     cpca = CPCA(n_components=n_components, whiten=False)
     cpca.fit(Z)
 
@@ -49,13 +86,14 @@ def generate_or_load_eigenworms(
         dataset_id: str = None,
         reconstruction_id: str = None,
         n_components: int = None,
+        restrict_concs: List[float] = None,
         depth: int = -1,
         regenerate: bool = False
 ) -> Eigenworms:
     """
     Try to load an existing eigenworm basis or generate it otherwise.
     """
-    eigenworms = fetch_eigenworms(eigenworms_id, dataset_id, reconstruction_id, n_components)
+    eigenworms = fetch_eigenworms(eigenworms_id, dataset_id, reconstruction_id, n_components, restrict_concs)
     if eigenworms is not None:
         if not regenerate:
             return eigenworms
@@ -74,6 +112,8 @@ def generate_or_load_eigenworms(
         'Must define a dataset or reconstruction to generate eigenworms basis from.'
     assert dataset_id is None or reconstruction_id is None, \
         'Cannot define a dataset and a reconstruction to generate eigenworms basis from.'
+    assert reconstruction_id is None or restrict_concs is None, \
+        'Cannot restrict_concs with a reconstruction defined.'
 
     X = None
 
@@ -83,6 +123,14 @@ def generate_or_load_eigenworms(
         dataset = Dataset.objects.get(id=dataset_id)
         eigenworms.dataset = dataset
         X = dataset.X_all
+        if restrict_concs is not None:
+            eigenworms.restrict_concs = restrict_concs
+            include_idxs = []
+            for conc in restrict_concs:
+                assert str(conc) in dataset.metas['concentration'], \
+                    f'No data with concentration {conc} present in dataset!'
+                include_idxs.extend(dataset.metas['concentration'][str(conc)])
+            X = X[include_idxs]
 
     # Generate eigenworms for reconstruction
     if reconstruction_id is not None:
@@ -125,7 +173,8 @@ def fetch_eigenworms(
         eigenworms_id: str = None,
         dataset_id: str = None,
         reconstruction_id: str = None,
-        n_components: int = None
+        n_components: int = None,
+        restrict_concs: List[float] = None
 ) -> Union[Eigenworms, None]:
     """
     Try to find a eigenworms instance satisfying arguments.
@@ -142,6 +191,8 @@ def fetch_eigenworms(
             filters['reconstruction'] = reconstruction_id
         if n_components is not None:
             filters['n_components'] = n_components
+        if restrict_concs is not None:
+            filters['restrict_concs'] = restrict_concs
 
         matching_eigenworms = Eigenworms.objects(**filters).order_by('-n_components')
         if matching_eigenworms.count() == 0:

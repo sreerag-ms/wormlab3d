@@ -20,8 +20,8 @@ from wormlab3d.toolkit.util import print_args
 from wormlab3d.trajectories.cache import get_trajectory
 
 plot_n_components = 10
-show_plots = True
-save_plots = False
+show_plots = False
+save_plots = True
 img_extension = 'svg'
 eigenworm_length = 1
 eigenworm_scale = 64
@@ -36,12 +36,14 @@ def parse_args() -> Namespace:
                         help='Reconstruction by id.')
     parser.add_argument('--n-components', type=int, default=10,
                         help='Number of eigenworms to use (basis dimension).')
+    parser.add_argument('--restrict-concs', type=lambda s: [float(item) for item in s.split(',')],
+                        help='Restrict to specified concentrations.')
     parser.add_argument('--cpca-file', type=str,
                         help='Load CPCA from file.')
     args = parser.parse_args()
 
     targets = np.array([getattr(args, k) is not None for k in ['reconstruction', 'dataset', 'cpca_file']],
-                       dtype=np.bool)
+                       dtype=bool)
     assert targets.sum() == 1, 'One of --reconstruction, --dataset or --cpca-file must be defined.'
 
     print_args(args)
@@ -95,7 +97,7 @@ def _plot_eigenworms(
             kappa_share_ax = ax
         else:
             ax.sharey(kappa_share_ax)
-        ax.set_title('$|\kappa|=|M_1+M_2|$')
+        ax.set_title('$|\kappa|=|m_1+i m_2|$')
         for j in range(N - 1):
             ax.plot(ind[j:j + 2], NF.kappa[j:j + 2], c=fc[j])
         ax.set_xticks([0, ind[-1]])
@@ -345,27 +347,30 @@ def _plot_eigenvalues_basic(
         Hs.append(NF.helicity())
     Hs = np.array(Hs)
 
-    fig, ax = plt.subplots(1, figsize=(4, 3))
+    # fig, ax = plt.subplots(1, figsize=(4, 3))
+    fig, ax = plt.subplots(1, figsize=(5, 4))
     ax.grid()
     ax.scatter(xs[1:], vr[1:], zorder=10, s=100)
     ax.plot(xs, vr, zorder=5, alpha=0.5, linestyle=':')
     ax.set_xlim(0, plot_n_components + 0.5)
-    ax.set_ylim(0, 1)
+    # ax.set_ylim(0, 1)
+    ax.set_ylim(0, 1.05)
     ax.set_xticks([2, 4, 6, 8, 10])
     ax.set_xlabel('Component')
     ax.set_ylabel('Cumulative variance')
-    ax.set_yticks([0, 0.4, 0.8])
-    ax.set_yticklabels([0, 0.4, 0.8])
-    ax.hlines(y=0.95, xmin=-1, xmax=8, color='red', linewidth=2, zorder=9)
-    ax.vlines(x=8, ymin=-1, ymax=0.95, color='red', linewidth=2, zorder=9)
+    ax.set_yticks([0, 0.4, 0.8, 1.0])
+    ax.set_yticklabels([0, 0.4, 0.8, None])
+    ax.axhline(y=0.95, color='red', linewidth=2, zorder=9)
+    # ax.hlines(y=0.95, xmin=-1, xmax=8, color='red', linewidth=2, zorder=9)
+    # ax.vlines(x=8, ymin=-1, ymax=0.95, color='red', linewidth=2, zorder=9)
     ax.text(-1.3, 0.93, '0.95', color='red')
 
     ax2 = ax.twinx()
     ax2.set_ylabel('Non-planarity', rotation=270, labelpad=15)
     ax2.scatter(xs[1:], NPs, zorder=8, s=80, alpha=0.7, color='orange', marker='x')
     ax2.plot(xs[1:], NPs, zorder=4, alpha=0.3, color='orange', linestyle='--')
-    ax2.set_yticks([0, 0.01, 0.02])
-    ax2.set_yticklabels([0, 0.01, 0.02])
+    # ax2.set_yticks([0, 0.01, 0.02])
+    # ax2.set_yticklabels([0, 0.01, 0.02])
 
     # Helicity
     ax_hel = ax.twinx()
@@ -496,6 +501,30 @@ def _plot_reconstruction(
     plt.close(fig)
 
 
+def sweep_dataset_concentrations():
+    """
+    Sweep over all concentrations in a dataset and plot the eigenworms and values for each subset.
+    """
+    args = parse_args()
+    assert args.dataset is not None
+    dataset = Dataset.objects.get(id=args.dataset)
+    concs = list(dataset.metas['concentrations'].keys())
+
+    for c in concs:
+        ew = generate_or_load_eigenworms(
+            dataset_id=args.dataset,
+            n_components=args.n_components,
+            restrict_concs=[c, ],
+            regenerate=False
+        )
+
+        title = f'Dataset {dataset.id}. Concentration {c}.\nNum worms={ew.n_samples}. Num points={ew.n_features}.'
+        filename = f'ds={dataset.id}_c={c}_M={ew.n_samples}_N={ew.n_features}'
+
+        _plot_eigenworms(ew, title, filename)
+        _plot_eigenvalues_basic(ew, filename)
+
+
 def main():
     args = parse_args()
     X_full = None
@@ -504,13 +533,18 @@ def main():
         ew = generate_or_load_eigenworms(
             dataset_id=args.dataset,
             n_components=args.n_components,
+            restrict_concs=args.restrict_concs,
             regenerate=False
         )
         dataset = Dataset.objects.get(id=args.dataset)
         # X_full = dataset.X_all
 
         title = f'Dataset {dataset.id}.'
-        filename = f'ds={dataset.id}'
+        filename = f'ds={dataset.id}_ew={ew.id}'
+
+        if args.restrict_concs is not None:
+            title += f' Concentrations [' + ', '.join([f'{c}%' for c in args.restrict_concs]) + '].'
+            filename += f'_concs=' + ','.join([f'{c}' for c in args.restrict_concs])
 
     elif args.reconstruction is not None:
         ew = generate_or_load_eigenworms(
@@ -525,7 +559,8 @@ def main():
                 f'Reconstruction={reconstruction.id} ({reconstruction.source}).'
 
         filename = f'trial={reconstruction.trial.id:03d}_' \
-                   f'reconstruction={reconstruction.id}_{reconstruction.source}'
+                   f'reconstruction={reconstruction.id}_{reconstruction.source}_' \
+                   f'ew={ew.id}'
 
     elif args.cpca_file is not None:
         path = Path(args.cpca_file)
@@ -544,10 +579,10 @@ def main():
     filename += f'_M={ew.n_samples}_N={ew.n_features}'
 
     # _plot_eigenworms_basic(ew, filename)
-    _plot_eigenworms_basic_mlab(ew, filename, interactive=True)
-    # _plot_eigenworms(ew, title, filename)
+    # _plot_eigenworms_basic_mlab(ew, filename, interactive=True)
+    _plot_eigenworms(ew, title, filename)
     # _plot_eigenvalues(ew, title, filename)
-    # _plot_eigenvalues_basic(ew, filename)
+    _plot_eigenvalues_basic(ew, filename)
     # if X_full is not None:
     #     _plot_reconstruction(ew, X_full, 500, title, filename)
 
@@ -557,4 +592,5 @@ if __name__ == '__main__':
     # interactive()
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
-    main()
+    sweep_dataset_concentrations()
+    # main()
