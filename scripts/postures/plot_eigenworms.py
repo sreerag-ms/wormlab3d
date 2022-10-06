@@ -508,7 +508,7 @@ def sweep_dataset_concentrations():
     args = parse_args()
     assert args.dataset is not None
     dataset = Dataset.objects.get(id=args.dataset)
-    concs = list(dataset.metas['concentrations'].keys())
+    concs = sorted(list(dataset.metas['concentration'].keys()))
 
     for c in concs:
         ew = generate_or_load_eigenworms(
