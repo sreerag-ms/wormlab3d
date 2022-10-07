@@ -95,6 +95,11 @@ def generate_or_load_eigenworms(
     """
     eigenworms = fetch_eigenworms(eigenworms_id, dataset_id, reconstruction_id, n_components, restrict_concs)
     if eigenworms is not None:
+        # Check that the components are there
+        if eigenworms.components is None or eigenworms.cpca is None:
+            logger.warning('Eigenworms cpca data not found, regenerating.')
+            regenerate = True
+
         if not regenerate:
             return eigenworms
 

@@ -106,6 +106,8 @@ class Eigenworms(Document):
             raise ValidationError('Dataset and reconstruction both undefined.')
         if self.dataset is not None and self.reconstruction is not None:
             raise ValidationError('Dataset and reconstruction both defined.')
+        if self.reconstruction is None and self.restrict_concs is not None:
+            raise ValidationError('Reconstruction and restrict_concs both defined.')
 
         # Validate the mean
         if self.mean is None:

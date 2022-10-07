@@ -514,7 +514,7 @@ def sweep_dataset_concentrations():
         ew = generate_or_load_eigenworms(
             dataset_id=args.dataset,
             n_components=args.n_components,
-            restrict_concs=[c, ],
+            restrict_concs=[float(c), ],
             regenerate=False
         )
 
