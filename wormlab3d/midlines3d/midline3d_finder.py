@@ -1292,9 +1292,9 @@ class Midline3DFinder:
                         M10[d],
                         integration_algorithm=p.curvature_integration_algorithm
                     )
-                    X0ht.append(torch.stack([Xc_d[:, 0], Xc_d[:, -1]]))
-                    T0ht.append(torch.stack([Tc_d[:, 0], Tc_d[:, -1]]))
-                    M10ht.append(torch.stack([M1c_d[:, 0], M1c_d[:, -1]]))
+                    X0ht.append(torch.stack([Xc_d[:, 0], Xc_d[:, -1]], dim=1))
+                    T0ht.append(torch.stack([Tc_d[:, 0], Tc_d[:, -1]], dim=1))
+                    M10ht.append(torch.stack([M1c_d[:, 0], M1c_d[:, -1]], dim=1))
 
             # In ht mode we need to recalculate the midpoint parameters
             elif p.curvature_integration == CURVATURE_INTEGRATION_MIDPOINT:
@@ -1364,9 +1364,9 @@ class Midline3DFinder:
                     X0.append(Xr_d[:, int((2**(p.depth_min + d) - 1) / 2)])
                     T0.append(Tr_d[:, int((2**(p.depth_min + d) - 1) / 2)])
                     M10.append(M1r_d[:, int((2**(p.depth_min + d) - 1) / 2)])
-                    X0ht.append(torch.stack([Xr_d[:, 0], Xr_d[:, -1]]))
-                    T0ht.append(torch.stack([Tr_d[:, 0], Tr_d[:, -1]]))
-                    M10ht.append(torch.stack([M1r_d[:, 0], M1r_d[:, -1]]))
+                    X0ht.append(torch.stack([Xr_d[:, 0], Xr_d[:, -1]], dim=1))
+                    T0ht.append(torch.stack([Tr_d[:, 0], Tr_d[:, -1]], dim=1))
+                    M10ht.append(torch.stack([M1r_d[:, 0], M1r_d[:, -1]], dim=1))
                 X, T, M1 = Xr, Tr, M1r
 
         # Update master state
