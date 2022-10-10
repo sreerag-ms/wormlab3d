@@ -10,7 +10,7 @@ import torch
 from wormlab3d import MF_DATA_PATH
 from wormlab3d import logger
 from wormlab3d.data.model import MFParameters, MFCheckpoint, Reconstruction, Trial
-from wormlab3d.data.model.mf_parameters import CURVATURE_INTEGRATION_HT
+from wormlab3d.data.model.mf_parameters import CURVATURE_INTEGRATION_HT, CURVATURE_INTEGRATION_RAND
 from wormlab3d.midlines3d.frame_state import FrameState, BUFFER_NAMES, PARAMETER_NAMES, BINARY_DATA_KEYS, \
     CURVATURE_PARAMETER_NAMES, TRANSIENTS_NAMES
 from wormlab3d.midlines3d.mf_methods import make_rotation_matrix
@@ -349,14 +349,16 @@ class TrialState:
                 frame_state.set_state(k, v)
 
             # Check HT data is valid if required
+            update_from_mp = False
             if self.parameters.curvature_integration == CURVATURE_INTEGRATION_HT:
-                ht_missing = False
                 for k in ['X0ht', 'T0ht', 'M10ht']:
                     if self.get(k)[frame_num].sum() == 0:
-                        ht_missing = True
+                        update_from_mp = True
                         break
-                if ht_missing:
-                    frame_state.update_ht_data_from_mp()
+            elif self.parameters.curvature_integration == CURVATURE_INTEGRATION_RAND:
+                update_from_mp = True
+            if update_from_mp:
+                frame_state.update_data_from_mp()
 
         # Move onto target device
         if device is not None:

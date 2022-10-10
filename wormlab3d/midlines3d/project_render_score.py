@@ -6,7 +6,7 @@ from torch import nn
 
 from wormlab3d import PREPARED_IMAGE_SIZE_DEFAULT
 from wormlab3d.data.model.mf_parameters import RENDER_MODE_GAUSSIANS, RENDER_MODES, CURVATURE_INTEGRATION_MIDPOINT, \
-    CURVATURE_INTEGRATION_ALGORITHM_EULER
+    CURVATURE_INTEGRATION_HT, CURVATURE_INTEGRATION_RAND, CURVATURE_INTEGRATION_ALGORITHM_EULER
 from wormlab3d.midlines3d.dynamic_cameras import DynamicCameras
 from wormlab3d.midlines3d.mf_methods import calculate_curvature, integrate_curvature, normalise, smooth_parameter
 
@@ -204,7 +204,7 @@ class ProjectRenderScoreModel(nn.Module):
         self.curvature_mode = curvature_mode
         self.curvature_deltas = curvature_deltas
         self.curvature_smoothing = curvature_smoothing
-        self.midpoint_integration = curvature_integration == CURVATURE_INTEGRATION_MIDPOINT
+        self.curvature_integration = curvature_integration
         self.curvature_integration_algorithm = curvature_integration_algorithm
         self.length_min = length_min
         self.length_max = length_max
@@ -235,6 +235,9 @@ class ProjectRenderScoreModel(nn.Module):
             X0ht: List[torch.Tensor],
             T0ht: List[torch.Tensor],
             M10ht: List[torch.Tensor],
+            X: List[torch.Tensor],
+            T: List[torch.Tensor],
+            M1: List[torch.Tensor],
             length: List[torch.Tensor],
             curvatures: List[torch.Tensor],
             points: List[torch.Tensor],
@@ -407,7 +410,7 @@ class ProjectRenderScoreModel(nn.Module):
                     if self.clamp_X0:
                         X0_d = X0_d.clamp(min=-0.5, max=0.5)
 
-                    if self.midpoint_integration:
+                    if self.curvature_integration == 'mp':
                         # Integrate the curvature to get the midline coordinates
                         Xc_d, Tc_d, M1c_d = integrate_curvature(X0_d, T0_d, length_d, curvatures_d, M10_d,
                                                                 integration_algorithm=self.curvature_integration_algorithm)
@@ -423,7 +426,8 @@ class ProjectRenderScoreModel(nn.Module):
                         # Use the average of the head and tail curves
                         points_d = (Xh_d + Xt_d) / 2
 
-                    else:
+                    elif self.curvature_integration == 'ht':
+                        # Integrate from the head and tail and take the average
                         X0ht_d = X0ht[d]
                         T0ht_d = T0ht[d]
                         M10ht_d = M10ht[d]
@@ -444,6 +448,37 @@ class ProjectRenderScoreModel(nn.Module):
                         Xc_d, Tc_d, M1c_d = integrate_curvature(points_d[:, N2], Tht_d[:, N2], length_d, curvatures_d,
                                                                 M1ht_d[:, N2], start_idx=N2,
                                                                 integration_algorithm=self.curvature_integration_algorithm)
+
+                    elif self.curvature_integration == 'rand':
+                        X_d = X[d]
+                        T_d = T[d]
+                        M1_d = M1[d]
+
+                        # Integrate from a random point along the body, sampling from a gaussian to prefer central points
+                        rN = torch.clip(
+                            torch.round(torch.randn(1, device=device) / 4 * (N / 2)) + (N / 2),
+                            min=0,
+                            max=N
+                        ).to(torch.long)[0]
+
+                        # Integrate the curvature to get the midline coordinates
+                        Xc_d, Tc_d, M1c_d = integrate_curvature(X_d[:, rN], T_d[:, rN], length_d, curvatures_d,
+                                                                M1_d[:, rN], start_idx=rN,
+                                                                integration_algorithm=self.curvature_integration_algorithm)
+
+                        # Rebuild it again from the head and the tail
+                        Xh_d, Th_d, M1h_d = integrate_curvature(Xc_d[:, 1], Tc_d[:, 1], length_d, curvatures_d,
+                                                                M1c_d[:, 1], start_idx=1,
+                                                                integration_algorithm=self.curvature_integration_algorithm)
+                        Xt_d, Tt_d, M1t_d = integrate_curvature(Xc_d[:, -2], Tc_d[:, -2], length_d, curvatures_d,
+                                                                M1c_d[:, -2], start_idx=N - 2,
+                                                                integration_algorithm=self.curvature_integration_algorithm)
+
+                        # Use the average of the head and tail curves
+                        points_d = (Xh_d + Xt_d) / 2
+
+                    else:
+                        raise RuntimeError(f'Unsupported curvature integration mode "{self.curvature_integration}".')
 
                     # Log centre, head and tail curves
                     X_raw_d = torch.stack([Xc_d, Xh_d, Xt_d], dim=1)

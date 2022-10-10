@@ -20,7 +20,8 @@ from torch.utils.tensorboard import SummaryWriter
 from simple_worm.plot3d import MidpointNormalize
 from wormlab3d import logger, LOGS_PATH, START_TIMESTAMP
 from wormlab3d.data.model import Trial, MFCheckpoint, MFParameters, Reconstruction
-from wormlab3d.data.model.mf_parameters import CURVATURE_INTEGRATION_MIDPOINT, CURVATURE_INTEGRATION_HT
+from wormlab3d.data.model.mf_parameters import CURVATURE_INTEGRATION_MIDPOINT, CURVATURE_INTEGRATION_HT, \
+    CURVATURE_INTEGRATION_RAND
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
 from wormlab3d.midlines3d.args_finder import ParameterArgs, RuntimeArgs, SourceArgs
 from wormlab3d.midlines3d.frame_state import FrameState, BUFFER_NAMES, PARAMETER_NAMES, CAM_PARAMETER_NAMES, \
@@ -380,7 +381,7 @@ class Midline3DFinder:
 
             # Set the curves to the same
             if i > 0 and not ra.resume:
-                for k in CURVATURE_PARAMETER_NAMES:
+                for k in CURVATURE_PARAMETER_NAMES + ['X', 'T', 'M1', ]:
                     fs.set_state(k, self.frame_batch[0].get_state(k))
 
             # Zero-out the initial curvature-deltas
@@ -456,7 +457,7 @@ class Midline3DFinder:
         else:
             params = {
                 k: [fs.get_state(k) for fs in self.frame_batch]
-                for k in PARAMETER_NAMES
+                for k in PARAMETER_NAMES + ['X', 'T', 'M1', ]
             }
         cam_params = [params[f'cam_{k}'] for k in CAM_PARAMETER_NAMES]
 
@@ -466,7 +467,7 @@ class Midline3DFinder:
         if p.curvature_mode:
             del params['points']
             point_params = []
-            for ck in CURVATURE_PARAMETER_NAMES:
+            for ck in CURVATURE_PARAMETER_NAMES + ['X', 'T', 'M1', ]:
                 if ck in lbfgs_keys and p.algorithm == OPTIMISER_LBFGS_NEW:
                     def add_params(p_):
                         if type(p_) == list:
@@ -769,7 +770,7 @@ class Midline3DFinder:
                                 for d, l_d in enumerate(l):
                                     l_d.data = l_d * p.length_shrink_factor
 
-                    f.update_ht_data_from_mp()
+                    f.update_data_from_mp()
                     new_batch.append(f)
                 self.frame_batch = new_batch
                 self.shrunken_lengths = torch.tensor(
@@ -878,7 +879,7 @@ class Midline3DFinder:
             if self.checkpoint.step < self.parameters.n_steps_batch_locked:
                 for i, fs in enumerate(self.frame_batch):
                     if i > 0:
-                        for k in PARAMETER_NAMES:
+                        for k in PARAMETER_NAMES + ['X', 'T', 'M1', ]:
                             fs.set_state(k, self.frame_batch[0].get_state(k))
 
             # Update lr
@@ -1012,7 +1013,7 @@ class Midline3DFinder:
                     points_shifted += shift.abs()
 
                 # Update the HT data
-                fs.update_ht_data_from_mp()
+                fs.update_data_from_mp()
 
             stats['shifts'] = points_shifted
 
@@ -1034,6 +1035,11 @@ class Midline3DFinder:
         X0ht = None
         T0ht = None
         M10ht = None
+        X = None
+        T = None
+        M1 = None
+        length = None
+        curvatures = None
         points_2d = None
         scores = None
         curvatures_smoothed = None
@@ -1048,7 +1054,7 @@ class Midline3DFinder:
         stats = None
 
         def closure():
-            nonlocal masks, detection_masks, X0, T0, M10, X0ht, T0ht, M10ht, points_2d, scores, \
+            nonlocal masks, detection_masks, X0, T0, M10, X0ht, T0ht, M10ht, X, T, M1, length, curvatures, points_2d, scores, \
                 curvatures_smoothed, points_smoothed, sigmas_smoothed, exponents_smoothed, intensities_smoothed, \
                 masks_target_residuals, loss, loss_global, losses_depths, stats
             self.optimiser.zero_grad()
@@ -1069,6 +1075,9 @@ class Midline3DFinder:
             X0ht = [torch.stack([f.get_state('X0ht')[d] for f in self.frame_batch]) for d in range(D)]
             T0ht = [torch.stack([f.get_state('T0ht')[d] for f in self.frame_batch]) for d in range(D)]
             M10ht = [torch.stack([f.get_state('M10ht')[d] for f in self.frame_batch]) for d in range(D)]
+            X = [torch.stack([f.get_state('X')[d] for f in self.frame_batch]) for d in range(D)]
+            T = [torch.stack([f.get_state('T')[d] for f in self.frame_batch]) for d in range(D)]
+            M1 = [torch.stack([f.get_state('M1')[d] for f in self.frame_batch]) for d in range(D)]
             length = [torch.stack([f.get_state('length')[d] for f in self.frame_batch]) for d in range(D)]
             curvatures = [torch.stack([f.get_state('curvatures')[d] for f in self.frame_batch]) for d in range(D)]
             points = [torch.stack([f.get_state('points')[d] for f in self.frame_batch]) for d in range(D)]
@@ -1092,6 +1101,9 @@ class Midline3DFinder:
                 X0ht=X0ht,
                 T0ht=T0ht,
                 M10ht=M10ht,
+                X=X,
+                T=T,
+                M1=M1,
                 length=length,
                 curvatures=curvatures,
                 points=points,
@@ -1141,6 +1153,33 @@ class Midline3DFinder:
                     for d in range(D)
                 ]
 
+            # Update midpoint and HT data
+            elif p.curvature_integration == CURVATURE_INTEGRATION_RAND:
+                X0 = [
+                    X_raw[d][:, 0, int((2**(p.depth_min + d) - 1) / 2)]
+                    for d in range(D)
+                ]
+                T0 = [
+                    T_raw[d][:, 0, int((2**(p.depth_min + d) - 1) / 2)]
+                    for d in range(D)
+                ]
+                M10 = [
+                    M1_raw[d][:, 0, int((2**(p.depth_min + d) - 1) / 2)]
+                    for d in range(D)
+                ]
+                X0ht = [
+                    torch.stack([X_raw[d][:, 0, 0], X_raw[d][:, 0, -1]], dim=1)
+                    for d in range(D)
+                ]
+                T0ht = [
+                    torch.stack([T_raw[d][:, 0, 0], T_raw[d][:, 0, -1]], dim=1)
+                    for d in range(D)
+                ]
+                M10ht = [
+                    torch.stack([M1_raw[d][:, 0, 0], M1_raw[d][:, 0, -1]], dim=1)
+                    for d in range(D)
+                ]
+
             # Calculate the losses
             loss, loss_global, losses_depths, stats = self._calculate_losses(
                 cam_rotation_preangles=cam_rotation_preangles,
@@ -1150,6 +1189,9 @@ class Midline3DFinder:
                 X0ht=X0ht,
                 T0ht=T0ht,
                 M10ht=M10ht,
+                X=X,
+                T=T,
+                M1=M1,
                 length=length,
                 curvatures=curvatures,
                 X_raw=X_raw,
@@ -1199,7 +1241,8 @@ class Midline3DFinder:
             raise RuntimeError('Bad loss!')
 
         # Update frames
-        self._update_frame_states(masks, masks_target_residuals, X0, T0, M10, X0ht, T0ht, M10ht, points_2d, scores,
+        self._update_frame_states(masks, masks_target_residuals,
+                                  points_2d, scores,
                                   sigmas_smoothed, exponents_smoothed, intensities_smoothed,
                                   points_smoothed, curvatures_smoothed, stats)
 
@@ -1212,12 +1255,6 @@ class Midline3DFinder:
             self,
             masks: List[torch.Tensor],
             masks_target_residuals: List[torch.Tensor],
-            X0: List[torch.Tensor],
-            T0: List[torch.Tensor],
-            M10: List[torch.Tensor],
-            X0ht: List[torch.Tensor],
-            T0ht: List[torch.Tensor],
-            M10ht: List[torch.Tensor],
             points_2d: List[torch.Tensor],
             scores: List[torch.Tensor],
             sigmas_smoothed: List[torch.Tensor],
@@ -1232,6 +1269,105 @@ class Midline3DFinder:
         """
         p = self.parameters
         D = p.depth - p.depth_min
+
+        # In curvature mode some of the parameters need to be rebuilt from others
+        if p.curvature_mode:
+            length = [torch.stack([f.get_state('length')[d] for f in self.frame_batch]) for d in range(D)]
+            curvatures = [torch.stack([f.get_state('curvatures')[d] for f in self.frame_batch]) for d in range(D)]
+
+            # In midpoint mode we need to recalculate the ht parameters
+            if p.curvature_integration == CURVATURE_INTEGRATION_MIDPOINT:
+                X0 = [torch.stack([f.get_state('X0')[d] for f in self.frame_batch]) for d in range(D)]
+                T0 = [torch.stack([f.get_state('T0')[d] for f in self.frame_batch]) for d in range(D)]
+                M10 = [torch.stack([f.get_state('M10')[d] for f in self.frame_batch]) for d in range(D)]
+                X0ht = []
+                T0ht = []
+                M10ht = []
+                for d in range(D):
+                    Xc_d, Tc_d, M1c_d = integrate_curvature(
+                        X0[d],
+                        T0[d],
+                        length[d],
+                        curvatures[d],
+                        M10[d],
+                        integration_algorithm=p.curvature_integration_algorithm
+                    )
+                    X0ht.append(torch.stack([Xc_d[:, 0], Xc_d[:, -1]]))
+                    T0ht.append(torch.stack([Tc_d[:, 0], Tc_d[:, -1]]))
+                    M10ht.append(torch.stack([M1c_d[:, 0], M1c_d[:, -1]]))
+
+            # In ht mode we need to recalculate the midpoint parameters
+            elif p.curvature_integration == CURVATURE_INTEGRATION_MIDPOINT:
+                X0ht = [torch.stack([f.get_state('X0ht')[d] for f in self.frame_batch]) for d in range(D)]
+                T0ht = [torch.stack([f.get_state('T0ht')[d] for f in self.frame_batch]) for d in range(D)]
+                M10ht = [torch.stack([f.get_state('M10ht')[d] for f in self.frame_batch]) for d in range(D)]
+                X0 = []
+                T0 = []
+                M10 = []
+                for d in range(D):
+                    N = curvatures[d].shape[1]
+                    Xh_d, Th_d, M1h_d = integrate_curvature(
+                        X0ht[d][:, 0],
+                        T0ht[d][:, 0],
+                        length[d],
+                        curvatures[d],
+                        M10ht[d][:, 0],
+                        start_idx=0,
+                        integration_algorithm=p.curvature_integration_algorithm
+                    )
+                    Xt_d, Tt_d, M1t_d = integrate_curvature(
+                        X0ht[d][:, 1],
+                        T0ht[d][:, 1],
+                        length[d],
+                        curvatures[d],
+                        M10ht[d][:, 1],
+                        start_idx=N - 1,
+                        integration_algorithm=p.curvature_integration_algorithm
+                    )
+
+                    # Use average for the midpoint data
+                    X_d = (Xh_d + Xt_d) / 2
+                    T_d = (Th_d + Tt_d) / 2
+                    M1_d = (M1h_d + M1t_d) / 2
+                    X0.append(X_d[:, int((2**(p.depth_min + d) - 1) / 2)])
+                    T0.append(T_d[:, int((2**(p.depth_min + d) - 1) / 2)])
+                    M10.append(M1_d[:, int((2**(p.depth_min + d) - 1) / 2)])
+
+            # In random integration mode we need to update the full curve, midpoint and ht data
+            elif p.curvature_integration == CURVATURE_INTEGRATION_RAND:
+                X = [torch.stack([f.get_state('X')[d] for f in self.frame_batch]) for d in range(D)]
+                T = [torch.stack([f.get_state('T')[d] for f in self.frame_batch]) for d in range(D)]
+                M1 = [torch.stack([f.get_state('M1')[d] for f in self.frame_batch]) for d in range(D)]
+                Xr = []
+                Tr = []
+                M1r = []
+                X0 = []
+                T0 = []
+                M10 = []
+                X0ht = []
+                T0ht = []
+                M10ht = []
+                for d in range(D):
+                    rN = self.frame_batch[0].get_state('X')[d].grad.abs().sum(dim=-1).argmax()
+                    Xr_d, Tr_d, M1r_d = integrate_curvature(
+                        X[d][:, rN],
+                        T[d][:, rN],
+                        length[d],
+                        curvatures[d],
+                        M1[d][:, rN],
+                        start_idx=rN,
+                        integration_algorithm=p.curvature_integration_algorithm
+                    )
+                    Xr.append(Xr_d)
+                    Tr.append(Tr_d)
+                    M1r.append(M1r_d)
+                    X0.append(Xr_d[:, int((2**(p.depth_min + d) - 1) / 2)])
+                    T0.append(Tr_d[:, int((2**(p.depth_min + d) - 1) / 2)])
+                    M10.append(M1r_d[:, int((2**(p.depth_min + d) - 1) / 2)])
+                    X0ht.append(torch.stack([Xr_d[:, 0], Xr_d[:, -1]]))
+                    T0ht.append(torch.stack([Tr_d[:, 0], Tr_d[:, -1]]))
+                    M10ht.append(torch.stack([M1r_d[:, 0], M1r_d[:, -1]]))
+                X, T, M1 = Xr, Tr, M1r
 
         # Update master state
         self.master_frame_state.set_state('masks_curve', [masks[d][self.active_idx] for d in range(D)])
@@ -1262,6 +1398,17 @@ class Midline3DFinder:
                 self.master_frame_state.set_state('T0', [T0[d][self.active_idx] for d in range(D)])
                 self.master_frame_state.set_state('M10', [M10[d][self.active_idx] for d in range(D)])
 
+            elif p.curvature_integration == CURVATURE_INTEGRATION_RAND:
+                self.master_frame_state.set_state('X0', [X0[d][self.active_idx] for d in range(D)])
+                self.master_frame_state.set_state('T0', [T0[d][self.active_idx] for d in range(D)])
+                self.master_frame_state.set_state('M10', [M10[d][self.active_idx] for d in range(D)])
+                self.master_frame_state.set_state('X0ht', [X0ht[d][self.active_idx] for d in range(D)])
+                self.master_frame_state.set_state('T0ht', [T0ht[d][self.active_idx] for d in range(D)])
+                self.master_frame_state.set_state('M10ht', [M10ht[d][self.active_idx] for d in range(D)])
+                self.master_frame_state.set_state('X', [X[d][self.active_idx] for d in range(D)])
+                self.master_frame_state.set_state('T', [T[d][self.active_idx] for d in range(D)])
+                self.master_frame_state.set_state('M1', [M1[d][self.active_idx] for d in range(D)])
+
         else:
             self.master_frame_state.set_state('curvatures', [curvatures_smoothed[d][self.active_idx] for d in range(D)])
 
@@ -1290,6 +1437,17 @@ class Midline3DFinder:
                     fs.set_state('T0', [T0[d][i] for d in range(D)])
                     fs.set_state('M10', [M10[d][i] for d in range(D)])
 
+                elif p.curvature_integration == CURVATURE_INTEGRATION_RAND:
+                    fs.set_state('X0', [X0[d][i] for d in range(D)])
+                    fs.set_state('T0', [T0[d][i] for d in range(D)])
+                    fs.set_state('M10', [M10[d][i] for d in range(D)])
+                    fs.set_state('X0ht', [X0ht[d][i] for d in range(D)])
+                    fs.set_state('T0ht', [T0ht[d][i] for d in range(D)])
+                    fs.set_state('M10ht', [M10ht[d][i] for d in range(D)])
+                    fs.set_state('X', [X[d][i] for d in range(D)])
+                    fs.set_state('T', [T[d][i] for d in range(D)])
+                    fs.set_state('M1', [M1[d][i] for d in range(D)])
+
             else:
                 fs.set_state('curvatures', [curvatures_smoothed[d][i] for d in range(D)])
 
@@ -1302,6 +1460,9 @@ class Midline3DFinder:
             X0ht: List[torch.Tensor],
             T0ht: List[torch.Tensor],
             M10ht: List[torch.Tensor],
+            X: List[torch.Tensor],
+            T: List[torch.Tensor],
+            M1: List[torch.Tensor],
             length: List[torch.Tensor],
             curvatures: List[torch.Tensor],
             X_raw: List[torch.Tensor],
@@ -1346,6 +1507,9 @@ class Midline3DFinder:
             X0ht_prev = self.last_frame_state.get_state('X0ht')
             T0ht_prev = self.last_frame_state.get_state('T0ht')
             M10ht_prev = self.last_frame_state.get_state('M10ht')
+            X_prev = self.last_frame_state.get_state('X')
+            T_prev = self.last_frame_state.get_state('T')
+            M1_prev = self.last_frame_state.get_state('M1')
             length_prev = self.last_frame_state.get_state('length')
             curvatures_prev = self.last_frame_state.get_state('curvatures')
             points_prev = self.last_frame_state.get_state('points')
@@ -1357,6 +1521,9 @@ class Midline3DFinder:
             X0ht_prev = None
             T0ht_prev = None
             M10ht_prev = None
+            X_prev = None
+            T_prev = None
+            M1_prev = None
             length_prev = None
             curvatures_prev = None
             points_prev = None
@@ -1390,18 +1557,23 @@ class Midline3DFinder:
             else:
                 if p.curvature_integration == CURVATURE_INTEGRATION_MIDPOINT:
                     losses['temporal'] = calculate_temporal_losses_curvatures(
-                        length, curvatures, X0, T0, M10, None, None, None, cam_shifts,
-                        length_prev, curvatures_prev, X0_prev, T0_prev, M10_prev, None, None, None, cam_shifts_prev
+                        length, curvatures, X0, T0, M10, None, None, None, None, None, None,
+                        cam_shifts,
+                        length_prev, curvatures_prev, X0_prev, T0_prev, M10_prev, None, None, None, None, None, None,
+                        cam_shifts_prev
                     )
-                else:
-                    # losses['temporal'] = calculate_temporal_losses_curvatures(
-                    #     length, curvatures, None, None, None, X0ht, T0ht, M10ht, cam_shifts,
-                    #     length_prev, curvatures_prev, None, None, None, X0ht_prev, T0ht_prev, M10ht_prev,
-                    #     cam_shifts_prev
-                    # )
+                elif p.curvature_integration == CURVATURE_INTEGRATION_HT:
                     losses['temporal'] = calculate_temporal_losses_curvatures(
-                        length, curvatures, None, None, None, X0ht, None, None, cam_shifts,
-                        length_prev, curvatures_prev, None, None, None, X0ht_prev, None, None,
+                        length, curvatures, None, None, None, X0ht, None, None, None, None, None,
+                        cam_shifts,
+                        length_prev, curvatures_prev, None, None, None, X0ht_prev, None, None, None, None, None,
+                        cam_shifts_prev
+                    )
+                elif p.curvature_integration == CURVATURE_INTEGRATION_RAND:
+                    losses['temporal'] = calculate_temporal_losses_curvatures(
+                        length, curvatures, None, None, None, None, None, None, X, T, M1,
+                        cam_shifts,
+                        length_prev, curvatures_prev, None, None, None, None, None, None, X_prev, T_prev, M1_prev,
                         cam_shifts_prev
                     )
                 losses['curvature'] = calculate_curvature_losses_curvatures(curvatures)

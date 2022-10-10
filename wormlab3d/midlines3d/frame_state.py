@@ -8,7 +8,8 @@ from torchvision.transforms.functional import gaussian_blur
 
 from wormlab3d import CAMERA_IDXS, logger
 from wormlab3d.data.model import Cameras, MFParameters, Frame
-from wormlab3d.data.model.mf_parameters import CURVATURE_INTEGRATION_MIDPOINT
+from wormlab3d.data.model.mf_parameters import CURVATURE_INTEGRATION_MIDPOINT, CURVATURE_INTEGRATION_HT, \
+    CURVATURE_INTEGRATION_RAND
 from wormlab3d.midlines3d.mf_methods import make_rotation_matrix, normalise, integrate_curvature, an_orthonormal
 
 PARAMETER_NAMES = [
@@ -75,6 +76,9 @@ TRANSIENTS_NAMES = [
     'masks_target',
     'masks_target_residuals',
     'masks_curve',
+    'X',
+    'T',
+    'M1',
 ]
 
 BINARY_DATA_KEYS = []
@@ -392,6 +396,8 @@ class FrameState(nn.Module):
         """
         mp = self.parameters
         midpoint_mode = mp.curvature_integration == CURVATURE_INTEGRATION_MIDPOINT
+        ht_mode = mp.curvature_integration == CURVATURE_INTEGRATION_HT
+        rand_mode = mp.curvature_integration == CURVATURE_INTEGRATION_RAND
 
         # Pick a random midpoint near the centre
         X0 = torch.normal(mean=torch.zeros(3), std=0.1)
@@ -412,10 +418,13 @@ class FrameState(nn.Module):
         l = torch.tensor(mp.length_init)
         lengths = [nn.Parameter(l, requires_grad=True) for _ in range(mp.depth - mp.depth_min)]
 
-        # Prepare HT parameters
+        # Prepare parameters
         X0ht = []
         T0ht = []
         M10ht = []
+        X = []
+        T = []
+        M1 = []
 
         # Start in a straight line configuration
         curvatures = []
@@ -434,9 +443,9 @@ class FrameState(nn.Module):
             self.register_buffer(f'points_{d}', X_d[0].detach())
             self.register_buffer(f'curvatures_smoothed_{d}', K.detach())
 
-            X0ht.append(nn.Parameter(torch.stack([X_d[0, 0], X_d[0, -1]]), requires_grad=not midpoint_mode))
-            T0ht.append(nn.Parameter(torch.stack([T_d[0, 0], T_d[0, -1]]), requires_grad=not midpoint_mode))
-            M10ht.append(nn.Parameter(torch.stack([M1_d[0, 0], M1_d[0, -1]]), requires_grad=not midpoint_mode))
+            X0ht.append(nn.Parameter(torch.stack([X_d[0, 0], X_d[0, -1]]), requires_grad=ht_mode))
+            T0ht.append(nn.Parameter(torch.stack([T_d[0, 0], T_d[0, -1]]), requires_grad=ht_mode))
+            M10ht.append(nn.Parameter(torch.stack([M1_d[0, 0], M1_d[0, -1]]), requires_grad=ht_mode))
 
             # Verify that the curves match
             Xh, Th, M1h = integrate_curvature(
@@ -464,12 +473,20 @@ class FrameState(nn.Module):
             assert torch.allclose(M1_d, M1h, atol=1e-1)
             assert torch.allclose(M1_d, M1t, atol=1e-1)
 
+            # Add the fully specified curve parameters
+            X.append(nn.Parameter(X_d[0], requires_grad=rand_mode))
+            T.append(nn.Parameter(T_d[0], requires_grad=rand_mode))
+            M1.append(nn.Parameter(M1_d[0], requires_grad=rand_mode))
+
         self.register_parameter('X0', X0s)
         self.register_parameter('T0', T0s)
         self.register_parameter('M10', M10s)
         self.register_parameter('X0ht', X0ht)
         self.register_parameter('T0ht', T0ht)
         self.register_parameter('M10ht', M10ht)
+        self.register_parameter('X', X)
+        self.register_parameter('T', T)
+        self.register_parameter('M1', M1)
         self.register_parameter('length', lengths)
         self.register_parameter('curvatures', curvatures)
 
@@ -632,20 +649,23 @@ class FrameState(nn.Module):
             else:
                 p.requires_grad_(False)
 
-    def update_ht_data_from_mp(
+    def update_data_from_mp(
             self,
             verification_threshold: float = 1e-1,
             abort_on_verification_errors: bool = False
     ):
         """
-        Update the ht parameters using the midpoint integration method.
+        Update the parameters using the midpoint integration method.
         """
         mp = self.parameters
 
-        # Prepare HT parameters
+        # Prepare parameters
         X0ht = []
         T0ht = []
         M10ht = []
+        X = []
+        T = []
+        M1 = []
 
         for i, d in enumerate(range(mp.depth_min, mp.depth)):
             N = 2**d
@@ -703,6 +723,14 @@ class FrameState(nn.Module):
                 else:
                     logger.warning(msg)
 
+            # Add the fully specified curve parameters
+            X.append(X_d[0])
+            T.append(T_d[0])
+            M1.append(M1_d[0])
+
         self.set_state('X0ht', X0ht)
         self.set_state('T0ht', T0ht)
         self.set_state('M10ht', M10ht)
+        self.set_state('X', X)
+        self.set_state('T', T)
+        self.set_state('M1', M1)

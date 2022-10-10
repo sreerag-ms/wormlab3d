@@ -977,6 +977,9 @@ def calculate_temporal_losses_curvatures(
         X0ht: Optional[List[torch.Tensor]],
         T0ht: Optional[List[torch.Tensor]],
         M10ht: Optional[List[torch.Tensor]],
+        X: Optional[List[torch.Tensor]],
+        T: Optional[List[torch.Tensor]],
+        M1: Optional[List[torch.Tensor]],
         cam_shifts: Optional[torch.Tensor],
         length_prev: Optional[List[torch.Tensor]],
         curvatures_prev: Optional[List[torch.Tensor]],
@@ -986,6 +989,9 @@ def calculate_temporal_losses_curvatures(
         X0ht_prev: Optional[List[torch.Tensor]],
         T0ht_prev: Optional[List[torch.Tensor]],
         M10ht_prev: Optional[List[torch.Tensor]],
+        X_prev: Optional[List[torch.Tensor]],
+        T_prev: Optional[List[torch.Tensor]],
+        M1_prev: Optional[List[torch.Tensor]],
         cam_shifts_prev: Optional[torch.Tensor],
 ) -> List[torch.Tensor]:
     """
@@ -1075,6 +1081,36 @@ def calculate_temporal_losses_curvatures(
         else:
             loss_M10ht = torch.tensor(0., device=device)
 
+        # X (midpoint) should be close
+        if X is not None:
+            X_d = X[d]
+            if X_prev is not None:
+                X_prev_d = X_prev[d].unsqueeze(0).detach()
+                X_d = torch.cat([X_prev_d, X_d], dim=0)
+            loss_X = torch.sum((X_d[1:] - X_d[:-1])**2) / bs
+        else:
+            loss_X = torch.tensor(0., device=device)
+
+        # T (tangent at midpoint) direction should be similar
+        if T is not None:
+            T_d = T[d]
+            if T_prev is not None:
+                T_prev_d = T_prev[d].unsqueeze(0).detach()
+                T_d = torch.cat([T_prev_d, T_d], dim=0)
+            loss_T = torch.sum((T_d[1:] - T_d[:-1])**2) / bs
+        else:
+            loss_T = torch.tensor(0., device=device)
+
+        # M1 (frame at midpoint) direction should be similar
+        if M1 is not None:
+            M1_d = M1[d]
+            if M1_prev is not None:
+                M1_prev_d = M1_prev[d].unsqueeze(0).detach()
+                M1_d = torch.cat([M1_prev_d, M1_d], dim=0)
+            loss_M1 = torch.sum((M1_d[1:] - M1_d[:-1])**2) / bs
+        else:
+            loss_M1 = torch.tensor(0., device=device)
+
         # Camera shifts should be close
         if cam_shifts is not None:
             if cam_shifts_prev is not None:
@@ -1084,7 +1120,10 @@ def calculate_temporal_losses_curvatures(
         else:
             loss_shifts = torch.tensor(0., device=device)
 
-        loss = loss_X0 + loss_T0 + loss_M10 + loss_X0ht + loss_T0ht + loss_M10ht + loss_l + loss_K + loss_shifts
+        loss = loss_X0 + loss_T0 + loss_M10 \
+               + loss_X0ht + loss_T0ht + loss_M10ht \
+               + loss_X + loss_T + loss_M1 \
+               + loss_l + loss_K + loss_shifts
         losses.append(loss)
 
     return losses
@@ -1119,11 +1158,17 @@ def calculate_temporal_losses_curvature_deltas(
         None,
         None,
         None,
+        None,
+        None,
+        None,
         length_prev,
         curvatures_prev,
         X0_prev,
         T0_prev,
         M10_prev,
+        None,
+        None,
+        None,
         None,
         None,
         None,
