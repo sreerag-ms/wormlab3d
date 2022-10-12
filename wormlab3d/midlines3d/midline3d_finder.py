@@ -942,7 +942,6 @@ class Midline3DFinder:
         if not p.curvature_mode \
                 or p.centre_shift_every_n_steps is None \
                 or self.checkpoint.step_frame == 0 \
-                or (p.length_regrow_steps is not None and self.checkpoint.step_frame < p.length_regrow_steps) \
                 or self.checkpoint.step_frame % p.centre_shift_every_n_steps != 0:
             return stats
 
