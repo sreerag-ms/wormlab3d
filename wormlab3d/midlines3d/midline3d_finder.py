@@ -32,7 +32,8 @@ from wormlab3d.midlines3d.mf_methods import generate_residual_targets, calculate
     calculate_smoothness_losses_curvatures, calculate_curvature_losses_curvatures, calculate_temporal_losses_curvatures, \
     calculate_temporal_losses_curvature_deltas, calculate_curvature_losses_curvature_deltas, \
     calculate_intersection_losses_curvatures, calculate_alignment_losses_curvatures, \
-    integrate_curvature, normalise, orthogonalise, calculate_consistency_losses_curvatures_ht
+    integrate_curvature, normalise, orthogonalise, calculate_consistency_losses_curvatures_ht, \
+    calculate_temporal_losses_points
 from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.nn.LBFGS import FullBatchLBFGS
@@ -50,6 +51,7 @@ PRINT_KEYS = [
     'loss/curvature',
     'loss/smoothness',
     'loss/temporal',
+    'loss/temporal_points',
     # 'loss/global',
     'loss/scores',
     'loss/intersections',
@@ -1573,11 +1575,12 @@ class Midline3DFinder:
                     )
                 elif p.curvature_integration == CURVATURE_INTEGRATION_RAND:
                     losses['temporal'] = calculate_temporal_losses_curvatures(
-                        length, curvatures, None, None, None, None, None, None, X, T, M1,
+                        length, curvatures, None, None, None, None, None, None, None, None, None,
                         cam_shifts,
-                        length_prev, curvatures_prev, None, None, None, None, None, None, X_prev, T_prev, M1_prev,
+                        length_prev, curvatures_prev, None, None, None, None, None, None, None, None, None,
                         cam_shifts_prev
                     )
+                losses['temporal_points'] = calculate_temporal_losses_points(points_smoothed, points_prev)
                 losses['curvature'] = calculate_curvature_losses_curvatures(curvatures)
         else:
             losses = {**losses, **{

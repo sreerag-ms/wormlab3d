@@ -107,6 +107,7 @@ class MFParameters(Document):
     loss_smoothness = FloatField()
     loss_curvature = FloatField()
     loss_temporal = FloatField()
+    loss_temporal_points = FloatField()
     loss_intersections = FloatField()
     loss_alignment = FloatField()
     loss_consistency = FloatField()

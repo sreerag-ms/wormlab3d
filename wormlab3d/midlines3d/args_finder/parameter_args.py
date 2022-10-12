@@ -86,6 +86,7 @@ class ParameterArgs(BaseArgs):
             loss_smoothness: float = 1.,
             loss_curvature: float = 1.,
             loss_temporal: float = 0.,
+            loss_temporal_points: float = 0.,
             loss_intersections: float = 0.,
             loss_alignment: float = 0.,
             loss_consistency: float = 0.,
@@ -244,6 +245,7 @@ class ParameterArgs(BaseArgs):
         self.loss_smoothness = loss_smoothness
         self.loss_curvature = loss_curvature
         self.loss_temporal = loss_temporal
+        self.loss_temporal_points = loss_temporal_points
         self.loss_intersections = loss_intersections
         self.loss_alignment = loss_alignment
         self.loss_consistency = loss_consistency
@@ -414,6 +416,8 @@ class ParameterArgs(BaseArgs):
                            help='Regularisation weight for penalising curvature.')
         group.add_argument('--loss-temporal', type=float, default=0.,
                            help='Temporal smoothing weight between frames.')
+        group.add_argument('--loss-temporal-points', type=float, default=0.,
+                           help='Temporal smoothing weight between frames -- applied to curve points only.')
         group.add_argument('--loss-intersections', type=float, default=0.,
                            help='Self-intersections loss.')
         group.add_argument('--loss-alignment', type=float, default=0.,

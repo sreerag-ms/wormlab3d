@@ -1130,6 +1130,34 @@ def calculate_temporal_losses_curvatures(
 
 
 @torch.jit.script
+def calculate_temporal_losses_points(
+        X: List[torch.Tensor],
+        X_prev: Optional[List[torch.Tensor]],
+) -> List[torch.Tensor]:
+    """
+    The points should change smoothly in time.
+    """
+    D = len(X)
+    device = X[0].device
+    bs = X[0].shape[0]
+
+    # If there are no other time points available then just return zeros.
+    if X_prev is None and len(X[0]) == 1:
+        return [torch.tensor(0., device=device) for _ in range(D)]
+
+    losses = []
+    for d in range(D):
+        X_d = X[d]
+        if X_prev is not None:
+            X_prev_d = X_prev[d].unsqueeze(0).detach()
+            X_d = torch.cat([X_prev_d, X_d], dim=0)
+        loss = torch.sum((X_d[1:] - X_d[:-1])**2) / bs
+        losses.append(loss)
+
+    return losses
+
+
+@torch.jit.script
 def calculate_temporal_losses_curvature_deltas(
         X0: List[torch.Tensor],
         T0: List[torch.Tensor],
