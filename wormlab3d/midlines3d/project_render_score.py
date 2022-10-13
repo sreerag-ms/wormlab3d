@@ -6,7 +6,7 @@ from torch import nn
 
 from wormlab3d import PREPARED_IMAGE_SIZE_DEFAULT
 from wormlab3d.data.model.mf_parameters import RENDER_MODE_GAUSSIANS, RENDER_MODES, CURVATURE_INTEGRATION_MIDPOINT, \
-    CURVATURE_INTEGRATION_HT, CURVATURE_INTEGRATION_RAND, CURVATURE_INTEGRATION_ALGORITHM_EULER
+    CURVATURE_INTEGRATION_ALGORITHM_EULER
 from wormlab3d.midlines3d.dynamic_cameras import DynamicCameras
 from wormlab3d.midlines3d.mf_methods import calculate_curvature, integrate_curvature, normalise, smooth_parameter
 
@@ -458,7 +458,7 @@ class ProjectRenderScoreModel(nn.Module):
                         rN = torch.clip(
                             torch.round(torch.randn(1, device=device) / 4 * (N / 2)) + (N / 2),
                             min=0,
-                            max=N
+                            max=N - 1
                         ).to(torch.long)[0]
 
                         # Integrate the curvature to get the midline coordinates
