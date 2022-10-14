@@ -106,7 +106,7 @@ class Eigenworms(Document):
             raise ValidationError('Dataset and reconstruction both undefined.')
         if self.dataset is not None and self.reconstruction is not None:
             raise ValidationError('Dataset and reconstruction both defined.')
-        if self.reconstruction is None and self.restrict_concs is not None:
+        if self.reconstruction is not None and self.restrict_concs is not None:
             raise ValidationError('Reconstruction and restrict_concs both defined.')
 
         # Validate the mean
@@ -170,4 +170,4 @@ class Eigenworms(Document):
         return self.cpca.inverse_transform(X)
 
     def __str__(self):
-        return f'{self.updated:%Y-%m-%d}: {self.n_components} components.'
+        return f'{self.updated:%Y-%m-%d}: {self.n_components} components, {self.n_features} features, {self.n_samples} samples.'

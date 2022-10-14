@@ -198,15 +198,17 @@ def fetch_eigenworms(
             filters['n_components'] = n_components
         if restrict_concs is not None:
             filters['restrict_concs'] = restrict_concs
+        else:
+            filters['restrict_concs'] = None
 
         matching_eigenworms = Eigenworms.objects(**filters).order_by('-n_components')
         if matching_eigenworms.count() == 0:
             logger.warning(f'Found no eigenworms for parameters {filters}.')
         else:
+            eigenworms = matching_eigenworms[0]
             logger.info(
                 f'Found {matching_eigenworms.count()} matching eigenworms. '
-                f'Using one with most components.'
+                f'Using: {eigenworms}'
             )
-            eigenworms = matching_eigenworms[0]
 
     return eigenworms
