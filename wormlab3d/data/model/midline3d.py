@@ -49,6 +49,13 @@ class Midline3D(Document):
         'indexes': ['frame', 'source', 'source_file']
     }
 
+    def get_reconstruction(self) -> 'Reconstruction':
+        """
+        Get the reconstruction that parents this midline.
+        """
+        from wormlab3d.data.model import Reconstruction
+        return Reconstruction.objects(midlines__contains=self.id).get()
+
     def get_segmentation_masks(self, blur_sigma: float = None, draw_mode: str = 'line_aa') -> np.ndarray:
         """
         Turn the midline coordinates into a set of segmentation masks by projecting the 3D object points

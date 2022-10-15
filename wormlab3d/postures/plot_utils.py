@@ -414,7 +414,10 @@ def plot_natural_frame_3d_mlab(
         midline_opts: dict = None,
         surface_opts: dict = None,
         mesh_opts: dict = None,
+        show_midline: bool = True,
+        show_surface: bool = True,
         show_frame_arrows: bool = True,
+        show_frame_e0: bool = False,
         show_outline: bool = True,
         show_axis: bool = True,
         n_frame_arrows: int = 30,
@@ -457,9 +460,11 @@ def plot_natural_frame_3d_mlab(
     )
     centre = fa.X.min(axis=0) + fa.X.ptp(axis=0) / 2
     if show_frame_arrows:
-        fa.add_component_vectors(fig, draw_e0=False)
-    fa.add_midline(fig, cmap_name=midline_cmap)
-    fa.add_surface(fig, cmap_name=surface_cmap)
+        fa.add_component_vectors(fig, draw_e0=show_frame_e0)
+    if show_midline:
+        fa.add_midline(fig, cmap_name=midline_cmap)
+    if show_surface:
+        fa.add_surface(fig, cmap_name=surface_cmap)
     if show_outline:
         fa.add_outline(fig)
 
