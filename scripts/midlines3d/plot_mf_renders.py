@@ -1,5 +1,5 @@
 import os
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -7,6 +7,7 @@ import torch
 import yaml
 from PIL import Image, ImageDraw
 
+from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT
 from wormlab3d import logger, LOGS_PATH, START_TIMESTAMP
 from wormlab3d.data.model import Reconstruction, Frame
 from wormlab3d.data.model.mf_parameters import RENDER_MODE_GAUSSIANS
@@ -18,10 +19,9 @@ from wormlab3d.trajectories.util import fetch_reconstruction
 
 show_plots = False
 save_plots = True
-
-
 # show_plots = True
 # save_plots = False
+img_extension = 'svg'
 
 
 def _get_targets() -> Tuple[Reconstruction, Frame]:
@@ -86,9 +86,9 @@ class RenderWrapper:
 
     def init_params(
             self,
-            sigma: Optional[float] = None,
+            sigma: Optional[Union[float, Tuple[float, float]]] = None,
             exponent: Optional[float] = None,
-            intensity: Optional[float] = None,
+            intensity: Optional[Union[float, Tuple[float, float]]] = None,
             camera_sigmas: Optional[float] = None,
             camera_exponents: Optional[float] = None,
             camera_intensities: Optional[float] = None,
@@ -96,19 +96,38 @@ class RenderWrapper:
         """
         Initialise the rendering parameters.
         """
+        params = self.reconstruction.mf_parameters
+        N = params.n_points_total
+        N5 = int(N / 5)
         n = self.frame.frame_num
+
         if sigma is None:
             sigma = torch.from_numpy(self.ts.get('sigmas', n, n + 1)[0].copy())
+            sigmas_min = params.sigmas_min
         else:
-            sigma = torch.tensor(sigma)
+            if type(sigma) == tuple:
+                sigmas_min = torch.tensor(sigma[0])
+                sigma = torch.tensor(sigma[1])
+            else:
+                sigma = torch.tensor(sigma)
+                sigmas_min = params.sigmas_min
+
         if exponent is None:
             exponent = torch.from_numpy(self.ts.get('exponents', n, n + 1).copy())
         else:
             exponent = torch.tensor(exponent)
+
         if intensity is None:
             intensity = torch.from_numpy(self.ts.get('intensities', n, n + 1).copy())
+            intensities_min = params.intensities_min
         else:
-            intensity = torch.tensor(intensity)
+            if type(intensity) == tuple:
+                intensities_min = torch.tensor(intensity[0])
+                intensity = torch.tensor(intensity[1])
+            else:
+                intensity = torch.tensor(intensity)
+                intensities_min = params.intensities_min
+
         if camera_sigmas is None:
             self.camera_sigmas = torch.from_numpy(self.ts.get('camera_sigmas', n, n + 1).copy())
         else:
@@ -122,14 +141,9 @@ class RenderWrapper:
         else:
             self.camera_intensities = torch.tensor(camera_intensities)
 
-        # Prepare sigmas, exponents and intensities
-        params = self.reconstruction.mf_parameters
-        N = params.n_points_total
-        N5 = int(N / 5)
-
         # Sigmas should be equal in the middle section but taper towards the ends
-        sigma = sigma.clamp(min=params.sigmas_min)
-        slopes = (sigma - params.sigmas_min) / N5 * torch.arange(N5)[None, :] + params.sigmas_min
+        sigma = sigma.clamp(min=sigmas_min)
+        slopes = (sigma - sigmas_min) / N5 * torch.arange(N5)[None, :] + sigmas_min
         self.sigmas = torch.cat([
             slopes,
             torch.ones(1, N - 2 * N5) * sigma,
@@ -140,9 +154,9 @@ class RenderWrapper:
         self.exponents = torch.ones(1, N) * exponent
 
         # Intensities should be equal in the middle section but taper towards the ends
-        intensity = intensity.clamp(min=params.intensities_min)
-        slopes = (intensity - params.intensities_min) / N5 \
-                 * torch.arange(N5)[None, :] + params.intensities_min
+        intensity = intensity.clamp(min=intensities_min)
+        slopes = (intensity - intensities_min) / N5 \
+                 * torch.arange(N5)[None, :] + intensities_min
         self.intensities = torch.cat([
             slopes,
             torch.ones(1, N - 2 * N5) * intensity,
@@ -373,7 +387,8 @@ def plot_blob_stacks_horizontal(
         amplification_factor: float = 1.1,
         alpha_min: float = 0.3,
         white_at: float = 0.1,
-        border_colour: Tuple[int] = (0, 0, 0, 200),
+        border_size: int =1,
+        border_colour: Optional[Tuple[int]] = (0, 0, 0, 200),
         n_blobs: int = 33,
         blob_spacing: int = 6,
         blob_chunk_spacing: int = 40,
@@ -389,6 +404,8 @@ def plot_blob_stacks_horizontal(
     N = reconstruction.mf_parameters.n_points_total
     reds = _get_reds(alpha_min=alpha_min, white_at=white_at)
     masks, blobs = _get_masks_and_blobs(reconstruction, frame)
+    cmap = plt.get_cmap(MIDLINE_CMAP_DEFAULT)
+    border_colours = cmap(np.linspace(0, 1, N)) * 255
 
     # Amplify the blobs a little and convert to 8-bit
     blobs = ((blobs * amplification_factor).clip(max=1) * 255).astype(np.uint8)
@@ -417,6 +434,7 @@ def plot_blob_stacks_horizontal(
             amplification_factor=amplification_factor,
             alpha_min=alpha_min,
             white_at=white_at,
+            border_size=border_size,
             border_colour=border_colour,
             n_blobs=n_blobs,
             blob_spacing=blob_spacing,
@@ -431,16 +449,22 @@ def plot_blob_stacks_horizontal(
 
     def _make_blob_img(c_, n_):
         b_ = np.take(reds, blobs[c_, n_], axis=0)
-        b_[0, :] = border_colour
-        b_[-1, :] = border_colour
-        b_[:, 0] = border_colour
-        b_[:, -1] = border_colour
+        if border_size > 0:
+            if border_colour is None:
+                bc = border_colours[n]
+            else:
+                bc = border_colour
+            b_[:border_size, :] = bc
+            b_[-border_size:, :] = bc
+            b_[:, :border_size] = bc
+            b_[:, -border_size:] = bc
         b_img = Image.fromarray(b_)
         return b_img
 
     for c in range(3):
         dim_x = trial.crop_size * 2 + (show_first_n_blobs + show_last_n_blobs - 1) * blob_spacing + blob_chunk_spacing
         bg = np.ones((trial.crop_size, dim_x, 4), dtype=np.uint8) * 255
+        bg[..., -1] = 0
         blob_stack = Image.fromarray(bg)
 
         # Draw the back of the stack first
@@ -522,6 +546,175 @@ def plot_renders(
             img.show()
 
 
+def plot_render_variations(
+        reconstruction: Reconstruction,
+        frame: Frame,
+        sigma_variants: Optional[List[Union[float, Tuple[float, float]]]] = None,
+        intensity_variants: Optional[List[Union[float, Tuple[float, float]]]] = None,
+        exponent_variants: Optional[List[float]] = None,
+        alpha_min: float = 0.3,
+        white_at: float = 0.1,
+):
+    """
+    Plot variations on the midline renders.
+    """
+    trial = reconstruction.trial
+    reds = _get_reds(alpha_min=alpha_min, white_at=white_at)
+    renderer = RenderWrapper(reconstruction, frame)
+
+    # Prepare path
+    save_dir = LOGS_PATH / (f'{START_TIMESTAMP}_render_variations'
+                            f'_trial={trial.id}'
+                            f'_frame={frame.frame_num}'
+                            f'_reconstruction={reconstruction.id}')
+    if save_plots:
+        os.makedirs(save_dir, exist_ok=True)
+
+        # Save layout spec
+        spec = dict(
+            created=START_TIMESTAMP,
+            sigma_variants=sigma_variants,
+            intensity_variants=intensity_variants,
+            exponent_variants=exponent_variants,
+            alpha_min=alpha_min,
+            white_at=white_at,
+        )
+        with open(save_dir / 'spec.yml', 'w') as f:
+            yaml.dump(spec, f)
+
+    # Loop over parameters
+    for param_name, variants in [
+        ('sigma', sigma_variants),
+        ('intensity', intensity_variants),
+        ('exponent', exponent_variants)
+    ]:
+        # Reset parameters
+        renderer.init_params()
+
+        # Plot variants
+        for variant in variants:
+            renderer.init_params(**{param_name: variant})
+            masks, _ = renderer.get_masks_and_blobs()
+            masks = (masks * 255).astype(np.uint8)
+
+            # Show/save renders
+            for c in range(3):
+                mask = np.take(reds, masks[c], axis=0)
+                img = Image.fromarray(mask)
+                if save_plots:
+                    if type(variant) == tuple:
+                        v_str = '[' + ','.join((f'{v:.2f}' for v in variant)) + ']'
+                    else:
+                        v_str = f'{variant:.2f}'
+                    img.save(save_dir / f'{param_name}={v_str}_c{c}.png')
+                if show_plots:
+                    img.show()
+
+
+def plot_rendering_parameters(
+        reconstruction: Reconstruction,
+        frame: Frame,
+        sigma_variants: Optional[List[float]] = None,
+        intensity_variants: Optional[List[float]] = None,
+        exponent_variants: Optional[List[float]] = None,
+):
+    """
+    Plot the rendering parameters.
+    """
+    trial = reconstruction.trial
+    N = reconstruction.mf_parameters.n_points_total
+    renderer = RenderWrapper(reconstruction, frame)
+
+    # Prepare path
+    save_dir = LOGS_PATH / (f'{START_TIMESTAMP}_params'
+                            f'_trial={trial.id}'
+                            f'_frame={frame.frame_num}'
+                            f'_reconstruction={reconstruction.id}')
+    if save_plots:
+        os.makedirs(save_dir, exist_ok=True)
+
+        # Save layout spec
+        spec = dict(
+            created=START_TIMESTAMP,
+            sigma_variants=sigma_variants,
+            intensity_variants=intensity_variants,
+            exponent_variants=exponent_variants,
+        )
+        with open(save_dir / 'spec.yml', 'w') as f:
+            yaml.dump(spec, f)
+
+    plt.rc('xtick', labelsize=7)  # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=6)  # fontsize of the y tick labels
+    plt.rc('xtick.major', pad=2)
+    plt.rc('ytick.major', pad=1)
+
+    fig, axes = plt.subplots(1, 3, figsize=(3.1, 0.95), gridspec_kw={
+        'left': 0.1,
+        'right': 0.98,
+        'top': 0.95,
+        'bottom': 0.2,
+        'wspace': 0.38
+    })
+
+    for i in range(3):
+        ax = axes[i]
+        ax.spines['top'].set_visible(False)
+
+        if i == 0:
+            variants = sigma_variants
+            lbl = '$\sigma$'
+            param_name = 'sigma'
+            state_name = 'sigmas'
+        elif i == 1:
+            variants = intensity_variants
+            lbl = '$\iota$'
+            param_name = 'intensity'
+            state_name = 'intensities'
+        else:
+            variants = exponent_variants
+            lbl = '$\\rho$'
+            param_name = 'exponent'
+            state_name = 'exponents'
+
+        # Plot (tapered) parameter
+        v = to_numpy(getattr(renderer, state_name)[0])
+        ax.plot(v)
+
+        if variants is not None:
+            for variant in variants:
+                r2 = RenderWrapper(reconstruction, frame)
+                r2.init_params(**{param_name: variant})
+                v2 = to_numpy(getattr(r2, state_name)[0])
+                ax.plot(v2, linestyle=':')
+
+        # Set up x-axis
+        ax.set_xticks([])
+        ax.set_xlim(left=0, right=N - 1)
+        ax.set_xticks([0, N - 1])
+        ax.set_xticklabels(['H', 'T'])
+
+        # Set up y-axis
+        # ax.set_ylim(bottom=0, top=v.max()*1.6)
+        if v.max() == v.min():
+            ax.set_yticks([0, v.max()])
+            ax.set_yticklabels([None, f'{v.max():.2f}'])
+        else:
+            ax.set_yticks([0, v.min(), v.max()])
+            ax.set_yticklabels([None, f'{v.min():.2f}', f'{v.max():.2f}'])
+
+        # Add parameter label
+        ax.text(-0.14, 0.96, lbl, transform=ax.transAxes,
+                horizontalalignment='center', verticalalignment='top',
+                fontweight='bold', fontsize=12)
+
+    if save_plots:
+        path = save_dir / f'params.{img_extension}'
+        logger.info(f'Saving plot to {path}.')
+        plt.savefig(path, transparent=True)
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
@@ -557,15 +750,16 @@ if __name__ == '__main__':
         reconstruction=rec_,
         frame=frame_,
         amplification_factor=1.,
-        alpha_min=0.3,
+        alpha_min=0.4,
         white_at=0.1,
-        border_colour=(0, 0, 0, 200),
-        n_blobs=33,
-        blob_spacing=15,
-        blob_chunk_spacing=100,
-        show_first_n_blobs=4,
+        border_size=2,
+        border_colour=None,
+        n_blobs=16,
+        blob_spacing=25,
+        blob_chunk_spacing=150,
+        show_first_n_blobs=7,
         show_last_n_blobs=1,
-        n_dots=4,
+        n_dots=5,
         dot_size=3,
     )
 
@@ -574,4 +768,31 @@ if __name__ == '__main__':
     #     frame=frame_,
     #     alpha_min=0.3,
     #     white_at=0.1,
+    # )
+
+    sigma_variants_ = [(0.005, 0.02), (0.05, 0.1)]
+    intensity_variants_ = [(0.1, 0.3), (0.75, 1.3)]
+    exponent_variants_ = [0.6, 3]
+
+    # plot_render_variations(
+    #     reconstruction=rec_,
+    #     frame=frame_,
+    #     sigma_variants=sigma_variants_,
+    #     intensity_variants=intensity_variants_,
+    #     exponent_variants=exponent_variants_,
+    #     alpha_min=0.7,
+    #     white_at=0.02,
+    # )
+
+    # plot_rendering_parameters(
+    #     reconstruction=rec_,
+    #     frame=frame_,
+    #     sigma_variants=sigma_variants_,
+    #     intensity_variants=intensity_variants_,
+    #     exponent_variants=exponent_variants_,
+    # )
+
+    # plot_rendering_parameters(
+    #     reconstruction=rec_,
+    #     frame=frame_,
     # )
