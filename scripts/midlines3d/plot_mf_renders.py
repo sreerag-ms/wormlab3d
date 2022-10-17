@@ -13,7 +13,7 @@ from wormlab3d import logger, LOGS_PATH, START_TIMESTAMP
 from wormlab3d.data.model import Reconstruction, Frame
 from wormlab3d.data.model.mf_parameters import RENDER_MODE_GAUSSIANS
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
-from wormlab3d.midlines3d.project_render_score import render_points
+from wormlab3d.midlines3d.project_render_score import render_points, _taper_parameter
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.toolkit.util import parse_target_arguments, to_numpy
 from wormlab3d.trajectories.util import fetch_reconstruction
@@ -802,6 +802,104 @@ def plot_rendering_parameters(
         plt.show()
 
 
+def plot_scores(
+        reconstruction: Reconstruction,
+        frame: Frame,
+        noise_scale: int = 0,
+):
+    """
+    Plot the scores.
+    """
+    trial = reconstruction.trial
+    N = reconstruction.mf_parameters.n_points_total
+    renderer = RenderWrapper(reconstruction, frame)
+    if noise_scale > 0:
+        renderer.points_2d += torch.randn_like(renderer.points_2d) * noise_scale
+
+    masks, blobs = renderer.get_masks_and_blobs()
+
+    # Get targets
+    images = frame.images
+    images[images < reconstruction.mf_parameters.masks_threshold] = 0
+    masks_target = images / images.max()
+
+    # Normalise blobs
+    sum_ = blobs.max(axis=(2, 3), keepdims=True)
+    sum_ = sum_.clip(min=1e-8)
+    blobs_normed = blobs / sum_
+
+    # Score the points - look at projections in each view and check how well each blob matches against the lowest intensity image
+    scores = (blobs_normed * masks_target[:, None]).sum(axis=(2, 3)).min(axis=0) \
+             / to_numpy(renderer.intensities[0]) \
+             / to_numpy(renderer.sigmas[0])  # Scale scores by sigmas and intensities
+    scores_untapered = scores.copy()
+    scores_tapered = to_numpy(_taper_parameter(torch.from_numpy(scores).unsqueeze(0))[0])
+
+    # Prepare path
+    save_dir = LOGS_PATH / (f'{START_TIMESTAMP}_scores'
+                            + (f'_ns={noise_scale:.3E}' if noise_scale > 0 else '') +
+                            f'_trial={trial.id}'
+                            f'_frame={frame.frame_num}'
+                            f'_reconstruction={reconstruction.id}')
+    if save_plots:
+        os.makedirs(save_dir, exist_ok=True)
+
+    cmap = plt.get_cmap(MIDLINE_CMAP_DEFAULT)
+    fc = cmap((np.arange(N) + 0.5) / N)
+    ind = np.arange(N)
+
+    plt.rc('xtick', labelsize=7)  # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+    plt.rc('xtick.major', pad=2)
+    plt.rc('ytick.major', pad=1, size=2)
+
+    fig, axes = plt.subplots(2, figsize=(0.9, 1.6), gridspec_kw={
+        'left': 0.23,
+        'right': 0.94,
+        'top': 0.98,
+        'bottom': 0.11,
+        'hspace': 0.38
+    })
+
+    for i in range(2):
+        ax = axes[i]
+        ax.spines['top'].set_visible(False)
+
+        if i == 0:
+            v = scores_untapered
+            lbl = '$\mathcal{S}$'
+        else:
+            v = scores_tapered
+            lbl = '$\hat{\mathcal{S}}$'
+
+        for n in range(N - 1):
+            ax.plot(ind[n:n + 2], v[n:n + 2], c=fc[n])
+
+        ax.vlines(x=int(N / 2), ymin=0, ymax=v[int(N / 2)], linestyle=':', color='grey')
+
+        # Set up x-axis
+        ax.set_xticks([])
+        ax.set_xlim(left=0, right=N - 1)
+        ax.set_xticks([0, N - 1])
+        ax.set_xticklabels(['H', 'T'])
+
+        # Set up y-axis
+        ax.set_ylim(bottom=0, top=scores_untapered.max() + 200)
+        ax.set_yticks([0, 5000])
+
+        # # Add parameter label
+        # ax.text(-0.14, 0.96, lbl, transform=ax.transAxes,
+        #         horizontalalignment='center', verticalalignment='top',
+        #         fontweight='bold', fontsize=12)
+
+    if save_plots:
+        path = save_dir / f'scores.{img_extension}'
+        logger.info(f'Saving plot to {path}.')
+        plt.savefig(path, transparent=True)
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
@@ -855,14 +953,14 @@ if __name__ == '__main__':
     #     dot_size=3,
     # )
 
-    plot_blob_intersections(
-        reconstruction=rec_,
-        frame=frame_,
-        blob_idx=64,
-        amplification_factor=1.1,
-        alpha_min=0.5,
-        white_at=0.02,
-    )
+    # plot_blob_intersections(
+    #     reconstruction=rec_,
+    #     frame=frame_,
+    #     blob_idx=64,
+    #     amplification_factor=1.1,
+    #     alpha_min=0.5,
+    #     white_at=0.02,
+    # )
 
     # plot_renders(
     #     reconstruction=rec_,
@@ -897,3 +995,9 @@ if __name__ == '__main__':
     #     reconstruction=rec_,
     #     frame=frame_,
     # )
+
+    plot_scores(
+        reconstruction=rec_,
+        frame=frame_,
+        noise_scale=0.5,
+    )
