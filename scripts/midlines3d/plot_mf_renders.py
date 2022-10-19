@@ -98,6 +98,8 @@ class RenderWrapper:
         n = self.frame.frame_num
         self.ts = TrialState(self.reconstruction)
         self.points_2d = torch.from_numpy(self.ts.get('points_2d', n, n + 1).copy())
+        self.scores_untapered: np.ndarray = None
+        self.scores_tapered: np.ndarray = None
         self.init_params()
 
     def init_params(
@@ -196,6 +198,37 @@ class RenderWrapper:
         )
 
         return to_numpy(masks[0]), to_numpy(blobs[0])
+
+    def get_scores(self, tapered: bool = True):
+        """
+        Calculate the scores.
+        """
+        if self.scores_tapered is None:
+            masks, blobs = self.get_masks_and_blobs()
+
+            # Get targets
+            images = self.frame.images
+            images[images < self.reconstruction.mf_parameters.masks_threshold] = 0
+            masks_target = images / images.max()
+
+            # Normalise blobs
+            sum_ = blobs.max(axis=(2, 3), keepdims=True)
+            sum_ = sum_.clip(min=1e-8)
+            blobs_normed = blobs / sum_
+
+            # Score the points - look at projections in each view and check how well each blob matches against the lowest intensity image
+            scores = (blobs_normed * masks_target[:, None]).sum(axis=(2, 3)).min(axis=0) \
+                     / to_numpy(self.intensities[0]) \
+                     / to_numpy(self.sigmas[0])  # Scale scores by sigmas and intensities
+            scores_untapered = scores.copy()
+            scores_tapered = to_numpy(_taper_parameter(torch.from_numpy(scores).unsqueeze(0))[0])
+            self.scores_untapered = scores_untapered
+            self.scores_tapered = scores_tapered
+
+        if tapered:
+            return self.scores_tapered
+        else:
+            return self.scores_untapered
 
 
 def _get_masks_and_blobs(
@@ -301,6 +334,8 @@ def plot_blob_stacks(
         border_colours = cmap(np.linspace(0, 1, N)) * 255
     else:
         border_colours = np.ones((N, 4)) * border_colour
+    if show_last_n_blobs == 0:
+        blob_chunk_spacing = 0
 
     # Amplify the blobs a little and convert to 8-bit
     blobs = ((blobs * amplification_factor).clip(max=1) * 255).astype(np.uint8)
@@ -355,6 +390,7 @@ def plot_blob_stacks(
         else:
             dim_x = dim_y
         bg = np.ones((dim_y, dim_x, 4), dtype=np.uint8) * 255
+        bg[..., -1] = 0
         blob_stack = Image.fromarray(bg)
 
         # Draw the back of the stack first
@@ -815,25 +851,8 @@ def plot_scores(
     renderer = RenderWrapper(reconstruction, frame)
     if noise_scale > 0:
         renderer.points_2d += torch.randn_like(renderer.points_2d) * noise_scale
-
-    masks, blobs = renderer.get_masks_and_blobs()
-
-    # Get targets
-    images = frame.images
-    images[images < reconstruction.mf_parameters.masks_threshold] = 0
-    masks_target = images / images.max()
-
-    # Normalise blobs
-    sum_ = blobs.max(axis=(2, 3), keepdims=True)
-    sum_ = sum_.clip(min=1e-8)
-    blobs_normed = blobs / sum_
-
-    # Score the points - look at projections in each view and check how well each blob matches against the lowest intensity image
-    scores = (blobs_normed * masks_target[:, None]).sum(axis=(2, 3)).min(axis=0) \
-             / to_numpy(renderer.intensities[0]) \
-             / to_numpy(renderer.sigmas[0])  # Scale scores by sigmas and intensities
-    scores_untapered = scores.copy()
-    scores_tapered = to_numpy(_taper_parameter(torch.from_numpy(scores).unsqueeze(0))[0])
+    scores_untapered = renderer.get_scores(tapered=False)
+    scores_tapered = renderer.get_scores(tapered=True)
 
     # Prepare path
     save_dir = LOGS_PATH / (f'{START_TIMESTAMP}_scores'
@@ -900,6 +919,75 @@ def plot_scores(
         plt.show()
 
 
+def plot_detection_masks(
+        reconstruction: Reconstruction,
+        frame: Frame,
+        alpha_min: float = 0.3,
+        white_at: float = 0.1,
+        threshold: float = 0.1,
+        val_above_threshold: float = 1,
+        val_below_threshold: float = 0.2,
+):
+    """
+    Plot the detection masks.
+    """
+    trial = reconstruction.trial
+    renderer = RenderWrapper(reconstruction, frame)
+    masks, blobs = renderer.get_masks_and_blobs()
+    scores = renderer.get_scores()
+
+    # Normalise blobs
+    sum_ = blobs.max(axis=(2, 3), keepdims=True)
+    sum_ = sum_.clip(min=1e-8)
+    blobs_normed = blobs / sum_
+
+    # Make new render with blobs scaled by relative scores to get detection masks
+    max_score = scores.max()
+    rel_scores = np.where(max_score > 0, scores / max_score, np.ones_like(scores))
+    sf = rel_scores[None, :, None, None]
+    dm = (blobs_normed * sf).max(axis=1)
+    dm[dm > threshold] = val_above_threshold
+    dm[dm < threshold] = val_below_threshold
+
+    # Get the masked input images
+    masked_images = frame.images * dm
+    masked_images = 1 - masked_images.clip(min=0, max=1)
+
+    # Convert to 8-bit
+    dm = (dm * 255).astype(np.uint8)
+    masked_images = (masked_images * 255).astype(np.uint8)
+
+    # Prepare path
+    save_dir = LOGS_PATH / (f'{START_TIMESTAMP}_detection_masks'
+                            f'_trial={trial.id}'
+                            f'_frame={frame.frame_num}'
+                            f'_reconstruction={reconstruction.id}')
+    if save_plots:
+        os.makedirs(save_dir, exist_ok=True)
+
+        # Save layout spec
+        spec = dict(
+            created=START_TIMESTAMP,
+            alpha_min=alpha_min,
+            white_at=white_at,
+            threshold=threshold,
+            val_above_threshold=val_above_threshold,
+            val_below_threshold=val_below_threshold,
+        )
+        with open(save_dir / 'spec.yml', 'w') as f:
+            yaml.dump(spec, f)
+
+    for c in range(3):
+        mask = Image.fromarray(dm[c])
+        masked_image = Image.fromarray(masked_images[c])
+        if save_plots:
+            mask.save(save_dir / f'mask_c{c}.png')
+            masked_image.save(save_dir / f'masked_image_c{c}.png')
+        if show_plots:
+            mask.show()
+            masked_image.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
@@ -919,21 +1007,21 @@ if __name__ == '__main__':
     #     reconstruction=rec_,
     #     frame=frame_,
     #     amplification_factor=1,
-    #     alpha_min=0.7,
+    #     alpha_min=0.5,
     #     white_at=0.05,
     #     border_size=3,
     #     # border_colour=(0, 0, 0, 200),
     #     border_colour=None,
     #     n_blobs=18,
     #     blob_spacing=20,
-    #     blob_chunk_spacing=100,
-    #     show_first_n_blobs=3,
-    #     show_last_n_blobs=3,
+    #     blob_chunk_spacing=50,
+    #     show_first_n_blobs=5,
+    #     show_last_n_blobs=5, #3,
     #     n_dots=3,
     #     dot_size=2,
-    #     highlight_idx=9,
-    #     highlight_offset=150,
-    #     highlight_border_size=6,
+    #     # highlight_idx=9,
+    #     # highlight_offset=150,
+    #     # highlight_border_size=6,
     # )
 
     # plot_blob_stacks_horizontal(
@@ -996,8 +1084,14 @@ if __name__ == '__main__':
     #     frame=frame_,
     # )
 
-    plot_scores(
+    # plot_scores(
+    #     reconstruction=rec_,
+    #     frame=frame_,
+    #     noise_scale=0.5,
+    # )
+
+    plot_detection_masks(
         reconstruction=rec_,
         frame=frame_,
-        noise_scale=0.5,
+        val_below_threshold=0.1
     )
