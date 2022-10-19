@@ -20,7 +20,7 @@ from wormlab3d.toolkit.plot_utils import to_rgb, make_box_outline
 SURFACE_CMAP_DEFAULT = 'coolwarm'
 
 
-def _plot_arrow(
+def plot_arrow(
         origin: np.ndarray,
         vec: np.ndarray,
         fig: Scene = None,
@@ -232,9 +232,9 @@ class FrameArtistMLab:
             keys.remove('e2')
         for k in keys:
             arrows[k] = []
-            vec, colours = self._get_vectors_and_colours(k, C)
+            vec, colours = self.get_vectors_and_colours(k, C)
             for i in self.arrow_idxs:
-                arrow = _plot_arrow(
+                arrow = plot_arrow(
                     fig=fig,
                     origin=self.X[i],
                     vec=vec[i],
@@ -274,7 +274,7 @@ class FrameArtistMLab:
         # todo: Update component vectors
         if len(self.arrows) is not None:
             for k in self.arrows:
-                vec, colours = self._get_vectors_and_colours(k, C)
+                vec, colours = self.get_vectors_and_colours(k, C)
                 for i, j in enumerate(self.arrow_idxs):
                     self.arrows[k][i].actor.trait_set(scale=[max_z, max_z, max_z])
                     self.arrows[k][i].actor.trait_set(color=colours[j])
@@ -284,7 +284,7 @@ class FrameArtistMLab:
     def get_midpoint(self):
         return self.X.min(axis=0) + np.ptp(self.X, axis=0) / 2
 
-    def _get_vectors_and_colours(self, k: str, C: ControlsNumpy = None) -> Tuple[np.ndarray, np.ndarray]:
+    def get_vectors_and_colours(self, k: str, C: ControlsNumpy = None) -> Tuple[np.ndarray, np.ndarray]:
         """
         Get the component vectors for the frame.
         These are scaled and coloured according to the (gated) controls if passed.
@@ -480,7 +480,7 @@ def plot_natural_frame_3d_mlab(
                 continue
             origin = centre - vec / 2
             scale = np.linalg.norm(vec)
-            _plot_arrow(
+            plot_arrow(
                 origin=origin,
                 vec=vec,
                 fig=fig,
