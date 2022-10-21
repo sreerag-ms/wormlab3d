@@ -16,7 +16,7 @@ from wormlab3d.data.model import Reconstruction, Trial
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF, Midline3D
 from wormlab3d.midlines3d.project_render_score import render_points
 from wormlab3d.midlines3d.trial_state import TrialState
-from wormlab3d.toolkit.util import print_args
+from wormlab3d.toolkit.util import print_args, to_numpy
 
 POINTS_CACHE_PATH = LOGS_PATH / 'cache'
 os.makedirs(POINTS_CACHE_PATH, exist_ok=True)
@@ -236,29 +236,30 @@ def _make_renders(
     Render the 2D points into images.
     """
     N = points_2d.shape[1]
+    device = points_2d.device
 
     # Prepare sigmas, exponents and intensities
     N5 = int(N / 5)
 
     # Sigmas should be equal in the middle section but taper towards the ends
     sigmas = sigmas.clamp(min=sigmas_min)
-    slopes = (sigmas - sigmas_min) / N5 * torch.arange(N5)[None, :] + sigmas_min
+    slopes = (sigmas - sigmas_min) / N5 * torch.arange(N5, device=device)[None, :] + sigmas_min
     sigmas = torch.cat([
         slopes,
-        torch.ones(1, N - 2 * N5) * sigmas,
+        torch.ones(1, N - 2 * N5, device=device) * sigmas,
         slopes.flip(dims=(1,))
     ], dim=1)
 
     # Make exponents equal everywhere
-    exponents = torch.ones(1, N) * exponents
+    exponents = torch.ones(1, N, device=device) * exponents
 
     # Intensities should be equal in the middle section but taper towards the ends
     intensities = intensities.clamp(min=intensities_min)
     slopes = (intensities - intensities_min) / N5 \
-             * torch.arange(N5)[None, :] + intensities_min
+             * torch.arange(N5, device=device)[None, :] + intensities_min
     intensities = torch.cat([
         slopes,
-        torch.ones(1, N - 2 * N5) * intensities,
+        torch.ones(1, N - 2 * N5, device=device) * intensities,
         slopes.flip(dims=(1,))
     ], dim=1)
 
@@ -281,6 +282,7 @@ def _calculate_errors(
         rec: Reconstruction,
         points_2d: np.ndarray,
         batch_size: int,
+        device: torch.device
 ) -> np.ndarray:
     """
     Render the 2D points and compute errors.
@@ -304,26 +306,26 @@ def _calculate_errors(
         start_frame = rec.start_frame + start_idx
         end_frame = rec.start_frame + end_idx
         renders = _make_renders(
-            points_2d=torch.from_numpy(points_2d[start_idx:end_idx]),
-            sigmas=torch.from_numpy(sigmas[start_frame:end_frame]),
+            points_2d=torch.from_numpy(points_2d[start_idx:end_idx]).to(device),
+            sigmas=torch.from_numpy(sigmas[start_frame:end_frame]).to(device),
             sigmas_min=ts.parameters.sigmas_min,
-            exponents=torch.from_numpy(exponents[start_frame:end_frame]),
-            intensities=torch.from_numpy(intensities[start_frame:end_frame]),
+            exponents=torch.from_numpy(exponents[start_frame:end_frame]).to(device),
+            intensities=torch.from_numpy(intensities[start_frame:end_frame]).to(device),
             intensities_min=ts.parameters.intensities_min,
-            camera_sigmas=torch.from_numpy(camera_sigmas[start_frame:end_frame]),
-            camera_exponents=torch.from_numpy(camera_exponents[start_frame:end_frame]),
-            camera_intensities=torch.from_numpy(camera_intensities[start_frame:end_frame]),
+            camera_sigmas=torch.from_numpy(camera_sigmas[start_frame:end_frame]).to(device),
+            camera_exponents=torch.from_numpy(camera_exponents[start_frame:end_frame]).to(device),
+            camera_intensities=torch.from_numpy(camera_intensities[start_frame:end_frame]).to(device),
             image_size=ts.trial.crop_size
         )
 
         # Get targets
-        images = np.stack([
+        images = torch.from_numpy(np.stack([
             np.load(PREPARED_IMAGES_PATH / f'{ts.trial.id:03d}' / f'{n:06d}.npz')['images']
             for n in range(start_frame, end_frame)
-        ])
+        ])).to(device)
 
         # MSE
-        errors[start_idx:end_idx] = ((renders - images)**2).mean(axis=(1, 2, 3))
+        errors[start_idx:end_idx] = to_numpy(((renders - images)**2).mean(axis=(1, 2, 3)))
 
     return errors
 
@@ -334,6 +336,7 @@ def _generate_or_load_errors(
         N: int,
         points_2d: np.ndarray,
         batch_size: int,
+        device: torch.device,
         rebuild_cache: bool = False,
         cache_only: bool = False
 ) -> np.ndarray:
@@ -360,7 +363,8 @@ def _generate_or_load_errors(
             ts=ts,
             rec=rec,
             points_2d=points_2d,
-            batch_size=batch_size
+            batch_size=batch_size,
+            device=device
         )
         save_arrs = {'data': data}
         logger.info(f'Saving errors data to {cache_path}.')
@@ -373,6 +377,7 @@ def _fetch_errors(
         rec_mf: Reconstruction,
         recs_to_compare: Dict[str, Reconstruction],
         batch_size: int,
+        device: torch.device,
         rebuild_cache: bool = False,
         cache_only: bool = False
 ) -> List[np.ndarray]:
@@ -411,6 +416,7 @@ def _fetch_errors(
             N=N,
             points_2d=points_2d[i],
             batch_size=batch_size,
+            device=device,
             rebuild_cache=rebuild_cache,
             cache_only=cache_only,
         )
@@ -431,6 +437,7 @@ def plot_mf_comparisons():
     end_frame = rec_mf.end_frame_valid
     frame_nums = np.arange(start_frame, end_frame)
     ts = TrialState(rec_mf)
+    device = _init_devices(args)
 
     # Fetch reconstructions to compare against, max one from each source
     recs = Reconstruction.objects(trial=trial, source__ne=M3D_SOURCE_MF)
@@ -452,6 +459,7 @@ def plot_mf_comparisons():
         rec_mf=rec_mf,
         recs_to_compare=recs_to_compare,
         batch_size=args.batch_size,
+        device=device,
         rebuild_cache=False,
         cache_only=False,
     )
