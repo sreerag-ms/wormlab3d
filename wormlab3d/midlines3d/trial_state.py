@@ -373,13 +373,13 @@ class TrialState:
         assert k in BUFFER_NAMES + PARAMETER_NAMES + TRANSIENTS_NAMES
 
         if start_frame is None:
-            start_frame = 0
+            start_frame = self.start_frame
         else:
             assert 0 <= start_frame <= self.trial.n_frames_min
         if end_frame is None:
-            end_frame = self.trial.n_frames_min
+            end_frame = self.end_frame
         else:
-            assert start_frame <= end_frame <= self.trial.n_frames_min
+            assert start_frame <= end_frame <= self.trial.n_frames_min + 1
 
         if k in TRANSIENTS_NAMES:
             if k == 'points_3d_base':

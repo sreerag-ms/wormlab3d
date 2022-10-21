@@ -592,7 +592,7 @@ def _flip_frames(
         lengths = ts.get('length', n)
 
         # Verify the flipped parameters are consistent
-        n_frames = ts.n_frames - n + ts.reconstruction.start_frame
+        n_frames = X0.shape[0] - n
         n_batches = int(n_frames / args.batch_size) + 1
         errors = np.zeros(n_frames)
         for i in range(n_batches):
@@ -2165,7 +2165,7 @@ def fix():
 
     args = get_args()
     reconstruction = Reconstruction.objects.get(id=args.reconstruction)
-    ts = TrialState(reconstruction, read_only=args.dry_run, partial_load_ok=True)
+    ts = TrialState(reconstruction, read_only=args.dry_run, partial_load_ok=True, end_frame=-1)
 
     # Make output directory
     save_dir = LOGS_PATH / f'trial_{reconstruction.trial.id:03d}_r={reconstruction.id}'
