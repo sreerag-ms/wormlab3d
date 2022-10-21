@@ -79,6 +79,12 @@ class MFParametersView(DocumentView):
                 },
             ),
             (
+                self.prefix + 'use_detection_masks', {
+                    'title': 'Use DMs',
+                    'type': 'boolean',
+                },
+            ),
+            (
                 self.prefix + 'render_mode', {
                     'title': 'Render mode',
                     'type': 'enum',
