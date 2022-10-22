@@ -671,6 +671,7 @@ def plot_examples(
             plt.savefig(path, transparent=True)
         if show_plots:
             plt.show()
+        plt.close(fig)
 
 
 def plot_example_comparisons_in_dataset():
