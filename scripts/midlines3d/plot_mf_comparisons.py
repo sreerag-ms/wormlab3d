@@ -1,18 +1,22 @@
 import os
 from argparse import Namespace, ArgumentParser
-from typing import List, Dict
+from pathlib import Path
+from typing import List, Dict, Tuple, Optional
 
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import yaml
 from PIL import Image
+from numpy.lib.stride_tricks import sliding_window_view
 from scipy import interpolate
 from torch.backends import cudnn
 
 from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT
 from wormlab3d import logger, LOGS_PATH, PREPARED_IMAGES_PATH, START_TIMESTAMP
-from wormlab3d.data.model import Reconstruction, Trial
+from wormlab3d.data.model import Reconstruction, Trial, Dataset
+from wormlab3d.data.model.dataset import DatasetMidline3D
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF, Midline3D
 from wormlab3d.midlines3d.project_render_score import render_points
 from wormlab3d.midlines3d.trial_state import TrialState
@@ -34,15 +38,15 @@ def get_args() -> Namespace:
     """
     parser = ArgumentParser(description='Wormlab3D script to compare MF losses against reconst/WT3D.')
 
+    parser.add_argument('--dataset', type=str, help='Dataset by id.')
     parser.add_argument('--reconstruction', type=str, help='Reconstruction by id.')
     parser.add_argument('--batch-size', type=int, default=10, help='Batch size.')
     parser.add_argument('--gpu-id', type=int, default=-1, help='GPU id to use if using GPUs.')
-    parser.add_argument('--x-label', type=str, default='time', help='Label x-axis with time or frame number.')
+    parser.add_argument('--x-label', type=str, default='frame', help='Label x-axis with time or frame number.')
+    parser.add_argument('--stats-window', type=int, default=5, help='Averaging window for the stats.')
     parser.add_argument('--rebuild-cache', type=str2bool, default=False, help='Rebuild caches.')
     parser.add_argument('--cache-only', type=str2bool, default=False, help='Use cache only.')
-
     args = parser.parse_args()
-    assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
 
     print_args(args)
 
@@ -423,11 +427,34 @@ def _fetch_errors(
     return errors
 
 
-def plot_mf_comparisons():
+def _rolling_stats(errors: List[np.ndarray], window_size: int) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Compute the rolling mean and standard deviations.
+    """
+    means = []
+    stds = []
+
+    for errs in errors:
+        pl = np.ones(int((window_size - 1) / 2)) * errs[0]
+        pr = np.ones(window_size - len(pl) - 1) * errs[-1]
+        errs_padded = np.r_[pl, errs, pr]
+        x = sliding_window_view(errs_padded, window_size)
+        means.append(x.mean(axis=1))
+        stds.append(x.std(axis=1))
+
+    return means, stds
+
+
+def plot_mf_comparisons(
+        args: Optional[Namespace] = None,
+        save_dir: Optional[Path] = None
+):
     """
     Plot the loss comparison between a MF reconstruction and any other available types.
     """
-    args = get_args()
+    if args is None:
+        args = get_args()
+    assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
     rec_mf: Reconstruction = Reconstruction.objects.get(id=args.reconstruction)
     assert rec_mf.source == M3D_SOURCE_MF, 'A MF reconstruction is required!'
     trial: Trial = rec_mf.trial
@@ -462,15 +489,21 @@ def plot_mf_comparisons():
         cache_only=args.cache_only,
     )
 
+    # Get moving averages
+    means, stds = _rolling_stats(errors, args.stats_window)
+
     # Make plot
-    fig, axes = plt.subplots(1, figsize=(10, 12))
+    fig, axes = plt.subplots(1, figsize=(10, 7))
     ax = axes
-    ax.set_title(f'Pixel Losses: Trial {trial.id}')
+    ax.set_title(f'Pixel Losses\nTrial {trial.id}. Smoothing window: {args.stats_window} frames.')
     ax.set_ylabel('MSE')
     if args.x_label == 'time':
         ax.set_xlabel('Time (s)')
     else:
         ax.set_xlabel('Frame #')
+
+    prop_cycle = plt.rcParams['axes.prop_cycle']
+    default_colours = prop_cycle.by_key()['color']
 
     for i in range(1 + len(sources_to_compare)):
         if i == 0:
@@ -483,19 +516,62 @@ def plot_mf_comparisons():
         if args.x_label == 'time':
             x = x / ts.trial.fps
 
-        ax.plot(x, errors[i], label=src)
+        ax.plot(x, means[i], label=src, color=default_colours[i])
+        ax.fill_between(x, means[i] - 2 * stds[i], means[i] + 2 * stds[i], color=default_colours[i], alpha=0.2,
+                        linewidth=0)
+
+    ax.set_xlim(left=start_frame, right=end_frame)
+    ax.set_yscale('log')
     ax.legend()
+    ax.grid()
+    fig.tight_layout()
 
     if save_plots:
-        path = LOGS_PATH / f'{START_TIMESTAMP}_losses' \
-                           f'_trial={trial.id}' \
-                           f'_mf={rec_mf.id}' \
-                           f'_comp={",".join([rec.id for rec in recs_to_compare.values()])}' \
-                           f'.{img_extension}'
+        if save_dir is None:
+            path = LOGS_PATH / f'{START_TIMESTAMP}_losses' \
+                               f'_trial={trial.id:03d}' \
+                               f'_mf={rec_mf.id}' \
+                               f'_comp={",".join([rec.id for rec in recs_to_compare.values()])}' \
+                               f'_sw={args.stats_window}' \
+                               f'.{img_extension}'
+        else:
+            path = save_dir / f'trial={trial.id:03d}' \
+                              f'_mf={rec_mf.id}' \
+                              f'_comp={",".join([rec.id for rec in recs_to_compare.values()])}' \
+                              f'.{img_extension}'
         logger.info(f'Saving plot to {path}.')
         plt.savefig(path, transparent=True)
     if show_plots:
         plt.show()
+
+
+def plot_all_comparisons_in_dataset():
+    """
+    Generate comparison plots for all reconstructions in a dataset.
+    """
+    args = get_args()
+    assert args.dataset is not None, 'This script requires setting --dataset=id.'
+    ds = Dataset.objects.get(id=args.dataset)
+    assert type(ds) == DatasetMidline3D, 'Only DatasetMidline3D datasets work here!'
+
+    # Make save dir and save spec
+    save_dir = LOGS_PATH / f'{START_TIMESTAMP}_ds={ds.id}'
+    if save_plots:
+        os.makedirs(save_dir, exist_ok=True)
+
+        spec = dict(
+            dataset=str(ds.id),
+            batch_size=args.batch_size,
+            x_label=args.x_label,
+            stats_window=args.stats_window,
+        )
+        with open(save_dir / 'spec.yml', 'w') as f:
+            yaml.dump(spec, f)
+
+    for i, rec in enumerate(ds.reconstructions):
+        logger.info(f'Reconstruction {i + 1}/{len(ds.reconstructions)}.')
+        args.reconstruction = rec.id
+        plot_mf_comparisons(args, save_dir)
 
 
 if __name__ == '__main__':
