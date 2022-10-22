@@ -531,13 +531,13 @@ def plot_mf_comparisons(
             path = LOGS_PATH / f'{START_TIMESTAMP}_losses' \
                                f'_trial={trial.id:03d}' \
                                f'_mf={rec_mf.id}' \
-                               f'_comp={",".join([rec.id for rec in recs_to_compare.values()])}' \
+                               f'_comp={",".join([str(rec.id) for rec in recs_to_compare.values()])}' \
                                f'_sw={args.stats_window}' \
                                f'.{img_extension}'
         else:
             path = save_dir / f'trial={trial.id:03d}' \
                               f'_mf={rec_mf.id}' \
-                              f'_comp={",".join([rec.id for rec in recs_to_compare.values()])}' \
+                              f'_comp={",".join([str(rec.id) for rec in recs_to_compare.values()])}' \
                               f'.{img_extension}'
         logger.info(f'Saving plot to {path}.')
         plt.savefig(path, transparent=True)
