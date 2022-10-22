@@ -46,11 +46,32 @@ def get_args() -> Namespace:
     parser.add_argument('--stats-window', type=int, default=5, help='Averaging window for the stats.')
     parser.add_argument('--rebuild-cache', type=str2bool, default=False, help='Rebuild caches.')
     parser.add_argument('--cache-only', type=str2bool, default=False, help='Use cache only.')
+    parser.add_argument('--plot-n-examples', type=int, default=3, help='Number of examples to plot.')
     args = parser.parse_args()
 
     print_args(args)
 
     return args
+
+
+def _get_recs_to_compare(trial: Trial) -> Dict[str, Reconstruction]:
+    """
+    Fetch reconstructions to compare against, max one from each source
+    """
+    recs = Reconstruction.objects(trial=trial, source__ne=M3D_SOURCE_MF)
+    n_results = recs.count()
+    if n_results == 0:
+        raise RuntimeError('No reconstructions found to compare against!')
+    recs_to_compare = {}
+    frame_nums_to_compare = {}
+    for rec in recs:
+        if rec.source not in recs_to_compare \
+                or (rec.source in recs_to_compare
+                    and len(rec.source_file) < len(recs_to_compare[rec.source].source_file)):
+            recs_to_compare[rec.source] = rec
+            frame_nums_to_compare[rec.source] = np.arange(rec.start_frame, rec.end_frame)
+
+    return recs_to_compare
 
 
 def _init_devices(args: Namespace):
@@ -145,6 +166,7 @@ def _overlay_images(
 def _calculate_2d_data(
         rec: Reconstruction,
         N: int,
+        rebuild_cache: bool = False,
 ) -> np.ndarray:
     """
     Calculate the r values across a range of sigmas, durations and pauses.
@@ -161,7 +183,7 @@ def _calculate_2d_data(
             source_file=rec.source_file,
         )
         if len(m3d.X) == N:
-            X[j] = np.stack(m3d.get_prepared_2d_coordinates(), axis=1)
+            X[j] = np.stack(m3d.get_prepared_2d_coordinates(regenerate=rebuild_cache), axis=1)
         else:
             Xr = _resample(m3d.X, N)
             X[j] = np.stack(m3d.prepare_2d_coordinates(X=Xr), axis=1)
@@ -194,7 +216,7 @@ def _generate_or_load_2d_data(
         if cache_only:
             raise RuntimeError(f'Cache "{cache_fn}" could not be loaded!')
         logger.info('Generating points data.')
-        data = _calculate_2d_data(rec, N)
+        data = _calculate_2d_data(rec, N, rebuild_cache)
         save_arrs = {'data': data}
         logger.info(f'Saving points data to {cache_fn}.')
         np.savez(cache_path, **save_arrs)
@@ -463,21 +485,7 @@ def plot_mf_comparisons(
     frame_nums = np.arange(start_frame, end_frame)
     ts = TrialState(rec_mf)
     device = _init_devices(args)
-
-    # Fetch reconstructions to compare against, max one from each source
-    recs = Reconstruction.objects(trial=trial, source__ne=M3D_SOURCE_MF)
-    n_results = recs.count()
-    if n_results == 0:
-        raise RuntimeError('No reconstructions found to compare against!')
-    recs_to_compare = {}
-    frame_nums_to_compare = {}
-    for rec in recs:
-        if rec.source not in recs_to_compare \
-                or (
-                rec.source in recs_to_compare and len(rec.source_file) < len(recs_to_compare[rec.source].source_file)):
-            recs_to_compare[rec.source] = rec
-            frame_nums_to_compare[rec.source] = np.arange(rec.start_frame, rec.end_frame)
-    sources_to_compare = list(recs_to_compare.keys())
+    recs_to_compare = _get_recs_to_compare(trial)
 
     # Generate or load the errors
     errors = _fetch_errors(
@@ -505,13 +513,14 @@ def plot_mf_comparisons(
     prop_cycle = plt.rcParams['axes.prop_cycle']
     default_colours = prop_cycle.by_key()['color']
 
-    for i in range(1 + len(sources_to_compare)):
+    for i in range(1 + len(recs_to_compare)):
         if i == 0:
             src = 'MF'
             x = frame_nums
         else:
-            src = sources_to_compare[i - 1]
-            x = frame_nums_to_compare[src]
+            src = list(recs_to_compare.keys())[i - 1]
+            rec = recs_to_compare[src]
+            x = np.arange(rec.start_frame, rec.end_frame)
 
         if args.x_label == 'time':
             x = x / ts.trial.fps
@@ -571,10 +580,127 @@ def plot_all_comparisons_in_dataset():
     for i, rec in enumerate(ds.reconstructions):
         logger.info(f'Reconstruction {i + 1}/{len(ds.reconstructions)}.')
         args.reconstruction = rec.id
-        plot_mf_comparisons(args, save_dir)
+        try:
+            plot_mf_comparisons(args, save_dir)
+        except Exception as e:
+            logger.warning(f'Unable to plot comparisons: {e}')
+            continue
+
+
+def plot_examples(
+        args: Optional[Namespace] = None,
+        save_dir: Optional[Path] = None
+):
+    """
+    Plot some examples from the different reconstructions.
+    """
+    if args is None:
+        args = get_args()
+    assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
+    rec_mf: Reconstruction = Reconstruction.objects.get(id=args.reconstruction)
+    assert rec_mf.source == M3D_SOURCE_MF, 'A MF reconstruction is required!'
+    trial: Trial = rec_mf.trial
+    start_frame = rec_mf.start_frame_valid
+    end_frame = rec_mf.end_frame_valid
+    frame_nums = np.arange(start_frame, end_frame)
+    recs_to_compare = _get_recs_to_compare(trial)
+    n_recs = 1 + len(recs_to_compare)
+
+    # Find the frame numbers in common
+    frame_nums_in_common = frame_nums
+    for src, rec in recs_to_compare.items():
+        frame_nums_rec = np.arange(rec.start_frame, rec.end_frame)
+        frame_nums_in_common = np.intersect1d(frame_nums_in_common, frame_nums_rec)
+
+    # Select frames at random
+    frame_nums_to_plot = sorted(np.random.choice(frame_nums_in_common, args.plot_n_examples, replace=False))
+
+    # Generate or load the 2D data
+    points_2d = _fetch_2d_data(
+        reconstruction=rec_mf,
+        recs_to_compare=recs_to_compare,
+        rebuild_cache=args.rebuild_cache,
+        cache_only=args.cache_only,
+    )
+
+    # Plot the comparisons for each frame
+    for frame_num in frame_nums_to_plot:
+        frame = trial.get_frame(frame_num)
+        fig, axes = plt.subplots(n_recs, figsize=(8, 3 * n_recs), gridspec_kw={
+            'left': 0.05,
+            'right': 0.95,
+            'bottom': 0.05,
+            'hspace': 0.1
+        })
+        fig.suptitle(f'Trial {trial.id}. Frame {frame_num}.')
+
+        for i in range(n_recs):
+            if i == 0:
+                src = 'MF'
+                rec = rec_mf
+            else:
+                src = list(recs_to_compare.keys())[i - 1]
+                rec = recs_to_compare[src]
+
+            # Get the images with midline overlays
+            imgs_i = _overlay_images(
+                images=frame.images,
+                points_2d=points_2d[i][frame_num - rec.start_frame],
+                midline_width=3
+            )
+
+            # Plot
+            ax = axes[i]
+            ax.set_title(f'Source: {src} ({rec.id})')
+            ax.imshow(np.array(imgs_i), aspect='equal')
+            ax.axis('off')
+
+        fig.tight_layout()
+
+        if save_plots:
+            if save_dir is None:
+                trial_dir = LOGS_PATH / f'{START_TIMESTAMP}_losses' \
+                                        f'_trial={trial.id:03d}' \
+                                        f'_mf={rec_mf.id}'
+            else:
+                trial_dir = save_dir / f'trial={trial.id:03d}' \
+                                       f'_mf={rec_mf.id}'
+            os.makedirs(trial_dir, exist_ok=True)
+            path = trial_dir / f'frame={frame_num:05d}.{img_extension}'
+            logger.info(f'Saving plot to {path}.')
+            plt.savefig(path, transparent=True)
+        if show_plots:
+            plt.show()
+
+
+def plot_example_comparisons_in_dataset():
+    """
+    Generate example comparisons for all reconstructions in a dataset.
+    """
+    args = get_args()
+    assert args.dataset is not None, 'This script requires setting --dataset=id.'
+    ds = Dataset.objects.get(id=args.dataset)
+    assert type(ds) == DatasetMidline3D, 'Only DatasetMidline3D datasets work here!'
+
+    # Make save dir and save spec
+    save_dir = LOGS_PATH / f'{START_TIMESTAMP}_ds={ds.id}_examples'
+    if save_plots:
+        os.makedirs(save_dir, exist_ok=True)
+
+    for i, rec in enumerate(ds.reconstructions):
+        logger.info(f'Reconstruction {i + 1}/{len(ds.reconstructions)}.')
+        args.reconstruction = rec.id
+        try:
+            plot_examples(args, save_dir)
+        except Exception as e:
+            logger.warning(f'Unable to plot examples: {e}')
+            continue
 
 
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
-    plot_mf_comparisons()
+    # plot_mf_comparisons()
+    # plot_all_comparisons_in_dataset()
+    # plot_examples()
+    plot_example_comparisons_in_dataset()
