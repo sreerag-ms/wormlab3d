@@ -16,7 +16,7 @@ from wormlab3d.data.model import Reconstruction, Trial
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF, Midline3D
 from wormlab3d.midlines3d.project_render_score import render_points
 from wormlab3d.midlines3d.trial_state import TrialState
-from wormlab3d.toolkit.util import print_args, to_numpy
+from wormlab3d.toolkit.util import print_args, to_numpy, str2bool
 
 POINTS_CACHE_PATH = LOGS_PATH / 'cache'
 os.makedirs(POINTS_CACHE_PATH, exist_ok=True)
@@ -38,6 +38,8 @@ def get_args() -> Namespace:
     parser.add_argument('--batch-size', type=int, default=10, help='Batch size.')
     parser.add_argument('--gpu-id', type=int, default=-1, help='GPU id to use if using GPUs.')
     parser.add_argument('--x-label', type=str, default='time', help='Label x-axis with time or frame number.')
+    parser.add_argument('--rebuild-cache', type=str2bool, default=False, help='Rebuild caches.')
+    parser.add_argument('--cache-only', type=str2bool, default=False, help='Use cache only.')
 
     args = parser.parse_args()
     assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
@@ -456,8 +458,8 @@ def plot_mf_comparisons():
         recs_to_compare=recs_to_compare,
         batch_size=args.batch_size,
         device=device,
-        rebuild_cache=False,
-        cache_only=False,
+        rebuild_cache=args.rebuild_cache,
+        cache_only=args.cache_only,
     )
 
     # Make plot
