@@ -385,19 +385,15 @@ def _fetch_errors(
     Generate or load the errors.
     """
     N = rec_mf.mf_parameters.n_points_total
-    start_frame = rec_mf.start_frame_valid
-    end_frame = rec_mf.end_frame_valid
     ts = TrialState(rec_mf)
 
     # Generate or load the 2D data
-    points_2d_mf = ts.get('points_2d', start_frame=start_frame, end_frame=end_frame)
-    points_2d_to_compare = _fetch_2d_data(
+    points_2d = _fetch_2d_data(
         reconstruction=rec_mf,
         recs_to_compare=recs_to_compare,
         rebuild_cache=rebuild_cache,
         cache_only=cache_only,
     )
-    points_2d = [points_2d_mf, *points_2d_to_compare]
 
     # Generate or load pixel-losses
     errors = []
@@ -406,7 +402,7 @@ def _fetch_errors(
             rec = rec_mf
             logger.info(f'Calculating pixel errors for MF reconstruction.')
         else:
-            src = list(recs_to_compare.keys())[i + 1]
+            src = list(recs_to_compare.keys())[i - 1]
             rec = recs_to_compare[src]
             logger.info(f'Calculating pixel errors for rec={rec.id}: {src}.')
 
@@ -467,7 +463,7 @@ def plot_mf_comparisons():
     # Make plot
     fig, axes = plt.subplots(1, figsize=(10, 12))
     ax = axes
-    ax.title(f'Pixel Losses: Trial {trial.id}')
+    ax.set_title(f'Pixel Losses: Trial {trial.id}')
     ax.set_ylabel('MSE')
     if args.x_label == 'time':
         ax.set_xlabel('Time (s)')
@@ -483,7 +479,7 @@ def plot_mf_comparisons():
             x = frame_nums_to_compare[src]
 
         if args.x_label == 'time':
-            x /= ts.trial.fps
+            x = x / ts.trial.fps
 
         ax.plot(x, errors[i], label=src)
     ax.legend()
