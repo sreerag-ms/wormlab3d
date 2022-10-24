@@ -227,7 +227,7 @@ def _generate_or_load_2d_data(
 
 
 def _fetch_2d_data(
-        reconstruction: Reconstruction,
+        rec_mf: Reconstruction,
         recs_to_compare: Dict[str, Reconstruction],
         rebuild_cache: bool = False,
         cache_only: bool = False
@@ -235,16 +235,20 @@ def _fetch_2d_data(
     """
     Fetch the 2d data
     """
-    N = reconstruction.mf_parameters.n_points_total
+    N = rec_mf.mf_parameters.n_points_total
 
     # Fetch the MF data directly
-    ts = TrialState(reconstruction, start_frame=reconstruction.start_frame_valid,
-                    end_frame=reconstruction.end_frame_valid)
+    ts = TrialState(rec_mf, start_frame=rec_mf.start_frame_valid,
+                    end_frame=rec_mf.end_frame_valid)
     Xs = [ts.get('points_2d'), ]
 
     # Load cached data for the comparisons
     for i, (src, rec) in enumerate(recs_to_compare.items()):
         X = _generate_or_load_2d_data(rec, N, rebuild_cache, cache_only)
+        if rec.start_frame < rec_mf.start_frame_valid:
+            X = X[rec_mf.start_frame_valid - rec.start_frame:]
+        if rec.end_frame > rec_mf.end_frame_valid:
+            X = X[:rec_mf.end_frame_valid - rec.end_frame]
         Xs.append(X)
 
     return Xs
@@ -308,7 +312,7 @@ def _make_renders(
 
 
 def _calculate_errors(
-        ts: TrialState,
+        rec_mf: Reconstruction,
         rec: Reconstruction,
         points_2d: np.ndarray,
         batch_size: int,
@@ -322,6 +326,11 @@ def _calculate_errors(
     errors = np.zeros(n_frames)
 
     # Rendering parameters come from the MF reconstruction
+    ts = TrialState(
+        rec_mf,
+        start_frame=max(rec.start_frame, rec_mf.start_frame_valid),
+        end_frame=min(rec.end_frame, rec_mf.end_frame_valid)
+    )
     sigmas = ts.get('sigmas')
     intensities = ts.get('intensities')
     exponents = ts.get('exponents')
@@ -363,7 +372,7 @@ def _calculate_errors(
 
 
 def _generate_or_load_errors(
-        ts: TrialState,
+        rec_mf: Reconstruction,
         rec: Reconstruction,
         N: int,
         points_2d: np.ndarray,
@@ -392,7 +401,7 @@ def _generate_or_load_errors(
             raise RuntimeError(f'Cache "{cache_fn}" could not be loaded!')
         logger.info('Calculating errors.')
         data = _calculate_errors(
-            ts=ts,
+            rec_mf=rec_mf,
             rec=rec,
             points_2d=points_2d,
             batch_size=batch_size,
@@ -417,11 +426,10 @@ def _fetch_errors(
     Generate or load the errors.
     """
     N = rec_mf.mf_parameters.n_points_total
-    ts = TrialState(rec_mf)
 
     # Generate or load the 2D data
     points_2d = _fetch_2d_data(
-        reconstruction=rec_mf,
+        rec_mf=rec_mf,
         recs_to_compare=recs_to_compare,
         rebuild_cache=rebuild_cache,
         cache_only=cache_only,
@@ -439,7 +447,7 @@ def _fetch_errors(
             logger.info(f'Calculating pixel errors for rec={rec.id}: {src}.')
 
         e = _generate_or_load_errors(
-            ts,
+            rec_mf=rec_mf,
             rec=rec,
             N=N,
             points_2d=points_2d[i],
@@ -529,7 +537,10 @@ def plot_mf_comparisons(
         else:
             src = list(recs_to_compare.keys())[i - 1]
             rec = recs_to_compare[src]
-            x = np.arange(rec.start_frame, rec.end_frame)
+            x = np.arange(
+                max(rec.start_frame, rec_mf.start_frame_valid),
+                min(rec.end_frame, rec_mf.end_frame_valid)
+            )
 
         if args.x_label == 'time':
             x = x / ts.trial.fps
@@ -596,7 +607,7 @@ def plot_examples(
 
     # Generate or load the 2D data
     points_2d = _fetch_2d_data(
-        reconstruction=rec_mf,
+        rec_mf=rec_mf,
         recs_to_compare=recs_to_compare,
         rebuild_cache=args.rebuild_cache,
         cache_only=args.cache_only,
