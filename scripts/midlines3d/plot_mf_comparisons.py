@@ -21,9 +21,18 @@ from wormlab3d.data.model.midline3d import M3D_SOURCE_MF, Midline3D, M3D_SOURCE_
 from wormlab3d.midlines3d.project_render_score import render_points
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.toolkit.util import print_args, to_numpy, str2bool
+from wormlab3d.trajectories.cache import get_trajectory
 
 POINTS_CACHE_PATH = LOGS_PATH / 'cache'
 os.makedirs(POINTS_CACHE_PATH, exist_ok=True)
+
+prop_cycle = plt.rcParams['axes.prop_cycle']
+default_colours = prop_cycle.by_key()['color']
+colours = {k: default_colours[i] for i, k in enumerate([
+    M3D_SOURCE_MF,
+    M3D_SOURCE_RECONST,
+    M3D_SOURCE_WT3D
+])}
 
 show_plots = False
 save_plots = True
@@ -239,7 +248,7 @@ def _fetch_2d_data(
 
     # Fetch the MF data directly
     ts = TrialState(rec_mf, start_frame=rec_mf.start_frame_valid,
-                    end_frame=rec_mf.end_frame_valid)
+                    end_frame=rec_mf.end_frame_valid + 1)
     Xs = [ts.get('points_2d'), ]
 
     # Load cached data for the comparisons
@@ -329,7 +338,7 @@ def _calculate_errors(
     ts = TrialState(
         rec_mf,
         start_frame=max(rec.start_frame, rec_mf.start_frame_valid),
-        end_frame=min(rec.end_frame, rec_mf.end_frame_valid)
+        end_frame=min(rec.end_frame, rec_mf.end_frame_valid + 1)
     )
     sigmas = ts.get('sigmas')
     intensities = ts.get('intensities')
@@ -461,6 +470,110 @@ def _fetch_errors(
     return errors
 
 
+def _calculate_smoothness(
+        rec_mf: Reconstruction,
+        rec: Reconstruction,
+) -> np.ndarray:
+    """
+    Compute smoothness from the 3D points.
+    """
+    X, _ = get_trajectory(
+        reconstruction_id=rec.id,
+        start_frame=max(rec.start_frame, rec_mf.start_frame_valid),
+        end_frame=min(rec.end_frame, rec_mf.end_frame_valid)
+    )
+
+    # Centre trajectory
+    X = X - X.mean(axis=0)
+
+    # Calculate angles between segments
+    v1 = X[:, 1:-1] - X[:, :-2]
+    v2 = X[:, 2:] - X[:, 1:-1]
+    abs_val = np.linalg.norm(v1, axis=-1) * np.linalg.norm(v2, axis=-1)
+    dot = np.einsum('bij,bij->bi', v1, v2)
+    cos = dot / abs_val
+    angles = np.arccos(cos)
+
+    # Calculate gradient of the angles along the body
+    angles_grad = np.gradient(np.unwrap(angles), axis=1)
+
+    # Take the loss as the sum of the absolute gradients
+    loss = np.abs(angles_grad).sum(axis=1)
+
+    return loss
+
+
+def _generate_or_load_smoothness(
+        rec_mf: Reconstruction,
+        rec: Reconstruction,
+        N: int,
+        rebuild_cache: bool = False,
+        cache_only: bool = False
+) -> np.ndarray:
+    """
+    Generate or load the smoothness losses.
+    """
+    cache_path = POINTS_CACHE_PATH / f'rec_{rec.id}_N={N}_smoothness'
+    cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
+    data = None
+    if not rebuild_cache and cache_fn.exists():
+        try:
+            data = np.load(cache_fn)
+            data = data['data']
+            logger.info(f'Loaded smoothness losses from cache: {cache_fn}')
+        except Exception as e:
+            data = None
+            logger.warning(f'Could not load cache: {e}')
+
+    if data is None:
+        if cache_only:
+            raise RuntimeError(f'Cache "{cache_fn}" could not be loaded!')
+        logger.info('Calculating smoothness losses.')
+        data = _calculate_smoothness(
+            rec_mf=rec_mf,
+            rec=rec,
+        )
+        save_arrs = {'data': data}
+        logger.info(f'Saving smoothness losses to {cache_path}.')
+        np.savez(cache_path, **save_arrs)
+
+    return data
+
+
+def _fetch_smoothness(
+        rec_mf: Reconstruction,
+        recs_to_compare: Dict[str, Reconstruction],
+        rebuild_cache: bool = False,
+        cache_only: bool = False
+) -> List[np.ndarray]:
+    """
+    Generate or load the smoothness losses.
+    """
+    N = rec_mf.mf_parameters.n_points_total
+
+    # Generate or load smoothness losses
+    losses = []
+    for i in range(1 + len(recs_to_compare)):
+        if i == 0:
+            rec = rec_mf
+            logger.info(f'Calculating smoothness for MF reconstruction.')
+        else:
+            src = list(recs_to_compare.keys())[i - 1]
+            rec = recs_to_compare[src]
+            logger.info(f'Calculating smoothness for rec={rec.id}: {src}.')
+
+        l = _generate_or_load_smoothness(
+            rec_mf=rec_mf,
+            rec=rec,
+            N=N,
+            rebuild_cache=rebuild_cache,
+            cache_only=cache_only,
+        )
+        losses.append(l)
+
+    return losses
+
+
 def _rolling_stats(errors: List[np.ndarray], window_size: int) -> Tuple[np.ndarray, np.ndarray]:
     """
     Compute the rolling mean and standard deviations.
@@ -494,8 +607,7 @@ def plot_mf_comparisons(
     trial: Trial = rec_mf.trial
     start_frame = rec_mf.start_frame_valid
     end_frame = rec_mf.end_frame_valid
-    frame_nums = np.arange(start_frame, end_frame)
-    ts = TrialState(rec_mf)
+    frame_nums = np.arange(start_frame, end_frame + 1)
     device = _init_devices(args)
     recs_to_compare = _get_recs_to_compare(trial)
 
@@ -522,14 +634,6 @@ def plot_mf_comparisons(
     else:
         ax.set_xlabel('Frame #')
 
-    prop_cycle = plt.rcParams['axes.prop_cycle']
-    default_colours = prop_cycle.by_key()['color']
-    colours = {k: default_colours[i] for i, k in enumerate([
-        M3D_SOURCE_MF,
-        M3D_SOURCE_RECONST,
-        M3D_SOURCE_WT3D
-    ])}
-
     for i in range(1 + len(recs_to_compare)):
         if i == 0:
             src = M3D_SOURCE_MF
@@ -539,14 +643,14 @@ def plot_mf_comparisons(
             rec = recs_to_compare[src]
             x = np.arange(
                 max(rec.start_frame, rec_mf.start_frame_valid),
-                min(rec.end_frame, rec_mf.end_frame_valid)
+                min(rec.end_frame, rec_mf.end_frame_valid + 1)
             )
 
         if args.x_label == 'time':
-            x = x / ts.trial.fps
+            x = x / trial.fps
 
         ax.plot(x, means[i], label=src, color=colours[src])
-        ax.fill_between(x, means[i] - 2 * stds[i], means[i] + 2 * stds[i], color=default_colours[i],
+        ax.fill_between(x, means[i] - 2 * stds[i], means[i] + 2 * stds[i], color=colours[src],
                         alpha=0.2, linewidth=0)
 
     ax.set_xlim(left=start_frame, right=end_frame)
@@ -668,6 +772,90 @@ def plot_examples(
         plt.close(fig)
 
 
+def plot_smoothness_comparisons(
+        args: Optional[Namespace] = None,
+        save_dir: Optional[Path] = None
+):
+    """
+    Plot the smoothness comparison between a MF reconstruction and any other available types.
+    """
+    if args is None:
+        args = get_args()
+    assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
+    rec_mf: Reconstruction = Reconstruction.objects.get(id=args.reconstruction)
+    assert rec_mf.source == M3D_SOURCE_MF, 'A MF reconstruction is required!'
+    trial: Trial = rec_mf.trial
+    start_frame = rec_mf.start_frame_valid
+    end_frame = rec_mf.end_frame_valid
+    frame_nums = np.arange(start_frame, end_frame + 1)
+    recs_to_compare = _get_recs_to_compare(trial)
+
+    # Generate or load the errors
+    losses = _fetch_smoothness(
+        rec_mf=rec_mf,
+        recs_to_compare=recs_to_compare,
+        rebuild_cache=args.rebuild_cache,
+        cache_only=args.cache_only,
+    )
+
+    # Get moving averages
+    means, stds = _rolling_stats(losses, args.stats_window)
+
+    # Make plot
+    fig, axes = plt.subplots(1, figsize=(10, 7))
+    ax = axes
+    ax.set_title(f'Smoothness\nTrial {trial.id}. Smoothing window: {args.stats_window} frames.')
+    ax.set_ylabel('Smoothness loss')
+    if args.x_label == 'time':
+        ax.set_xlabel('Time (s)')
+    else:
+        ax.set_xlabel('Frame #')
+
+    for i in range(1 + len(recs_to_compare)):
+        if i == 0:
+            src = M3D_SOURCE_MF
+            x = frame_nums
+        else:
+            src = list(recs_to_compare.keys())[i - 1]
+            rec = recs_to_compare[src]
+            x = np.arange(
+                max(rec.start_frame, rec_mf.start_frame_valid),
+                min(rec.end_frame, rec_mf.end_frame_valid + 1)
+            )
+
+        if args.x_label == 'time':
+            x = x / trial.fps
+
+        ax.plot(x, means[i], label=src, color=colours[src])
+        ax.fill_between(x, means[i] - 2 * stds[i], means[i] + 2 * stds[i], color=colours[src],
+                        alpha=0.2, linewidth=0)
+
+    ax.set_xlim(left=start_frame, right=end_frame)
+    ax.set_yscale('log')
+    ax.legend()
+    ax.grid()
+    fig.tight_layout()
+
+    if save_plots:
+        if save_dir is None:
+            path = LOGS_PATH / f'{START_TIMESTAMP}_smoothness' \
+                               f'_trial={trial.id:03d}' \
+                               f'_mf={rec_mf.id}' \
+                               f'_comp={",".join([str(rec.id) for rec in recs_to_compare.values()])}' \
+                               f'_sw={args.stats_window}' \
+                               f'.{img_extension}'
+        else:
+            path = save_dir / f'trial={trial.id:03d}' \
+                              f'_mf={rec_mf.id}' \
+                              f'_comp={",".join([str(rec.id) for rec in recs_to_compare.values()])}' \
+                              f'_smoothness' \
+                              f'.{img_extension}'
+        logger.info(f'Saving plot to {path}.')
+        plt.savefig(path, transparent=True)
+    if show_plots:
+        plt.show()
+
+
 def plot_all_comparisons_in_dataset():
     """
     Generate comparison plots and examples for all reconstructions in a dataset.
@@ -676,6 +864,7 @@ def plot_all_comparisons_in_dataset():
     assert args.dataset is not None, 'This script requires setting --dataset=id.'
     ds = Dataset.objects.get(id=args.dataset)
     assert type(ds) == DatasetMidline3D, 'Only DatasetMidline3D datasets work here!'
+    args.plot_example_frames = None
 
     # Make save dir and save spec
     save_dir = LOGS_PATH / f'{START_TIMESTAMP}_ds={ds.id}'
@@ -697,6 +886,7 @@ def plot_all_comparisons_in_dataset():
         try:
             plot_mf_comparisons(args, save_dir)
             plot_examples(args, save_dir)
+            plot_smoothness_comparisons(args, save_dir)
         except Exception as e:
             logger.warning(f'Unable to plot comparisons: {e}')
             continue
@@ -707,4 +897,5 @@ if __name__ == '__main__':
         os.makedirs(LOGS_PATH, exist_ok=True)
     # plot_mf_comparisons()
     # plot_examples()
+    # plot_smoothness_comparisons()
     plot_all_comparisons_in_dataset()
