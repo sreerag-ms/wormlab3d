@@ -182,7 +182,7 @@ def _calculate_2d_data(
     """
     Calculate the r values across a range of sigmas, durations and pauses.
     """
-    frame_nums = np.arange(rec.start_frame, rec.end_frame)
+    frame_nums = np.arange(rec.start_frame, rec.end_frame + 1)
     X = np.zeros((len(frame_nums), N, 3, 2))
     for j, frame_num in enumerate(frame_nums):
         if (j + 1) % 10 == 0:
@@ -218,6 +218,9 @@ def _generate_or_load_2d_data(
         try:
             data = np.load(cache_fn)
             data = data['data']
+            n_frames = rec.end_frame - rec.start_frame + 1
+            if len(data) != n_frames:
+                raise RuntimeError(f'Number of points {len(data)} != expected {n_frames}.')
             logger.info(f'Loaded points data from cache: {cache_fn}')
         except Exception as e:
             data = None
