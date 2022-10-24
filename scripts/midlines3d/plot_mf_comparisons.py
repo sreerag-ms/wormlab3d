@@ -400,6 +400,8 @@ def _generate_or_load_errors(
         try:
             data = np.load(cache_fn)
             data = data['data']
+            if len(data) != len(points_2d):
+                raise RuntimeError(f'Number of errors {len(data)} != number of points {len(points_2d)}.')
             logger.info(f'Loaded errors from cache: {cache_fn}')
         except Exception as e:
             data = None
