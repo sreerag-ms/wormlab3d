@@ -353,22 +353,22 @@ def _calculate_errors(
         end_idx = min(n_frames, (i + 1) * batch_size)
         if end_idx == start_idx:
             continue
-        start_frame = rec.start_frame + start_idx
-        end_frame = rec.start_frame + end_idx
         renders = _make_renders(
             points_2d=torch.from_numpy(points_2d[start_idx:end_idx]).to(device),
-            sigmas=torch.from_numpy(sigmas[start_frame:end_frame]).to(device),
+            sigmas=torch.from_numpy(sigmas[start_idx:end_idx]).to(device),
             sigmas_min=ts.parameters.sigmas_min,
-            exponents=torch.from_numpy(exponents[start_frame:end_frame]).to(device),
-            intensities=torch.from_numpy(intensities[start_frame:end_frame]).to(device),
+            exponents=torch.from_numpy(exponents[start_idx:end_idx]).to(device),
+            intensities=torch.from_numpy(intensities[start_idx:end_idx]).to(device),
             intensities_min=ts.parameters.intensities_min,
-            camera_sigmas=torch.from_numpy(camera_sigmas[start_frame:end_frame]).to(device),
-            camera_exponents=torch.from_numpy(camera_exponents[start_frame:end_frame]).to(device),
-            camera_intensities=torch.from_numpy(camera_intensities[start_frame:end_frame]).to(device),
+            camera_sigmas=torch.from_numpy(camera_sigmas[start_idx:end_idx]).to(device),
+            camera_exponents=torch.from_numpy(camera_exponents[start_idx:end_idx]).to(device),
+            camera_intensities=torch.from_numpy(camera_intensities[start_idx:end_idx]).to(device),
             image_size=ts.trial.crop_size
         )
 
         # Get targets
+        start_frame = rec.start_frame + start_idx
+        end_frame = rec.start_frame + end_idx
         images = torch.from_numpy(np.stack([
             np.load(PREPARED_IMAGES_PATH / f'{ts.trial.id:03d}' / f'{n:06d}.npz')['images']
             for n in range(start_frame, end_frame)
