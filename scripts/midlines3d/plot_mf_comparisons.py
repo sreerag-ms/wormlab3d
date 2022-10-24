@@ -25,10 +25,10 @@ from wormlab3d.toolkit.util import print_args, to_numpy, str2bool
 POINTS_CACHE_PATH = LOGS_PATH / 'cache'
 os.makedirs(POINTS_CACHE_PATH, exist_ok=True)
 
-# show_plots = False
-# save_plots = True
-show_plots = True
-save_plots = False
+show_plots = False
+save_plots = True
+# show_plots = True
+# save_plots = False
 img_extension = 'svg'
 
 
@@ -333,6 +333,8 @@ def _calculate_errors(
         logger.info(f'Calculating errors for batch {i + 1}/{n_batches}.')
         start_idx = i * batch_size
         end_idx = min(n_frames, (i + 1) * batch_size)
+        if end_idx == start_idx:
+            continue
         start_frame = rec.start_frame + start_idx
         end_frame = rec.start_frame + end_idx
         renders = _make_renders(
@@ -693,5 +695,5 @@ if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
     # plot_mf_comparisons()
-    # plot_example_comparisons_in_dataset()
+    # plot_examples()
     plot_all_comparisons_in_dataset()
