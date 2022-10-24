@@ -143,15 +143,22 @@ class Midline3D(Document):
         else:
             cams = list(cams)
 
-            # Otherwise we have multiple cameras for this trial and source, pick the one closest to the frame
-            frame_num = self.frame.frame_num
-            offsets = np.zeros(len(cams))
-            for i, cam in enumerate(cams):
-                if cam.frame is not None and cam.frame.frame_num is not None:
-                    offsets[i] = abs(cam.frame.frame_num - frame_num)
-                else:
-                    offsets[i] = np.inf
-            cams = cams[int(np.argmin(offsets))]
+            # Discard any with lower priority
+            priorities = [c.priority for c in cams]
+            cams = [c for c in cams if c.priority == max(priorities)]
+            if len(cams) == 1:
+                cams = cams[0]
+
+            # Otherwise we have multiple cameras with the same priority for this trial and source, pick the one closest to the frame
+            else:
+                frame_num = self.frame.frame_num
+                offsets = np.zeros(len(cams))
+                for i, cam in enumerate(cams):
+                    if cam.frame is not None and cam.frame.frame_num is not None:
+                        offsets[i] = abs(cam.frame.frame_num - frame_num)
+                    else:
+                        offsets[i] = np.inf
+                cams = cams[int(np.argmin(offsets))]
 
         # Apply shifts correction
         if use_shifts and cams.source == CAM_SOURCE_ANNEX:

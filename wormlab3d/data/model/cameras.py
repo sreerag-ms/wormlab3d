@@ -38,6 +38,7 @@ class Cameras(Document):
     pose = TripletField(NumpyField(shape=(4, 4), dtype=np.float64), required=True)
     matrix = TripletField(NumpyField(shape=(3, 3), dtype=np.float64), required=True)
     distortion = TripletField(NumpyField(shape=(5,), dtype=np.float64), required=True)
+    priority = IntField(default=0)
 
     # Indexes
     meta = {
