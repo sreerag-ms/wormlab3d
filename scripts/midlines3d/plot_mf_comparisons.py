@@ -74,13 +74,11 @@ def _get_recs_to_compare(trial: Trial) -> Dict[str, Reconstruction]:
     if n_results == 0:
         raise RuntimeError('No reconstructions found to compare against!')
     recs_to_compare = {}
-    frame_nums_to_compare = {}
     for rec in recs:
         if rec.source not in recs_to_compare \
                 or (rec.source in recs_to_compare
                     and len(rec.source_file) < len(recs_to_compare[rec.source].source_file)):
             recs_to_compare[rec.source] = rec
-            frame_nums_to_compare[rec.source] = np.arange(rec.start_frame, rec.end_frame)
 
     return recs_to_compare
 
@@ -341,7 +339,7 @@ def _calculate_errors(
     ts = TrialState(
         rec_mf,
         start_frame=max(rec.start_frame, rec_mf.start_frame_valid),
-        end_frame=min(rec.end_frame, rec_mf.end_frame_valid + 1)
+        end_frame=min(rec.end_frame, rec_mf.end_frame_valid) + 1
     )
     sigmas = ts.get('sigmas')
     intensities = ts.get('intensities')
@@ -353,7 +351,7 @@ def _calculate_errors(
     for i in range(n_batches):
         logger.info(f'Calculating errors for batch {i + 1}/{n_batches}.')
         start_idx = i * batch_size
-        end_idx = min(n_frames, (i + 1) * batch_size)
+        end_idx = min(n_frames + 1, (i + 1) * batch_size)
         if end_idx == start_idx:
             continue
         renders = _make_renders(
@@ -648,7 +646,7 @@ def plot_mf_comparisons(
             rec = recs_to_compare[src]
             x = np.arange(
                 max(rec.start_frame, rec_mf.start_frame_valid),
-                min(rec.end_frame, rec_mf.end_frame_valid + 1)
+                min(rec.end_frame, rec_mf.end_frame_valid) + 1
             )
 
         if args.x_label == 'time':
@@ -706,7 +704,7 @@ def plot_examples(
         # Find the frame numbers in common
         frame_nums_in_common = frame_nums
         for src, rec in recs_to_compare.items():
-            frame_nums_rec = np.arange(rec.start_frame, rec.end_frame)
+            frame_nums_rec = np.arange(rec.start_frame, rec.end_frame + 1)
             frame_nums_in_common = np.intersect1d(frame_nums_in_common, frame_nums_rec)
 
         # Select frames at random
@@ -825,7 +823,7 @@ def plot_smoothness_comparisons(
             rec = recs_to_compare[src]
             x = np.arange(
                 max(rec.start_frame, rec_mf.start_frame_valid),
-                min(rec.end_frame, rec_mf.end_frame_valid + 1)
+                min(rec.end_frame, rec_mf.end_frame_valid) + 1
             )
 
         if args.x_label == 'time':
