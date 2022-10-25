@@ -9,6 +9,8 @@ import numpy as np
 import torch
 import yaml
 from PIL import Image
+from matplotlib.axes import Axes
+from matplotlib.ticker import NullFormatter
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy import interpolate
 from torch.backends import cudnn
@@ -33,12 +35,22 @@ colours = {k: default_colours[i] for i, k in enumerate([
     M3D_SOURCE_RECONST,
     M3D_SOURCE_WT3D
 ])}
+colours = {
+    M3D_SOURCE_MF: 'blue',
+    M3D_SOURCE_RECONST: 'orange',
+    M3D_SOURCE_WT3D: 'forestgreen',
+    'highlight': 'darkviolet'
+}
 
 show_plots = False
 save_plots = True
 # show_plots = True
 # save_plots = False
 img_extension = 'svg'
+
+
+class NothingToCompare(Exception):
+    pass
 
 
 def get_args() -> Namespace:
@@ -65,6 +77,12 @@ def get_args() -> Namespace:
     return args
 
 
+def _tex_mode():
+    """Use latex font rendering."""
+    plt.rcParams.update({'text.usetex': True})
+    plt.rc('text.latex', preamble=r'\usepackage{amsmath}')
+
+
 def _get_recs_to_compare(trial: Trial) -> Dict[str, Reconstruction]:
     """
     Fetch reconstructions to compare against, max one from each source
@@ -72,7 +90,7 @@ def _get_recs_to_compare(trial: Trial) -> Dict[str, Reconstruction]:
     recs = Reconstruction.objects(trial=trial, source__ne=M3D_SOURCE_MF)
     n_results = recs.count()
     if n_results == 0:
-        raise RuntimeError('No reconstructions found to compare against!')
+        raise NothingToCompare('No reconstructions found to compare against!')
     recs_to_compare = {}
     for rec in recs:
         if rec.source not in recs_to_compare \
@@ -130,8 +148,9 @@ def _resample(X: np.ndarray, N: int) -> np.ndarray:
 def _overlay_images(
         images: np.ndarray,
         points_2d: np.ndarray,
-        midline_width: int = 3
-) -> Image:
+        midline_width: int = 3,
+        invert: bool = False
+) -> List[np.ndarray]:
     """
     Make triplet of images with overlaid midlines for debug.
     """
@@ -144,6 +163,8 @@ def _overlay_images(
 
     views = []
     for c, img_array in enumerate(images):
+        if invert:
+            img_array = 1 - img_array
         z = (img_array * 255).astype(np.uint8)
         z = cv2.cvtColor(z, cv2.COLOR_GRAY2BGRA)
         p2d = points_2d[c]
@@ -166,10 +187,7 @@ def _overlay_images(
 
         views.append(z)
 
-    # Convert to PIL image
-    img = Image.fromarray(np.concatenate(views, axis=1), 'RGBA')
-
-    return img
+    return views
 
 
 def _calculate_2d_data(
@@ -369,7 +387,7 @@ def _calculate_errors(
 
         # Get targets
         start_frame = rec.start_frame + start_idx
-        end_frame = rec.start_frame + end_idx
+        end_frame = start_frame + len(renders)
         images = torch.from_numpy(np.stack([
             np.load(PREPARED_IMAGES_PATH / f'{ts.trial.id:03d}' / f'{n:06d}.npz')['images']
             for n in range(start_frame, end_frame)
@@ -683,7 +701,10 @@ def plot_mf_comparisons(
 
 def plot_examples(
         args: Optional[Namespace] = None,
-        save_dir: Optional[Path] = None
+        save_dir: Optional[Path] = None,
+        save_singles: bool = False,
+        crop_size: int = -1,
+        invert: bool = False
 ):
     """
     Plot some examples from the different reconstructions.
@@ -699,6 +720,14 @@ def plot_examples(
     frame_nums = np.arange(start_frame, end_frame)
     recs_to_compare = _get_recs_to_compare(trial)
     n_recs = 1 + len(recs_to_compare)
+
+    if save_dir is None:
+        trial_dir = LOGS_PATH / f'{START_TIMESTAMP}_examples' \
+                                f'_trial={trial.id:03d}' \
+                                f'_mf={rec_mf.id}'
+        os.makedirs(trial_dir, exist_ok=True)
+    else:
+        trial_dir = save_dir
 
     if args.plot_example_frames is None:
         # Find the frame numbers in common
@@ -746,28 +775,35 @@ def plot_examples(
             imgs_i = _overlay_images(
                 images=frame.images,
                 points_2d=points_2d[i][idx],
-                midline_width=3
+                midline_width=3,
+                invert=invert
             )
+
+            # Save singles
+            if save_plots and save_singles:
+                for c, img in enumerate(imgs_i):
+                    img2 = Image.fromarray(img, 'RGBA')
+                    if -1 < crop_size < img2.size[0]:
+                        m = int(img2.size[0] - crop_size) / 2  # margin to remove
+                        img2 = img2.crop(box=(m, m, img2.size[0] - m, img2.size[1] - m))
+                    path = trial_dir / f'frame={frame_num:05d}_{src}_c{c}.png'
+                    img2.save(path)
 
             # Plot
             ax = axes[i]
             ax.set_title(f'Source: {src} ({rec.id})')
-            ax.imshow(np.array(imgs_i), aspect='equal')
+            ax.imshow(np.concatenate(imgs_i, axis=1), aspect='equal')
             ax.axis('off')
 
         fig.tight_layout()
 
         if save_plots:
             if save_dir is None:
-                trial_dir = LOGS_PATH / f'{START_TIMESTAMP}_examples' \
-                                        f'_trial={trial.id:03d}' \
-                                        f'_mf={rec_mf.id}'
-                os.makedirs(trial_dir, exist_ok=True)
                 path = trial_dir / f'frame={frame_num:05d}.{img_extension}'
             else:
-                path = save_dir / f'trial={trial.id:03d}' \
-                                  f'_mf={rec_mf.id}' \
-                                  f'_frame={frame_num:05d}.{img_extension}'
+                path = trial_dir / f'trial={trial.id:03d}' \
+                                   f'_mf={rec_mf.id}' \
+                                   f'_frame={frame_num:05d}.{img_extension}'
             logger.info(f'Saving plot to {path}.')
             plt.savefig(path, transparent=True)
         if show_plots:
@@ -859,6 +895,147 @@ def plot_smoothness_comparisons(
         plt.show()
 
 
+def plot_losses_combined(
+        args: Optional[Namespace] = None,
+        save_dir: Optional[Path] = None
+):
+    """
+    Plot the pixel and smoothness losses across reconstructions.
+    """
+    if args is None:
+        args = get_args()
+    assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
+    rec_mf: Reconstruction = Reconstruction.objects.get(id=args.reconstruction)
+    assert rec_mf.source == M3D_SOURCE_MF, 'A MF reconstruction is required!'
+    device = _init_devices(args)
+    trial: Trial = rec_mf.trial
+    start_frame = rec_mf.start_frame_valid
+    end_frame = rec_mf.end_frame_valid
+    frame_nums = np.arange(start_frame, end_frame + 1)
+    recs_to_compare = _get_recs_to_compare(trial)
+    # _tex_mode()
+
+    # Generate or load the errors
+    l_pixel = _fetch_errors(
+        rec_mf=rec_mf,
+        recs_to_compare=recs_to_compare,
+        batch_size=args.batch_size,
+        device=device,
+        rebuild_cache=args.rebuild_cache,
+        cache_only=args.cache_only,
+    )
+    l_smooth = _fetch_smoothness(
+        rec_mf=rec_mf,
+        recs_to_compare=recs_to_compare,
+        rebuild_cache=args.rebuild_cache,
+        cache_only=args.cache_only,
+    )
+
+    # Get moving averages
+    lp_means, lp_stds = _rolling_stats(l_pixel, args.stats_window)
+    ls_means, ls_stds = _rolling_stats(l_smooth, args.stats_window)
+
+    # Make plots
+    plt.rc('axes', labelsize=6)  # fontsize of the X label
+    plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+    plt.rc('legend', fontsize=6)  # fontsize of the legend
+    plt.rc('xtick.major', pad=2)
+    plt.rc('ytick.major', pad=2, size=2)
+
+    fig, axes = plt.subplots(2, figsize=(3.6, 2.4), sharex=True, gridspec_kw={
+        'left': 0.09,
+        'right': 0.97,
+        'top': 0.9,
+        'bottom': 0.12,
+        'hspace': 0.12,
+    })
+
+    def _make_plot(ax_: Axes, means: np.ndarray, stds: np.ndarray):
+        markers = []
+        for i in range(1 + len(recs_to_compare)):
+            if i == 0:
+                src = M3D_SOURCE_MF
+                lbl = src + ' (ours)'
+                rec = rec_mf
+                x = frame_nums
+            else:
+                src = list(recs_to_compare.keys())[i - 1]
+                lbl = src
+                rec = recs_to_compare[src]
+                x = np.arange(
+                    max(rec.start_frame, rec_mf.start_frame_valid),
+                    min(rec.end_frame, rec_mf.end_frame_valid) + 1
+                )
+            if args.x_label == 'time':
+                x = x / trial.fps
+
+            ax_.plot(x, means[i], label=lbl, color=colours[src], linewidth=0.5)
+            lb = np.clip(means[i] - 2 * stds[i], a_min=1e-4, a_max=np.inf)
+            ub = means[i] + 2 * stds[i]
+            ax_.fill_between(x, lb, ub, color=colours[src], alpha=0.3, linewidth=0)
+
+            for frame_num in args.plot_example_frames:
+                if frame_num < x[0] or frame_num > x[-1]:
+                    continue
+                markers.append((frame_num, means[i][frame_num - rec.start_frame]))
+        ax_.set_xlim(left=start_frame, right=end_frame)
+        ax_.set_xticks([0, 5000, 10000, 15000, 20000])
+        ax_.set_yscale('log')
+        ax_.grid()
+
+        # Add highlighted-frames markers
+        for frame_num in args.plot_example_frames:
+            ax_.vlines(x=frame_num, ymin=1e-4, ymax=1e2, linestyle='-', linewidth=1,
+                       alpha=0.6, color=colours['highlight'], zorder=3)
+        if len(markers) > 0:
+            markers = np.array(markers)
+            ax_.scatter(x=markers[:, 0], y=markers[:, 1], marker='o', s=50, alpha=0.6,
+                        facecolors='none', edgecolors=colours['highlight'], linewidth=1, zorder=4)
+
+    # Pixel losses
+    ax = axes[0]
+    _make_plot(ax, lp_means, lp_stds)
+    # ax.set_ylabel('$\mathcal{L}_\\text{pixel}$')
+    ax.set_ylabel('$\mathcal{L}_{pixel}$', labelpad=-1)
+    ax.set_ylim(bottom=1e-3, top=1e-2)
+    ax.set_yticks([1e-3, 1e-2])
+    ax.yaxis.set_minor_formatter(NullFormatter())
+    legend = ax.legend(loc='lower center', mode=None, ncol=3, bbox_to_anchor=(0.5, 1), bbox_transform=ax.transAxes)
+    for line in legend.get_lines():
+        line.set_linewidth(2)
+
+    # Smoothness losses
+    ax = axes[1]
+    _make_plot(ax, ls_means, ls_stds)
+    # ax.set_ylabel('$\mathcal{L}_\\text{smooth}$')
+    ax.set_ylabel('$\mathcal{L}_{smooth}$', labelpad=-1)
+    ax.set_ylim(bottom=5e-2, top=10)
+    if args.x_label == 'time':
+        ax.set_xlabel('Time (s)')
+    else:
+        ax.set_xlabel('Frame #')
+
+    if save_plots:
+        if save_dir is None:
+            path = LOGS_PATH / f'{START_TIMESTAMP}_losses_combined' \
+                               f'_trial={trial.id:03d}' \
+                               f'_mf={rec_mf.id}' \
+                               f'_comp={",".join([str(rec.id) for rec in recs_to_compare.values()])}' \
+                               f'_sw={args.stats_window}' \
+                               f'.{img_extension}'
+        else:
+            path = save_dir / f'trial={trial.id:03d}' \
+                              f'_mf={rec_mf.id}' \
+                              f'_comp={",".join([str(rec.id) for rec in recs_to_compare.values()])}' \
+                              f'_losses_combined' \
+                              f'.{img_extension}'
+        logger.info(f'Saving plot to {path}.')
+        plt.savefig(path, transparent=True)
+    if show_plots:
+        plt.show()
+
+
 def plot_all_comparisons_in_dataset():
     """
     Generate comparison plots and examples for all reconstructions in a dataset.
@@ -890,15 +1067,18 @@ def plot_all_comparisons_in_dataset():
             plot_mf_comparisons(args, save_dir)
             plot_examples(args, save_dir)
             plot_smoothness_comparisons(args, save_dir)
-        except Exception as e:
-            logger.warning(f'Unable to plot comparisons: {e}')
+        except NothingToCompare as e:
+            logger.info(e)
             continue
 
 
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
+    # from simple_worm.plot3d import interactive
+    # interactive()
     # plot_mf_comparisons()
-    # plot_examples()
+    # plot_examples(save_singles=True, crop_size=150, invert=True)
     # plot_smoothness_comparisons()
-    plot_all_comparisons_in_dataset()
+    plot_losses_combined()
+    # plot_all_comparisons_in_dataset()
