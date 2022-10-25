@@ -252,7 +252,8 @@ def fetch_reconstruction(
     return reconstruction
 
 
-def get_deltas_from_args(args: Namespace, fps: int = DEFAULT_FPS, min_delta: int = None) -> Tuple[np.ndarray, np.ndarray]:
+def get_deltas_from_args(args: Namespace, fps: int = DEFAULT_FPS, min_delta: int = None) -> Tuple[
+    np.ndarray, np.ndarray]:
     """
     Get deltas and delta times from command line arguments.
     """
@@ -275,3 +276,38 @@ def get_deltas_from_args(args: Namespace, fps: int = DEFAULT_FPS, min_delta: int
     delta_ts = deltas / fps
 
     return deltas, delta_ts
+
+
+def resample_curve_points(X: np.ndarray, N_new: int) -> np.ndarray:
+    """
+    Resample the curve to the specified resolution.
+    """
+    from scipy import interpolate
+    is_complex = np.iscomplexobj(X)
+    if is_complex:
+        X = np.stack([np.real(X), np.imag(X)], axis=-1)
+    assert X.ndim == 3 or X.ndim == 2, f'X is the wrong shape! {X.shape}'
+    squeeze_dim0 = False
+    if X.ndim == 2:
+        X = X[None, ...]
+        squeeze_dim0 = True
+    if X.shape[1] == N_new:
+        return X
+
+    X_new = np.zeros((X.shape[0], N_new, X.shape[-1]))
+    sl = np.linalg.norm(X[:, :-1] - X[:, 1:], axis=-1)
+    u = np.c_[np.zeros((X.shape[0], 1)), sl.cumsum(axis=-1)]
+    u = u / u[:, -1][:, None]
+    u_new = np.linspace(0, 1, N_new)
+
+    for i, Xi in enumerate(X):
+        for j in range(X.shape[-1]):
+            tck = interpolate.splrep(u[i], Xi[:, j], s=0, k=3)
+            X_new[i, :, j] = interpolate.splev(u_new, tck)
+
+    if squeeze_dim0:
+        X_new = X_new[0]
+    if is_complex:
+        X_new = X_new[..., 0] + 1.j * X_new[..., 1]
+
+    return X_new

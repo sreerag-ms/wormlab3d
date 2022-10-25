@@ -35,6 +35,7 @@ def get_args(
     parser.add_argument('--midline3d-source-file', type=str, help='Midline3D source file.')
     parser.add_argument('--start-frame', type=int, help='Frame number to start from.')
     parser.add_argument('--end-frame', type=int, help='Frame number to end at.')
+    parser.add_argument('--resample-points', type=int, default=-1, help='Resample the curve points.')
     parser.add_argument('--rebuild-cache', type=str2bool, help='Rebuild the trajectory cache.', default=False)
     parser.add_argument('--tracking-only', type=str2bool, help='Use the tracking trajectory only.', default=False)
 

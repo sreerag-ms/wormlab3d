@@ -22,10 +22,10 @@ img_extension = 'svg'
 
 def parse_args() -> Namespace:
     parser = ArgumentParser(description='Wormlab3D script to plot helicity across a clip.')
-    parser.add_argument('--reconstruction', type=str,
-                        help='Reconstruction by id.')
+    parser.add_argument('--reconstruction', type=str, help='Reconstruction by id.')
     parser.add_argument('--start-frame', type=int, help='Frame number to start from.')
     parser.add_argument('--end-frame', type=int, help='Frame number to end at.')
+    parser.add_argument('--resample-points', type=int, default=-1, help='Resample the curve points.')
     args = parser.parse_args()
     assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
 
@@ -52,7 +52,7 @@ def helicity_trace(x_label: str = 'time'):
     X, meta = get_trajectory(**common_args)
     N = len(X)
     if x_label == 'time':
-        ts = np.linspace(0, N / trial.fps, N)
+        ts = np.arange(args.start_frame, args.start_frame + N) / trial.fps
     else:
         ts = np.arange(N) + (args.start_frame if args.start_frame is not None else 0)
 
@@ -102,7 +102,73 @@ def helicity_trace(x_label: str = 'time'):
         plt.show()
 
 
-def torsion_trace(x_label: str = 'time', threshold: float = np.pi / 2):
+def helicity_kymogram(x_label: str = 'time'):
+    """
+    Plot a kymogram of the helicity over time.
+    """
+    args = parse_args()
+    common_args = {
+        'reconstruction_id': args.reconstruction,
+        'start_frame': args.start_frame,
+        'end_frame': args.end_frame,
+        'smoothing_window': 25,
+        'resample_points': args.resample_points
+    }
+
+    reconstruction = Reconstruction.objects.get(id=args.reconstruction)
+    trial = reconstruction.trial
+    Z, meta = get_trajectory(**common_args, natural_frame=True, rebuild_cache=False)
+    N = len(Z)
+    if x_label == 'time':
+        ts = np.arange(args.start_frame, args.start_frame + N) / trial.fps
+    else:
+        ts = np.arange(N) + (args.start_frame if args.start_frame is not None else 0)
+
+    # Calculate helicity
+    logger.info('Calculating helicities.')
+    kappa = np.abs(Z)
+    psi = np.unwrap(np.angle(Z), axis=1)
+    tau = np.gradient(psi, axis=1)
+    H = kappa * tau
+
+    # Plot
+    fig, axes = plt.subplots(1, figsize=(12, 8))
+
+    # Torsion
+    ax = axes
+    ax.set_title(f'Helicity\n'
+                 f'Trial {trial.id} ({trial.date:%Y-%m-%d} #{trial.trial_num}).\n'
+                 f'Reconstruction {reconstruction.id} ({reconstruction.source}).')
+    im = ax.imshow(H.T, aspect='auto', cmap='PRGn', origin='lower', extent=(ts[0], ts[-1], 0, 1),
+                   norm=MidpointNormalize(midpoint=0))
+    cax = ax.inset_axes([1.03, 0.1, 0.02, 0.8], transform=ax.transAxes)
+    fig.colorbar(im, ax=ax, cax=cax)
+    ht_args = dict(transform=ax.transAxes, horizontalalignment='right', fontweight='bold')
+    ax.text(-0.02, 0.98, 'T', verticalalignment='top', **ht_args)
+    ax.text(-0.02, 0.01, 'H', verticalalignment='bottom', **ht_args)
+    ax.set_ylabel('$\zeta$', fontsize=12, labelpad=10)
+    ax.set_yticks([0, 1])
+    ax.set_yticklabels([])
+    if x_label == 'time':
+        ax.set_xlabel('Time (s)')
+    else:
+        ax.set_xlabel('Frame #')
+
+    fig.tight_layout()
+
+    if save_plots:
+        path = LOGS_PATH / f'{START_TIMESTAMP}_helicity_kymogram_' \
+                           f'r={reconstruction.id}_' \
+                           f'f={meta["start_frame"]}-{meta["end_frame"]}' \
+                           f'.{img_extension}'
+        logger.info(f'Saving plot to {path}.')
+        plt.savefig(path)
+
+    if show_plots:
+        plt.show()
+
+
+def torsion_kymogram(x_label: str = 'time', threshold: float = np.pi / 2):
     """
     Plot a kymogram of the torsion over time.
     """
@@ -117,10 +183,10 @@ def torsion_trace(x_label: str = 'time', threshold: float = np.pi / 2):
 
     reconstruction = Reconstruction.objects.get(id=args.reconstruction)
     trial = reconstruction.trial
-    Z, meta = get_trajectory(**common_args, natural_frame=True, rebuild_cache=True)
+    Z, meta = get_trajectory(**common_args, natural_frame=True, rebuild_cache=False)
     N = len(Z)
     if x_label == 'time':
-        ts = np.linspace(0, N / trial.fps, N)
+        ts = np.arange(args.start_frame, args.start_frame + N) / trial.fps
     else:
         ts = np.arange(N) + (args.start_frame if args.start_frame is not None else 0)
 
@@ -142,7 +208,7 @@ def torsion_trace(x_label: str = 'time', threshold: float = np.pi / 2):
     ax.set_title(f'Torsion\n'
                  f'Trial {trial.id} ({trial.date:%Y-%m-%d} #{trial.trial_num}).\n'
                  f'Reconstruction {reconstruction.id} ({reconstruction.source}).')
-    im = ax.imshow(torsion.T, aspect='auto', cmap='PRGn', origin='lower', extent=(0, ts[-1], 0, 1),
+    im = ax.imshow(torsion.T, aspect='auto', cmap='PRGn', origin='lower', extent=(ts[0], ts[-1], 0, 1),
                    norm=MidpointNormalize(midpoint=0))
     cax = ax.inset_axes([1.03, 0.1, 0.02, 0.8], transform=ax.transAxes)
     fig.colorbar(im, ax=ax, cax=cax)
@@ -152,7 +218,6 @@ def torsion_trace(x_label: str = 'time', threshold: float = np.pi / 2):
     ax.set_ylabel('$\\tau$', fontsize=12, labelpad=10)
     ax.set_yticks([0, 1])
     ax.set_yticklabels([])
-    ax.set_xticklabels([])
 
     if x_label == 'time':
         ax.set_xlabel('Time (s)')
@@ -162,7 +227,7 @@ def torsion_trace(x_label: str = 'time', threshold: float = np.pi / 2):
     fig.tight_layout()
 
     if save_plots:
-        path = LOGS_PATH / f'{START_TIMESTAMP}_torsion_trace_' \
+        path = LOGS_PATH / f'{START_TIMESTAMP}_torsion_kymogram_' \
                            f'r={reconstruction.id}_' \
                            f'f={meta["start_frame"]}-{meta["end_frame"]}' \
                            f'.{img_extension}'
@@ -178,5 +243,6 @@ if __name__ == '__main__':
         os.makedirs(LOGS_PATH, exist_ok=True)
     # from simple_worm.plot3d import interactive
     # interactive()
-    # helicity_trace(x_label='frames')
-    torsion_trace(x_label='frames')
+    helicity_trace(x_label='time')
+    helicity_kymogram(x_label='time')
+    torsion_kymogram(x_label='time')

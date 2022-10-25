@@ -10,7 +10,7 @@ from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.postures.natural_frame import NaturalFrame, align_complex_vectors
 from wormlab3d.trajectories.util import smooth_trajectory, prune_slowest_frames, prune_directionality, \
-    fetch_reconstruction
+    fetch_reconstruction, resample_curve_points
 
 SMOOTHING_WINDOW_TYPES = ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']
 
@@ -31,6 +31,7 @@ def get_trajectory(
         trajectory_point: float = None,
         tracking_only: bool = False,
         natural_frame: bool = False,
+        resample_points: int = -1,
         rebuild_cache: bool = False
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
     """
@@ -47,6 +48,7 @@ def get_trajectory(
         depth=depth,
         tracking_only=tracking_only,
         natural_frame=natural_frame,
+        resample_points=resample_points,
         rebuild_cache=rebuild_cache
     )
     N = X.shape[1]
@@ -337,6 +339,7 @@ def generate_or_load_trajectory_cache(
         depth: int = -1,
         tracking_only: bool = False,
         natural_frame: bool = False,
+        resample_points: int = -1,
         rebuild_cache: bool = False
 ) -> Tuple[np.ndarray, dict]:
     """
@@ -466,5 +469,11 @@ def generate_or_load_trajectory_cache(
     meta['end_frame'] = end_frame
     if reconstruction is not None:
         meta['reconstruction'] = str(reconstruction.id)
+
+    # Resample if required
+    if resample_points > -1 and resample_points != X.shape[1]:
+        meta['N_original'] = X.shape[1]
+        X = resample_curve_points(X, resample_points)
+        meta['N_resampled'] = X.shape[1]
 
     return X, meta
