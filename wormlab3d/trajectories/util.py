@@ -201,6 +201,8 @@ def calculate_rotation_matrix(v1: np.ndarray, v2: np.ndarray) -> np.ndarray:
     Calculate the rotation matrix between two vectors.
     """
     assert len(v1) == 3 and len(v2) == 3, 'Only 3D vectors supported!'
+    if np.allclose(v1, v2):
+        return np.eye(3)
     a = v1 / np.linalg.norm(v1)
     b = v2 / np.linalg.norm(v2)
     v = np.cross(a, b)

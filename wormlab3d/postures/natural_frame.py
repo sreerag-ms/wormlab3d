@@ -50,7 +50,8 @@ class NaturalFrame:
             X0: np.ndarray = None,
             T0: np.ndarray = None,
             M0: np.ndarray = None,
-            threshold: float = PSI_ESTIMATION_KAPPA_THRESHOLD_DEFAULT
+            threshold: float = PSI_ESTIMATION_KAPPA_THRESHOLD_DEFAULT,
+            integration_method: str = 'euler',
     ):
         """
         Takes either a midline and converts it into the Bishop frame or a Bishop frame representation
@@ -77,6 +78,7 @@ class NaturalFrame:
         self.X = X
         self.N = len(X)
         self.threshold = threshold
+        self.integration_method = integration_method
 
         if X.shape[-1] == 3:
             self.X = X.astype(np.float64)
@@ -198,13 +200,13 @@ class NaturalFrame:
 
         # Position offset
         if X0 is None:
-            X0 = np.array([0, 0, 0])
+            X0 = np.array([0, 0, 0], dtype=np.float64)
         else:
             assert X0.shape == (3,)
 
         # Orientation - initial tangent direction
         if T0 is None:
-            T0 = np.array([1, 0, 0])
+            T0 = np.array([1, 0, 0], dtype=np.float64)
         else:
             assert T0.shape == (3,)
             T0 = normalise(T0)
@@ -218,35 +220,55 @@ class NaturalFrame:
             M0 = M0 - np.dot(T0, M0) * T0
             M0 = M0 / norm(M0, keepdims=True)
 
-        # Initialise the components
-        shape = (self.N, 3)
-        X = np.zeros(shape)
-        T = np.zeros(shape)
-        M1 = np.zeros(shape)
-        M2 = np.zeros(shape)
-        X[0] = X0
-        T[0] = T0
-        M1[0] = M0
-        M2[0] = np.cross(T[0], M1[0])
         h = scale / (self.N - 1)
 
-        # Calculate the frame components (X/T/M1/M2)
-        for i in range(1, self.N):
-            k1 = self.m1[i]
-            k2 = self.m2[i]
+        if self.integration_method != 'euler':
+            from wormlab3d.midlines3d.mf_methods import integrate_curvature
+            import torch
+            X2, T2, M12 = integrate_curvature(
+                X0=torch.from_numpy(X0)[None, ...],
+                T0=torch.from_numpy(T0)[None, ...],
+                l=torch.from_numpy(np.array(scale))[None, ...],
+                K=torch.from_numpy(np.stack([self.m1, self.m2], axis=-1))[None, ...] * h,
+                M10=torch.from_numpy(M0)[None, ...],
+                start_idx=0,
+                integration_algorithm=self.integration_method
+            )
+            X = X2[0].clone().numpy()
+            T = T2[0].clone().numpy()
+            M1 = M12[0].clone().numpy()
+            M2 = np.cross(T, M1)
 
-            dTds = k1 * M1[i - 1] + k2 * M2[i - 1]
-            dM1ds = -k1 * T[i - 1]
-            dM2ds = -k2 * T[i - 1]
+        else:
+            # Initialise the components
+            shape = (self.N, 3)
+            X = np.zeros(shape)
+            T = np.zeros(shape)
+            M1 = np.zeros(shape)
+            M2 = np.zeros(shape)
+            X[0] = X0
+            T[0] = T0
+            M1[0] = M0
+            M2[0] = np.cross(T[0], M1[0])
+            h = scale / (self.N - 1)
 
-            T_tilde = T[i - 1] + h * dTds
-            M1_tilde = M1[i - 1] + h * dM1ds
-            M2_tilde = M2[i - 1] + h * dM2ds
+            # Calculate the frame components (X/T/M1/M2)
+            for i in range(1, self.N):
+                k1 = self.m1[i]
+                k2 = self.m2[i]
 
-            X[i] = X[i - 1] + h * T[i - 1]
-            T[i] = normalise(T_tilde)
-            M1[i] = normalise(M1_tilde)
-            M2[i] = normalise(M2_tilde)
+                dTds = k1 * M1[i - 1] + k2 * M2[i - 1]
+                dM1ds = -k1 * T[i - 1]
+                dM2ds = -k2 * T[i - 1]
+
+                T_tilde = T[i - 1] + h * dTds
+                M1_tilde = M1[i - 1] + h * dM1ds
+                M2_tilde = M2[i - 1] + h * dM2ds
+
+                X[i] = X[i - 1] + h * T[i - 1]
+                T[i] = normalise(T_tilde)
+                M1[i] = normalise(M1_tilde)
+                M2[i] = normalise(M2_tilde)
 
         self.X_pos = X
         self.K = self.m1[:, None] * M1 + self.m2[:, None] * M2
@@ -309,6 +331,32 @@ class NaturalFrame:
 
         # Smooth the peaks with a log
         h = np.sign(h1) * np.log(1 + np.abs(h1))
+
+        return h
+
+    def helicity_angles_method(self, normalise_length: bool = False) -> float:
+        """
+        Compute the helicity of the curve as the rate of change of frame rotation around the tangent.
+        """
+        if normalise_length and np.abs(self.length - 1) > EPS:
+            NF = NaturalFrame(self.X_pos / self.length)
+        else:
+            NF = self
+
+        # Orthogonalise the previous M1 to the next T to put it in the same plane as the next M1
+        M1_prev = NF.M1[:-1]
+        M1_prev_dot_T = np.einsum('mi,mi->m', M1_prev, NF.T[1:])
+        M1_ref = M1_prev - M1_prev_dot_T[:, None] * NF.T[1:]
+        M1_ref = M1_ref / np.linalg.norm(M1_ref, axis=-1, keepdims=True)
+
+        # Calculate the angles between M1 and M1_ref
+        M1_dot_M1_ref = np.einsum('ni,ni->n', NF.M1[1:], M1_ref)
+        M1_ref_cross_M1 = np.cross(M1_ref, NF.M1[1:], axis=1)
+        M1_ref_cross_M1_dot_T = np.einsum('ni,ni->n', M1_ref_cross_M1, NF.T[1:])
+        dpsi = np.arctan2(M1_ref_cross_M1_dot_T, M1_dot_M1_ref)
+
+        # Sum the angle changes to get a helicity score
+        h = dpsi.sum()
 
         return h
 

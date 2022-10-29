@@ -2,6 +2,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from wormlab3d.toolkit.util import normalise
+from wormlab3d.trajectories.util import calculate_rotation_matrix
 
 
 def get_rotation_matrix(u, angle):
@@ -58,6 +59,19 @@ def test_rotation_angle_decomposition():
     return
 
 
+def test_rotating_vector_to_axis():
+    """
+    Check that the rotation matrix will align two vectors.
+    """
+    a = np.random.randn(3)
+    a = a / np.linalg.norm(a)
+    b = np.random.randn(3)
+    b = b / np.linalg.norm(b)
+    R = calculate_rotation_matrix(a, b)
+    assert np.allclose(R @ a, b)
+
+
 if __name__ == '__main__':
     test_rotation_matrix()
     test_rotation_angle_decomposition()
+    test_rotating_vector_to_axis()

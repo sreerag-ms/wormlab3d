@@ -3,11 +3,13 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import cm
+from scipy.spatial.transform import Rotation
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d.postures.helicities import illustrate_helicity_method
 from wormlab3d.postures.natural_frame import NaturalFrame, EPS
 from wormlab3d.postures.plot_utils import plot_natural_frame_3d
+from wormlab3d.toolkit.util import normalise
 
 show_plots = True
 save_plots = False
@@ -68,8 +70,55 @@ def test_planar_bends():
     h = NF.helicity()
     h2 = NF2.helicity()
 
-    assert abs(h) < 1e-6
-    assert abs(h2) < 1e-1
+    assert np.allclose(h, 0)
+    assert np.allclose(h2, 0, atol=1e-1)
+
+
+def test_twisted_lines():
+    """
+    Test that a straight line with a full twist gives h=2pi
+    -- only works with angles method
+    """
+    N = 100
+    x = np.linspace(0, 1, 100)
+    X = np.stack([x, np.zeros_like(x), np.zeros_like(x)]).T
+    NF = NaturalFrame(X)
+    psi = np.linspace(0, -2 * np.pi, N)
+    M1 = np.stack([np.zeros_like(x), np.sin(psi), np.cos(psi)], axis=1)
+    M2 = np.stack([np.zeros_like(x), np.cos(psi), np.sin(psi)], axis=1)
+    NF.M1 = M1
+    NF.M2 = M2
+    if show_plots:
+        plot_natural_frame_3d(NF)
+    h = NF.helicity_angles_method()
+    assert np.allclose(h, 2 * np.pi)
+
+    # Twist the other way
+    psi = np.linspace(0, 2 * np.pi, N)
+    NF.M1 = np.stack([np.zeros_like(x), np.sin(psi), np.cos(psi)], axis=1)
+    NF.M2 = np.stack([np.zeros_like(x), np.cos(psi), np.sin(psi)], axis=1)
+    if show_plots:
+        plot_natural_frame_3d(NF)
+    h = NF.helicity_angles_method()
+    assert np.allclose(h, -2 * np.pi)
+
+    # Generate random rotation matrix
+    A = Rotation.from_rotvec(normalise(np.random.random(3)) * np.random.rand() * np.pi).as_matrix()
+    t0 = np.random.rand() * 2 * np.pi
+    t1 = np.random.rand() * 2 * np.pi
+    t2 = np.random.rand() * 2 * np.pi
+    R = Rotation.from_rotvec(A[:, 0] * t0) * Rotation.from_rotvec(A[:, 1] * t1) * Rotation.from_rotvec(A[:, 2] * t2)
+    R = R.as_matrix()
+
+    # Rotate the line and M1/M2 and also reverse the order
+    X = np.einsum('ij,bj->bi', R, X[::-1])
+    NF = NaturalFrame(X)
+    NF.M1 = np.einsum('ij,bj->bi', R, M1[::-1])
+    NF.M2 = np.einsum('ij,bj->bi', R, M2[::-1])
+    if show_plots:
+        plot_natural_frame_3d(NF)
+    h = NF.helicity_angles_method()
+    assert np.allclose(h, 2 * np.pi)
 
 
 def test_perfect_helix():
@@ -130,7 +179,7 @@ def test_inverted_helices():
     h = NF.helicity()
     h2 = NF2.helicity()
 
-    assert np.allclose(h, -h2)
+    assert np.allclose(h, -h2, atol=1e-4)
 
 
 def test_helices_by_pitch_and_radius():
@@ -226,14 +275,14 @@ def plot_sweep_over_radius_twists():
     N = 100
     n_rs = 20
     n_ks = 20
-    rs = np.linspace(0, 100 * np.pi, n_rs)  # radius
-    ks = np.linspace(0, 100, n_ks)  # twists
+    rs = np.linspace(-10 * np.pi, 10 * np.pi, n_rs)  # radius
+    ks = np.linspace(0, 10, n_ks)  # twists
 
     out = np.zeros((n_rs, n_ks))
 
     for i, r in enumerate(rs):
         for j, k in enumerate(ks):
-            psi = np.linspace(0, k * 2 * np.pi, 100)
+            psi = np.linspace(0, k * 2 * np.pi, N)
             mc = r * np.ones(N, dtype=np.complex128) * np.exp(1j * psi)
             nf = NaturalFrame(mc)
             out[i, j] = nf.helicity()
@@ -262,8 +311,8 @@ def plot_sweep_over_radius_twists():
     fig, ax = plt.subplots(subplot_kw={'projection': '3d'})
     X, Y = np.meshgrid(rs, ks)
     ax.plot_surface(X, Y, out, cmap=cm.coolwarm, linewidth=0, antialiased=False)
-    ax.set_xlabel('r')
-    ax.set_ylabel('k')
+    ax.set_xlabel('k')
+    ax.set_ylabel('r')
     ax.set_zlabel('h')
 
     if save_plots:
@@ -281,6 +330,7 @@ if __name__ == '__main__':
     # interactive()
     test_straight_line()
     test_planar_bends()
+    test_twisted_lines()
     test_perfect_helix()
     test_reversed_helices()
     test_inverted_helices()

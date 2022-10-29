@@ -412,13 +412,14 @@ def integrate_curvature(
     else:
         assert 0 <= start_idx < N
     device = X0.device
+    dtype = X0.dtype
     shape = (bs, N, 3)
 
     # Outputs
-    X = torch.zeros(shape, device=device)
-    T = torch.zeros(shape, device=device)
-    M1 = torch.zeros(shape, device=device)
-    M2 = torch.zeros(shape, device=device)
+    X = torch.zeros(shape, device=device, dtype=dtype)
+    T = torch.zeros(shape, device=device, dtype=dtype)
+    M1 = torch.zeros(shape, device=device, dtype=dtype)
+    M2 = torch.zeros(shape, device=device, dtype=dtype)
 
     # Step size to build a curve of length l
     h = l / (N - 1)  # [:, None]
