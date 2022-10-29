@@ -491,7 +491,7 @@ def _fetch_errors(
     return errors
 
 
-def _calculate_smoothness(
+def _calculate_smoothness_old(
         rec_mf: Reconstruction,
         rec: Reconstruction,
 ) -> np.ndarray:
@@ -520,6 +520,48 @@ def _calculate_smoothness(
 
     # Take the loss as the sum of the absolute gradients
     loss = np.abs(angles_grad).sum(axis=1)
+
+    return loss
+
+
+def _calculate_smoothness(
+        rec_mf: Reconstruction,
+        rec: Reconstruction,
+) -> np.ndarray:
+    """
+    Compute smoothness from the 3D points.
+    """
+    from numpy.linalg import norm
+    X, _ = get_trajectory(
+        reconstruction_id=rec.id,
+        start_frame=max(rec.start_frame, rec_mf.start_frame_valid),
+        end_frame=min(rec.end_frame, rec_mf.end_frame_valid)
+    )
+
+    # Centre trajectory
+    X = X - X.mean(axis=0)
+
+    # Distance between vertices
+    q = norm(X[:, 1:] - X[:, :-1], axis=-1)
+    q = np.c_[q[:, 0], q, q[:, -1]]
+
+    # Average distances over both neighbours
+    spacing = (q[:, :-1] + q[:, 1:]) / 2
+    locs = np.cumsum(spacing, axis=1)
+
+    # Tangent is normalised gradient of curve
+    T = np.zeros_like(X)
+    for i, Xi in enumerate(X):
+        T[i] = np.gradient(Xi, locs[i], axis=0, edge_order=1)
+    T_norm = norm(T, axis=-1, keepdims=True)
+    T = T / T_norm
+
+    # Curvature is gradient of tangent
+    K = np.gradient(T, 1 / (X.shape[1] - 1), axis=1, edge_order=1)
+    K = K / T_norm
+
+    # Take the loss as the squared distance in neighbouring curvatures
+    loss = ((K[:, 1:] - K[:, :-1])**2).sum(axis=(1, 2))
 
     return loss
 
@@ -997,7 +1039,7 @@ def plot_losses_combined(
     ax = axes[0]
     _make_plot(ax, lp_means, lp_stds)
     # ax.set_ylabel('$\mathcal{L}_\\text{pixel}$')
-    ax.set_ylabel('$\mathcal{L}_{pixel}$', labelpad=-1)
+    ax.set_ylabel('$\mathcal{L}_{px}$', labelpad=-1)
     ax.set_ylim(bottom=1e-3, top=1e-2)
     ax.set_yticks([1e-3, 1e-2])
     ax.yaxis.set_minor_formatter(NullFormatter())
@@ -1009,8 +1051,8 @@ def plot_losses_combined(
     ax = axes[1]
     _make_plot(ax, ls_means, ls_stds)
     # ax.set_ylabel('$\mathcal{L}_\\text{smooth}$')
-    ax.set_ylabel('$\mathcal{L}_{smooth}$', labelpad=-1)
-    ax.set_ylim(bottom=5e-2, top=10)
+    ax.set_ylabel('$\mathcal{L}_{sm}$', labelpad=-1)
+    ax.set_ylim(bottom=5, top=5e3)
     if args.x_label == 'time':
         ax.set_xlabel('Time (s)')
     else:
