@@ -39,7 +39,7 @@ class Midline2D(Document):
         """
         Fetch the pre-prepared image if available from the frame.
         """
-        if len(self.frame.images) == 3:
+        if self.frame.images is not None and len(self.frame.images) == 3:
             return self.frame.images[self.camera]
         return None
 
