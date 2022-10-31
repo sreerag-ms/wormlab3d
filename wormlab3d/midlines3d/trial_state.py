@@ -331,7 +331,7 @@ class TrialState:
             D_min = self.parameters.depth_min
             idx_offset = 2**D_min - 1
             for k in BUFFER_NAMES + PARAMETER_NAMES:
-                v = torch.from_numpy(self.get(k)[frame_num])
+                v = torch.from_numpy(self.get(k)[frame_num - self.start_frame])
 
                 # Expand collapsed
                 if k in ['curvatures', 'points', 'points_2d', 'scores']:
@@ -370,14 +370,14 @@ class TrialState:
         """
         Return a slice of data for a given buffer/parameter key.
         """
-        assert k in BUFFER_NAMES + PARAMETER_NAMES + TRANSIENTS_NAMES
+        assert k in BUFFER_NAMES + PARAMETER_NAMES + TRANSIENTS_NAMES, f'Unrecognised key: {k}.'
 
         if start_frame is None:
             start_frame = self.start_frame
         else:
             assert 0 <= start_frame <= self.trial.n_frames_min
         if end_frame is None:
-            end_frame = self.end_frame
+            end_frame = self.end_frame + 1
         else:
             assert start_frame <= end_frame <= self.trial.n_frames_min + 1
 
