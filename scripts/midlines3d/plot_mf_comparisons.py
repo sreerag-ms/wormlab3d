@@ -68,7 +68,7 @@ def get_args() -> Namespace:
     parser.add_argument('--rebuild-cache', type=str2bool, default=False, help='Rebuild caches.')
     parser.add_argument('--cache-only', type=str2bool, default=False, help='Use cache only.')
     parser.add_argument('--plot-n-examples', type=int, default=3, help='Number of examples to plot.')
-    parser.add_argument('--plot-example-frames', type=lambda s: [int(item) for item in s.split(',')],
+    parser.add_argument('--plot-example-frames', type=lambda s: [int(item) for item in s.split(',')], default=[],
                         help='Plot these frame numbers.')
     args = parser.parse_args()
 
@@ -267,7 +267,7 @@ def _fetch_2d_data(
 
     # Fetch the MF data directly
     ts = TrialState(rec_mf, start_frame=rec_mf.start_frame_valid,
-                    end_frame=rec_mf.end_frame_valid + 1)
+                    end_frame=rec_mf.end_frame_valid)
     Xs = [ts.get('points_2d'), ]
 
     # Load cached data for the comparisons
@@ -357,7 +357,7 @@ def _calculate_errors(
     ts = TrialState(
         rec_mf,
         start_frame=max(rec.start_frame, rec_mf.start_frame_valid),
-        end_frame=min(rec.end_frame, rec_mf.end_frame_valid) + 1
+        end_frame=min(rec.end_frame, rec_mf.end_frame_valid)
     )
     sigmas = ts.get('sigmas')
     intensities = ts.get('intensities')
