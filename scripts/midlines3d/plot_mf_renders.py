@@ -47,7 +47,7 @@ def _get_targets() -> Tuple[Reconstruction, Frame]:
 
 def _get_reds(
         alpha_min: float = 0.3,
-        white_at: float = 0.1
+        white_at: float = 0.1,
 ) -> np.ndarray:
     """
     Get the alpha-blended red colours.
@@ -478,6 +478,7 @@ def plot_renders(
         frame: Frame,
         alpha_min: float = 0.3,
         white_at: float = 0.1,
+        include_raw_images: bool = False
 ):
     """
     Plot the midline renders.
@@ -507,10 +508,15 @@ def plot_renders(
     for c in range(3):
         mask = np.take(reds, masks[c], axis=0)
         img = Image.fromarray(mask)
+        raw_img = ((1 - frame.images[c]) * 255).astype(np.uint8)
+        raw_img = Image.fromarray(raw_img)
         if save_plots:
             img.save(save_dir / f'c{c}.png')
+            if include_raw_images:
+                raw_img.save(save_dir / f'c{c}_input.png')
         if show_plots:
             img.show()
+            raw_img.show()
 
 
 def plot_render_variations(
@@ -884,12 +890,13 @@ if __name__ == '__main__':
     #     white_at=0.02,
     # )
 
-    # plot_renders(
-    #     reconstruction=rec_,
-    #     frame=frame_,
-    #     alpha_min=0.3,
-    #     white_at=0.1,
-    # )
+    plot_renders(
+        reconstruction=rec_,
+        frame=frame_,
+        alpha_min=1,  # 0.3,
+        white_at=0.005,
+        include_raw_images=True
+    )
 
     sigma_variants_ = [(0.005, 0.02), (0.05, 0.1)]
     intensity_variants_ = [(0.1, 0.3), (0.75, 1.3)]
@@ -924,8 +931,8 @@ if __name__ == '__main__':
     #     noise_scale=0.5,
     # )
 
-    plot_detection_masks(
-        reconstruction=rec_,
-        frame=frame_,
-        val_below_threshold=0.1
-    )
+    # plot_detection_masks(
+    #     reconstruction=rec_,
+    #     frame=frame_,
+    #     val_below_threshold=0.1
+    # )
