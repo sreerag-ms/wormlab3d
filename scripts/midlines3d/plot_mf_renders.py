@@ -314,6 +314,8 @@ def plot_blob_stacks_horizontal(
         n_blobs: int = 33,
         blob_spacing: int = 6,
         blob_chunk_spacing: int = 40,
+        blob_spacing_vert: int = 0,
+        blob_chunk_spacing_vert: int = 0,
         show_first_n_blobs: int = 5,
         show_last_n_blobs: int = 1,
         n_dots: int = 3,
@@ -343,9 +345,14 @@ def plot_blob_stacks_horizontal(
         blob_idxs = range(N)
 
     # Calculate the offsets
-    offsets_first = np.arange(show_first_n_blobs) * blob_spacing
-    offsets_last = trial.crop_size + blob_chunk_spacing \
+    dim_x = trial.crop_size * 2 + (show_first_n_blobs + show_last_n_blobs - 1) * blob_spacing + blob_chunk_spacing
+    dim_y = trial.crop_size + (show_first_n_blobs + show_last_n_blobs - 1) * blob_spacing_vert + blob_chunk_spacing_vert
+    offsets_first_h = np.arange(show_first_n_blobs) * blob_spacing
+    offsets_last_h = trial.crop_size + blob_chunk_spacing \
                    + (show_first_n_blobs + np.arange(show_last_n_blobs)) * blob_spacing
+    offsets_first_v = dim_y - trial.crop_size - np.arange(show_first_n_blobs) * blob_spacing_vert
+    offsets_last_v = dim_y - trial.crop_size - blob_chunk_spacing_vert \
+                   - (show_first_n_blobs + np.arange(show_last_n_blobs)) * blob_spacing_vert
 
     # Prepare path
     save_dir = LOGS_PATH / (f'{START_TIMESTAMP}_blob_stacks_horizontal'
@@ -366,6 +373,8 @@ def plot_blob_stacks_horizontal(
             n_blobs=n_blobs,
             blob_spacing=blob_spacing,
             blob_chunk_spacing=blob_chunk_spacing,
+            blob_spacing_vert=blob_spacing_vert,
+            blob_chunk_spacing_vert=blob_chunk_spacing_vert,
             show_first_n_blobs=show_first_n_blobs,
             show_last_n_blobs=show_last_n_blobs,
             n_dots=n_dots,
@@ -376,8 +385,7 @@ def plot_blob_stacks_horizontal(
             yaml.dump(spec, f)
 
     for c in range(3):
-        dim_x = trial.crop_size * 2 + (show_first_n_blobs + show_last_n_blobs - 1) * blob_spacing + blob_chunk_spacing
-        bg = np.ones((trial.crop_size, dim_x, 4), dtype=np.uint8) * 255
+        bg = np.ones((dim_y, dim_x, 4), dtype=np.uint8) * 255
         bg[..., -1] = 0
         blob_stack = Image.fromarray(bg)
 
@@ -386,7 +394,7 @@ def plot_blob_stacks_horizontal(
             blob_img = _make_blob_img(blobs[c, n], reds, border_size, border_colours[n])
             blob_stack.paste(
                 blob_img,
-                box=(offsets_last[show_last_n_blobs - i - 1], 0),
+                box=(offsets_last_h[show_last_n_blobs - i - 1], offsets_last_v[show_last_n_blobs - i - 1]),
                 mask=blob_img
             )
 
@@ -395,16 +403,17 @@ def plot_blob_stacks_horizontal(
             blob_img = _make_blob_img(blobs[c, n], reds, border_size, border_colours[n])
             blob_stack.paste(
                 blob_img,
-                box=(offsets_first[show_first_n_blobs - i - 1], 0),
+                box=(offsets_first_h[show_first_n_blobs - i - 1], offsets_first_v[show_first_n_blobs - i - 1]),
                 mask=blob_img
             )
 
         # Add the dots
-        dot_offsets = np.linspace(0, blob_chunk_spacing + blob_spacing, n_dots + 2).round().astype(np.uint8)[1:-1]
+        dot_offsets_h = np.linspace(0, blob_chunk_spacing + blob_spacing, n_dots + 2).round().astype(np.uint8)[1:-1]
+        dot_offsets_v = np.linspace(0, blob_chunk_spacing_vert + blob_spacing_vert, n_dots + 2).round().astype(np.uint8)[1:-1]
         draw = ImageDraw.Draw(blob_stack)
         for i in range(n_dots):
-            x = trial.crop_size + blob_spacing * (show_first_n_blobs - 1) + dot_offsets[i]
-            y = trial.crop_size / 2
+            x = trial.crop_size + blob_spacing * (show_first_n_blobs - 1) + dot_offsets_h[i]
+            y = trial.crop_size / 2 + blob_spacing_vert * (show_first_n_blobs - 1) - dot_offsets_v[i]
             draw.ellipse((x - dot_size, y - dot_size, x + dot_size, y + dot_size), fill=dot_colour)
 
         if save_plots:
@@ -864,22 +873,24 @@ if __name__ == '__main__':
     #     # highlight_border_size=6,
     # )
 
-    # plot_blob_stacks_horizontal(
-    #     reconstruction=rec_,
-    #     frame=frame_,
-    #     amplification_factor=1.,
-    #     alpha_min=0.4,
-    #     white_at=0.1,
-    #     border_size=2,
-    #     border_colour=None,
-    #     n_blobs=16,
-    #     blob_spacing=25,
-    #     blob_chunk_spacing=150,
-    #     show_first_n_blobs=7,
-    #     show_last_n_blobs=3,
-    #     n_dots=5,
-    #     dot_size=3,
-    # )
+    plot_blob_stacks_horizontal(
+        reconstruction=rec_,
+        frame=frame_,
+        amplification_factor=1.,
+        alpha_min=0.4,
+        white_at=0.1,
+        border_size=2,
+        border_colour=None,
+        n_blobs=16,
+        blob_spacing=25,
+        blob_chunk_spacing=150,
+        blob_spacing_vert=10,
+        blob_chunk_spacing_vert=60,
+        show_first_n_blobs=7,
+        show_last_n_blobs=1,
+        n_dots=5,
+        dot_size=3,
+    )
 
     # plot_blob_intersections(
     #     reconstruction=rec_,
@@ -890,13 +901,13 @@ if __name__ == '__main__':
     #     white_at=0.02,
     # )
 
-    plot_renders(
-        reconstruction=rec_,
-        frame=frame_,
-        alpha_min=1,  # 0.3,
-        white_at=0.005,
-        include_raw_images=True
-    )
+    # plot_renders(
+    #     reconstruction=rec_,
+    #     frame=frame_,
+    #     alpha_min=1,  # 0.3,
+    #     white_at=0.005,
+    #     include_raw_images=True
+    # )
 
     sigma_variants_ = [(0.005, 0.02), (0.05, 0.1)]
     intensity_variants_ = [(0.1, 0.3), (0.75, 1.3)]
