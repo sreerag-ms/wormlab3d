@@ -93,10 +93,15 @@ def _get_recs_to_compare(trial: Trial) -> Dict[str, Reconstruction]:
         raise NothingToCompare('No reconstructions found to compare against!')
     recs_to_compare = {}
     for rec in recs:
-        if rec.source not in recs_to_compare \
-                or (rec.source in recs_to_compare
-                    and len(rec.source_file) < len(recs_to_compare[rec.source].source_file)):
+        if rec.source not in recs_to_compare:
             recs_to_compare[rec.source] = rec
+        elif rec.source == M3D_SOURCE_RECONST and len(rec.source_file) < len(recs_to_compare[rec.source].source_file):
+            recs_to_compare[rec.source] = rec
+        elif rec.source == M3D_SOURCE_WT3D:
+            sfA = recs_to_compare[rec.source].source_file[:8]
+            sfB = rec.source_file[:8]
+            if sfB.isnumeric() and (not sfA.isnumeric() or (sfA.isnumeric() and int(sfA) < int(sfB))):
+                recs_to_compare[rec.source] = rec
 
     return recs_to_compare
 
