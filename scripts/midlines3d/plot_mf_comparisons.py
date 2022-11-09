@@ -199,6 +199,7 @@ def _calculate_2d_data(
         rec: Reconstruction,
         N: int,
         rebuild_cache: bool = False,
+        force_resample: bool = False
 ) -> np.ndarray:
     """
     Calculate the r values across a range of sigmas, durations and pauses.
@@ -214,7 +215,7 @@ def _calculate_2d_data(
             source=rec.source,
             source_file=rec.source_file,
         )
-        if len(m3d.X) == N:
+        if len(m3d.X) == N and not force_resample:
             X[j] = np.stack(m3d.get_prepared_2d_coordinates(regenerate=rebuild_cache), axis=1)
         else:
             Xr = _resample(m3d.X, N)
@@ -1125,7 +1126,7 @@ if __name__ == '__main__':
     # from simple_worm.plot3d import interactive
     # interactive()
     # plot_mf_comparisons()
-    # plot_examples(save_singles=True, crop_size=150, invert=True)
+    # plot_examples(save_singles=False, crop_size=150, invert=True)
     # plot_smoothness_comparisons()
     plot_losses_combined()
     # plot_all_comparisons_in_dataset()
