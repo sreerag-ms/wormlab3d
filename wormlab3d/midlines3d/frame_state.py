@@ -537,7 +537,7 @@ class FrameState(nn.Module):
         # Setup buffers for the outputs
         mt = self.get_state('masks_target')
         for i, d in enumerate(range(D_min, D)):
-            self.register_buffer(f'points_2d_{d}', torch.zeros(2**d))
+            self.register_buffer(f'points_2d_{d}', torch.zeros(2**d, 3, 2))
             self.register_buffer(f'masks_curve_{d}', torch.zeros_like(mt[i]))
             self.register_buffer(f'masks_target_residuals_{d}', torch.zeros_like(mt[i]))
             self.register_buffer(f'scores_{d}', torch.zeros(2**d))
