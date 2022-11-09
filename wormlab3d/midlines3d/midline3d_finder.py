@@ -24,6 +24,7 @@ from wormlab3d.data.model.mf_parameters import CURVATURE_INTEGRATION_MIDPOINT, C
     CURVATURE_INTEGRATION_RAND
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
 from wormlab3d.midlines3d.args_finder import ParameterArgs, RuntimeArgs, SourceArgs
+from wormlab3d.midlines3d.f0_state import F0State
 from wormlab3d.midlines3d.frame_state import FrameState, BUFFER_NAMES, PARAMETER_NAMES, CAM_PARAMETER_NAMES, \
     TRANSIENTS_NAMES, CURVATURE_PARAMETER_NAMES
 from wormlab3d.midlines3d.mf_methods import generate_residual_targets, calculate_renders_losses, \
@@ -94,6 +95,7 @@ class Midline3DFinder:
 
         # Load the trial and initialise trainable parameters
         self._init_trial()
+        self._init_f0_state()
 
         # Initialise the model
         self.model = self._init_model()
@@ -406,6 +408,21 @@ class Midline3DFinder:
                 [fs.get_state('length') for fs in self.frame_batch],
                 device=self.device
             ).detach()
+
+    def _init_f0_state(self):
+        """
+        Initialise the F0 state to saves all of the data for the first optimisation frame.
+        """
+        self.f0_state = None
+        if self.runtime_args.save_f0:
+            self.f0_state = F0State(
+                reconstruction=self.reconstruction,
+                frame=self.frame_batch[0].frame,
+                read_only=False,
+                load_only=False
+            )
+            self.f0_state.update_step_state(0, self.frame_batch[0])
+            self.f0_state.save()
 
     def _init_model(self) -> ProjectRenderScoreModel:
         """
@@ -911,6 +928,11 @@ class Midline3DFinder:
                 loss=loss,
                 stats=stats
             )
+
+            # Save the f0 state
+            if first_frame and self.runtime_args.save_f0:
+                self.f0_state.update_step_state(step - start_step + 1, self.frame_batch[0])
+                self.f0_state.save()
 
             # Make plots
             self._make_plots(first_frame=first_frame)

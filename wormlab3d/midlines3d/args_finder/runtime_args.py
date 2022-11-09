@@ -17,6 +17,7 @@ class RuntimeArgs(BaseArgs):
             cpu_only: bool = False,
             gpu_id: int = 0,
             log_level: int = 0,
+            save_f0: bool = False,
             plot_every_n_steps: int = -1,
             plot_every_n_init_steps: int = -1,
             plot_every_n_frames: int = -1,
@@ -45,6 +46,7 @@ class RuntimeArgs(BaseArgs):
         self.cpu_only = cpu_only
         self.gpu_id = gpu_id
         self.log_level = log_level
+        self.save_f0 = save_f0
 
         if fix_mode or finetune_mode:
             assert resume, '--resume must be set for fix_mode or finetune_mode'
@@ -107,6 +109,8 @@ class RuntimeArgs(BaseArgs):
                            help='GPU id to use if using GPUs.')
         group.add_argument('--log-level', type=int, default=2, choices=[0, 1, 2],
                            help='Tensorboard logging level. 0=Totals only. 1=Depth losses. 2=All losses and parameter stats.')
+        group.add_argument('--save-f0', type=str2bool, default=False,
+                           help='Save all data for the first optimisation frame (f0).')
 
         # General plot options
         group.add_argument('--plot-every-n-steps', type=int, default=-1,
