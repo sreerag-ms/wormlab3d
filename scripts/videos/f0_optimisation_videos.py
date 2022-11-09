@@ -504,9 +504,6 @@ def generate_f0_video(
         frame = update_fn(step)
         process.stdin.write(frame.tobytes())
 
-        if step > 200:
-            break
-
     # Flush video
     process.stdin.close()
     process.wait()
