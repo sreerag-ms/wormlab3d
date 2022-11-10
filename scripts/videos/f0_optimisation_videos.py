@@ -86,7 +86,7 @@ def _make_info_panel(
     ax.axis('off')
 
     def get_details(step) -> str:
-        return f'Step: {step:4d} / {len(X)}\n' \
+        return f'Step: {step:4d} / {len(X) - 1}\n' \
                f'Length: {lengths[step]:.3f}mm'
 
     # Details
@@ -171,9 +171,8 @@ def _make_3d_plot(
     M20 = np.cross(T0, M10)
     min_arrow_size = 0.05
     max_arrow_size = 0.15
-    arrow_sizes = min_arrow_size + (max_arrow_size - min_arrow_size) * (lengths - lengths.min()) / (
-                lengths.max() - lengths.min())
-    # frame_arrow_scales = 0.15 * lengths
+    arrow_sizes = min_arrow_size + (max_arrow_size - min_arrow_size) \
+                  * (lengths - lengths.min()) / (lengths.max() - lengths.min())
     frame_vectors = {
         'e0': T0 * arrow_sizes[:, None],
         'e1': M10 * arrow_sizes[:, None],
