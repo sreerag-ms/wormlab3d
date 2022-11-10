@@ -550,15 +550,13 @@ class Midline3DFinder:
 
         return optimiser
 
-    def _init_lr_scheduler(self, first_frame: bool) -> Optional[ReduceLROnPlateau]:
+    def _init_lr_scheduler(self) -> Optional[ReduceLROnPlateau]:
         """
         Set up the learning rate scheduler.
         """
         logger.info('Initialising lr scheduler.')
         p = self.parameters
         if p.lr_decay is None or p.lr_decay <= 0:
-            return None
-        if first_frame:
             return None
         if p.algorithm == OPTIMISER_LBFGS_NEW:
             optim = self.optimiser_gd
@@ -883,7 +881,7 @@ class Midline3DFinder:
         logger.info('----- Training the camera coefficients and multiscale curve -----')
         p = self.parameters
         self.optimiser = self._init_optimiser()
-        lr_scheduler = self._init_lr_scheduler(first_frame)
+        lr_scheduler = self._init_lr_scheduler()
         max_steps = p.n_steps_init if first_frame else p.n_steps_max
         start_step = self.checkpoint.step_frame + 1
         final_step = start_step + max_steps
@@ -908,7 +906,7 @@ class Midline3DFinder:
                 stats['lr'] = self.optimiser_gd.param_groups[1]['lr']
             else:
                 stats['lr'] = self.optimiser.param_groups[1]['lr']
-            if lr_scheduler is not None:
+            if lr_scheduler is not None and (not first_frame or first_frame and step > 1000):
                 lr_scheduler.step(loss.item())
 
             # Merge stats
