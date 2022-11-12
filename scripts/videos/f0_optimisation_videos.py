@@ -24,6 +24,7 @@ from wormlab3d import logger, START_TIMESTAMP, LOGS_PATH
 from wormlab3d.data.model import Reconstruction
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
 from wormlab3d.midlines3d.f0_state import F0State
+from wormlab3d.midlines3d.mf_render_wrapper import RenderWrapper
 from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.midlines3d.util import generate_annotated_images
@@ -62,6 +63,14 @@ def get_args() -> Namespace:
                         help='Rate of 3D plot revolution in revolutions/step.')
     parser.add_argument('--distance', type=float, default=3.,
                         help='Camera distance in worm lengths.')
+
+    # Renders/midline
+    parser.add_argument('--overlay-midlines', type=str2bool, default=True,
+                        help='Add midlines to the rendered images.')
+    parser.add_argument('--show-renders', type=str2bool, default=False,
+                        help='Show renders alongside the images.')
+    parser.add_argument('--renders-white-at', type=float, default=0.1,
+                        help='What pixel intensity below which to set to zero for the renders.')
 
     args = parser.parse_args()
     assert args.spec is not None, 'This script requires setting --spec=path.'
@@ -320,17 +329,14 @@ def _make_curvature_plots(
     return fig, update
 
 
-def _generate_annotated_images(
+def _resize_image_panel(
         width: int,
         height: int,
-        image_triplet: np.ndarray,
-        points_2d: np.ndarray
+        images: np.ndarray
 ) -> np.ndarray:
     """
-    Prepare images with overlaid midlines as connecting lines between vertices.
+    Resize a set of images or renders.
     """
-    images = generate_annotated_images(image_triplet, points_2d)
-    images = images.transpose(1, 0, 2)
     panel = np.ones((height, width, 3), dtype=np.uint8) * 155
     rh = height / images.shape[0]
     rw = width / images.shape[1]
@@ -348,6 +354,84 @@ def _generate_annotated_images(
     return panel
 
 
+def _generate_annotated_images(
+        width: int,
+        height: int,
+        image_triplet: np.ndarray,
+        points_2d: np.ndarray,
+        overlay_midlines: bool
+) -> np.ndarray:
+    """
+    Prepare images with overlaid midlines as connecting lines between vertices.
+    """
+    if overlay_midlines:
+        images = generate_annotated_images(image_triplet, points_2d)
+        images = images.transpose(1, 0, 2)
+    else:
+        images = []
+        for img in image_triplet:
+            z = ((1 - img) * 255).astype(np.uint8)
+            z = cv2.cvtColor(z, cv2.COLOR_GRAY2BGR)
+            images.append(z)
+        images = np.fliplr(np.concatenate(images))
+
+    panel = _resize_image_panel(width, height, images)
+    return panel
+
+
+def _get_reds(
+        white_at: float = 0.1,
+) -> np.ndarray:
+    """
+    Get the alpha-blended red colours.
+    """
+    cm = plt.get_cmap('Reds')
+    reds = cm(np.linspace(0, 1, 256))[..., :3]
+    reds[:int(255 * white_at)] = (1, 1, 1)
+    reds = (reds * 255).astype(np.uint8)
+    return reds
+
+
+def _make_renders(
+        width: int,
+        height: int,
+        F0S: F0State,
+        renderer: RenderWrapper,
+        white_at: float = 0.1,
+) -> Callable:
+    """
+    Prepare rendered images.
+    """
+    reds = _get_reds(white_at)
+    sigmas = F0S.get('sigmas')[:, 0]
+    exponents = F0S.get('exponents')[:, 0]
+    intensities = F0S.get('intensities')[:, 0]
+    camera_sigmas = F0S.get('camera_sigmas')
+    camera_exponents = F0S.get('camera_exponents')
+    camera_intensities = F0S.get('camera_intensities')
+
+    def update(step: int, points_2d: np.ndarray):
+        renderer.points_2d = torch.from_numpy(points_2d).unsqueeze(0)
+        renderer.init_params(
+            sigma=sigmas[step],
+            exponent=exponents[step],
+            intensity=intensities[step],
+            camera_sigmas=camera_sigmas[step],
+            camera_exponents=camera_exponents[step],
+            camera_intensities=camera_intensities[step],
+        )
+
+        masks, blobs = renderer.get_masks_and_blobs()
+        masks = (masks * 255).astype(np.uint8)
+        renders = np.take(reds, masks, axis=0)
+        renders = np.fliplr(np.concatenate(renders, axis=0))
+        renders = _resize_image_panel(width, height, renders)
+
+        return renders
+
+    return update
+
+
 def prepare_panels(
         args: Namespace,
         reconstruction: Reconstruction,
@@ -361,7 +445,9 @@ def prepare_panels(
     logger.info(f'Preparing panel for reconstruction {reconstruction.id}.')
     assert reconstruction.source == M3D_SOURCE_MF, 'Only MF reconstructions supported!'
     trial = reconstruction.trial
-    F0S = F0State(reconstruction, trial.get_frame(frame_num))
+    frame = trial.get_frame(frame_num)
+    F0S = F0State(reconstruction, frame)
+    renderer = RenderWrapper(reconstruction, frame)
 
     # Get variables
     X = F0S.get('points')
@@ -382,6 +468,15 @@ def prepare_panels(
 
     # Build plots
     imgs_width = int(args.height / 3)
+    if args.show_renders:
+        imgs_width *= 2
+        update_renders = _make_renders(
+            width=int(args.height / 3),
+            height=int(args.height),
+            F0S=F0S,
+            renderer=renderer,
+            white_at=args.renders_white_at
+        )
 
     fig_info, update_info_plot = _make_info_panel(
         width=int(args.width - imgs_width),
@@ -426,11 +521,16 @@ def prepare_panels(
 
         # Prepare images
         images = _generate_annotated_images(
-            width=imgs_width,
+            width=int(args.height / 3),
             height=int(args.height),
             image_triplet=image_triplet,
-            points_2d=points_2d
+            points_2d=points_2d,
+            overlay_midlines=args.overlay_midlines
         )
+
+        if args.show_renders:
+            renders = update_renders(step, points_2d)
+            images = np.concatenate([images, renders], axis=1)
 
         # Update the plots and extract renders
         update_info_plot(step)
