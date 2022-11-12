@@ -906,7 +906,7 @@ class Midline3DFinder:
                 stats['lr'] = self.optimiser_gd.param_groups[1]['lr']
             else:
                 stats['lr'] = self.optimiser.param_groups[1]['lr']
-            if lr_scheduler is not None and (not first_frame or first_frame and step > 1000):
+            if lr_scheduler is not None and (not first_frame or first_frame and step > 1500):
                 lr_scheduler.step(loss.item())
 
             # Merge stats
@@ -927,10 +927,9 @@ class Midline3DFinder:
                 stats=stats
             )
 
-            # Save the f0 state
+            # Update the f0 state
             if first_frame and self.runtime_args.save_f0:
                 self.f0_state.update_step_state(step - start_step + 1, self.frame_batch[0])
-                self.f0_state.save()
 
             # Make plots
             self._make_plots(first_frame=first_frame)
@@ -948,6 +947,10 @@ class Midline3DFinder:
                     and loss.item() < p.convergence_loss_target \
                     and (p.length_regrow_steps is None or self.checkpoint.step_frame > p.length_regrow_steps):
                 break
+
+        # Save the f0 state
+        if first_frame and self.runtime_args.save_f0:
+            self.f0_state.save()
 
         self.tb_logger.add_scalar('train_steps', self.checkpoint.step_frame, self.checkpoint.frame_num)
 
