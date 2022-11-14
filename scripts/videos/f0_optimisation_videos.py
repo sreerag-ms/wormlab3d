@@ -54,13 +54,14 @@ def get_args() -> Namespace:
     # Video
     parser.add_argument('--width', type=int, default=1200, help='Width of video in pixels.')
     parser.add_argument('--height', type=int, default=900, help='Height of video in pixels.')
+    parser.add_argument('--duration', type=int, default=15, help='Video duration in seconds.')
     parser.add_argument('--fps', type=int, default=25, help='Video framerate.')
 
     # 3D plot
     parser.add_argument('--show-3d-axis', type=str2bool, default=True,
                         help='Show axis on the 3D plot.')
-    parser.add_argument('--revolution-rate', type=float, default=0.01,
-                        help='Rate of 3D plot revolution in revolutions/step.')
+    parser.add_argument('--revolutions', type=float, default=3,
+                        help='Number of plot revolutions across the clip.')
     parser.add_argument('--distance', type=float, default=3.,
                         help='Camera distance in worm lengths.')
 
@@ -202,7 +203,7 @@ def _make_3d_plot(
     fig.scene.anti_aliasing_frames = 20
 
     # Set up the artist and add the pieces
-    NF = NaturalFrame(X[0])
+    NF = NaturalFrame(X[0] - X[0].mean(axis=0))
     fa = FrameArtistMLab(
         NF,
         use_centred_midline=False,
@@ -241,14 +242,13 @@ def _make_3d_plot(
     _make_axes(fig, scale=lengths[-1])
 
     # Aspects
-    n_revolutions = T * args.revolution_rate
-    azims = azim_offset + np.linspace(start=0, stop=360 * n_revolutions, num=T)
+    azims = azim_offset + np.linspace(start=0, stop=360 * args.revolutions, num=T)
     mlab.view(figure=fig, azimuth=azims[0], distance=distance, focalpoint=np.zeros(3))
 
     def update(step: int):
         nonlocal arrows
         fig.scene.disable_render = True
-        NF = NaturalFrame(X[step])
+        NF = NaturalFrame(X[step] - X[step].mean(axis=0))
         fa.surface_opts['radius'] = 0.024 * lengths[step]
         fa.update(NF)
         if step > 0:
@@ -311,12 +311,6 @@ def _make_curvature_plots(
     for n in range(N - 1):
         line = ax.plot(ind[n:n + 2], kappa[0, n:n + 2], c=fc[n])
         lines.append(line[0])
-
-    # # Add n0 label
-    # trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
-    # ax.text(start_idx, -0.08, '$n_0$', color=cmaplist[start_idx] / 255, fontsize=7, fontweight='bold',
-    #         horizontalalignment='center', verticalalignment='top', transform=trans)
-    # ax.axvline(x=start_idx, ymin=-0.1, ymax=0.92, linestyle=':', color='grey')
 
     def update(step: int):
         nonlocal lines
@@ -578,6 +572,12 @@ def generate_f0_video(
 
     # Initialise ffmpeg process
     output_path = output_dir / f'{clip_idx:03d}_trial={reconstruction.trial.id}_r={reconstruction.id}_f={clip["frame_num"]}'
+    input_args = {
+        'format': 'rawvideo',
+        'pix_fmt': 'rgb24',
+        's': f'{args.width}x{args.height}',
+        'r': n_steps / args.duration,
+    }
     output_args = {
         'pix_fmt': 'yuv444p',
         'vcodec': 'libx264',
@@ -588,7 +588,7 @@ def generate_f0_video(
     }
     process = (
         ffmpeg
-            .input('pipe:', format='rawvideo', pix_fmt='rgb24', s=f'{args.width}x{args.height}')
+            .input('pipe:', **input_args)
             .output(str(output_path) + '.mp4', **output_args)
             .overwrite_output()
             .run_async(pipe_stdin=True)
