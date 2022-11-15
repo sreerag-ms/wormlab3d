@@ -39,6 +39,8 @@ mlab.options.offscreen = True
 m1_colour = 'deepskyblue'
 m2_colour = 'mediumseagreen'
 
+plt.rcParams['font.family'] = 'Helvetica'
+
 
 def get_args() -> Namespace:
     """

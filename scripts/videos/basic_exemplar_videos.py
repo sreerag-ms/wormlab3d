@@ -31,6 +31,8 @@ from wormlab3d.trajectories.util import smooth_trajectory
 # Off-screen rendering
 mlab.options.offscreen = True
 
+plt.rcParams['font.family'] = 'Helvetica'
+
 
 def get_args() -> Namespace:
     """
