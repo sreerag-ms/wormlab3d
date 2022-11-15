@@ -294,6 +294,8 @@ def _fetch_mf_trajectory(
 
     # Add the base points
     X_base = ts.get('points_3d_base').astype(np.float64)
+    if len(X_base) > len(X_full):
+        X_base = X_base[:len(X_full)]
     X_full = X_full + X_base[:, None, :]
     meta = {'shape': X_full.shape, }
 
