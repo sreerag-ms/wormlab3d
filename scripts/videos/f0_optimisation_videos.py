@@ -82,6 +82,7 @@ def get_args() -> Namespace:
 def _make_info_panel(
         width: int,
         height: int,
+        caption: str,
         X: np.ndarray,
         lengths: np.ndarray,
 ) -> Tuple[Figure, Callable]:
@@ -99,9 +100,14 @@ def _make_info_panel(
         return f'Step: {step:4d} / {len(X) - 1}\n' \
                f'Length: {lengths[step]:.3f}mm'
 
+    # Caption
+    if caption != '':
+        text = fig.text(0.05, 0.95, caption, ha='left', va='top',
+                        fontsize=18, linespacing=1.5, fontweight='bold')
+
     # Details
-    text = fig.text(0.05, 0.95, get_details(0), ha='left', va='top',
-                    fontsize=18, linespacing=1.5, fontweight='bold')
+    text = fig.text(0.95, 0.95, get_details(0), ha='right', va='top',
+                    fontsize=18, linespacing=1.5)
 
     def update(step: int):
         # Update the text
@@ -430,6 +436,7 @@ def prepare_panels(
         args: Namespace,
         reconstruction: Reconstruction,
         frame_num: int,
+        caption: str,
         azim_offset: int,
         distance: float,
 ):
@@ -475,6 +482,7 @@ def prepare_panels(
     fig_info, update_info_plot = _make_info_panel(
         width=int(args.width - imgs_width),
         height=int(args.height / 3 * 2),
+        caption=caption,
         X=X,
         lengths=lengths
     )
@@ -524,6 +532,7 @@ def prepare_panels(
 
         if args.show_renders:
             renders = update_renders(step, points_2d)
+            images[:, -1] = 0
             images = np.concatenate([images, renders], axis=1)
 
         # Update the plots and extract renders
@@ -538,9 +547,11 @@ def prepare_panels(
 
         # Overlay plot info on top of 3d panel
         plot_3d = overlay_image(plot_3d, plot_info, x_offset=0, y_offset=0)
-        # plot_3d[-1] = 0
 
         # Join plots and images and write to stream
+        images[int(args.height / 3)] = 0
+        images[int(args.height / 3 * 2)] = 0
+        images[:, -1] = 0
         frame = np.concatenate([
             images,
             np.concatenate([plot_3d, plot_curvatures], axis=0)
@@ -566,6 +577,7 @@ def generate_f0_video(
         args=args,
         reconstruction=reconstruction,
         frame_num=clip['frame_num'],
+        caption=clip['caption'] if 'caption' in clip else '',
         azim_offset=clip['azim_offset'] if 'azim_offset' in clip else 0,
         distance=clip['distance'] if 'distance' in clip else args.distance
     )
