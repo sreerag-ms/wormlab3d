@@ -2,12 +2,14 @@ import os
 import time
 
 from PIL import Image
+
 from wormlab3d import CAMERA_IDXS, LOGS_PATH
 from wormlab3d.data.model.trial import Trial
 from wormlab3d.toolkit.util import parse_target_arguments
 
 show_imgs = True
-save_imgs = True
+save_imgs = False
+use_uncompressed_videos = False
 
 
 def raw_frame_images():
@@ -23,7 +25,7 @@ def raw_frame_images():
     # Fetch the trial and the video readers
     trial = Trial.objects.get(id=args.trial)
     frame = trial.get_frame(args.frame_num)
-    reader = trial.get_video_triplet_reader()
+    reader = trial.get_video_triplet_reader(use_uncompressed_videos=use_uncompressed_videos)
 
     # Set the frame number and fetch the images from each video
     reader.set_frame_num(args.frame_num)

@@ -14,6 +14,7 @@ def generate_prepared_images(
         fixed_centres_only: bool = True,
         fix_missing_centres: bool = False,
         max_3d_error: float = 0,
+        use_uncompressed_videos: bool = False
 ):
     """
     Using the centre_3d point for a frame and its corresponding 2d reprojection points,
@@ -55,7 +56,7 @@ def generate_prepared_images(
             logger.info('No frames found!')
             continue
 
-        reader = trial.get_video_triplet_reader()
+        reader = trial.get_video_triplet_reader(use_uncompressed_videos=use_uncompressed_videos)
 
         # Iterate over the frames
         for frame_id in frame_ids:
@@ -133,4 +134,5 @@ if __name__ == '__main__':
         fixed_centres_only=True,
         fix_missing_centres=False,
         max_3d_error=0,
+        use_uncompressed_videos=True
     )

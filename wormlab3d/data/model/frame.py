@@ -380,7 +380,7 @@ class Frame(Document):
 
         return res
 
-    def generate_prepared_images(self):
+    def generate_prepared_images(self, use_uncompressed_videos: bool = False):
         """
         Generate prepared image crops.
         """
@@ -400,7 +400,7 @@ class Frame(Document):
             p3d = self.centre_3d
 
         # Set the frame number, fetch the images from each video and generate the crops
-        reader = self.trial.get_video_triplet_reader()
+        reader = self.trial.get_video_triplet_reader(use_uncompressed_videos=use_uncompressed_videos)
         reader.set_frame_num(self.frame_num)
         images = reader.get_images(invert=True, subtract_background=True)
         crops = np.zeros((3, self.trial.crop_size, self.trial.crop_size), dtype=np.float32)

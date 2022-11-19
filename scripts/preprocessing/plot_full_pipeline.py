@@ -14,6 +14,7 @@ from wormlab3d.toolkit.util import parse_target_arguments
 MAX_RESULTS = 5
 save_plot = False
 contour_threshold_ratio: float = CONT_THRESH_RATIO_DEFAULT
+use_uncompressed_videos = False
 
 plt.rcParams.update({
     'text.usetex': True,
@@ -46,7 +47,7 @@ def plot_full_pipeline():
         frame.generate_centre_3d()
         frame.generate_prepared_images()
         frame.save()
-    reader = trial.get_video_triplet_reader()
+    reader = trial.get_video_triplet_reader(use_uncompressed_videos=use_uncompressed_videos)
     cameras = trial.get_cameras()
 
     # Set the frame number, fetch the images from each video and find objects in all 3

@@ -13,6 +13,7 @@ from wormlab3d.toolkit.util import parse_target_arguments
 show_plots = False
 save_plots = True
 invert = True
+use_uncompressed_videos = True
 
 
 def plot_crops():
@@ -29,8 +30,8 @@ def plot_crops():
     assert args.frame_num is not None, '--frame-num must be defined!'
 
     # Fetch the trial, the video readers and the cameras
-    trial = Trial.objects.get(id=args.trial_id)
-    reader = trial.get_video_triplet_reader()
+    trial = Trial.objects.get(id=args.trial)
+    reader = trial.get_video_triplet_reader(use_uncompressed_videos=use_uncompressed_videos)
     frame = trial.get_frame(args.frame_num)
     crop_size = (trial.crop_size, trial.crop_size)
 

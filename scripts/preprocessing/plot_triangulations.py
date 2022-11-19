@@ -8,6 +8,7 @@ from wormlab3d.preprocessing.contour import CONT_THRESH_RATIO_DEFAULT
 from wormlab3d.toolkit.plot_utils import interactive_plots
 from wormlab3d.toolkit.triangulate import triangulate
 
+use_uncompressed_videos = False
 MAX_RESULTS = 5
 
 
@@ -20,7 +21,7 @@ def plot_triangulations(
 
     # Fetch the trial, the video readers and the cameras
     trial = Trial.objects.get(id=trial_id)
-    reader = trial.get_video_triplet_reader()
+    reader = trial.get_video_triplet_reader(use_uncompressed_videos=use_uncompressed_videos)
     cameras_trial = trial.get_cameras()
 
     # Set the frame number, fetch the images from each video and find objects in all 3

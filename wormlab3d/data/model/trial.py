@@ -55,6 +55,7 @@ class Trial(Document):
     temperature = FloatField(min_value=0)
     comments = StringField()
     videos = TripletField(StringField(), required=True)
+    videos_uncompressed = TripletField(StringField(), required=True)
     backgrounds = TripletField(StringField())
     legacy_id = IntField(unique=True)
     legacy_data = DictField()
@@ -127,14 +128,22 @@ class Trial(Document):
 
         return clips
 
-    def get_video_reader(self, camera_idx: int, reload: bool = False) -> VideoReader:
+    def get_video_reader(
+            self,
+            camera_idx: int,
+            reload: bool = False,
+            use_uncompressed_videos: bool = False
+    ) -> VideoReader:
         """
         Instantiate a video reader for the recording taken by the target camera.
         """
         assert camera_idx in CAMERA_IDXS
 
         if self.readers[camera_idx] is None or reload:
-            vid_path = fix_path(self.videos[camera_idx])
+            if use_uncompressed_videos:
+                vid_path = fix_path(self.videos_uncompressed[camera_idx])
+            else:
+                vid_path = fix_path(self.videos[camera_idx])
             if len(self.backgrounds) > 0:
                 bg_path = fix_path(self.backgrounds[camera_idx])
             else:
@@ -147,12 +156,19 @@ class Trial(Document):
 
         return self.readers[camera_idx]
 
-    def get_video_triplet_reader(self, reload: bool = False) -> VideoTripletReader:
+    def get_video_triplet_reader(
+            self,
+            reload: bool = False,
+            use_uncompressed_videos: bool = False
+    ) -> VideoTripletReader:
         """
         Instantiate a video-triplet reader to read all recordings in sync.
         """
         if self.triplet_reader is None or reload:
-            vid_paths = [fix_path(self.videos[c]) for c in CAMERA_IDXS]
+            if use_uncompressed_videos:
+                vid_paths = [fix_path(self.videos_uncompressed[c]) for c in CAMERA_IDXS]
+            else:
+                vid_paths = [fix_path(self.videos[c]) for c in CAMERA_IDXS]
             if len(self.backgrounds) > 0:
                 bg_paths = [fix_path(self.backgrounds[c]) for c in CAMERA_IDXS]
             else:

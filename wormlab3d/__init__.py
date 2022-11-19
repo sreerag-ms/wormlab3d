@@ -29,6 +29,7 @@ def _load_env_path(k: str, default: Path):
 DATA_PATH = ROOT_PATH / 'data'
 ANNEX_PATH = _load_env_path('ANNEX_PATH', ROOT_PATH.parent / 'worm_data')
 WT3D_PATH = _load_env_path('WT3D_PATH', ROOT_PATH.parent / '3DWT_Data')
+UOL_STORE_PATH = _load_env_path('UOL_STORE_PATH', ROOT_PATH.parent / 'uol')
 DATASETS_PATH = _load_env_path('DATASETS_PATH', DATA_PATH / 'datasets')
 DATASETS_MIDLINES3D_PATH = _load_env_path('DATASETS_MIDLINES3D_PATH', DATASETS_PATH / 'midlines3d')
 DATASETS_SEG_MASKS_PATH = _load_env_path('DATASET_CACHE_PATH', DATASETS_PATH / 'seg_masks')

@@ -25,13 +25,13 @@ class Midline2D(Document):
         'indexes': ['frame', 'user']
     }
 
-    def get_image(self) -> np.ndarray:
+    def get_image(self, use_uncompressed_videos: bool = False) -> np.ndarray:
         """
         Get the image associated with this midline annotation from the video.
         midline -> frame -> trial -> video[c] -> frame[f]
         """
         trial = self.frame.trial
-        video = trial.get_video_reader(camera_idx=self.camera)
+        video = trial.get_video_reader(camera_idx=self.camera, use_uncompressed_videos=use_uncompressed_videos)
         image = video[self.frame.frame_num]
         return image
 

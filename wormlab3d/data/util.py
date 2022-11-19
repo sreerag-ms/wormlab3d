@@ -1,9 +1,10 @@
 import re
 
-from wormlab3d import ANNEX_PATH, DATA_PATH
+from wormlab3d import ANNEX_PATH, DATA_PATH, UOL_STORE_PATH
 
 DATA_PATH_PLACEHOLDER = '$DATA_PATH$'
 ANNEX_PATH_PLACEHOLDER = '$ANNEX$'
+UOL_PATH_PLACEHOLDER = '$UOL$'
 
 
 def fix_path(path: str) -> str:
@@ -16,6 +17,8 @@ def fix_path(path: str) -> str:
         path = path.replace(DATA_PATH_PLACEHOLDER, str(DATA_PATH))
     if ANNEX_PATH_PLACEHOLDER in path:
         path = path.replace(ANNEX_PATH_PLACEHOLDER, str(ANNEX_PATH))
+    if UOL_PATH_PLACEHOLDER in path:
+        path = path.replace(UOL_PATH_PLACEHOLDER, str(UOL_STORE_PATH))
 
     return path
 
