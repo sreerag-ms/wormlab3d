@@ -80,8 +80,9 @@ def eigenworm_modulation(
             idxs = (speeds > min_speed) & (speeds < max_speed)
             Z = Z[idxs]
 
-        X_ew = ew.transform(Z)
-        lambdas[c][rid] = np.abs(X_ew)
+        if len(Z):
+            X_ew = ew.transform(Z)
+            lambdas[c][rid] = np.abs(X_ew)
 
     # Sort by concentration
     lambdas = {k: v for k, v in sorted(list(lambdas.items()))}
@@ -116,13 +117,13 @@ def eigenworm_modulation(
         return fig_, ax_
 
     def make_filename(method: str):
-        return LOGS_PATH / (f'{START_TIMESTAMP}' \
-                            f'_ew_modulation_{method}' \
-                            f'_ds={ds.id}' \
-                            f'_ew={ew.id}' \
-                            f'_plot={",".join([str(c_) for c_ in args.plot_components])}' + \
-                            (f'_spmin={args.min_speed}' if args.min_speed is not None else '') + \
-                            (f'_spmax={args.max_speed}' if args.max_speed is not None else '') + \
+        return LOGS_PATH / (f'{START_TIMESTAMP}'
+                            f'_ew_modulation_{method}'
+                            f'_ds={ds.id}'
+                            f'_ew={ew.id}'
+                            f'_plot={",".join([str(c_) for c_ in args.plot_components])}' +
+                            (f'_spmin={args.min_speed}' if args.min_speed is not None else '') +
+                            (f'_spmax={args.max_speed}' if args.max_speed is not None else '') +
                             f'.{img_extension}')
 
     if by_concentration:
