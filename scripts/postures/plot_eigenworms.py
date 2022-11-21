@@ -19,10 +19,10 @@ from wormlab3d.postures.plot_utils import plot_natural_frame_3d, plot_natural_fr
 from wormlab3d.toolkit.util import print_args
 from wormlab3d.trajectories.cache import get_trajectory
 
-plot_n_components = 10
+plot_n_components = 7
 show_plots = False
 save_plots = True
-img_extension = 'svg'
+img_extension = 'png'
 eigenworm_length = 1
 eigenworm_scale = 64
 cmap = cm.get_cmap(MIDLINE_CMAP_DEFAULT)
@@ -210,29 +210,30 @@ def _plot_eigenworms_basic_mlab(
     """
     plot_config = {
         0: {
-            'azimuth': -60,
-            'elevation': 60,
+            'azimuth': 70,
+            'elevation': 45,
+            'roll': -135
         },
         1: {
-            'azimuth': 90,
-            'elevation': 55,
-            'roll': 135,
+            'azimuth': -110,
+            'elevation': 40,
+            'roll': -5,
         },
         2: {
-            'azimuth': 120,
-            'elevation': 45,
-            'roll': 140,
+            'azimuth': -160,
+            'elevation': 50,
+            'roll': 80,
         },
         3: {
-            'azimuth': -130,
-            'elevation': 115,
-            'roll': -65,
+            'azimuth': 125,
+            'elevation': 140,
+            'roll': -15,
             'distance': 1.5,
         },
         4: {
-            'azimuth': 175,
-            'elevation': 120,
-            'roll': -90,
+            'azimuth': 165,
+            'elevation': 65,
+            'roll': 100,
             'distance': 1.7,
         }
     }
@@ -267,7 +268,7 @@ def _plot_eigenworms_basic_mlab(
             show_frame_arrows=True,
             n_frame_arrows=16,
             show_pca_arrows=False,
-            show_outline=True,
+            show_outline=False,
             show_axis=False,
             offscreen=not interactive,
             **{**default_plot_options, **plot_config[i]}
@@ -337,6 +338,7 @@ def _plot_eigenvalues_basic(
 ):
     vr = np.cumsum([0, *eigenworms.explained_variance_ratio[:plot_n_components]])
     xs = np.arange(len(vr))
+    highlight_idx = 5  # 1-based index!
 
     NPs = []
     Hs = []
@@ -347,30 +349,42 @@ def _plot_eigenvalues_basic(
         Hs.append(NF.helicity())
     Hs = np.array(Hs)
 
-    # fig, ax = plt.subplots(1, figsize=(4, 3))
-    fig, ax = plt.subplots(1, figsize=(5, 4))
+    # Make plots
+    plt.rc('axes', labelsize=6)  # fontsize of the X label
+    plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+    plt.rc('xtick.major', pad=2, size=2)
+    plt.rc('ytick.major', pad=2, size=2)
+
+    fig, ax = plt.subplots(1, figsize=(2.1, 1.6), gridspec_kw={
+        'left': 0.15,
+        'right': 0.85,
+        'top': 0.98,
+        'bottom': 0.16,
+    })
     ax.grid()
-    ax.scatter(xs[1:], vr[1:], zorder=10, s=100)
+    ax.scatter(xs[1:], vr[1:], zorder=20, s=50)
     ax.plot(xs, vr, zorder=5, alpha=0.5, linestyle=':')
     ax.set_xlim(0, plot_n_components + 0.5)
-    # ax.set_ylim(0, 1)
     ax.set_ylim(0, 1.05)
-    ax.set_xticks([2, 4, 6, 8, 10])
-    ax.set_xlabel('Component')
-    ax.set_ylabel('Cumulative variance')
+    ax.set_xticks([2, 4, 6])
+    ax.set_xlabel('Component', labelpad=2)
+    ax.set_ylabel('Cumulative variance', labelpad=3)
     ax.set_yticks([0, 0.4, 0.8, 1.0])
     ax.set_yticklabels([0, 0.4, 0.8, None])
-    ax.axhline(y=0.95, color='red', linewidth=2, zorder=9)
-    # ax.hlines(y=0.95, xmin=-1, xmax=8, color='red', linewidth=2, zorder=9)
-    # ax.vlines(x=8, ymin=-1, ymax=0.95, color='red', linewidth=2, zorder=9)
-    ax.text(-1.3, 0.93, '0.95', color='red')
+    ax.hlines(xmin=0, xmax=highlight_idx, y=vr[highlight_idx],
+              color='red', linewidth=2, zorder=9)
+    ax.vlines(ymin=0, ymax=vr[highlight_idx], x=highlight_idx,
+              color='red', linewidth=2, zorder=9)
+    ax.text(-0.1, vr[highlight_idx], f'{vr[highlight_idx]:.2f}',
+            color='red', fontsize=5, ha='right', va='center', transform=ax.transData)
 
     ax2 = ax.twinx()
-    ax2.set_ylabel('Non-planarity', rotation=270, labelpad=15)
-    ax2.scatter(xs[1:], NPs, zorder=8, s=80, alpha=0.7, color='orange', marker='x')
+    ax2.set_ylabel('Non-planarity / Helicity', rotation=270, labelpad=7)
+    ax2.scatter(xs[1:], NPs, zorder=8, s=50, alpha=0.7, color='orange', marker='x')
     ax2.plot(xs[1:], NPs, zorder=4, alpha=0.3, color='orange', linestyle='--')
-    # ax2.set_yticks([0, 0.01, 0.02])
-    # ax2.set_yticklabels([0, 0.01, 0.02])
+    ax2.set_yticks([0, 0.01, 0.02])
+    ax2.set_yticklabels([0, 0.01, 0.02])
 
     # Helicity
     ax_hel = ax.twinx()
@@ -579,8 +593,8 @@ def main():
     filename += f'_M={ew.n_samples}_N={ew.n_features}'
 
     # _plot_eigenworms_basic(ew, filename)
-    # _plot_eigenworms_basic_mlab(ew, filename, interactive=True)
-    _plot_eigenworms(ew, title, filename)
+    _plot_eigenworms_basic_mlab(ew, filename, interactive=False)
+    # _plot_eigenworms(ew, title, filename)
     # _plot_eigenvalues(ew, title, filename)
     _plot_eigenvalues_basic(ew, filename)
     # if X_full is not None:
@@ -592,5 +606,5 @@ if __name__ == '__main__':
     # interactive()
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
-    sweep_dataset_concentrations()
-    # main()
+    # sweep_dataset_concentrations()
+    main()
