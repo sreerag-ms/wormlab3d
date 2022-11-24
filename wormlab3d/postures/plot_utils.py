@@ -445,6 +445,8 @@ def plot_natural_frame_3d_mlab(
         fig.scene.render_window.polygon_smoothing = True
         fig.scene.render_window.multi_samples = 20
         fig.scene.anti_aliasing_frames = 20
+        fig.scene.renderer.use_depth_peeling = True
+        fig.scene.renderer.maximum_number_of_peels = 64
     visual.set_viewer(fig)
 
     # Set up the artist and add the pieces
@@ -458,7 +460,13 @@ def plot_natural_frame_3d_mlab(
         arrow_scale=arrow_scale,
         use_centred_midline=use_centred_midline
     )
-    centre = fa.X.min(axis=0) + fa.X.ptp(axis=0) / 2
+
+    # Find the centre
+    R = np.stack(NF.pca.components_, axis=1)
+    Xt = np.einsum('ij,bj->bi', R.T, fa.X)
+    centre = (Xt.min(axis=0) + Xt.ptp(axis=0) / 2) @ R.T
+
+    # Add components
     if show_frame_arrows:
         fa.add_component_vectors(fig, draw_e0=show_frame_e0)
     if show_midline:
@@ -478,6 +486,9 @@ def plot_natural_frame_3d_mlab(
             vec = NF.pca.components_[i] * NF.pca.singular_values_[i] / 3
             if vec.sum() == 0:
                 continue
+            if np.dot(vec, fa.X[-1] - fa.X[0]) > 0:
+                vec *= -1
+
             origin = centre - vec / 2
             scale = np.linalg.norm(vec)
             plot_arrow(
@@ -487,8 +498,8 @@ def plot_natural_frame_3d_mlab(
                 color=to_rgb(fa.arrow_colours[f'e{i}']),
                 opacity=0.8,
                 radius_shaft=0.01 / scale,
-                radius_cone=0.02 / scale,
-                # length_cone=0.02 / scale
+                radius_cone=0.04 / scale,
+                length_cone=np.clip(0.06 / scale, a_min=0, a_max=1)
             )
             if show_pca_arrow_labels:
                 origin = origin - vec / np.linalg.norm(vec) * 0.1
@@ -505,11 +516,11 @@ def plot_natural_frame_3d_mlab(
 
     # # Useful for getting the view parameters when recording from the gui:
     # scene = mlab.get_engine().scenes[0]
-    # scene.scene.camera.position = [-0.056627444635577756, 0.5919369307500081, -0.40565610534344765]
-    # scene.scene.camera.focal_point = [0.16923413053154945, 0.06871700007468462, 0.15579509735107422]
+    # scene.scene.camera.position = [-1.3990791380817185, -1.0605420398460177, -0.34892066576669]
+    # scene.scene.camera.focal_point = [0.189302998142271, 0.38237924018923336, 0.11808596314336256]
     # scene.scene.camera.view_angle = 30.0
-    # scene.scene.camera.view_up = [0.25412043647039007, 0.7564286845750556, 0.602692665394353]
-    # scene.scene.camera.clipping_range = [0.24939435045734276, 1.4669799173586755]
+    # scene.scene.camera.view_up = [-0.5764637524715683, 0.4048556242409965, 0.709775644557371]
+    # scene.scene.camera.clipping_range = [1.0941187590357875, 3.6358236502847223]
     # scene.scene.camera.compute_view_plane_normal()
     # scene.scene.render()
     # print(mlab.view())  # (azimuth, elevation, distance, focalpoint)

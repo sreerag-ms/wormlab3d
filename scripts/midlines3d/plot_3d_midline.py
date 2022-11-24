@@ -1,4 +1,6 @@
 import os
+from argparse import Namespace
+from typing import List
 
 import cv2
 import matplotlib.pyplot as plt
@@ -17,13 +19,13 @@ from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.midlines3d.util import generate_annotated_images
 from wormlab3d.postures.natural_frame import NaturalFrame
-from wormlab3d.postures.plot_utils import plot_natural_frame_3d, plot_natural_frame_3d_mlab, FrameArtistMLab, \
+from wormlab3d.postures.plot_utils import plot_natural_frame_3d_mlab, FrameArtistMLab, \
     plot_arrow
 from wormlab3d.toolkit.plot_utils import equal_aspect_ratio
 from wormlab3d.toolkit.util import parse_target_arguments
 from wormlab3d.trajectories.util import fetch_reconstruction, smooth_trajectory
 
-img_extension = 'svg'
+img_extension = 'png'
 show_plots = False
 save_plots = True
 # show_plots = True
@@ -34,11 +36,14 @@ if save_plots:
     os.makedirs(LOGS_PATH, exist_ok=True)
 
 
-def get_midline() -> Midline3D:
+def get_midline(
+        args: Namespace = None
+) -> Midline3D:
     """
     Find a midline for a given trial and frame num, or by id.
     """
-    args = parse_target_arguments()
+    if args is None:
+        args = parse_target_arguments()
     frame = None
     reconstruction = None
     if args.midline3d is not None:
@@ -525,6 +530,8 @@ def plot_3d_with_pca(
         reconstruction: Reconstruction,
         frame: Frame,
         X: np.ndarray,
+        interactive: bool = True,
+        transparent_bg: bool = True,
 ):
     """
     3D plot of a midline with pca arrows.
@@ -532,28 +539,77 @@ def plot_3d_with_pca(
     trial = reconstruction.trial
     NF = NaturalFrame(X)
 
-    fig = plt.figure(figsize=(4, 4))
-    ax = fig.add_subplot(projection='3d', azim=-110, elev=40)  # azim=-60, elev=30)
-    ax = plot_natural_frame_3d(
+    # 3D plot of midline
+    fig = plot_natural_frame_3d_mlab(
         NF,
-        ax=ax,
+        azimuth=-150,
+        elevation=100,
+        roll=60,
+        distance=1.65,
         show_frame_arrows=False,
         show_pca_arrows=True,
         show_pca_arrow_labels=False,
+        show_midline=True,
+        show_outline=True,
+        show_axis=False,
+        midline_opts={'tube_radius': 0.01, 'opacity': 1},
+        surface_opts={'radius': 0.04},
+        mesh_opts={'opacity': 0.5},
+        offscreen=not interactive,
     )
-    ax.axis('off')
 
     if save_plots:
-        save_path = LOGS_PATH / f'{START_TIMESTAMP}' \
-                                f'_trial={trial.id}' \
-                                f'_frame={frame.frame_num}' \
-                                f'_reconstruction={reconstruction.id}' \
-                                f'_3D_pca.{img_extension}'
-        logger.info(f'Saving plot to {save_path}.')
-        plt.savefig(save_path, transparent=True)
+        path = LOGS_PATH / f'{START_TIMESTAMP}' \
+                           f'_trial={trial.id}' \
+                           f'_frame={frame.frame_num}' \
+                           f'_reconstruction={reconstruction.id}' \
+                           f'_3D_pca.{img_extension}'
+        logger.info(f'Saving plot to {path}.')
+
+        if not transparent_bg:
+            mlab.savefig(str(path), figure=fig)
+        else:
+            fig.scene._lift()
+            img = mlab.screenshot(figure=fig, mode='rgba', antialiased=True)
+            img = Image.fromarray((img * 255).astype(np.uint8), 'RGBA')
+            img.save(path)
+            mlab.clf(fig)
+            mlab.close()
 
     if show_plots:
-        plt.show()
+        if interactive:
+            mlab.show()
+        else:
+            fig.scene._lift()
+            img = mlab.screenshot(figure=fig, mode='rgba', antialiased=True)
+            mlab.clf(fig)
+            mlab.close()
+            fig_mpl = plt.figure(figsize=(10, 10))
+            ax = fig_mpl.add_subplot()
+            ax.imshow(img)
+            ax.axis('off')
+            fig_mpl.tight_layout()
+            plt.show()
+            plt.close(fig_mpl)
+
+
+def plot_3d_pca_sequence(
+        frame_nums: List[int]
+):
+    """
+    Plot a series of 3D worms with pca arrows
+    """
+    args = parse_target_arguments()
+
+    for frame_num in frame_nums:
+        args.frame_num = frame_num
+        reconstruction, frame, X, points_2d = get_midline(args)
+        plot_3d_with_pca(
+            reconstruction=reconstruction,
+            frame=frame,
+            X=X,
+            interactive=False,
+        )
 
 
 def plot_reprojections(
@@ -690,14 +746,18 @@ def plot_reprojection_singles(
 if __name__ == '__main__':
     # from wormlab3d.toolkit.plot_utils import interactive_plots
     # interactive_plots()
-    reconstruction_, frame_, X_, points_2d_ = get_midline()
+    # reconstruction_, frame_, X_, points_2d_ = get_midline()
     # plot_3d(reconstruction_, frame_, X_)
     # plot_3d_mlab(reconstruction_, frame_, X_, interactive=False, transparent_bg=True)
     # plot_3d_with_points_mlab(reconstruction_, frame_, X_, interactive=False, transparent_bg=True, n_points=33)
     # plot_3d_construction(reconstruction_, frame_, X_, n_points=33, start_idx=40, n_stages=4, curvature_smoothing=11)
-    plot_n0_distribution(start_idx=40)
+    # plot_n0_distribution(start_idx=40)
     # plot_3d_with_pca(reconstruction_, frame_, X_)
     # plot_reprojections(reconstruction_, frame_, points_2d_)
     # plot_reprojection_singles(reconstruction_, frame_, points_2d_)
     # plot_reprojection_singles(reconstruction_, frame_, points_2d_, with_image=False, n_points=33, point_radius=5, point_alpha=0.7)
     # plot_reprojection_singles(reconstruction_, frame_, points_2d_, with_midline=False)
+
+    # plot_3d_pca_sequence(frame_nums=[13788,13854,13931])  # (azim, elev, roll) = (10, 100, -10)
+    plot_3d_pca_sequence(frame_nums=[14378, 14474, 14533])
+    # plot_3d_pca_sequence(frame_nums=[13931,])
