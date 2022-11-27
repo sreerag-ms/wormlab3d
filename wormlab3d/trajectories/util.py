@@ -18,13 +18,13 @@ def smooth_trajectory(X: np.ndarray, window_len: int = 5, window_type: str = 'fl
     Extended to smooth along each of the body points and coordinate axes.
     todo: remove for loops!
     """
-    squeeze = False
+    squeeze = 0
     if X.ndim == 1:
         X = X[..., None]
-        squeeze = True
+        squeeze += 1
     if X.ndim == 2:
         X = X[..., None]
-        squeeze = True
+        squeeze += 1
     if X.ndim != 3:
         raise ValueError('X must have 2 or 3 dimensions.')
     assert X.shape[0] > window_len, 'Time dimension needs to be bigger than window size.'
@@ -53,8 +53,9 @@ def smooth_trajectory(X: np.ndarray, window_len: int = 5, window_type: str = 'fl
             X_s[:, u, i] = np.convolve(w, X_padded[:, u, i], mode='valid')
 
     # Remove extra dimension is one was added
-    if squeeze:
+    while squeeze > 0:
         X_s = X_s.squeeze(axis=-1)
+        squeeze -= 1
 
     return X_s
 
