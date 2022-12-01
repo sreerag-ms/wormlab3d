@@ -285,17 +285,21 @@ def resample_curve_points(X: np.ndarray, N_new: int) -> np.ndarray:
     """
     Resample the curve to the specified resolution.
     """
-    from scipy import interpolate
-    is_complex = np.iscomplexobj(X)
-    if is_complex:
-        X = np.stack([np.real(X), np.imag(X)], axis=-1)
-    assert X.ndim == 3 or X.ndim == 2, f'X is the wrong shape! {X.shape}'
-    squeeze_dim0 = False
-    if X.ndim == 2:
-        X = X[None, ...]
-        squeeze_dim0 = True
     if X.shape[1] == N_new:
         return X
+    from scipy import interpolate
+    is_complex = np.iscomplexobj(X)
+
+    # To resample from complex representations first get coordinates
+    if is_complex:
+        from wormlab3d.postures.natural_frame import NaturalFrame
+        X2 = np.zeros((X.shape[0], X.shape[1], 3))
+        for i in range(X.shape[0]):
+            nf = NaturalFrame(X[i])
+            X2[i] = nf.X_pos
+        X = X2
+
+    assert X.ndim == 3, f'X is the wrong shape! {X.shape}'
 
     X_new = np.zeros((X.shape[0], N_new, X.shape[-1]))
     sl = np.linalg.norm(X[:, :-1] - X[:, 1:], axis=-1)
@@ -308,9 +312,12 @@ def resample_curve_points(X: np.ndarray, N_new: int) -> np.ndarray:
             tck = interpolate.splrep(u[i], Xi[:, j], s=0, k=3)
             X_new[i, :, j] = interpolate.splev(u_new, tck)
 
-    if squeeze_dim0:
-        X_new = X_new[0]
+    # Convert back into complex curvatures if required
     if is_complex:
-        X_new = X_new[..., 0] + 1.j * X_new[..., 1]
+        Z = np.zeros((X.shape[0], N_new), dtype=np.complex128)
+        for i in range(X.shape[0]):
+            nf = NaturalFrame(X_new[i])
+            Z[i] = nf.mc
+        X_new = Z
 
     return X_new
