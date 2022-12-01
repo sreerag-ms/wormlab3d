@@ -20,9 +20,9 @@ from wormlab3d.toolkit.util import print_args
 from wormlab3d.trajectories.cache import get_trajectory
 
 plot_n_components = 7
-show_plots = False
+show_plots = True
 save_plots = True
-img_extension = 'png'
+img_extension = 'svg'
 eigenworm_length = 1
 eigenworm_scale = 64
 cmap = cm.get_cmap(MIDLINE_CMAP_DEFAULT)
@@ -334,11 +334,15 @@ def _plot_eigenvalues(
 
 def _plot_eigenvalues_basic(
         eigenworms: Eigenworms,
-        filename: str
+        filename: str,
+        format: str = 'paper'
 ):
     vr = np.cumsum([0, *eigenworms.explained_variance_ratio[:plot_n_components]])
     xs = np.arange(len(vr))
-    highlight_idx = 5  # 1-based index!
+    if format == 'paper':
+        highlight_idxs = [4, 5]  # 1-based index!
+    else:
+        highlight_idxs = [5,]  # 1-based index!
 
     NPs = []
     Hs = []
@@ -350,37 +354,60 @@ def _plot_eigenvalues_basic(
     Hs = np.array(Hs)
 
     # Make plots
-    plt.rc('axes', labelsize=6)  # fontsize of the X label
-    plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
-    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
-    plt.rc('xtick.major', pad=2, size=2)
-    plt.rc('ytick.major', pad=2, size=2)
+    if format == 'paper':
+        plt.rc('axes', labelsize=6)  # fontsize of the X label
+        plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+        plt.rc('xtick.major', pad=2, size=2)
+        plt.rc('ytick.major', pad=2, size=2)
+        fig, ax = plt.subplots(1, figsize=(2.1, 1.6), gridspec_kw={
+            'left': 0.15,
+            'right': 0.85,
+            'top': 0.98,
+            'bottom': 0.16,
+        })
+        ax.set_xlabel('Component', labelpad=2)
+        ax.set_ylabel('Cumulative variance', labelpad=3)
+        ax.set_yticks([0, 0.4, 0.8, 1.0])
+        ax.set_yticklabels([0, 0.4, 0.8, None])
 
-    fig, ax = plt.subplots(1, figsize=(2.1, 1.6), gridspec_kw={
-        'left': 0.15,
-        'right': 0.85,
-        'top': 0.98,
-        'bottom': 0.16,
-    })
+    else:
+        plt.rc('axes', labelsize=9)  # fontsize of the X label
+        plt.rc('xtick', labelsize=8)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=8)  # fontsize of the y tick labels
+        plt.rc('xtick.major', pad=2, size=3)
+        plt.rc('ytick.major', pad=2, size=3)
+        fig, ax = plt.subplots(1, figsize=(4, 2.1), gridspec_kw={
+            'left': 0.14,
+            'right': 0.86,
+            'top': 0.98,
+            'bottom': 0.18,
+        })
+        ax.set_xlabel('Component', labelpad=5)
+        ax.set_ylabel('Cumulative variance', labelpad=8)
+        ax.set_yticks(vr)
+        ax.set_yticklabels([f'{v:.2f}' if i < 6 else None for i, v in enumerate(vr)])
+
     ax.grid()
     ax.scatter(xs[1:], vr[1:], zorder=20, s=50)
     ax.plot(xs, vr, zorder=5, alpha=0.5, linestyle=':')
     ax.set_xlim(0, plot_n_components + 0.5)
     ax.set_ylim(0, 1.05)
     ax.set_xticks([2, 4, 6])
-    ax.set_xlabel('Component', labelpad=2)
-    ax.set_ylabel('Cumulative variance', labelpad=3)
-    ax.set_yticks([0, 0.4, 0.8, 1.0])
-    ax.set_yticklabels([0, 0.4, 0.8, None])
-    ax.hlines(xmin=0, xmax=highlight_idx, y=vr[highlight_idx],
-              color='red', linewidth=2, zorder=9)
-    ax.vlines(ymin=0, ymax=vr[highlight_idx], x=highlight_idx,
-              color='red', linewidth=2, zorder=9)
-    ax.text(-0.1, vr[highlight_idx], f'{vr[highlight_idx]:.2f}',
-            color='red', fontsize=5, ha='right', va='center', transform=ax.transData)
+
+    for highlight_idx in highlight_idxs:
+        ax.hlines(xmin=0, xmax=highlight_idx, y=vr[highlight_idx],
+                  color='red', linewidth=2, zorder=9)
+        ax.vlines(ymin=0, ymax=vr[highlight_idx], x=highlight_idx,
+                  color='red', linewidth=2, zorder=9)
+        # ax.text(-0.1, vr[highlight_idx], f'{vr[highlight_idx]:.2f}',
+        #         color='red', fontsize=8, ha='right', va='center', transform=ax.transData)
 
     ax2 = ax.twinx()
-    ax2.set_ylabel('Non-planarity / Helicity', rotation=270, labelpad=7)
+    if format == 'paper':
+        ax2.set_ylabel('Non-planarity / Helicity', rotation=270, labelpad=7)
+    else:
+        ax2.set_ylabel('Non-planarity / Helicity', rotation=270, labelpad=15)
     ax2.scatter(xs[1:], NPs, zorder=8, s=50, alpha=0.7, color='orange', marker='x')
     ax2.plot(xs[1:], NPs, zorder=4, alpha=0.3, color='orange', linestyle='--')
     ax2.set_yticks([0, 0.01, 0.02])
@@ -593,10 +620,10 @@ def main():
     filename += f'_M={ew.n_samples}_N={ew.n_features}'
 
     # _plot_eigenworms_basic(ew, filename)
-    _plot_eigenworms_basic_mlab(ew, filename, interactive=False)
+    # _plot_eigenworms_basic_mlab(ew, filename, interactive=False)
     # _plot_eigenworms(ew, title, filename)
     # _plot_eigenvalues(ew, title, filename)
-    _plot_eigenvalues_basic(ew, filename)
+    _plot_eigenvalues_basic(ew, filename, format='thesis')
     # if X_full is not None:
     #     _plot_reconstruction(ew, X_full, 500, title, filename)
 
