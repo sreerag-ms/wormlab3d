@@ -360,6 +360,68 @@ class NaturalFrame:
 
         return h
 
+    def helicity_angles_method2(self, normalise_length: bool = False, aggregate: bool = True) -> float:
+        """
+        Compute the helicity of the curve as the rate of change of frame rotation around the tangent.
+        """
+        from wormlab3d.trajectories.angles import calculate_angle
+        if normalise_length and np.abs(self.length - 1) > EPS:
+            NF = NaturalFrame(self.X_pos / self.length)
+        else:
+            NF = self
+
+        # Convert e0 to spherical coordinates to find theta/phi
+        e0_x, e0_y, e0_z = NF.T.T
+        theta0 = np.arccos(e0_z)
+        phi0 = np.arctan2(e0_y, e0_x)
+
+        # Let e1 be the derivative of e0 wrt theta
+        e1 = np.stack([
+            np.cos(theta0) * np.cos(phi0),
+            np.cos(theta0) * np.sin(phi0),
+            -np.sin(theta0)
+        ], axis=1)
+        e2 = np.cross(self.T, e1)
+        basis = np.stack([self.T, e1, e2], axis=1)
+
+        # Calculate angle between e1 and M1
+        angles = np.zeros(self.N)
+        for i in range(self.N):
+            v1 = (e1[i] @ basis[i].T)[1:]
+            v2 = (self.M1[i] @ basis[i].T)[1:]
+            angles[i] = calculate_angle(v1, v2)
+
+        h = np.gradient(np.unwrap(angles))
+        if aggregate:
+            return h.sum()
+        return h
+
+    def helicity_angles_method3(self, normalise_length: bool = False, aggregate: bool = True) -> float:
+        """
+        Compute the helicity of the curve as the rate of change of frame rotation around the tangent.
+        """
+        from scipy.spatial.transform import Rotation
+        if normalise_length and np.abs(self.length - 1) > EPS:
+            NF = NaturalFrame(self.X_pos / self.length)
+        else:
+            NF = self
+
+        # Calculate angle between e1 and M1
+        angles = np.zeros(self.N)
+        for i in range(self.N):
+            r, _ = Rotation.align_vectors(
+                np.stack([NF.T[i], NF.M1[i], NF.M2[i]]),
+                np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+            )
+            r = r.as_matrix()
+            v2 = (NF.M1[i] @ r.T)[1:]
+            angles[i] = np.arctan2(*v2)
+
+        h = np.gradient(np.unwrap(angles))
+        if aggregate:
+            return h.sum()
+        return h
+
     def surface(
             self,
             N_theta: int = 32,
