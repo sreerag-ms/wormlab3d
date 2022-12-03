@@ -759,6 +759,8 @@ class Midline3DFinder:
                         f0 = f.frame_num
                     else:
                         expired_batch.append(f)
+                if len(new_batch) == 0:
+                    f0 -= 1
 
                 # Load the closest expired frame as the last frame state
                 self.last_frame_state = expired_batch[-1]
