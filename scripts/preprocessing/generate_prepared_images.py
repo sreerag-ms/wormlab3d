@@ -56,7 +56,15 @@ def generate_prepared_images(
             logger.info('No frames found!')
             continue
 
-        reader = trial.get_video_triplet_reader(use_uncompressed_videos=use_uncompressed_videos)
+        # Load video reader
+        try:
+            reader = trial.get_video_triplet_reader(use_uncompressed_videos=use_uncompressed_videos)
+        except Exception as e:
+            if use_uncompressed_videos and len(trial.videos_uncompressed) == 0:
+                logger.warning(f'Failed to instantiate triplet reader! {e}')
+                continue
+            else:
+                raise e
 
         # Iterate over the frames
         for frame_id in frame_ids:
