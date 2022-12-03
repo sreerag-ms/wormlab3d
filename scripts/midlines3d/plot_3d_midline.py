@@ -25,7 +25,7 @@ from wormlab3d.toolkit.plot_utils import equal_aspect_ratio
 from wormlab3d.toolkit.util import parse_target_arguments
 from wormlab3d.trajectories.util import fetch_reconstruction, smooth_trajectory
 
-img_extension = 'png'
+img_extension = 'svg'
 show_plots = False
 save_plots = True
 # show_plots = True
@@ -324,20 +324,22 @@ def plot_3d_construction(
         os.makedirs(save_dir, exist_ok=True)
 
     # Plot curvatures
-    plt.rc('xtick', labelsize=7)  # fontsize of the x tick labels
+    plt.rc('axes', labelsize=6)  # fontsize of the axis labels
+    plt.rc('xtick', labelsize=6)  # fontsize of the x tick labels
     plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
     plt.rc('xtick.major', pad=2)
     plt.rc('ytick.major', pad=1, size=2)
+    plt.rc('legend', fontsize=5.5)  # fontsize of the legend
 
-    fig, ax = plt.subplots(1, figsize=(1.1, 0.8), gridspec_kw={
-        'left': 0.13,
+    fig, ax = plt.subplots(1, figsize=(1.2, 0.8), gridspec_kw={
+        'left': 0.22,
         'right': 0.96,
-        'top': 0.98,
+        'top': 0.95,
         'bottom': 0.21,
     })
     ax.spines['top'].set_visible(False)
-    ax.plot(smooth_trajectory(NF.m1, window_len=curvature_smoothing), color=m1_colour)
-    ax.plot(smooth_trajectory(NF.m2, window_len=curvature_smoothing), color=m2_colour)
+    ax.plot(smooth_trajectory(NF.m1, window_len=curvature_smoothing), color=m1_colour, label='$m^1$')
+    ax.plot(smooth_trajectory(NF.m2, window_len=curvature_smoothing), color=m2_colour, label='$m^2$')
 
     # Set up x-axis
     ax.set_xticks([])
@@ -346,15 +348,21 @@ def plot_3d_construction(
     ax.set_xticklabels(['H', 'T'])
 
     # Add n0 label
-    trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
-    ax.text(start_idx, -0.08, '$n_0$', color=cmaplist[start_idx] / 255, fontsize=7, fontweight='bold',
-            horizontalalignment='center', verticalalignment='top', transform=trans)
+    if start_idx != 0:
+        trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
+        ax.text(start_idx, -0.08, '$n_0$', color=cmaplist[start_idx] / 255, fontsize=7, fontweight='bold',
+                horizontalalignment='center', verticalalignment='top', transform=trans)
 
     # Set up y-axis
     ylim = max(np.concatenate([np.abs(NF.m1), np.abs(NF.m1)])) * 1.05
     ax.set_ylim(bottom=-ylim, top=ylim)
     ax.set_yticks([-5, 0, 5])
-    ax.axvline(x=start_idx, ymin=-0.1, ymax=0.92, linestyle=':', color='grey')
+    if start_idx != 0:
+        ax.axvline(x=start_idx, ymin=-0.1, ymax=0.92, linestyle=':', color='grey')
+    ax.set_ylabel('Curvature (mm$^{-1}$)', labelpad=-1)
+
+    # Legend
+    ax.legend(loc='lower right', ncol=2)
 
     if save_plots:
         path = save_dir / f'curvatures.{img_extension}'
@@ -746,11 +754,11 @@ def plot_reprojection_singles(
 if __name__ == '__main__':
     # from wormlab3d.toolkit.plot_utils import interactive_plots
     # interactive_plots()
-    # reconstruction_, frame_, X_, points_2d_ = get_midline()
+    reconstruction_, frame_, X_, points_2d_ = get_midline()
     # plot_3d(reconstruction_, frame_, X_)
     # plot_3d_mlab(reconstruction_, frame_, X_, interactive=False, transparent_bg=True)
     # plot_3d_with_points_mlab(reconstruction_, frame_, X_, interactive=False, transparent_bg=True, n_points=33)
-    # plot_3d_construction(reconstruction_, frame_, X_, n_points=33, start_idx=40, n_stages=4, curvature_smoothing=11)
+    plot_3d_construction(reconstruction_, frame_, X_, n_points=33, start_idx=0, n_stages=4, curvature_smoothing=11)
     # plot_n0_distribution(start_idx=40)
     # plot_3d_with_pca(reconstruction_, frame_, X_)
     # plot_reprojections(reconstruction_, frame_, points_2d_)
@@ -759,5 +767,5 @@ if __name__ == '__main__':
     # plot_reprojection_singles(reconstruction_, frame_, points_2d_, with_midline=False)
 
     # plot_3d_pca_sequence(frame_nums=[13788,13854,13931])  # (azim, elev, roll) = (10, 100, -10)
-    plot_3d_pca_sequence(frame_nums=[14378, 14474, 14533])
+    # plot_3d_pca_sequence(frame_nums=[14378, 14474, 14533])
     # plot_3d_pca_sequence(frame_nums=[13931,])
