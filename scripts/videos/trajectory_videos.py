@@ -1,6 +1,7 @@
 import os
 import time
 from argparse import ArgumentParser, Namespace
+from datetime import datetime
 from pathlib import PosixPath
 from typing import Dict, Any, Tuple, Callable
 
@@ -8,37 +9,30 @@ import cv2
 import ffmpeg
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
 import yaml
 from matplotlib.figure import Figure
 from mayavi import mlab
 
-from wormlab3d import PREPARED_IMAGES_PATH
 from wormlab3d import logger, START_TIMESTAMP, LOGS_PATH
-from wormlab3d.data.model import Reconstruction, Frame, Trial
+from wormlab3d.data.model import Reconstruction, Trial
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
-from wormlab3d.midlines3d.mf_render_wrapper import RenderWrapper
-from wormlab3d.midlines3d.project_render_score import ProjectRenderScoreModel
 from wormlab3d.midlines3d.trial_state import TrialState
-from wormlab3d.midlines3d.util import generate_annotated_images
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.postures.plot_utils import FrameArtistMLab
-from wormlab3d.toolkit.plot_utils import overlay_image
-from wormlab3d.toolkit.util import print_args, str2bool, to_dict
+from wormlab3d.toolkit.plot_utils import overlay_image, make_box_outline, to_rgb
+from wormlab3d.toolkit.util import print_args, to_dict
 from wormlab3d.trajectories.cache import get_trajectory
 from wormlab3d.trajectories.util import smooth_trajectory
 
 # Off-screen rendering
 mlab.options.offscreen = True
 
-plt.rcParams['font.family'] = 'Helvetica'
-
 
 def get_args() -> Namespace:
     """
     Parse command line arguments.
     """
-    parser = ArgumentParser(description='Wormlab3D script to generate a basic exemplar video.')
+    parser = ArgumentParser(description='Wormlab3D script to generate trajectory videos.')
 
     # Target
     parser.add_argument('--spec', type=str, help='Load spec from file (relative to logs path).')
@@ -47,8 +41,9 @@ def get_args() -> Namespace:
     # Video
     parser.add_argument('--width', type=int, default=1200, help='Width of video in pixels.')
     parser.add_argument('--height', type=int, default=900, help='Height of video in pixels.')
-    parser.add_argument('--fps', type=int, default=25, help='Video framerate.')
-    parser.add_argument('--buffer-window', type=int, help='Number of frames to load either side of the clip.')
+    parser.add_argument('--fps', type=int, default=25, help='Video output framerate.')
+    parser.add_argument('--clip-duration', type=int, default=30, help='Duration of each clip.')
+    parser.add_argument('--speed', type=int, default=2, help='Speedup factor.')
 
     # Trajectory
     parser.add_argument('--trajectory-point', type=int, default=-1, help='Trajectory point.')
@@ -61,16 +56,10 @@ def get_args() -> Namespace:
     # 3D plot
     parser.add_argument('--revolution-rate', type=float, default=1 / 3,
                         help='Rate of 3D plot revolution in revolutions/minute.')
-    parser.add_argument('--distance', type=float, default=2.,
+    parser.add_argument('--distance', type=float, default=10.,
                         help='Camera distance in worm lengths.')
-
-    # Renders/midline
-    parser.add_argument('--overlay-midlines', type=str2bool, default=True,
-                        help='Add midlines to the rendered images.')
-    parser.add_argument('--show-renders', type=str2bool, default=False,
-                        help='Show renders alongside the images.')
-    parser.add_argument('--renders-white-at', type=float, default=0.1,
-                        help='What pixel intensity below which to set to zero for the renders.')
+    parser.add_argument('--outline-mode', type=str, default='xyz', choices=['xyz', 'pca', 'none'],
+                        help='Add outline box in the main axis mode (xyz, default), by PCA components (pca) or none.')
 
     args = parser.parse_args()
     assert args.spec is not None, 'This script requires setting --spec=path.'
@@ -81,23 +70,45 @@ def get_args() -> Namespace:
 def _make_info_panel(
         width: int,
         height: int,
-        caption: str
+        caption: str,
+        speed: int,
+        reconstruction: Reconstruction,
 ) -> Tuple[Figure, Callable]:
     """
     Info panel.
     """
     logger.info('Building infos plot.')
+    trial = reconstruction.trial
+    if caption != '':
+        caption += '\n'
+    r_end_frame = reconstruction.end_frame_valid
 
     # Create figure
     fig = plt.figure(figsize=(width / 100, height / 100))
     ax = fig.add_subplot(111)
     ax.axis('off')
-    fig.text(0.05, 0.95, caption, ha='left', va='top',
-             fontsize=18, linespacing=1.5, fontweight='bold')
-    fig.canvas.draw()
+
+    def get_details(frame_num: int) -> str:
+        curr_time = datetime.fromtimestamp(np.floor(frame_num / trial.fps))
+        total_time = datetime.fromtimestamp(np.floor(r_end_frame / trial.fps))
+        return caption + \
+               f'Concentration: {trial.experiment.concentration}%\n' \
+               f'Time: {curr_time:%M:%S}/{total_time:%M:%S}\n' \
+               f'Speed: {speed}x'
+
+    # Details
+    text = fig.text(0.05, 0.95, get_details(0), ha='left', va='top', fontsize=20, linespacing=1.5)
+
+    def update(frame_num: int):
+        # Update the text
+        text.set_text(get_details(frame_num))
+
+        # Redraw the canvas
+        fig.canvas.draw()
+
     fig.tight_layout()
 
-    return fig
+    return fig, update
 
 
 def _make_3d_plot(
@@ -138,8 +149,21 @@ def _make_3d_plot(
     fig.scene.anti_aliasing_frames = 20
 
     # Render the trajectory with simple lines
-    path = mlab.plot3d(*X_trajectory.T, s, opacity=0.4, tube_radius=None, line_width=8)
+    path = mlab.plot3d(*X_trajectory.T, s, opacity=0.2, tube_radius=0.015)
     path.module_manager.scalar_lut_manager.lut.table = cmaplist
+
+    if args.outline_mode == 'xyz':
+        mlab.outline(path, color=(0, 0, 0), figure=fig)
+    elif args.outline_mode == 'pca':
+        # Add outline box aligned with PCA components
+        lines = make_box_outline(X=X_trajectory, use_extents=True)
+        for l in lines:
+            mlab.plot3d(
+                *l.T,
+                figure=fig,
+                color=to_rgb('darkgrey'),
+                tube_radius=0.001,
+            )
 
     # Smooth the midpoints for nicer camera tracking
     mps = np.zeros((T, 3))
@@ -152,10 +176,11 @@ def _make_3d_plot(
     fa = FrameArtistMLab(
         NF,
         use_centred_midline=False,
-        midline_opts={'opacity': 1, 'line_width': 8},
+        # midline_opts={'opacity': 1, 'line_width': 8},
+        mesh_opts={'opacity': 1},
         surface_opts={'radius': 0.024 * lengths.mean()}
     )
-    fa.add_midline(fig)
+    # fa.add_midline(fig)
     fa.add_surface(fig, v_min=-curvatures.max(), v_max=curvatures.max())
 
     # Aspects
@@ -174,103 +199,14 @@ def _make_3d_plot(
     return fig, update
 
 
-def _resize_image_panel(
-        width: int,
-        height: int,
-        images: np.ndarray
-) -> np.ndarray:
-    """
-    Resize a set of images or renders.
-    """
-    panel = np.ones((height, width, 3), dtype=np.uint8) * 155
-    rh = height / images.shape[0]
-    rw = width / images.shape[1]
-    if images.shape[0] * rw > height:
-        images = cv2.resize(images, None, fx=rh, fy=rh)
-        new_width = images.shape[1]
-        offset = int((width - new_width) / 2)
-        panel[:, offset:offset + new_width] = images
-    else:
-        images = cv2.resize(images, None, fx=rw, fy=rw)
-        new_height = images.shape[0]
-        offset = int((height - new_height) / 2)
-        panel[offset:offset + new_height] = images
-
-    return panel
-
-
-def _generate_annotated_images(
-        width: int,
-        height: int,
-        image_triplet: np.ndarray,
-        points_2d: np.ndarray,
-        overlay_midlines: bool
-) -> np.ndarray:
-    """
-    Prepare images with overlaid midlines as connecting lines between vertices.
-    """
-    if overlay_midlines:
-        images = generate_annotated_images(image_triplet, points_2d)
-        images = images.transpose(1, 0, 2)
-    else:
-        images = []
-        for img in image_triplet:
-            z = ((1 - img) * 255).astype(np.uint8)
-            z = cv2.cvtColor(z, cv2.COLOR_GRAY2BGR)
-            images.append(z)
-        images = np.fliplr(np.concatenate(images))
-
-    panel = _resize_image_panel(width, height, images)
-    return panel
-
-
-def _get_reds(
-        white_at: float = 0.1,
-) -> np.ndarray:
-    """
-    Get the alpha-blended red colours.
-    """
-    cm = plt.get_cmap('Reds')
-    reds = cm(np.linspace(0, 1, 256))[..., :3]
-    reds[:int(255 * white_at)] = (1, 1, 1)
-    reds = (reds * 255).astype(np.uint8)
-    return reds
-
-
-def _make_renders(
-        width: int,
-        height: int,
-        renderer: RenderWrapper,
-        white_at: float = 0.1,
-) -> Callable:
-    """
-    Prepare rendered images.
-    """
-    reds = _get_reds(white_at)
-
-    def update(frame_num: int):
-        renderer.frame = renderer.ts.trial.get_frame(frame_num)
-        renderer.points_2d = torch.from_numpy(renderer.ts.get('points_2d', frame_num, frame_num + 1).copy())
-        renderer.init_params()
-        masks, blobs = renderer.get_masks_and_blobs()
-        masks = (masks * 255).astype(np.uint8)
-        renders = np.take(reds, masks, axis=0)
-        renders = np.fliplr(np.concatenate(renders, axis=0))
-        renders = _resize_image_panel(width, height, renders)
-
-        return renders
-
-    return update
-
-
 def prepare_panels(
         args: Namespace,
         reconstruction: Reconstruction,
-        start_frame: int,
-        end_frame: int,
+        frame_num: int,
         caption: str,
         distance: float,
         azim_offset: int,
+        speed: int,
 ):
     """
     Prepare the panel of plots for the given reconstruction.
@@ -278,15 +214,8 @@ def prepare_panels(
     logger.info(f'Preparing panels for reconstruction {reconstruction.id}.')
     assert reconstruction.source == M3D_SOURCE_MF, 'Only MF reconstructions supported!'
     trial = reconstruction.trial
-    if args.buffer_window is not None:
-        r_start_frame = max(reconstruction.start_frame_valid, start_frame - args.buffer_window)
-        r_end_frame = min(reconstruction.end_frame_valid, end_frame + args.buffer_window)
-    else:
-        r_start_frame = reconstruction.start_frame_valid
-        r_end_frame = reconstruction.end_frame_valid
-
-    # Instantiate renderer
-    renderer = RenderWrapper(reconstruction, trial.get_frame(r_start_frame))
+    r_start_frame = reconstruction.start_frame_valid
+    r_end_frame = reconstruction.end_frame_valid
 
     # Fetch raw posture data
     common_args = {
@@ -323,38 +252,19 @@ def prepare_panels(
     # Calculate parameters
     logger.info('Calculating/loading values.')
     ts = TrialState(reconstruction)
-    points_3d = ts.get('points')
-    if args.smoothing_window_postures > 1:
-        points_3d = smooth_trajectory(points_3d, args.smoothing_window_postures)
-    points_3d_base = ts.get('points_3d_base')
-    points_2d_base = ts.get('points_2d_base')
     lengths = ts.get('length', r_start_frame, r_end_frame + 1)[:, 0]
-    cam_coeffs = np.concatenate([
-        ts.get(f'cam_{k}')
-        for k in ['intrinsics', 'rotations', 'translations', 'distortions', 'shifts', ]
-    ], axis=2)
-    prs = ProjectRenderScoreModel(image_size=trial.crop_size)
 
     # Build plots
-    imgs_width = int(args.height / 3)
-    if args.show_renders:
-        imgs_width *= 2
-        update_renders = _make_renders(
-            width=int(args.height / 3),
-            height=int(args.height),
-            renderer=renderer,
-            white_at=args.renders_white_at
-        )
-
-    fig_info = _make_info_panel(
-        width=int(args.width - imgs_width),
+    fig_info, update_infos = _make_info_panel(
+        width=args.width,
         height=args.height,
-        caption=caption
+        caption=caption,
+        speed=speed,
+        reconstruction=reconstruction,
     )
-    plot_info = np.asarray(fig_info.canvas.renderer._renderer).take([0, 1, 2], axis=2)
 
     fig_3d, update_3d_plot = _make_3d_plot(
-        width=int(args.width - imgs_width),
+        width=args.width,
         height=args.height,
         trial=trial,
         X_postures=Xp,
@@ -366,80 +276,24 @@ def prepare_panels(
         args=args,
     )
 
-    # Fetch the frames
-    logger.info('Querying database for frames.')
-    pipeline = [
-        {'$match': {
-            'trial': trial.id,
-            'frame_num': {
-                '$gte': start_frame,
-                '$lte': end_frame,
-            }
-        }},
-        {'$project': {
-            '_id': 1,
-            'frame_num': 1,
-        }},
-    ]
-    cursor = Frame.objects().aggregate(pipeline, allowDiskUse=True)
-
-    frame_nums = []
-    for i, res in enumerate(cursor):
-        n = res['frame_num']
-
-        # Check we don't miss any frames
-        if i == 0:
-            assert n == start_frame
-            n0 = n
-        assert n == n0 + i
-
-        frame_nums.append(n)
+    # Figure out which frames to display
+    n_frames = int(args.clip_duration * speed * trial.fps)
+    start_frame = max(r_start_frame, int(frame_num - n_frames / 2))
+    end_frame = min(r_end_frame, start_frame + n_frames)
+    frame_nums = np.arange(start_frame, end_frame + 1)
 
     def prepare_frame(i: int) -> np.ndarray:
-        n = frame_nums[i]
-        # Check images are present
-        img_path = PREPARED_IMAGES_PATH / f'{trial.id:03d}' / f'{n:06d}.npz'
-        image_triplet = np.load(img_path)['images']
-        if image_triplet.shape != (3, trial.crop_size, trial.crop_size):
-            raise RuntimeError('Prepared images are the wrong size, regeneration needed!')
-
-        # Generate the annotated images
-        points_2d = prs._project_to_2d(
-            cam_coeffs=torch.from_numpy(cam_coeffs[n][None, ...]),
-            points_3d=torch.from_numpy(points_3d[n][None, ...]),
-            points_3d_base=torch.from_numpy(points_3d_base[n][None, ...].astype(np.float32)),
-            points_2d_base=torch.from_numpy(points_2d_base[n][None, ...].astype(np.float32)),
-        )
-        points_2d = points_2d[0].numpy().transpose(1, 0, 2)
-        points_2d = np.round(points_2d).astype(np.int32)
-
-        # Prepare images
-        images = _generate_annotated_images(
-            width=int(args.height / 3),
-            height=int(args.height),
-            image_triplet=image_triplet,
-            points_2d=points_2d,
-            overlay_midlines=args.overlay_midlines
-        )
-
-        if args.show_renders:
-            renders = update_renders(n)
-            images[:, -1] = 0
-            images = np.concatenate([images, renders], axis=1)
-
         # Update the plots and extract renders
-        update_3d_plot(start_frame - r_start_frame + i)
+        n = start_frame - r_start_frame + i
+        update_3d_plot(n)
+        update_infos(n)
         plot_3d = mlab.screenshot(mode='rgb', antialiased=True, figure=fig_3d)
         plot_3d = cv2.resize(plot_3d, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA)
+        plot_info = np.asarray(fig_info.canvas.renderer._renderer).take([0, 1, 2], axis=2)
 
         # Overlay plot info on top of 3d panel
         plot_3d = overlay_image(plot_3d, plot_info, x_offset=0, y_offset=0)
-
-        # Join plots and images and write to stream
-        images[int(args.height / 3)] = 0
-        images[int(args.height / 3 * 2)] = 0
-        images[:, -1] = 0
-        frame = np.concatenate([images, plot_3d], axis=1)
+        frame = plot_3d
 
         return frame
 
@@ -453,33 +307,38 @@ def generate_clip(
         clip_idx: int
 ):
     """
-    Generate a basic exemplar video showing a rotating 3D worm along a trajectory
-    and camera images with overlaid 2D midline reprojections.
+    Generate a trajectory video showing a 3D worm moving along a trajectory.
     """
     reconstruction = Reconstruction.objects.get(id=clip['reconstruction'])
     update_fn, frame_nums = prepare_panels(
         args=args,
         reconstruction=reconstruction,
-        start_frame=clip['start'],
-        end_frame=clip['end'],
+        frame_num=clip['frame_num'],
         caption=clip['caption'] if 'caption' in clip else '',
         azim_offset=clip['azim_offset'] if 'azim_offset' in clip else 0,
-        distance=clip['distance'] if 'distance' in clip else args.distance
+        distance=clip['distance'] if 'distance' in clip else args.distance,
+        speed=clip['speed'] if 'speed' in clip else args.speed,
     )
 
     # Initialise ffmpeg process
-    output_path = output_dir / f'{clip_idx:03d}_trial={reconstruction.trial.id}_r={reconstruction.id}_f={clip["start"]}-{clip["end"]}'
+    output_path = output_dir / f'{clip_idx:03d}_trial={reconstruction.trial.id}_r={reconstruction.id}_f={frame_nums[0]}-{frame_nums[-1]}'
+    input_args = {
+        'format': 'rawvideo',
+        'pix_fmt': 'rgb24',
+        's': f'{args.width}x{args.height}',
+        'r': len(frame_nums) / args.clip_duration,
+    }
     output_args = {
         'pix_fmt': 'yuv444p',
         'vcodec': 'libx264',
         'r': args.fps,
-        # 'metadata:g:0': f'title=Trial {reconstruction.trial.id}. Reconstruction {reconstruction.id}. Frame #{clip["frame_num"]}',
-        # 'metadata:g:1': 'artist=Leeds Wormlab',
+        'metadata:g:0': f'title=Trial {reconstruction.trial.id}. Reconstruction {reconstruction.id}. Frames {frame_nums[0]}-{frame_nums[-1]}',
+        'metadata:g:1': 'artist=Leeds Wormlab',
         'metadata:g:2': f'year={time.strftime("%Y")}',
     }
     process = (
         ffmpeg
-            .input('pipe:', format='rawvideo', pix_fmt='rgb24', s=f'{args.width}x{args.height}')
+            .input('pipe:', **input_args)
             .output(str(output_path) + '.mp4', **output_args)
             .overwrite_output()
             .run_async(pipe_stdin=True)
@@ -529,8 +388,7 @@ def generate_from_spec():
     clips = spec['clips']
     for i, clip in enumerate(clips):
         assert 'reconstruction' in clip
-        assert 'start' in clip
-        assert 'end' in clip
+        assert 'frame_num' in clip
 
         logger.info(f'Generating clip {i + 1}/{len(clips)}.')
         generate_clip(
