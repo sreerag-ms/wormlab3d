@@ -13,8 +13,8 @@ from simple_worm.plot3d import generate_interactive_scatter_clip
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d import logger
 from wormlab3d.data.model import Reconstruction
-from wormlab3d.postures.helicities import calculate_helicities, plot_helicities
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
+from wormlab3d.postures.helicities import calculate_helicities, plot_helicities
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.toolkit.util import print_args
 from wormlab3d.trajectories.cache import get_trajectory
@@ -23,7 +23,7 @@ from wormlab3d.trajectories.util import calculate_speeds, calculate_rotation_mat
 
 # tex_mode()
 
-show_plots = False
+show_plots = True
 save_plots = True
 img_extension = 'svg'
 
@@ -190,40 +190,43 @@ def traces_condensed(x_label: str = 'time'):
         'smoothing_window': 25
     }
 
+    y_max = 0.22
+    y_min = -0.22
+
     regions = {
         'forwards_1': {
             'start': 13700,
             'end': 14135,
             'y1': 0.,
-            'y2': 0.008 * 25,
+            'y2': y_max,
             'color': 'green'
         },
         'reversal': {
             'start': 14135,
             'end': 14185,
-            'y1': -0.008 * 25,
-            'y2': 0.008 * 25,
+            'y1': y_min,
+            'y2': y_max,
             'color': 'skyblue'
         },
         'backwards': {
             'start': 14185,
-            'end': 14375,
-            'y1': -0.008 * 25,
+            'end': 14400,
+            'y1': y_min,
             'y2': 0.,
             'color': 'red'
         },
         'reorientation': {
-            'start': 14375,
+            'start': 14400,
             'end': 14550,
-            'y1': -0.008 * 25,
-            'y2': 0.008 * 25,
+            'y1': y_min,
+            'y2': y_max,
             'color': 'violet'
         },
         'forwards_2': {
             'start': 14550,
             'end': 14750,
             'y1': 0.,
-            'y2': 0.008 * 25,
+            'y2': y_max,
             'color': 'green'
         },
     }
@@ -246,7 +249,7 @@ def traces_condensed(x_label: str = 'time'):
     nonp = pcas.nonp
 
     # Helicity
-    logger.info('Calculating helicity')
+    logger.info('Calculating helicities.')
     H = calculate_helicities(X)
 
     # Eigenworms embeddings
@@ -254,9 +257,24 @@ def traces_condensed(x_label: str = 'time'):
     X_ew = ew.transform(np.array(Z))
 
     # Plot
+    plt.rc('axes', labelsize=6)  # fontsize of the X label
+    plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+    plt.rc('legend', fontsize=5)  # fontsize of the legend
+    plt.rc('xtick.major', pad=2, size=2)
+    plt.rc('ytick.major', pad=2, size=2)
+
     # fig, axes = plt.subplots(2, figsize=(12, 8), sharex=True)
-    fig = plt.figure(figsize=(12, 8))
-    gs = GridSpec(nrows=3, ncols=1)
+    fig = plt.figure(figsize=(5, 3.2))
+    gs = GridSpec(
+        nrows=3,
+        ncols=1,
+        hspace=0.05,
+        left=0.07,
+        right=0.94,
+        top=0.99,
+        bottom=0.07,
+    )
 
     # Speeds
     ax_sp = fig.add_subplot(gs[0:2, 0])  # axes[0]
@@ -277,28 +295,42 @@ def traces_condensed(x_label: str = 'time'):
         )
 
     ax_sp.axhline(y=0, color='darkgrey')
-    ax_sp.plot(ts, speeds)
-    ax_sp.set_ylabel('Speed (mm/s)')
+    ax_sp.plot(ts, speeds, color='black')
+    ax_sp.set_ylabel('Speed (mm/s)', labelpad=1)
+    ax_sp.set_xticks([])
+    ax_sp.set_yticks([-0.2, -0.1, 0, 0.1, 0.2])
     # ax.grid()
+    ax_sp.set_ylim(bottom=y_min, top=y_max)
+    ax_sp.set_xlim(left=ts[0], right=ts[-1])
+    ax_sp.spines['right'].set_visible(False)
 
     # Planarities
     ax_nonp = ax_sp.twinx()
     ax_nonp.plot(ts, nonp, color='orange', alpha=0.6, linestyle='--')
-    ax_nonp.set_ylabel('Non-planarity', rotation=270, labelpad=15)
-    ax_nonp.axhline(y=0, color='darkgrey')
+    ax_nonp.set_ylabel('Non-planarity / Helicity', rotation=270, labelpad=8)
+    # ax_nonp.axhline(y=0, color='darkgrey')
     ax_nonp.set_yticks([0, 0.1, 0.2])
     ax_nonp.set_yticklabels([0, 0.1, 0.2])
+    ax_nonp.set_ylim(bottom=0, top=nonp.max() * 1.03)
+    ax_nonp.spines['right'].set_linewidth(1.5)
+    ax_nonp.spines['right'].set_linestyle((0, (3, 2)))
+    ax_nonp.spines['right'].set_alpha(0.8)
+    ax_nonp.spines['right'].set_color('orange')
 
     # Helicity
     ax_hel = ax_sp.twinx()
     ax_hel.set_yticks([])
     h_lim = np.abs(H).max() * 1.1
     ax_hel.set_ylim(bottom=-h_lim, top=h_lim)
+    ax_hel.spines['right'].set_visible(False)
+    # ax_hel.plot(ts, H, color='peru', linewidth=0.2)
     plot_helicities(
         ax=ax_hel,
         helicities=H,
         xs=ts,
-        alpha_max=0.8
+        alpha_max=0.8,
+        colour_pos='grey',
+        colour_neg='grey',
     )
 
     # Eigenworms - absolute values
@@ -306,7 +338,7 @@ def traces_condensed(x_label: str = 'time'):
     default_colours = prop_cycle.by_key()['color']
     component_colours = [default_colours[i] for i in range(len(args.plot_components))]
 
-    ax_sp = fig.add_subplot(gs[2, 0])
+    ax_lam = fig.add_subplot(gs[2, 0])
     for i in args.plot_components:
         for j, (k, region) in enumerate(regions.items()):
             idxs = region['start'] - args.start_frame, region['end'] - args.start_frame + 1
@@ -318,22 +350,22 @@ def traces_condensed(x_label: str = 'time'):
             if k in ['forwards_1', 'forwards_2', 'backwards', 'reversal']:
                 if i in [0, 1]:
                     alpha = 0.8
-                    linewidth = 2
+                    linewidth = 1.5
                     add_label = k == 'forwards_1'
                 else:
                     alpha = 0.25
-                    linewidth = 1
+                    linewidth = 0.8
                     add_label = False
             elif k == 'reorientation':
                 if i in [0, 1]:
                     alpha = 0.25
-                    linewidth = 1
+                    linewidth = 0.8
                     add_label = False
                 else:
                     alpha = 0.8
-                    linewidth = 2
+                    linewidth = 1.5
                     add_label = True
-            ax_sp.plot(
+            ax_lam.plot(
                 x_r,
                 np.abs(X_ew[idxs[0]:idxs[1], i]),
                 color=component_colours[i],
@@ -342,20 +374,17 @@ def traces_condensed(x_label: str = 'time'):
                 linewidth=linewidth
             )
 
-        # ax.plot(ts, np.abs(X_ew[:, i]), label=i, alpha=0.7)
-    ax_sp.set_ylabel('$|\lambda|$')
-    ax_sp.legend()
-    # ax.grid()
-
-    ax_sp.set_yticks([0, 40, 80])
-    ax_sp.set_yticklabels([0, 40, 80])
+    ax_lam.set_ylabel('$|\lambda|$')
+    ax_lam.legend(loc='upper right', handlelength=1, handletextpad=0.6, labelspacing=0.3,
+                  borderpad=0.5)
+    ax_lam.set_xlim(left=ts[0], right=ts[-1])
+    ax_lam.set_yticks([0, 40, 80])
+    ax_lam.set_yticklabels([0, 40, 80])
 
     if x_label == 'time':
-        ax_sp.set_xlabel('Time (s)')
+        ax_lam.set_xlabel('Time (s)', labelpad=2)
     else:
-        ax_sp.set_xlabel('Frame #')
-
-    fig.tight_layout()
+        ax_lam.set_xlabel('Frame #', labelpad=2)
 
     if save_plots:
         path = LOGS_PATH / f'{START_TIMESTAMP}_traces_condensed_' \

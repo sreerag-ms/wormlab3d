@@ -342,7 +342,7 @@ def _plot_eigenvalues_basic(
     if format == 'paper':
         highlight_idxs = [4, 5]  # 1-based index!
     else:
-        highlight_idxs = [5,]  # 1-based index!
+        highlight_idxs = [4, 5]  # 1-based index!
 
     NPs = []
     Hs = []
@@ -361,15 +361,18 @@ def _plot_eigenvalues_basic(
         plt.rc('xtick.major', pad=2, size=2)
         plt.rc('ytick.major', pad=2, size=2)
         fig, ax = plt.subplots(1, figsize=(2.1, 1.6), gridspec_kw={
-            'left': 0.15,
+            'left': 0.16,
             'right': 0.85,
             'top': 0.98,
-            'bottom': 0.16,
+            'bottom': 0.15,
         })
-        ax.set_xlabel('Component', labelpad=2)
-        ax.set_ylabel('Cumulative variance', labelpad=3)
-        ax.set_yticks([0, 0.4, 0.8, 1.0])
-        ax.set_yticklabels([0, 0.4, 0.8, None])
+        ax.set_xlabel('Component', labelpad=0)
+        ax.set_ylabel('Cumulative variance', labelpad=2)
+        # ax.set_yticks([0, 0.4, 0.8, 1.0])
+        # ax.set_yticklabels([0, 0.4, 0.8, None])
+        ax.set_yticks(vr)
+        ax.set_yticklabels([f'{v:.2f}' if i < 6 else None for i, v in enumerate(vr)])
+        cv_colour = 'black'
 
     else:
         plt.rc('axes', labelsize=9)  # fontsize of the X label
@@ -387,13 +390,15 @@ def _plot_eigenvalues_basic(
         ax.set_ylabel('Cumulative variance', labelpad=8)
         ax.set_yticks(vr)
         ax.set_yticklabels([f'{v:.2f}' if i < 6 else None for i, v in enumerate(vr)])
+        cv_colour = 'C0'
 
     ax.grid()
-    ax.scatter(xs[1:], vr[1:], zorder=20, s=50)
-    ax.plot(xs, vr, zorder=5, alpha=0.5, linestyle=':')
+    ax.scatter(xs[1:], vr[1:], zorder=20, s=50, c=cv_colour)
+    ax.plot(xs, vr, zorder=5, alpha=0.5, linestyle=':', color=cv_colour)
     ax.set_xlim(0, plot_n_components + 0.5)
     ax.set_ylim(0, 1.05)
     ax.set_xticks([2, 4, 6])
+    ax.spines['right'].set_visible(False)
 
     for highlight_idx in highlight_idxs:
         ax.hlines(xmin=0, xmax=highlight_idx, y=vr[highlight_idx],
@@ -403,25 +408,39 @@ def _plot_eigenvalues_basic(
         # ax.text(-0.1, vr[highlight_idx], f'{vr[highlight_idx]:.2f}',
         #         color='red', fontsize=8, ha='right', va='center', transform=ax.transData)
 
-    ax2 = ax.twinx()
+    ax_nonp = ax.twinx()
     if format == 'paper':
-        ax2.set_ylabel('Non-planarity / Helicity', rotation=270, labelpad=7)
+        ax_nonp.set_ylabel('Non-planarity / Helicity', rotation=270, labelpad=7)
     else:
-        ax2.set_ylabel('Non-planarity / Helicity', rotation=270, labelpad=15)
-    ax2.scatter(xs[1:], NPs, zorder=8, s=50, alpha=0.7, color='orange', marker='x')
-    ax2.plot(xs[1:], NPs, zorder=4, alpha=0.3, color='orange', linestyle='--')
-    ax2.set_yticks([0, 0.01, 0.02])
-    ax2.set_yticklabels([0, 0.01, 0.02])
+        ax_nonp.set_ylabel('Non-planarity / Helicity', rotation=270, labelpad=15)
+    ax_nonp.scatter(xs[1:], NPs, zorder=8, s=50, alpha=0.7, color='orange', marker='x')
+    ax_nonp.plot(xs[1:], NPs, zorder=4, alpha=0.3, color='orange', linestyle='--')
+    ax_nonp.set_yticks([0, 0.01, 0.02])
+    ax_nonp.set_yticklabels([0, 0.01, 0.02])
+
+    ax_nonp.spines['right'].set_linewidth(1.5)
+    ax_nonp.spines['right'].set_linestyle((0, (3, 2)))
+    ax_nonp.spines['right'].set_alpha(0.8)
+    ax_nonp.spines['right'].set_color('orange')
 
     # Helicity
     ax_hel = ax.twinx()
     ax_hel.set_yticks([])
+    ax_hel.spines['right'].set_visible(False)
     h_lim = np.abs(Hs).max() * 1.1
     ax_hel.set_ylim(bottom=-h_lim, top=h_lim)
     n_fade_lines = 100
     fade_lines_pos = np.linspace(0, Hs.max(), n_fade_lines)
     fade_lines_neg = np.linspace(0, Hs.min(), n_fade_lines)
     alpha_max = 1
+
+    if format == 'paper':
+        hel_col_pos = 'grey'
+        hel_col_neg = 'grey'
+    else:
+        hel_col_pos = 'purple'
+        hel_col_neg = 'green'
+
     for i, H in enumerate(Hs):
         x_bounds = np.array([xs[i + 1] - 0.25, xs[i + 1] + 0.25])
         h = np.ones(2) * H
@@ -432,7 +451,7 @@ def _plot_eigenvalues_basic(
                     np.ones_like(h) * fade_lines_pos[j],
                     h,
                     where=h > fade_lines_pos[j],
-                    color='purple',
+                    color=hel_col_pos,
                     alpha=alpha_max / n_fade_lines,
                     linewidth=0,
                     zorder=-100,
@@ -443,13 +462,11 @@ def _plot_eigenvalues_basic(
                     h,
                     np.ones_like(h) * fade_lines_neg[j],
                     where=h < fade_lines_neg[j],
-                    color='green',
+                    color=hel_col_neg,
                     alpha=alpha_max / n_fade_lines,
                     linewidth=0,
                     zorder=-100,
                 )
-
-    fig.tight_layout()
 
     if save_plots:
         path = LOGS_PATH / f'{START_TIMESTAMP}_eigenvalues_basic_{filename}.{img_extension}'
@@ -623,7 +640,7 @@ def main():
     # _plot_eigenworms_basic_mlab(ew, filename, interactive=False)
     # _plot_eigenworms(ew, title, filename)
     # _plot_eigenvalues(ew, title, filename)
-    _plot_eigenvalues_basic(ew, filename, format='thesis')
+    _plot_eigenvalues_basic(ew, filename, format='paper')
     # if X_full is not None:
     #     _plot_reconstruction(ew, X_full, 500, title, filename)
 

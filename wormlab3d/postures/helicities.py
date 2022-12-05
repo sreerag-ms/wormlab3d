@@ -86,7 +86,9 @@ def plot_helicities(
         helicities: np.ndarray,
         xs: np.ndarray = None,
         alpha_max: int = 1,
-        n_fade_lines: int = 100
+        n_fade_lines: int = 100,
+        colour_pos: str = 'purple',
+        colour_neg: str = 'green',
 ):
     """
     Helper method to plot the helicities on an axes.
@@ -101,7 +103,7 @@ def plot_helicities(
             np.ones_like(helicities) * fade_lines_pos[i],
             helicities,
             where=helicities > fade_lines_pos[i],
-            color='purple',
+            color=colour_pos,
             alpha=alpha_max / n_fade_lines,
             linewidth=0,
         )
@@ -110,7 +112,7 @@ def plot_helicities(
             helicities,
             np.ones_like(helicities) * fade_lines_neg[i],
             where=helicities < fade_lines_neg[i],
-            color='green',
+            color=colour_neg,
             alpha=alpha_max / n_fade_lines,
             linewidth=0,
         )
