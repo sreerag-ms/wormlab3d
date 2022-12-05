@@ -20,7 +20,7 @@ os.makedirs(DATA_CACHE_PATH, exist_ok=True)
 
 show_plots = True
 save_plots = True
-img_extension = 'png'
+img_extension = 'svg'
 
 
 def parse_args() -> Namespace:
@@ -262,9 +262,9 @@ def eigenworm_modulation(
             plt.show()
 
 
-def eigenworm_modulation_tidy():
+def eigenworm_modulation_by_conc():
     """
-    Show how eigenworms vary across concentrations/reconstructions.
+    Show how eigenworms vary across concentrations.
     Make a paper-ready bespoke plot.
     """
     args = parse_args()
@@ -293,23 +293,34 @@ def eigenworm_modulation_tidy():
         i += 1
 
     # Make plots
-    cmap = plt.get_cmap('jet')
-    colours = cmap(np.linspace(0, 1, len(args.plot_components)))
+    # cmap = plt.get_cmap('jet')
+    # colours = cmap(np.linspace(0, 1, len(args.plot_components)))
+    prop_cycle = plt.rcParams['axes.prop_cycle']
+    colours = prop_cycle.by_key()['color']
 
-    fig, axes = plt.subplots(1, figsize=(8, 6), sharex=False, sharey=False)
-    ax = axes
-    ax.set_title('Eigenworm contributions by concentration')
+    plt.rc('axes', labelsize=6)  # fontsize of the X label
+    plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+    plt.rc('legend', fontsize=5)  # fontsize of the legend
+    plt.rc('xtick.major', pad=2, size=2)
+    plt.rc('ytick.major', pad=1, size=2)
+
+    fig, ax = plt.subplots(1, figsize=(2.15, 1.9), gridspec_kw={
+        'left': 0.16,
+        'right': 0.99,
+        'top': 0.97,
+        'bottom': 0.16,
+    })
     ax.set_xticks(ticks)
     ax.set_xticklabels(concs)
-    ax.set_xlabel('Concentration')
-    ax.set_ylabel('Relative contribution')
-    # ax.axhline(y=0, linestyle=':', color='lightgrey', zorder=-1)
+    ax.set_xlabel('Concentration (% gelatin)')
+    ax.set_ylabel('Relative contribution', labelpad=1)
 
     plot_args = dict(
         linewidth=2,
         marker='x',
-        markersize=10,
-        markeredgewidth=4,
+        markersize=7,
+        markeredgewidth=1.5,
         alpha=0.8,
     )
 
@@ -317,7 +328,7 @@ def eigenworm_modulation_tidy():
         ax.plot(
             ticks[:break_at],
             out_conc[:break_at, idx],
-            label=f'$\lambda_{i}$',
+            label=f'$\lambda_{i + 1}$',
             color=colours[i],
             **plot_args
         )
@@ -330,9 +341,9 @@ def eigenworm_modulation_tidy():
             )
 
     if break_at < len(ticks):
-        dx = .04
-        dy = .025
-        dist = 0.06
+        dx = .1
+        dy = .02
+        dist = 0.2
         trans = blended_transform_factory(ax.transData, ax.transAxes)
         break_line_args = dict(transform=trans, color='k', clip_on=False)
         x_div = break_at - 0.5
@@ -340,14 +351,18 @@ def eigenworm_modulation_tidy():
         ax.plot((x_div + dist / 2 - dx, x_div + dist / 2 + dx), (-dy, dy), **break_line_args)
         ax.plot((x_div - dist / 2 - dx, x_div - dist / 2 + dx), (1 - dy, 1 + dy), **break_line_args)
         ax.plot((x_div + dist / 2 - dx, x_div + dist / 2 + dx), (1 - dy, 1 + dy), **break_line_args)
-        ax.axvline(x=x_div, linestyle=':', color='k')
+        # ax.axvline(x=x_div, linestyle=':', color='k')
 
-    ax.legend()
+    ax.set_yticks([0.1, 0.15, 0.2, 0.25])
+    # ax.legend(loc='upper left',  markerscale=0.8, handlelength=1, handletextpad=0.8, labelspacing=1,
+    #           borderpad=0.8, bbox_to_anchor=(1.01, 0.9), bbox_transform=ax.transAxes)
+    ax.legend(loc='upper right', markerscale=0.8, handlelength=1, handletextpad=0.6, labelspacing=0,
+              borderpad=0.7, ncol=5, columnspacing=0.8, bbox_to_anchor=(0.99, 0.98), bbox_transform=ax.transAxes)
     fig.tight_layout()
 
     if save_plots:
         path = LOGS_PATH / (f'{START_TIMESTAMP}'
-                            f'_ew_modulation_tidy'
+                            f'_ew_modulation_conc'
                             f'_ds={ds.id}'
                             f'_ew={ew.id}'
                             f'_plot={",".join([str(c_) for c_ in args.plot_components])}' +
@@ -356,7 +371,133 @@ def eigenworm_modulation_tidy():
                             (f'_spmax={args.max_speed}' if args.max_speed is not None else '') +
                             f'.{img_extension}')
         logger.info(f'Saving plot to {path}.')
-        plt.savefig(path)
+        plt.savefig(path, transparent=True)
+
+    if show_plots:
+        plt.show()
+
+
+def eigenworm_modulation_by_rec():
+    """
+    Show how eigenworms vary across reconstruction.
+    Make a paper-ready bespoke plot.
+    """
+    args = parse_args()
+    ds, ew, lambdas = _generate_or_load_data(args, rebuild_cache=False, cache_only=True)
+    # exclude_concs = []
+    # break_at = 100
+    exclude_concs = [2.75, 4]
+    break_at = 5
+
+    # Determine positions
+    concs = [float(k) for k in lambdas.keys() if k not in exclude_concs]
+    ticks = np.arange(len(concs))
+
+    # Prepare output
+    out_conc = np.zeros((len(concs), ew.n_components))
+    out_reconst = {c: [] for c in concs}
+    out_reconst_stats = np.zeros((len(concs), ew.n_components, 2))
+    i = 0
+    for c, r_vals in lambdas.items():
+        if c in exclude_concs:
+            continue
+        lambdas_c = np.concatenate([v for v in r_vals.values()])
+        out_conc[i] = lambdas_c.sum(axis=0) / lambdas_c.sum()
+        out_reconst[c] = np.array([rv.sum(axis=0) / rv.sum() for rv in r_vals.values()])
+        out_reconst_stats[i] = np.array([out_reconst[c].mean(axis=0), out_reconst[c].std(axis=0)]).T
+        i += 1
+
+    # Make plots
+    prop_cycle = plt.rcParams['axes.prop_cycle']
+    colours = prop_cycle.by_key()['color']
+
+    plt.rc('axes', labelsize=6)  # fontsize of the X label
+    plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+    plt.rc('legend', fontsize=5)  # fontsize of the legend
+    plt.rc('xtick.major', pad=2, size=2)
+    plt.rc('ytick.major', pad=1, size=2)
+
+    fig, ax = plt.subplots(1, figsize=(2.15, 1.9), gridspec_kw={
+        'left': 0.14,
+        'right': 0.99,
+        'top': 0.97,
+        'bottom': 0.15,
+    })
+    ax.set_xticks(ticks)
+    ax.set_xticklabels(concs)
+    ax.set_xlabel('Concentration (% gelatin)')
+    ax.set_ylabel('Relative contribution', labelpad=1)
+    offsets = np.linspace(-0.1, 0.1, len(args.plot_components))
+
+    for i, idx in enumerate(args.plot_components):
+        for j, c in enumerate(concs):
+            ij_vals = out_reconst[c][:, i]
+            ax.scatter(
+                x=np.ones_like(ij_vals) * ticks[j] + offsets[i],
+                y=ij_vals,
+                color=colours[i],
+                marker='o',
+                facecolor='none',
+                s=20,
+                alpha=0.6,
+            )
+
+        means = out_reconst_stats[:, idx, 0]
+        stds = out_reconst_stats[:, idx, 1]
+        ax.errorbar(
+            ticks[:break_at] + offsets[i],
+            means[:break_at],
+            yerr=stds[:break_at],
+            capsize=5,
+            color=colours[i],
+            label=f'$\lambda_{i + 1}$',
+            alpha=0.7,
+        )
+
+        if break_at < len(ticks):
+            ax.errorbar(
+                ticks[break_at:] + offsets[i],
+                means[break_at:],
+                yerr=stds[break_at:],
+                capsize=5,
+                color=colours[i],
+                alpha=0.7,
+            )
+
+    if break_at < len(ticks):
+        dx = .1
+        dy = .02
+        dist = 0.2
+        trans = blended_transform_factory(ax.transData, ax.transAxes)
+        break_line_args = dict(transform=trans, color='k', clip_on=False)
+        x_div = break_at - 0.5
+        ax.plot((x_div - dist / 2 - dx, x_div - dist / 2 + dx), (-dy, dy), **break_line_args)
+        ax.plot((x_div + dist / 2 - dx, x_div + dist / 2 + dx), (-dy, dy), **break_line_args)
+        ax.plot((x_div - dist / 2 - dx, x_div - dist / 2 + dx), (1 - dy, 1 + dy), **break_line_args)
+        ax.plot((x_div + dist / 2 - dx, x_div + dist / 2 + dx), (1 - dy, 1 + dy), **break_line_args)
+
+    ax.set_yticks([0.1, 0.15, 0.2, 0.25])
+
+    # Remove the errorbars from the legend handles
+    handles, labels = ax.get_legend_handles_labels()
+    handles = [h[0] for h in handles]
+    ax.legend(handles, labels, loc='upper right', markerscale=0.8, handlelength=1, handletextpad=0.6, labelspacing=0,
+              borderpad=0.5, ncol=5, columnspacing=0.8, bbox_to_anchor=(0.99, 0.98), bbox_transform=ax.transAxes)
+    fig.tight_layout()
+
+    if save_plots:
+        path = LOGS_PATH / (f'{START_TIMESTAMP}'
+                            f'_ew_modulation_recs'
+                            f'_ds={ds.id}'
+                            f'_ew={ew.id}'
+                            f'_plot={",".join([str(c_) for c_ in args.plot_components])}' +
+                            f'_exc={",".join([str(c_) for c_ in exclude_concs])}' +
+                            (f'_spmin={args.min_speed}' if args.min_speed is not None else '') +
+                            (f'_spmax={args.max_speed}' if args.max_speed is not None else '') +
+                            f'.{img_extension}')
+        logger.info(f'Saving plot to {path}.')
+        plt.savefig(path, transparent=True)
 
     if show_plots:
         plt.show()
@@ -369,4 +510,5 @@ if __name__ == '__main__':
     #     by_concentration=True,
     #     by_reconstruction=True,
     # )
-    eigenworm_modulation_tidy()
+    # eigenworm_modulation_by_conc()
+    eigenworm_modulation_by_rec()
