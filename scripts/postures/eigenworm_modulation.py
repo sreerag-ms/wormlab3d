@@ -377,7 +377,9 @@ def eigenworm_modulation_by_conc():
         plt.show()
 
 
-def eigenworm_modulation_by_rec():
+def eigenworm_modulation_by_rec(
+        layout: str = 'paper'
+):
     """
     Show how eigenworms vary across reconstruction.
     Make a paper-ready bespoke plot.
@@ -411,23 +413,39 @@ def eigenworm_modulation_by_rec():
     prop_cycle = plt.rcParams['axes.prop_cycle']
     colours = prop_cycle.by_key()['color']
 
-    plt.rc('axes', labelsize=6)  # fontsize of the X label
-    plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
-    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
-    plt.rc('legend', fontsize=5)  # fontsize of the legend
-    plt.rc('xtick.major', pad=2, size=2)
-    plt.rc('ytick.major', pad=1, size=2)
+    if layout == 'paper':
+        plt.rc('axes', labelsize=6)  # fontsize of the X label
+        plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+        plt.rc('legend', fontsize=5)  # fontsize of the legend
+        plt.rc('xtick.major', pad=2, size=2)
+        plt.rc('ytick.major', pad=1, size=2)
+        fig, ax = plt.subplots(1, figsize=(2.15, 1.9), gridspec_kw={
+            'left': 0.14,
+            'right': 0.99,
+            'top': 0.97,
+            'bottom': 0.15,
+        })
+        ax.set_xlabel('Concentration (% gelatin)')
+        ax.set_ylabel('Relative contribution', labelpad=1)
+    else:
+        plt.rc('axes', labelsize=9)  # fontsize of the X label
+        plt.rc('xtick', labelsize=8)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=8)  # fontsize of the y tick labels
+        plt.rc('legend', fontsize=8)  # fontsize of the legend
+        plt.rc('xtick.major', pad=2, size=3)
+        plt.rc('ytick.major', pad=2, size=3)
+        fig, ax = plt.subplots(1, figsize=(4.5, 2.6), gridspec_kw={
+            'left': 0.14,
+            'right': 0.84,
+            'top': 0.97,
+            'bottom': 0.18,
+        })
+        ax.set_xlabel('Concentration (% gelatin)', labelpad=5)
+        ax.set_ylabel('Relative contribution', labelpad=8)
 
-    fig, ax = plt.subplots(1, figsize=(2.15, 1.9), gridspec_kw={
-        'left': 0.14,
-        'right': 0.99,
-        'top': 0.97,
-        'bottom': 0.15,
-    })
     ax.set_xticks(ticks)
     ax.set_xticklabels(concs)
-    ax.set_xlabel('Concentration (% gelatin)')
-    ax.set_ylabel('Relative contribution', labelpad=1)
     offsets = np.linspace(-0.1, 0.1, len(args.plot_components))
 
     for i, idx in enumerate(args.plot_components):
@@ -451,7 +469,7 @@ def eigenworm_modulation_by_rec():
             yerr=stds[:break_at],
             capsize=5,
             color=colours[i],
-            label=f'$\lambda_{i + 1}$',
+            label=f'$\lambda_{i + (1 if layout == "paper" else 0)}$',
             alpha=0.7,
         )
 
@@ -466,9 +484,15 @@ def eigenworm_modulation_by_rec():
             )
 
     if break_at < len(ticks):
-        dx = .1
-        dy = .02
-        dist = 0.2
+        if layout == 'paper':
+            dx = .1
+            dy = .02
+            dist = 0.2
+        else:
+            dx = .08
+            dy = .03
+            dist = 0.16
+
         trans = blended_transform_factory(ax.transData, ax.transAxes)
         break_line_args = dict(transform=trans, color='k', clip_on=False)
         x_div = break_at - 0.5
@@ -479,12 +503,16 @@ def eigenworm_modulation_by_rec():
 
     ax.set_yticks([0.1, 0.15, 0.2, 0.25])
 
-    # Remove the errorbars from the legend handles
-    handles, labels = ax.get_legend_handles_labels()
-    handles = [h[0] for h in handles]
-    ax.legend(handles, labels, loc='upper right', markerscale=0.8, handlelength=1, handletextpad=0.6, labelspacing=0,
-              borderpad=0.5, ncol=5, columnspacing=0.8, bbox_to_anchor=(0.99, 0.98), bbox_transform=ax.transAxes)
-    fig.tight_layout()
+    if layout == 'paper':
+        # Remove the errorbars from the legend handles
+        handles, labels = ax.get_legend_handles_labels()
+        handles = [h[0] for h in handles]
+        ax.legend(handles, labels, loc='upper right', markerscale=0.8, handlelength=1, handletextpad=0.6, labelspacing=0,
+                  borderpad=0.5, ncol=5, columnspacing=0.8, bbox_to_anchor=(0.99, 0.98), bbox_transform=ax.transAxes)
+
+    else:
+        ax.legend(loc='upper left',
+                  bbox_to_anchor=(1.01, 0.95), bbox_transform=ax.transAxes)
 
     if save_plots:
         path = LOGS_PATH / (f'{START_TIMESTAMP}'
@@ -511,4 +539,4 @@ if __name__ == '__main__':
     #     by_reconstruction=True,
     # )
     # eigenworm_modulation_by_conc()
-    eigenworm_modulation_by_rec()
+    eigenworm_modulation_by_rec(layout='thesis')
