@@ -5,19 +5,23 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 from matplotlib import cm
+from matplotlib.collections import LineCollection
 from matplotlib.gridspec import GridSpec
 from mayavi import mlab
+from scipy.stats import gaussian_kde
 
 from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT
 from wormlab3d import LOGS_PATH, logger, START_TIMESTAMP
 from wormlab3d.data.model import Eigenworms
+from wormlab3d.data.model import Reconstruction
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.postures.plot_utils import plot_natural_frame_3d_mlab
 from wormlab3d.toolkit.util import print_args, str2bool
+from wormlab3d.trajectories.cache import get_trajectory
 
 interactive = False
-show_plots = False
-save_plots = True
+show_plots = True
+save_plots = False
 img_extension = 'svg'
 eigenworm_length = 1
 eigenworm_scale = 64
@@ -29,9 +33,18 @@ def parse_args() -> Namespace:
     parser.add_argument('--ew', type=str, required=True, help='Eigenworms by id.')
     parser.add_argument('--plot-components', type=lambda s: [item for item in s.split(',')],
                         default='0,1,0+1', help='Comma delimited list of component idxs to plot.')
+
+    # Eigenworm rotation plots
     parser.add_argument('--spiral-scale', type=str2bool, default=False, help='Spiral the scale.')
     parser.add_argument('--n-examples', type=int, default=2, help='Highlight n points and draw 3d plots for each.')
     parser.add_argument('--max-scale', type=int, default=128, help='Maximum scale factor for components.')
+
+    # Coefficient phases plot args
+    parser.add_argument('--reconstruction', type=str, help='Reconstruction by id.')
+    parser.add_argument('--start-frame', type=int, help='Frame number to start from.')
+    parser.add_argument('--end-frame', type=int, help='Frame number to end at.')
+    parser.add_argument('--x-label', type=str, default='time', help='Label x-axis with time or frame number.')
+
     args = parser.parse_args()
 
     print_args(args)
@@ -108,7 +121,6 @@ def plot_phases():
         else:
             raise RuntimeError(f'Unrecognised component {c}')
 
-
         # Plot the example shapes
         for i in range(args.n_examples):
             logger.info(f'Making example {i + 1}/{args.n_examples}')
@@ -117,7 +129,7 @@ def plot_phases():
                 a = r_egs[i] * np.exp(1j * theta_egs[i])
                 NF = NaturalFrame(component * a)
             else:
-                a = r_egs[i] / 2 * c1 + r_egs[i]/2 * np.exp(1j * theta_egs[i]) * c2
+                a = r_egs[i] / 2 * c1 + r_egs[i] / 2 * np.exp(1j * theta_egs[i]) * c2
                 NF = NaturalFrame(a)
 
             # Align main PCA component to z-axis
@@ -177,6 +189,151 @@ def plot_phases():
                     plt.close(fig_mpl)
 
 
+def coefficient_phases():
+    """
+    Coefficient phase plots.
+    """
+    args = parse_args()
+    ew = Eigenworms.objects.get(id=args.ew)
+    assert args.reconstruction is not None, '--reconstruction must be set!'
+    assert args.start_frame is not None, '--start-frame must be set!'
+    assert args.end_frame is not None, '--end-frame must be set!'
+    reconstruction = Reconstruction.objects.get(id=args.reconstruction)
+    n_mesh_points = 100
+    plot_components = [int(c) for c in args.plot_components if '+' not in c]
+    if len(plot_components) == 0:
+        raise RuntimeError('No components to plot!')
+
+    common_args = {
+        'reconstruction_id': args.reconstruction,
+        'smoothing_window': 3,
+        'natural_frame': True,
+    }
+
+    # Eigenworms embeddings for entire clip
+    logger.info('Fetching eigenworms embeddings for entire clip.')
+    Z_all, meta = get_trajectory(**common_args)
+    # Z_all, meta = get_trajectory(**common_args, start_frame=args.start_frame, end_frame=args.end_frame)
+    X_ew_all = ew.transform(np.array(Z_all))
+
+    # Eigenworms embeddings just for requested frames
+    logger.info('Fetching eigenworms embeddings for requested frames.')
+    Z_traj, meta = get_trajectory(**common_args, start_frame=args.start_frame, end_frame=args.end_frame)
+    X_ew_traj = ew.transform(np.array(Z_traj))
+
+    # Rotate the complex numbers so the phase of the first component is zero
+    X_ew_all *= np.exp(-1j * np.angle(X_ew_all[:, 0]))[:, None]
+    X_ew_traj *= np.exp(-1j * np.angle(X_ew_traj[:, 0]))[:, None]
+
+    # Collate and get limits
+    x_all = np.stack([np.real(X_ew_all[:, c]) for c in plot_components])
+    y_all = np.stack([np.imag(X_ew_all[:, c]) for c in plot_components])
+    x_traj = np.stack([np.real(X_ew_traj[:, c]) for c in plot_components])
+    y_traj = np.stack([np.imag(X_ew_traj[:, c]) for c in plot_components])
+    x_max = np.abs(x_all.flatten()).max()
+    y_max = np.abs(y_all.flatten()).max()
+    x_max = np.abs(x_traj.flatten()).max()
+    y_max = np.abs(y_traj.flatten()).max()
+    x_max = max(x_max, y_max)
+    y_max = x_max
+
+    # Construct colours
+    colours = np.linspace(0, 1, len(X_ew_traj))
+    cmap = plt.get_cmap('winter_r')
+
+    # Axis lines
+    ax_args = {
+        'color': 'grey',
+        'linestyle': '--',
+        'linewidth': 0.5,
+    }
+
+    # Interpolate data to make a surface
+    def make_surface(x_, y_):
+        X, Y = np.mgrid[-x_max:x_max:complex(n_mesh_points), -y_max:y_max:complex(n_mesh_points)]
+        positions = np.vstack([X.ravel(), Y.ravel()])
+        values = np.vstack([x_, y_])
+        kernel = gaussian_kde(values)  # , bw_method=0.2)
+        Z = np.reshape(kernel(positions).T, X.shape)
+        return Z
+
+    def plot_heatmap(ax, c, x_all_, y_all_, x_traj_, y_traj_):
+        Z = make_surface(x_all_, y_all_)
+        ax.set_xlabel(f'Re($\lambda_{c}$)', labelpad=4)
+        ax.set_ylabel(f'Im($\lambda_{c}$)', labelpad=2)
+
+        # Add the heatmap
+        ax.axvline(x=0, **ax_args)
+        ax.axhline(y=0, **ax_args)
+        ax.imshow(np.rot90(Z), cmap=plt.get_cmap('YlOrRd'), extent=[-x_max, x_max, -y_max, y_max])
+
+        # Overlay the trajectory
+        X = np.stack([x_traj_, y_traj_], axis=1)
+        points = X[:, None, :]
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
+        lc = LineCollection(segments, array=colours, cmap=cmap, alpha=colours, linewidths=0.5)
+        ax.add_collection(lc)
+        ax.set_xlim([-x_max, x_max])
+        ax.set_ylim([-y_max, y_max])
+        ax.set_yticks([])
+        ax.set_xticks([])
+
+    # Plot
+    plt.rc('axes', labelsize=7, labelpad=1)  # fontsize of the labels
+    plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+    plt.rc('xtick.major', pad=2, size=2)
+    plt.rc('ytick.major', pad=2, size=2)
+
+    fig, axes = plt.subplots(1, len(plot_components), figsize=(len(plot_components) * 1.4, 1.4), gridspec_kw={
+        'wspace': 0.25,
+        'left': 0.05,
+        'right': 0.99,
+        'top': 0.96,
+        'bottom': 0.2,
+    })
+
+    for i, c in enumerate(plot_components):
+        logger.info(f'Plotting component {c}.')
+
+        # First component is only real so just draw a normal plot
+        if c == 0:
+            N = len(Z_traj)
+            if args.x_label == 'time':
+                ts = np.linspace(0, N / reconstruction.trial.fps, N)
+            else:
+                ts = np.arange(N)
+
+            ax = axes[i]
+            for j in range(N - 1):
+                ax.plot(ts[j:j + 2], x_traj[i, j:j + 2], c=cmap(colours[j]), alpha=colours[j])
+            asp = np.diff(ax.get_xlim())[0] / np.diff(ax.get_ylim())[0]
+            ax.set_aspect(asp)
+            ax.set_ylabel(f'Re($\lambda_{c + 1}$)', labelpad=1)
+            # ax.set_yticks([0, 50, 100])
+            if args.x_label == 'time':
+                ax.set_xlabel('Time (s)', labelpad=2)
+            else:
+                ax.set_xlabel('Frame #', labelpad=2)
+
+        # Draw others as trajectories on top of heatmaps
+        else:
+            plot_heatmap(axes[i], c + 1, x_all[i], y_all[i], x_traj[i], y_traj[i])
+
+    if save_plots:
+        path = LOGS_PATH / f'{START_TIMESTAMP}_coefficient_phases' \
+                           f'_r={reconstruction.id}' \
+                           f'_f={args.start_frame}-{args.end_frame}' \
+                           f'_ew={ew.id}' \
+                           f'_c={",".join([str(c) for c in plot_components])}' \
+                           f'.{img_extension}'
+        logger.info(f'Saving plot to {path}.')
+        plt.savefig(path, transparent=True)
+
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if interactive:
         from simple_worm.plot3d import interactive
@@ -185,4 +342,5 @@ if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
 
-    plot_phases()
+    # plot_phases()
+    coefficient_phases()
