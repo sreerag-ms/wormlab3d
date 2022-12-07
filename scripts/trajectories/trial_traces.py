@@ -15,14 +15,14 @@ from wormlab3d.trajectories.util import fetch_annotations, calculate_speeds, cal
 # tex_mode()
 
 show_plots = True
-save_plots = True
+save_plots = False
 img_extension = 'png'
 
 
 def make_filename(method: str, args: Namespace, excludes: List[str] = None):
     if excludes is None:
         excludes = []
-    fn = LOGS_PATH + '/' + START_TIMESTAMP + f'_{method}'
+    fn = LOGS_PATH / f'{START_TIMESTAMP}_{method}'
 
     for k in ['trial', 'frames', 'src', 'smoothing_window', 'directionality', 'Knf', 'K0', 'pw']:
         if k in excludes:

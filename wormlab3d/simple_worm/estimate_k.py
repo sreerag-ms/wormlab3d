@@ -137,8 +137,8 @@ def generate_or_load_K_estimates_cache(
     arg_hash = hash_data(args)
     filename_meta = f'{arg_hash}K.meta'
     filename_K = f'{arg_hash}K.npz'
-    path_meta = K_ESTIMATES_CACHE_PATH + '/' + filename_meta
-    path_K = K_ESTIMATES_CACHE_PATH + '/' + filename_K
+    path_meta = K_ESTIMATES_CACHE_PATH / filename_meta
+    path_K = K_ESTIMATES_CACHE_PATH / filename_K
     if not rebuild_cache and os.path.exists(path_meta) and os.path.exists(path_K):
         try:
             with open(path_meta, 'r') as f:
