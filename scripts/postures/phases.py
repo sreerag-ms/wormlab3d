@@ -21,7 +21,7 @@ from wormlab3d.trajectories.cache import get_trajectory
 
 interactive = False
 show_plots = True
-save_plots = False
+save_plots = True
 img_extension = 'svg'
 eigenworm_length = 1
 eigenworm_scale = 64
@@ -189,7 +189,7 @@ def plot_phases():
                     plt.close(fig_mpl)
 
 
-def coefficient_phases():
+def coefficient_phases(style: str = 'paper'):
     """
     Coefficient phase plots.
     """
@@ -248,6 +248,24 @@ def coefficient_phases():
         'linewidth': 0.5,
     }
 
+    # pads
+    style_vars = {
+        'paper': {
+            'tr_padx': 2,
+            'tr_pady': 1,
+            'heat_padx': 4,
+            'heat_pady': 2,
+            'heat_lw': 0.5,
+        },
+        'thesis': {
+            'tr_padx': 2,
+            'tr_pady': 4,
+            'heat_padx': 4,
+            'heat_pady': 3,
+            'heat_lw': 1.2,
+        }
+    }[style]
+
     # Interpolate data to make a surface
     def make_surface(x_, y_):
         X, Y = np.mgrid[-x_max:x_max:complex(n_mesh_points), -y_max:y_max:complex(n_mesh_points)]
@@ -259,8 +277,8 @@ def coefficient_phases():
 
     def plot_heatmap(ax, c, x_all_, y_all_, x_traj_, y_traj_):
         Z = make_surface(x_all_, y_all_)
-        ax.set_xlabel(f'Re($\lambda_{c}$)', labelpad=4)
-        ax.set_ylabel(f'Im($\lambda_{c}$)', labelpad=2)
+        ax.set_xlabel(f'Re($\lambda_{c}$)', labelpad=style_vars['heat_padx'])
+        ax.set_ylabel(f'Im($\lambda_{c}$)', labelpad=style_vars['heat_pady'])
 
         # Add the heatmap
         ax.axvline(x=0, **ax_args)
@@ -271,7 +289,7 @@ def coefficient_phases():
         X = np.stack([x_traj_, y_traj_], axis=1)
         points = X[:, None, :]
         segments = np.concatenate([points[:-1], points[1:]], axis=1)
-        lc = LineCollection(segments, array=colours, cmap=cmap, alpha=colours, linewidths=0.5)
+        lc = LineCollection(segments, array=colours, cmap=cmap, alpha=colours, linewidths=style_vars['heat_lw'])
         ax.add_collection(lc)
         ax.set_xlim([-x_max, x_max])
         ax.set_ylim([-y_max, y_max])
@@ -279,22 +297,38 @@ def coefficient_phases():
         ax.set_xticks([])
 
     # Plot
-    plt.rc('axes', labelsize=7, labelpad=1)  # fontsize of the labels
-    plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
-    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
-    plt.rc('xtick.major', pad=2, size=2)
-    plt.rc('ytick.major', pad=2, size=2)
+    if style == 'paper':
+        plt.rc('axes', labelsize=7, labelpad=1)  # fontsize of the labels
+        plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+        plt.rc('xtick.major', pad=2, size=2)
+        plt.rc('ytick.major', pad=2, size=2)
+        fig, axes = plt.subplots(1, len(plot_components), figsize=(len(plot_components) * 1.4, 1.4), gridspec_kw={
+            'wspace': 0.25,
+            'left': 0.05,
+            'right': 0.99,
+            'top': 0.96,
+            'bottom': 0.2,
+        })
+    else:
+        plt.rc('axes', labelsize=9)  # fontsize of the X label
+        plt.rc('xtick', labelsize=8)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=8)  # fontsize of the y tick labels
+        plt.rc('legend', fontsize=8)  # fontsize of the legend
+        plt.rc('xtick.major', pad=2, size=3)
+        plt.rc('ytick.major', pad=2, size=3)
 
-    fig, axes = plt.subplots(1, len(plot_components), figsize=(len(plot_components) * 1.4, 1.4), gridspec_kw={
-        'wspace': 0.25,
-        'left': 0.05,
-        'right': 0.99,
-        'top': 0.96,
-        'bottom': 0.2,
-    })
+        fig, axes = plt.subplots(1, len(plot_components), figsize=(len(plot_components) * 1.16, 1.4), gridspec_kw={
+            'wspace': 0.3,
+            'left': 0.07,
+            'right': 0.99,
+            'top': 0.98,
+            'bottom': 0.18,
+        })
 
     for i, c in enumerate(plot_components):
         logger.info(f'Plotting component {c}.')
+        ci = c if style == 'thesis' else c + 1
 
         # First component is only real so just draw a normal plot
         if c == 0:
@@ -309,16 +343,16 @@ def coefficient_phases():
                 ax.plot(ts[j:j + 2], x_traj[i, j:j + 2], c=cmap(colours[j]), alpha=colours[j])
             asp = np.diff(ax.get_xlim())[0] / np.diff(ax.get_ylim())[0]
             ax.set_aspect(asp)
-            ax.set_ylabel(f'Re($\lambda_{c + 1}$)', labelpad=1)
+            ax.set_ylabel(f'Re($\lambda_{ci}$)', labelpad=style_vars['tr_pady'])
             # ax.set_yticks([0, 50, 100])
             if args.x_label == 'time':
-                ax.set_xlabel('Time (s)', labelpad=2)
+                ax.set_xlabel('Time (s)', labelpad=style_vars['tr_padx'])
             else:
-                ax.set_xlabel('Frame #', labelpad=2)
+                ax.set_xlabel('Frame #', labelpad=style_vars['tr_padx'])
 
         # Draw others as trajectories on top of heatmaps
         else:
-            plot_heatmap(axes[i], c + 1, x_all[i], y_all[i], x_traj[i], y_traj[i])
+            plot_heatmap(axes[i], ci, x_all[i], y_all[i], x_traj[i], y_traj[i])
 
     if save_plots:
         path = LOGS_PATH / f'{START_TIMESTAMP}_coefficient_phases' \
@@ -328,7 +362,7 @@ def coefficient_phases():
                            f'_c={",".join([str(c) for c in plot_components])}' \
                            f'.{img_extension}'
         logger.info(f'Saving plot to {path}.')
-        plt.savefig(path, transparent=True)
+        plt.savefig(path)
 
     if show_plots:
         plt.show()
@@ -343,4 +377,4 @@ if __name__ == '__main__':
         os.makedirs(LOGS_PATH, exist_ok=True)
 
     # plot_phases()
-    coefficient_phases()
+    coefficient_phases(style='thesis')

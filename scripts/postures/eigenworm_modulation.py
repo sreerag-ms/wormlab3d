@@ -386,10 +386,10 @@ def eigenworm_modulation_by_rec(
     """
     args = parse_args()
     ds, ew, lambdas = _generate_or_load_data(args, rebuild_cache=False, cache_only=True)
-    # exclude_concs = []
-    # break_at = 100
-    exclude_concs = [2.75, 4]
-    break_at = 5
+    exclude_concs = []
+    breaks_at = [5,6,7]
+    # exclude_concs = [2.75, 4]
+    # break_at = 5
 
     # Determine positions
     concs = [float(k) for k in lambdas.keys() if k not in exclude_concs]
@@ -435,11 +435,11 @@ def eigenworm_modulation_by_rec(
         plt.rc('legend', fontsize=8)  # fontsize of the legend
         plt.rc('xtick.major', pad=2, size=3)
         plt.rc('ytick.major', pad=2, size=3)
-        fig, ax = plt.subplots(1, figsize=(4.5, 2.6), gridspec_kw={
-            'left': 0.14,
-            'right': 0.84,
+        fig, ax = plt.subplots(1, figsize=(5.5, 2.6), gridspec_kw={
+            'left': 0.1,
+            'right': 0.87,
             'top': 0.97,
-            'bottom': 0.18,
+            'bottom': 0.16,
         })
         ax.set_xlabel('Concentration (% gelatin)', labelpad=5)
         ax.set_ylabel('Relative contribution', labelpad=8)
@@ -463,43 +463,38 @@ def eigenworm_modulation_by_rec(
 
         means = out_reconst_stats[:, idx, 0]
         stds = out_reconst_stats[:, idx, 1]
-        ax.errorbar(
-            ticks[:break_at] + offsets[i],
-            means[:break_at],
-            yerr=stds[:break_at],
-            capsize=5,
-            color=colours[i],
-            label=f'$\lambda_{i + (1 if layout == "paper" else 0)}$',
-            alpha=0.7,
-        )
 
-        if break_at < len(ticks):
+        for k, break_at in enumerate(breaks_at):
+            start_idx = 0 if k == 0 else breaks_at[k-1]
+            end_idx = len(ticks) if k == len(breaks_at) else break_at
+            label = f'$\lambda_{i + (1 if layout == "paper" else 0)}$' if k == 0 else None
             ax.errorbar(
-                ticks[break_at:] + offsets[i],
-                means[break_at:],
-                yerr=stds[break_at:],
+                ticks[start_idx:end_idx] + offsets[i],
+                means[start_idx:end_idx],
+                yerr=stds[start_idx:end_idx],
                 capsize=5,
                 color=colours[i],
+                label=label,
                 alpha=0.7,
             )
 
-    if break_at < len(ticks):
-        if layout == 'paper':
-            dx = .1
-            dy = .02
-            dist = 0.2
-        else:
-            dx = .08
-            dy = .03
-            dist = 0.16
+            if break_at < len(ticks):
+                if layout == 'paper':
+                    dx = .1
+                    dy = .02
+                    dist = 0.2
+                else:
+                    dx = .08
+                    dy = .03
+                    dist = 0.16
 
-        trans = blended_transform_factory(ax.transData, ax.transAxes)
-        break_line_args = dict(transform=trans, color='k', clip_on=False)
-        x_div = break_at - 0.5
-        ax.plot((x_div - dist / 2 - dx, x_div - dist / 2 + dx), (-dy, dy), **break_line_args)
-        ax.plot((x_div + dist / 2 - dx, x_div + dist / 2 + dx), (-dy, dy), **break_line_args)
-        ax.plot((x_div - dist / 2 - dx, x_div - dist / 2 + dx), (1 - dy, 1 + dy), **break_line_args)
-        ax.plot((x_div + dist / 2 - dx, x_div + dist / 2 + dx), (1 - dy, 1 + dy), **break_line_args)
+                trans = blended_transform_factory(ax.transData, ax.transAxes)
+                break_line_args = dict(transform=trans, color='k', clip_on=False, linewidth=1)
+                x_div = break_at - 0.5
+                ax.plot((x_div - dist / 2 - dx, x_div - dist / 2 + dx), (-dy, dy), **break_line_args)
+                ax.plot((x_div + dist / 2 - dx, x_div + dist / 2 + dx), (-dy, dy), **break_line_args)
+                ax.plot((x_div - dist / 2 - dx, x_div - dist / 2 + dx), (1 - dy, 1 + dy), **break_line_args)
+                ax.plot((x_div + dist / 2 - dx, x_div + dist / 2 + dx), (1 - dy, 1 + dy), **break_line_args)
 
     ax.set_yticks([0.1, 0.15, 0.2, 0.25])
 
