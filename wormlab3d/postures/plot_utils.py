@@ -164,7 +164,7 @@ class FrameArtistMLab:
 
     def add_surface(self, fig: Scene, cmap_name: str = SURFACE_CMAP_DEFAULT, v_min: float = None, v_max: float = None):
         """
-        Add the initial midline.
+        Add the surface.
         """
         if cmap_name is None:
             cmap_name = SURFACE_CMAP_DEFAULT
@@ -174,7 +174,7 @@ class FrameArtistMLab:
         x, y, z = surface[..., 0], surface[..., 1], surface[..., 2]
         self.surface = mlab.mesh(x, y, z, scalars=K_surf, figure=fig, vmin=v_min, vmax=v_max, **self.mesh_opts)
         self.surface.scene.renderer.use_depth_peeling = True
-        self.surface.scene.renderer.maximum_number_of_peels = 16
+        self.surface.scene.renderer.maximum_number_of_peels = 64
         self.surface.module_manager.scalar_lut_manager.lut.table = cmaplist
 
     def add_outline(
