@@ -7,6 +7,7 @@ class L2(EmbeddedDocument):
     alpha = FloatField(default=0)
     beta = FloatField(default=0)
     gamma = FloatField(default=0)
+    psi0 = FloatField(default=0)
 
 
 class grad_t(EmbeddedDocument):

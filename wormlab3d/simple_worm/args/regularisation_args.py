@@ -11,6 +11,7 @@ class RegularisationArgs(BaseArgs):
             l2_alpha: float = 0.,
             l2_beta: float = 0.,
             l2_gamma: float = 0.,
+            l2_psi0: float = 0.,
             grad_t_alpha: float = 0.,
             grad_t_beta: float = 0.,
             grad_t_gamma: float = 0.,
@@ -23,6 +24,7 @@ class RegularisationArgs(BaseArgs):
         self.l2_alpha = l2_alpha
         self.l2_beta = l2_beta
         self.l2_gamma = l2_gamma
+        self.l2_psi0 = l2_psi0
         self.grad_t_alpha = grad_t_alpha
         self.grad_t_beta = grad_t_beta
         self.grad_t_gamma = grad_t_gamma
@@ -44,6 +46,8 @@ class RegularisationArgs(BaseArgs):
                            help='L2 regularisation penalty on the sum of beta.')
         group.add_argument('--l2-gamma', type=float, default=0,
                            help='L2 regularisation penalty on the sum of gamma.')
+        group.add_argument('--l2-psi0', type=float, default=0,
+                           help='Normalisation penalty on the size of e1.')
         group.add_argument('--grad-t-alpha', type=float, default=0,
                            help='Smoothness in time regularisation penalty on alpha.')
         group.add_argument('--grad-t-beta', type=float, default=0,
@@ -68,6 +72,7 @@ class RegularisationArgs(BaseArgs):
                 'alpha': self.l2_alpha,
                 'beta': self.l2_beta,
                 'gamma': self.l2_gamma,
+                'psi0': self.l2_psi0,
             },
             'grad_t': {
                 'alpha': self.grad_t_alpha,

@@ -12,6 +12,7 @@ class FrameSequenceArgs(BaseArgs):
             sw_run_id: str = None,
             load_fs: bool = True,
             trial: int = None,
+            reconstruction: str = None,
             start_frame: int = None,
             midline_source: str = M3D_SOURCE_RECONST,
             midline_source_file: str = None,
@@ -26,6 +27,7 @@ class FrameSequenceArgs(BaseArgs):
             assert fs_id is None, 'Can only load a FS or SW run as the target, not both!'
         self.load = load_fs
         self.trial_id = trial
+        self.reconstruction_id = reconstruction
         if start_frame is None:
             start_frame = 0
         self.start_frame = start_frame
@@ -46,6 +48,8 @@ class FrameSequenceArgs(BaseArgs):
                            help='Try to load an existing FS if available matching the given parameters.')
         group.add_argument('--trial', type=int,
                            help='Trial database id.')
+        group.add_argument('--reconstruction', type=str,
+                           help='Reconstruction database id.')
         group.add_argument('--start-frame', type=int, default=0,
                            help='Starting frame number of the sequence.')
         group.add_argument('--midline-source', type=str, default=M3D_SOURCE_RECONST, choices=M3D_SOURCES,

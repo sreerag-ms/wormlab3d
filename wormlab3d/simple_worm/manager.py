@@ -28,8 +28,9 @@ from simple_worm.plot3d import plot_X_vs_target, plot_FS_3d, generate_scatter_di
     plot_frame_components, plot_CS_vs_output, plot_gates
 from simple_worm.util_torch import expand_tensor
 from simple_worm.worm_torch import WormModule
-from wormlab3d import LOGS_PATH, logger
+from wormlab3d import LOGS_PATH, logger, START_TIMESTAMP
 from wormlab3d.data.model import FrameSequence, Trial
+from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
 from wormlab3d.data.model.sw_checkpoint import SwCheckpoint
 from wormlab3d.data.model.sw_regularisation_parameters import SwRegularisationParameters
 from wormlab3d.data.model.sw_run import SwRun, SwControlSequence, SwFrameSequence, SwMaterialParameters
@@ -37,8 +38,7 @@ from wormlab3d.data.model.sw_simulation_parameters import SwSimulationParameters
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.simple_worm.args import RuntimeArgs, FrameSequenceArgs, SimulationArgs, OptimiserArgs, RegularisationArgs
 from wormlab3d.toolkit.util import to_dict, to_numpy, hash_data, is_bad
-
-START_TIMESTAMP = time.strftime('%Y%m%d_%H%M')
+from wormlab3d.trajectories.cache import get_trajectory
 
 
 class Manager:
@@ -90,30 +90,31 @@ class Manager:
 
     @staticmethod
     def get_logs_path(checkpoint: SwCheckpoint) -> str:
-        sim_dir = f'/N={checkpoint.sim_args["worm_length"]:03d}' \
+        sim_dir = f'N={checkpoint.sim_args["worm_length"]:03d}' \
                   f'_T={checkpoint.sim_args["duration"]:06.2f}' \
                   f'_dt={checkpoint.sim_args["dt"]:04.2f}' \
                   f'_{checkpoint.sim_params.id}'
 
         if checkpoint.frame_sequence_args['sw_run_id'] is not None:
-            FS_dir = f'/run={checkpoint.frame_sequence_args["sw_run_id"]}'
+            FS_dir = f'run={checkpoint.frame_sequence_args["sw_run_id"]}'
         else:
-            FS_dir = f'/{checkpoint.frame_sequence_args["trial_id"]:03d}' \
+            FS_dir = f'{checkpoint.frame_sequence_args["trial_id"]:03d}' \
                      f'_{checkpoint.frame_sequence_args["start_frame"]}' \
                      f'_{checkpoint.frame_sequence_args["midline_source"]}' \
                      f'_{checkpoint.frame_sequence.id}'
 
-        regs_dir = f'/{checkpoint.reg_params.created:%Y%m%d_%H:%M}' \
+        regs_dir = f'{checkpoint.reg_params.created:%Y%m%d_%H:%M}' \
                    f'_{checkpoint.reg_params.id}'
 
-        solver_dir = f'/{checkpoint.optimiser_args["inverse_opt_library"]}' \
+        solver_dir = f'{checkpoint.optimiser_args["inverse_opt_library"]}' \
                      f'_{checkpoint.optimiser_args["inverse_opt_method"]}' \
-                     f'_{hash_data(checkpoint.optimiser_args["inverse_opt_opts"])}'
+                     f'_{hash_data(checkpoint.optimiser_args)}'
+        # f'_{hash_data(checkpoint.optimiser_args["inverse_opt_opts"])}'
 
         if 'chunked_mode' in checkpoint.optimiser_args and checkpoint.optimiser_args['chunked_mode']:
             solver_dir += f'_chunks={checkpoint.optimiser_args["n_chunks"]}'
 
-        return LOGS_PATH + sim_dir + FS_dir + regs_dir + solver_dir
+        return LOGS_PATH / sim_dir / FS_dir / regs_dir / solver_dir
 
     def _init_frame_sequence(self) \
             -> Tuple[FrameSequence, FrameTorch, FrameSequenceTorch, List[FrameSequenceTorch], Optional[np.ndarray]]:
@@ -174,7 +175,8 @@ class Manager:
 
         # Extract the first frame
         F0 = FrameTorch(x=x[0], psi=psi[0])
-        FS = FrameSequenceTorch(x=x[1:], psi=psi[1:])
+        # FS = FrameSequenceTorch(x=x[1:], psi=psi[1:])
+        FS = FrameSequenceTorch(x=x, psi=psi)
 
         # Chunk the FS if required
         FS_chunks = []
@@ -229,12 +231,25 @@ class Manager:
         else:
             trial = Trial.objects.get(id=fsa.trial_id)
             n_frames = math.ceil(self.simulation_args.duration * trial.fps) + 1
-            FS_db = FrameSequence.find_from_args(fsa, n_frames)
-            if FS_db.count() > 0:
-                logger.info(f'Found {len(FS_db)} matching frame sequences in database, using most recent.')
-                FS_db = FS_db[0]
+
+            if fsa.midline_source == M3D_SOURCE_MF:
+                X, _ = get_trajectory(
+                    trial_id=fsa.trial_id,
+                    reconstruction_id=fsa.reconstruction_id,
+                    midline_source=M3D_SOURCE_MF,
+                    start_frame=fsa.start_frame,
+                    end_frame=fsa.start_frame + n_frames - 2
+                )
+                FS_db = FrameSequence()
+                FS_db.X = X - X.mean(axis=(0, 1))
+
             else:
-                raise DoesNotExist()
+                FS_db = FrameSequence.find_from_args(fsa, n_frames)
+                if FS_db.count() > 0:
+                    logger.info(f'Found {len(FS_db)} matching frame sequences in database, using most recent.')
+                    FS_db = FS_db[0]
+                else:
+                    raise DoesNotExist()
 
         if isinstance(FS_db, FrameSequence):
             logger.info(f'Loaded frame sequence id={FS_db.id}.')
@@ -452,6 +467,10 @@ class Manager:
             optimise=oa.optimise_F0,
             batch_size=self.batch_size
         )
+        for i, F0i in enumerate(F0):
+            F0.e0[i] = torch.from_numpy(NFS_target[0].T.T)
+            F0.e1[i] = torch.from_numpy(NFS_target[0].M1.T)
+            F0.e2[i] = torch.from_numpy(NFS_target[0].M2.T)
 
         # Build control gates
         gates = {}
@@ -474,7 +493,7 @@ class Manager:
                 **gates
             )
         else:
-            n_timesteps = self.FS_target.n_frames
+            n_timesteps = self.FS_target.n_frames - 1
             CS_stitched = None
         CS = ControlSequenceBatchTorch(
             worm=self.worm.worm_solver,
@@ -631,9 +650,9 @@ class Manager:
         """
         Initialise the tensorboard writers - one for each batch item plus one master.
         """
-        self.tb_logger_main = SummaryWriter(self.logs_path + f'/events/{START_TIMESTAMP}_agg', flush_secs=5)
+        self.tb_logger_main = SummaryWriter(self.logs_path / 'events' / f'{START_TIMESTAMP}_agg', flush_secs=5)
         self.tb_loggers = [
-            SummaryWriter(self.logs_path + f'/events/{START_TIMESTAMP}_{idx:03d}', flush_secs=5)
+            SummaryWriter(self.logs_path / 'events' / f'{START_TIMESTAMP}_{idx:03d}', flush_secs=5)
             for idx in range(self.batch_size)
         ]
 
@@ -643,8 +662,8 @@ class Manager:
             logger.warning('Removing previous log files...')
             shutil.rmtree(self.logs_path, ignore_errors=True)
         os.makedirs(self.logs_path, exist_ok=True)
-        os.makedirs(self.logs_path + '/events', exist_ok=True)
-        os.makedirs(self.logs_path + '/plots', exist_ok=True)
+        os.makedirs(self.logs_path / 'events', exist_ok=True)
+        os.makedirs(self.logs_path / 'plots', exist_ok=True)
 
     def save_checkpoint(self, L: LossesTorch):
         """
@@ -801,12 +820,12 @@ class Manager:
         self.checkpoint.step += 1
 
         # Log losses and make plots
-        self.checkpoint.loss = float(L.total.mean())
-        self.checkpoint.loss_data = float(L.data.mean())
-        self._log_losses(L, L_stitched)
+        self.checkpoint.loss = float(L_opt.total.mean())
+        self.checkpoint.loss_data = float(L_opt.data.mean())
+        self._log_losses(L_opt, L_stitched)
         self._make_plots()
 
-        return L
+        return L_opt
 
     def _log_losses(self, L: LossesTorch, L_stitched: LossesTorch = None):
         """
@@ -943,8 +962,8 @@ class Manager:
         fig = plot_gates(self.CS)
 
         # Save plot regardless of setting and don't use tensorboard
-        save_dir = self.logs_path + f'/plots'
-        path = save_dir + f'/gates.svg'
+        save_dir = self.logs_path / 'plots'
+        path = save_dir / 'gates.svg'
         plt.savefig(path, bbox_inches='tight')
         plt.close(fig)
 
@@ -999,7 +1018,7 @@ class Manager:
         Plot the psi/e0/e1/e2 frame components as matrices.
         """
         fig = plot_frame_components(
-            F=self.F0[idx].to_numpy(worm=self.worm.worm_solver, calculate_components=True)
+            F=self.F0[idx].to_numpy()  # worm=self.worm.worm_solver, calculate_components=True)
         )
         self._save_plot(fig, f'F0/{idx:03d}')
 
@@ -1008,7 +1027,7 @@ class Manager:
         Plot a 3x3 grid of 3D plots of the same worm frame from different angles.
         """
         fig = plot_frame_3d(
-            F0=self.F0[idx].to_numpy(worm=self.worm.worm_solver, calculate_components=True)
+            F0=self.F0[idx].to_numpy()  # worm=self.worm.worm_solver, calculate_components=True)
         )
         self._save_plot(fig, f'F0_3D/{idx:03d}')
 
@@ -1139,9 +1158,9 @@ class Manager:
         Log the figure to the tensorboard logger and optionally save it to disk.
         """
         if self.runtime_args.save_plots:
-            save_dir = self.logs_path + f'/plots/{plot_type}'
+            save_dir = self.logs_path / 'plots' / f'{plot_type}'
             os.makedirs(save_dir, exist_ok=True)
-            path = save_dir + f'/{self.checkpoint.step:05d}.svg'
+            path = save_dir / f'{self.checkpoint.step:05d}.svg'
             plt.savefig(path, bbox_inches='tight')
 
         self.tb_logger_main.add_figure(plot_type, fig, self.checkpoint.step)
@@ -1161,7 +1180,7 @@ class Manager:
         generate_scatter_diff_clip(
             FS_target=FS_target.to_numpy(),
             FS_attempt=self.FS_out[idx].to_numpy(),
-            save_dir=self.logs_path + f'/vid_diffs/{idx:03d}',
+            save_dir=str(self.logs_path / 'vid_diffs' / f'{idx:03d}'),
             save_fn=str(self.checkpoint.step),
             n_arrows=12,
         )
@@ -1174,7 +1193,7 @@ class Manager:
         generate_scatter_diff_clip(
             FS_target=self.FS_target.to_numpy(),
             FS_attempt=self.FS_out_stitched[0].to_numpy(),
-            save_dir=self.logs_path + f'/vid_diffs/stitched',
+            save_dir=str(self.logs_path / 'vid_diffs' / 'stitched'),
             save_fn=str(self.checkpoint.step),
             n_arrows=12,
         )
