@@ -132,14 +132,16 @@ def helicity_kymogram(x_label: str = 'time'):
     H = kappa * tau
 
     # Plot
-    fig, axes = plt.subplots(1, figsize=(12, 8))
+    # fig, axes = plt.subplots(1, figsize=(12, 8))
+    fig, axes = plt.subplots(1, figsize=(6, 3))
 
     # Torsion
     ax = axes
     ax.set_title(f'Helicity\n'
                  f'Trial {trial.id} ({trial.date:%Y-%m-%d} #{trial.trial_num}).\n'
                  f'Reconstruction {reconstruction.id} ({reconstruction.source}).')
-    im = ax.imshow(H.T, aspect='auto', cmap='PRGn', origin='lower', extent=(ts[0], ts[-1], 0, 1),
+    im = ax.imshow(H.T, aspect='auto', cmap='PRGn', origin='lower', extent=(0, N / trial.fps, 0, 1),
+                   # , extent=(ts[0], ts[-1], 0, 1),
                    norm=MidpointNormalize(midpoint=0))
     cax = ax.inset_axes([1.03, 0.1, 0.02, 0.8], transform=ax.transAxes)
     fig.colorbar(im, ax=ax, cax=cax)
@@ -243,6 +245,6 @@ if __name__ == '__main__':
         os.makedirs(LOGS_PATH, exist_ok=True)
     # from simple_worm.plot3d import interactive
     # interactive()
-    helicity_trace(x_label='time')
+    # helicity_trace(x_label='time')
     helicity_kymogram(x_label='time')
-    torsion_kymogram(x_label='time')
+    # torsion_kymogram(x_label='time')

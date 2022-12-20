@@ -154,7 +154,7 @@ def plot_non_planarity():
         values = []
         for v in nps[c].values():
             values.append(v)
-        pos = np.linspace(c - step, c + step, len(nps[c]) + 4)[2:-2]
+        pos = np.linspace(c - step / 2, c + step / 2, len(nps[c]) + 4)[2:-2]
         positions = pos.tolist()
 
         parts = ax.violinplot(
