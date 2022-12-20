@@ -6,16 +6,18 @@ import numpy as np
 from PIL import Image
 from matplotlib import cm
 from matplotlib.collections import LineCollection
-from matplotlib.gridspec import GridSpec
+from matplotlib.ticker import MaxNLocator
 from mayavi import mlab
 from scipy.stats import gaussian_kde
 
 from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT
+from simple_worm.plot3d import interactive
 from wormlab3d import LOGS_PATH, logger, START_TIMESTAMP
 from wormlab3d.data.model import Eigenworms
 from wormlab3d.data.model import Reconstruction
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.postures.plot_utils import plot_natural_frame_3d_mlab
+from wormlab3d.toolkit.plot_utils import to_rgb
 from wormlab3d.toolkit.util import print_args, str2bool
 from wormlab3d.trajectories.cache import get_trajectory
 
@@ -43,6 +45,7 @@ def parse_args() -> Namespace:
     parser.add_argument('--reconstruction', type=str, help='Reconstruction by id.')
     parser.add_argument('--start-frame', type=int, help='Frame number to start from.')
     parser.add_argument('--end-frame', type=int, help='Frame number to end at.')
+    parser.add_argument('--frame-offset', type=int, help='Frame number to start numbering from.')
     parser.add_argument('--x-label', type=str, default='time', help='Label x-axis with time or frame number.')
 
     args = parser.parse_args()
@@ -107,7 +110,6 @@ def plot_phases():
 
     for c in args.plot_components:
         logger.info(f'Making worms for component {c}.')
-
         cs = c.split('+')
 
         if len(cs) == 1:
@@ -129,14 +131,8 @@ def plot_phases():
                 a = r_egs[i] * np.exp(1j * theta_egs[i])
                 NF = NaturalFrame(component * a)
             else:
-                a = r_egs[i] / 2 * c1 + r_egs[i] / 2 * np.exp(1j * theta_egs[i]) * c2
+                a = r_egs[i] / np.sqrt(2) * c1 + r_egs[i] / np.sqrt(2) * np.exp(1j * theta_egs[i]) * c2
                 NF = NaturalFrame(a)
-
-            # Align main PCA component to z-axis
-            # R, _ = Rotation.align_vectors(NF.pca.components_, np.eye(3))
-            # R = R.as_matrix()
-            # R = calculate_rotation_matrix(NF.pca.components_[0], np.array([0,0,1]))
-            # NF = NaturalFrame(NF.X_pos @ R.T)
 
             # 3D plot of eigenworm
             fig = plot_natural_frame_3d_mlab(
@@ -144,7 +140,7 @@ def plot_phases():
                 show_frame_arrows=True,
                 n_frame_arrows=16,
                 show_pca_arrows=False,
-                show_outline=True,
+                show_outline=False,
                 show_axis=False,
                 offscreen=not interactive,
                 azimuth=90,
@@ -159,8 +155,24 @@ def plot_phases():
                 },
                 midline_opts={
                     'line_width': 8
+                },
+                outline_opts={
+                    'color': to_rgb('red')
                 }
             )
+
+            # orientation_axes = mlab.orientation_axes(xlabel='x', ylabel='y', zlabel='z')
+            # orientation_axes.axes.normalized_label_position = [1.7, 1.7, 1.5]
+            # ax_col = 'darkgrey'
+            # orientation_axes.axes.x_axis_caption_actor2d.caption_text_property.color = to_rgb('black')
+            # orientation_axes.axes.x_axis_tip_property.color = to_rgb(ax_col)
+            # orientation_axes.axes.x_axis_shaft_property.color = to_rgb(ax_col)
+            # orientation_axes.axes.y_axis_caption_actor2d.caption_text_property.color = to_rgb('black')
+            # orientation_axes.axes.y_axis_tip_property.color = to_rgb(ax_col)
+            # orientation_axes.axes.y_axis_shaft_property.color = to_rgb(ax_col)
+            # orientation_axes.axes.z_axis_caption_actor2d.caption_text_property.color = to_rgb('black')
+            # orientation_axes.axes.z_axis_tip_property.color = to_rgb(ax_col)
+            # orientation_axes.axes.z_axis_shaft_property.color = to_rgb(ax_col)
 
             if save_plots:
                 path = save_dir / f'c={c}_eg={i:02d}_r={r_egs[i]:.1f}_theta={theta_egs[i] / np.pi:.1f}pi.png'
@@ -255,7 +267,7 @@ def coefficient_phases(style: str = 'paper'):
             'tr_pady': 1,
             'heat_padx': 4,
             'heat_pady': 2,
-            'heat_lw': 0.5,
+            'heat_lw': 1,
         },
         'thesis': {
             'tr_padx': 2,
@@ -310,6 +322,7 @@ def coefficient_phases(style: str = 'paper'):
             'top': 0.96,
             'bottom': 0.2,
         })
+
     else:
         plt.rc('axes', labelsize=9)  # fontsize of the X label
         plt.rc('xtick', labelsize=8)  # fontsize of the x tick labels
@@ -317,7 +330,6 @@ def coefficient_phases(style: str = 'paper'):
         plt.rc('legend', fontsize=8)  # fontsize of the legend
         plt.rc('xtick.major', pad=2, size=3)
         plt.rc('ytick.major', pad=2, size=3)
-
         fig, axes = plt.subplots(1, len(plot_components), figsize=(len(plot_components) * 1.16, 1.4), gridspec_kw={
             'wspace': 0.3,
             'left': 0.07,
@@ -333,18 +345,21 @@ def coefficient_phases(style: str = 'paper'):
         # First component is only real so just draw a normal plot
         if c == 0:
             N = len(Z_traj)
+            ts = np.arange(N, dtype=np.float32) + args.start_frame
+            if args.frame_offset is not None:
+                ts -= args.frame_offset
             if args.x_label == 'time':
-                ts = np.linspace(0, N / reconstruction.trial.fps, N)
-            else:
-                ts = np.arange(N)
+                ts /= reconstruction.trial.fps
 
             ax = axes[i]
             for j in range(N - 1):
                 ax.plot(ts[j:j + 2], x_traj[i, j:j + 2], c=cmap(colours[j]), alpha=colours[j])
-            asp = np.diff(ax.get_xlim())[0] / np.diff(ax.get_ylim())[0]
-            ax.set_aspect(asp)
+            ax.set_yticks([0, 50, 100])
+            asp_sqr = np.diff(ax.get_xlim())[0] / np.diff(ax.get_ylim())[0]
+            asp_targ = 8 / 100
+            ax.set_aspect(asp_targ, anchor='C', adjustable='box' if asp_targ > asp_sqr else 'datalim')
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=4, integer=True))
             ax.set_ylabel(f'Re($\lambda_{ci}$)', labelpad=style_vars['tr_pady'])
-            # ax.set_yticks([0, 50, 100])
             if args.x_label == 'time':
                 ax.set_xlabel('Time (s)', labelpad=style_vars['tr_padx'])
             else:
@@ -370,11 +385,9 @@ def coefficient_phases(style: str = 'paper'):
 
 if __name__ == '__main__':
     if interactive:
-        from simple_worm.plot3d import interactive
-
         interactive()
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
 
     # plot_phases()
-    coefficient_phases(style='thesis')
+    coefficient_phases(style='paper')
