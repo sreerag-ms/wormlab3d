@@ -13,13 +13,21 @@ def _nonp(pca: PCA) -> np.ndarray:
     return r[2] / np.where(r[2] == 0, 1, np.sqrt(r[1] * r[0]))
 
 
+def align_with_traj(v: np.ndarray, X: np.ndarray) -> np.ndarray:
+    va = v
+    if np.dot(v, X[-1] - X[0]) < 0:
+        va *= -1
+    return va
+
+
 def get_manoeuvres(
         X_full: np.ndarray,
         X_slice: np.ndarray,
         min_reversal_frames: int = 25,
         min_reversal_distance: float = 0.,
         window_size: int = 500,
-        cut_windows_at_manoeuvres: bool = False
+        cut_windows_at_manoeuvres: bool = False,
+        align_with_traj: bool = False
 ) -> List[Dict[str, Any]]:
     """
     Get the manoeuvre sections, the parts prior and subsequent to a reversal.
@@ -65,21 +73,30 @@ def get_manoeuvres(
         pca_next = PCA(svd_solver='full', copy=True, n_components=3)
         pca_next.fit(X_next)
 
-        # Calculate the angle between planes
-        n1 = pca_prev.components_[2]
-        n2 = pca_next.components_[2]
-        angle = calculate_angle(n1, n2)
+        # Get component vectors for each section
+        prev_t = pca_prev.components_[0]
+        rev_t = pca_rev.components_[0]
+        next_t = pca_next.components_[0]
+        prev_n = pca_prev.components_[2]
+        rev_n = pca_rev.components_[2]
+        next_n = pca_next.components_[2]
 
-        # Calculate the trajectory angles (between first PCA components)
-        t1 = pca_prev.components_[0]
-        t2 = pca_next.components_[0]
-        angle_traj = calculate_angle(t1, t2)
+        # Align component vectors with trajectory
+        if align_with_traj:
+            prev_t = align_with_traj(prev_t, X_prev)
+            rev_t = align_with_traj(rev_t, X_rev)
+            next_t = align_with_traj(next_t, X_next)
+            prev_n = align_with_traj(prev_n, X_prev)
+            rev_n = align_with_traj(rev_n, X_rev)
+            next_n = align_with_traj(next_n, X_next)
 
-        # Calculate angles between prev->rev, rev->next
-        angle_prev_rev_t = calculate_angle(pca_prev.components_[0], pca_rev.components_[0])
-        angle_prev_rev_n = calculate_angle(pca_prev.components_[2], pca_rev.components_[2])
-        angle_rev_next_t = calculate_angle(pca_rev.components_[0], pca_next.components_[0])
-        angle_rev_next_n = calculate_angle(pca_rev.components_[2], pca_next.components_[2])
+        # Calculate angles
+        angle_prev_rev_t = calculate_angle(prev_t, rev_t)
+        angle_prev_rev_n = calculate_angle(prev_n, rev_n)
+        angle_rev_next_t = calculate_angle(rev_t, next_t)
+        angle_rev_next_n = calculate_angle(rev_n, next_n)
+        angle_prev_next_t = calculate_angle(prev_t, next_t)
+        angle_prev_next_n = calculate_angle(prev_n, next_n)
 
         # Calculate the distance, speed and non-planarity for the whole manoeuvre window
         X_window = X_slice[prev_start_idx:next_end_idx]
@@ -96,18 +113,20 @@ def get_manoeuvres(
             'start_idx': prev_start_idx,
             'end_idx': next_end_idx,
             'X_prev': X_prev,
+            'X_rev': X_rev,
             'X_next': X_next,
             'pca_prev': pca_prev,
+            'pca_rev': pca_rev,
             'pca_next': pca_next,
             'reversal_duration': reversal_props['widths'][i],
             'reversal_distance': np.linalg.norm(X_rev[0] - X_rev[-1], axis=-1),
-            'angle': angle,
+            'angle': angle_prev_next_n,
             'angle_prev_rev_t': angle_prev_rev_t,
             'angle_prev_rev_n': angle_prev_rev_n,
             'angle_rev_next_t': angle_rev_next_t,
             'angle_rev_next_n': angle_rev_next_n,
-            'angle_prev_next_t': angle_traj,
-            'angle_prev_next_n': angle,
+            'angle_prev_next_t': angle_prev_next_t,
+            'angle_prev_next_n': angle_prev_next_n,
             'nonp_prev': _nonp(pca_prev),
             'nonp_rev': _nonp(pca_rev),
             'nonp_next': _nonp(pca_next),

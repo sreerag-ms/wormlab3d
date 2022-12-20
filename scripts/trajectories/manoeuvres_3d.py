@@ -1026,7 +1026,8 @@ def plot_dataset_reversal_durations_vs_angles_combined():
             min_reversal_frames=args.min_reversal_frames,
             min_reversal_distance=args.min_reversal_distance,
             window_size=args.manoeuvre_window,
-            cut_windows_at_manoeuvres=True
+            cut_windows_at_manoeuvres=True,
+            align_with_traj=False
         )
 
         # Loop over manoeuvres
@@ -1226,7 +1227,8 @@ def plot_angle_correlations():
             min_reversal_frames=args.min_reversal_frames,
             min_reversal_distance=args.min_reversal_distance,
             window_size=args.manoeuvre_window,
-            cut_windows_at_manoeuvres=True
+            cut_windows_at_manoeuvres=True,
+            align_with_traj=True
         )
 
         # Loop over manoeuvres
