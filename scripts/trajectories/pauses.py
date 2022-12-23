@@ -277,11 +277,11 @@ def plot_pauses():
 
     # Activity histogram
     ax_hist_activity = fig.add_subplot(gs[1, 1])
-    ax_hist_activity.hist(d_vals, orientation='horizontal', color='blue', **hist_args)
+    ax_hist_activity.hist(a_vals, orientation='horizontal', color='blue', **hist_args)
     ax_hist_activity.tick_params(axis='y', left=False, labelleft=False)
     ax_hist_activity.spines['left'].set(linestyle='--', color='grey')
     ax_hist_activity.set_xlabel('Density')
-    ax_hist_activity.set_xticks([0.5])
+    ax_hist_activity.set_xticks([5])
 
     # Activity distribution
     ax_dist = fig.add_subplot(gs[0, 1])
