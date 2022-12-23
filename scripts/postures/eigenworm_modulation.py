@@ -386,10 +386,10 @@ def eigenworm_modulation_by_rec(
     """
     args = parse_args()
     ds, ew, lambdas = _generate_or_load_data(args, rebuild_cache=False, cache_only=True)
-    exclude_concs = []
-    breaks_at = [5,6,7]
-    # exclude_concs = [2.75, 4]
-    # break_at = 5
+    # exclude_concs = []
+    # breaks_at = [5, 6, 7]
+    exclude_concs = [2.75, 4]
+    breaks_at = [5, 6]
 
     # Determine positions
     concs = [float(k) for k in lambdas.keys() if k not in exclude_concs]
@@ -457,22 +457,24 @@ def eigenworm_modulation_by_rec(
                 color=colours[i],
                 marker='o',
                 facecolor='none',
+                linewidths=0.5,
                 s=20,
-                alpha=0.6,
+                alpha=0.5,
             )
 
         means = out_reconst_stats[:, idx, 0]
         stds = out_reconst_stats[:, idx, 1]
 
         for k, break_at in enumerate(breaks_at):
-            start_idx = 0 if k == 0 else breaks_at[k-1]
+            start_idx = 0 if k == 0 else breaks_at[k - 1]
             end_idx = len(ticks) if k == len(breaks_at) else break_at
             label = f'$\lambda_{i + (1 if layout == "paper" else 0)}$' if k == 0 else None
             ax.errorbar(
                 ticks[start_idx:end_idx] + offsets[i],
                 means[start_idx:end_idx],
                 yerr=stds[start_idx:end_idx],
-                capsize=5,
+                elinewidth=1,
+                capsize=3,
                 color=colours[i],
                 label=label,
                 alpha=0.7,
@@ -502,12 +504,12 @@ def eigenworm_modulation_by_rec(
         # Remove the errorbars from the legend handles
         handles, labels = ax.get_legend_handles_labels()
         handles = [h[0] for h in handles]
-        ax.legend(handles, labels, loc='upper right', markerscale=0.8, handlelength=1, handletextpad=0.6, labelspacing=0,
-                  borderpad=0.5, ncol=5, columnspacing=0.8, bbox_to_anchor=(0.99, 0.98), bbox_transform=ax.transAxes)
+        ax.legend(handles, labels, loc='upper right', markerscale=0.8, handlelength=1, handletextpad=0.6,
+                  labelspacing=0, borderpad=0.5, ncol=5, columnspacing=0.8,
+                  bbox_to_anchor=(0.99, 0.98), bbox_transform=ax.transAxes)
 
     else:
-        ax.legend(loc='upper left',
-                  bbox_to_anchor=(1.01, 0.95), bbox_transform=ax.transAxes)
+        ax.legend(loc='upper left', bbox_to_anchor=(1.01, 0.95), bbox_transform=ax.transAxes)
 
     if save_plots:
         path = LOGS_PATH / (f'{START_TIMESTAMP}'
@@ -534,4 +536,4 @@ if __name__ == '__main__':
     #     by_reconstruction=True,
     # )
     # eigenworm_modulation_by_conc()
-    eigenworm_modulation_by_rec(layout='thesis')
+    eigenworm_modulation_by_rec(layout='paper')
