@@ -116,6 +116,8 @@ def get_manoeuvres(
             'centre_idx': reversal_centre_idx,
             'start_idx': prev_start_idx,
             'end_idx': next_end_idx,
+            'rev_start_idx': rev_start_idx,
+            'rev_end_idx': rev_end_idx,
             'X_prev': X_prev,
             'X_rev': X_rev,
             'X_next': X_next,
