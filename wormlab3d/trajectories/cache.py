@@ -54,7 +54,7 @@ def get_trajectory(
     N = X.shape[1]
     meta['frame_nums'] = np.arange(meta['start_frame'], meta['end_frame'] + 1)
 
-    if smoothing_window is not None and smoothing_window > -1:
+    if smoothing_window is not None and smoothing_window > 0:
         X = smooth_trajectory(X, window_len=smoothing_window)
 
         # Smoothing breaks natural frame alignment so re-align here

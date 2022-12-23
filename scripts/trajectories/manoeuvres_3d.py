@@ -1027,7 +1027,7 @@ def plot_dataset_reversal_durations_vs_angles_combined():
             min_reversal_distance=args.min_reversal_distance,
             window_size=args.manoeuvre_window,
             cut_windows_at_manoeuvres=True,
-            align_with_traj=False
+            align_components_with_traj=True
         )
 
         # Loop over manoeuvres
@@ -1069,8 +1069,10 @@ def plot_dataset_reversal_durations_vs_angles_combined():
     scatter_args = dict(s=10, c=durations, alpha=0.6)
 
     def _make_scat(ax_, traj_angles, planar_angles):
-        s = ax_.scatter(traj_angles, distances, marker='x', cmap=cmap_traj, label='Trajectory angles', **scatter_args)
-        s2 = ax_.scatter(planar_angles, distances, marker='o', cmap=cmap_planar, label='Planar angles', **scatter_args)
+        s = ax_.scatter(traj_angles, distances, marker='x', cmap=cmap_traj, label='Trajectory angles',
+                        **scatter_args)
+        s2 = ax_.scatter(planar_angles, distances, marker='$\u25EF$', cmap=cmap_planar, label='Planar angles',
+                         **scatter_args)
         ax_.set_xlabel('Angle')
         ax_.set_xlim(left=-0.1, right=np.pi + 0.1)
         ax_.set_xticks([0, np.pi])
@@ -1121,21 +1123,21 @@ def plot_dataset_reversal_durations_vs_angles_combined():
     ax_hist_angles_ir.set_ylabel('Density')
     ax_hist_angles_ir.set_yticks([0, 0.4, 0.8])
     ax_hist_angles_ir.yaxis.set_label_coords(-.15, .5)
-    ax_hist_angles_ir.set_title('Angles between incoming\nand reversal trajectories.', fontsize=6)
+    ax_hist_angles_ir.set_title('Angles between incoming\nand reversal trajectories', fontsize=6)
 
     # Angles rev/out histogram
     ax_hist_angles_ro = fig.add_subplot(gs[0, 1], sharex=ax_scat_in_rev, sharey=ax_hist_angles_ir)
     _make_angles_hist(ax_hist_angles_ro, traj_angles_rev_out, planar_angles_rev_out)
     ax_hist_angles_ro.tick_params(axis='y', left=False, labelleft=False)
     ax_hist_angles_ro.spines['left'].set(linestyle='--', color='grey')
-    ax_hist_angles_ro.set_title('Angles between reversal\nand outgoing trajectories.', fontsize=6)
+    ax_hist_angles_ro.set_title('Angles between reversal\nand outgoing trajectories', fontsize=6)
 
     # Angles in/out histogram
     ax_hist_angles_io = fig.add_subplot(gs[0, 2], sharex=ax_scat_in_rev, sharey=ax_hist_angles_ir)
     _make_angles_hist(ax_hist_angles_io, traj_angles_in_out, planar_angles_in_out)
     ax_hist_angles_io.tick_params(axis='y', left=False, labelleft=False)
     ax_hist_angles_io.spines['left'].set(linestyle='--', color='grey')
-    ax_hist_angles_io.set_title('Angles between incoming\nand outgoing trajectories.', fontsize=6)
+    ax_hist_angles_io.set_title('Angles between incoming\nand outgoing trajectories', fontsize=6)
 
     # Distances histogram
     ax_hist_dists = fig.add_subplot(gs[1, 3], sharey=ax_scat_in_rev)
@@ -1228,7 +1230,7 @@ def plot_angle_correlations():
             min_reversal_distance=args.min_reversal_distance,
             window_size=args.manoeuvre_window,
             cut_windows_at_manoeuvres=True,
-            align_with_traj=True
+            align_components_with_traj=True
         )
 
         # Loop over manoeuvres
