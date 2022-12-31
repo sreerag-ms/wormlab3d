@@ -1251,7 +1251,7 @@ def trajectory_helicity_over_time():
         plt.show()
 
 
-def nonplanarity_and_displacement_over_time(x_label: str = 'time'):
+def nonplanarity_and_displacement_over_time(x_label: str = 'time', layout: str = 'paper'):
     """
     Plot traces of the nonplanarity/displacement changes along a trajectory highlighting regions above and below the average.
     Show histograms of the dwell times spent in each state.
@@ -1265,6 +1265,7 @@ def nonplanarity_and_displacement_over_time(x_label: str = 'time'):
     # np.savez(LOGS_PATH / f'{START_TIMESTAMP}_trajectory_trial={args.trial}', trajectory)
 
     # Calculate displacements
+    logger.info('Calculating displacements')
     displacements = calculate_displacements(X, deltas, args.aggregation)
     dwells_displacements = calculate_transitions_and_dwells_multiple_deltas(displacements)
 
@@ -1325,18 +1326,40 @@ def nonplanarity_and_displacement_over_time(x_label: str = 'time'):
     if x_label == 'time':
         ts = ts / 25
     # fig, axes = plt.subplots(2, 1 + len(deltas), figsize=(4 + 5 * len(deltas), 8))
-    fig, axes = plt.subplots(2, len(deltas), figsize=(10, 4))
+
+    if layout == 'paper':
+        fig, axes = plt.subplots(2, len(deltas), figsize=(10, 4))
+        linewidth = None
+        alpha = 0.75
+    else:
+        plt.rc('axes', labelsize=7, labelpad=3)  # fontsize of the axis labels
+        plt.rc('xtick', labelsize=6)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=6)  # fontsize of the y tick labels
+        plt.rc('xtick.major', pad=3, size=2)
+        plt.rc('ytick.major', pad=1, size=2)
+        fig, axes = plt.subplots(2, len(deltas), figsize=(6, 3), gridspec_kw={
+            'wspace': 0.3,
+            'hspace': 0.7,
+            'top': 0.96,
+            'bottom': 0.14,
+            'left': 0.06,
+            'right': 0.98,
+        })
+        linewidth = 0.9
+        alpha = 0.9
+
     for i, delta in enumerate(deltas):
         d = displacements[delta][:max_i]
         p = nonp[delta][:max_i]
 
         # Displacement trace over time
         ax = axes[0, i]
-        ax.plot(ts, d, alpha=0.75, zorder=100)
-        if x_label == 'time':
-            ax.set_title(f'$\Delta={delta_ts[i]}s$')
-        else:
-            ax.set_title(f'$\Delta={delta_ts[i]}\ frames$')
+        ax.plot(ts, d, alpha=alpha, zorder=100, linewidth=linewidth)
+        if layout == 'paper':
+            if x_label == 'time':
+                ax.set_title(f'$\Delta={delta_ts[i]}s$')
+            else:
+                ax.set_title(f'$\Delta={delta_ts[i]}\ frames$')
         # if args.aggregation == DISPLACEMENT_AGGREGATION_L2:
         #     ax.set_ylabel('$d=|x(t)-x(t+\Delta)|$')
         # else:
@@ -1363,7 +1386,7 @@ def nonplanarity_and_displacement_over_time(x_label: str = 'time'):
 
         # Nonplanarity trace over time
         ax = axes[1, i]
-        ax.plot(ts, p, alpha=0.75, zorder=100)
+        ax.plot(ts, p, alpha=alpha, zorder=100, linewidth=linewidth)
         ax.set_ylabel('Non-planarity')
         avg = p.mean()
         ax.axhline(y=avg, color='red')
@@ -1391,7 +1414,8 @@ def nonplanarity_and_displacement_over_time(x_label: str = 'time'):
     #     ax.set_ylabel('Probability')
     #     ax.set_xlabel('$\Delta s$')
 
-    fig.tight_layout()
+    if layout == 'paper':
+        fig.tight_layout()
 
     if save_plots:
         plt.savefig(
@@ -1708,7 +1732,7 @@ if __name__ == '__main__':
 
     # displacement_over_time_with_stats()
 
-    nonplanarity_and_displacement_over_time(x_label='time')
+    nonplanarity_and_displacement_over_time(x_label='time', layout='thesis')
     # if args_.dataset is not None:
     #     transition_rates_dataset()
     # else:
