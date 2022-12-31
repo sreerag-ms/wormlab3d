@@ -29,6 +29,8 @@ def get_manoeuvres(
         X_slice: np.ndarray,
         min_reversal_frames: int = 25,
         min_reversal_distance: float = 0.,
+        min_forward_frames: int = 0,
+        min_forward_distance: float = 0.,
         window_size: int = 500,
         cut_windows_at_manoeuvres: bool = False,
         align_components_with_traj: bool = False
@@ -37,8 +39,30 @@ def get_manoeuvres(
     Get the manoeuvre sections, the parts prior and subsequent to a reversal.
     """
     signed_speeds = calculate_speeds(X_full, signed=True)
-    reversal_centre_idxs, reversal_props = find_peaks(signed_speeds < 0, width=min_reversal_frames)
+    reversing = signed_speeds < 0
+    reversal_centre_idxs, reversal_props = find_peaks(reversing, width=min_reversal_frames)
     manoeuvres = []
+
+    # Merge reversal sections where there was not enough forward time/distance between them
+    if min_forward_frames > 0 or min_forward_distance > 0:
+        for i, reversal_centre_idx in enumerate(reversal_centre_idxs):
+            if i == 0:
+                continue
+
+            rev_a_end = reversal_props['right_bases'][i - 1]
+            rev_b_start = reversal_props['left_bases'][i] + 1
+
+            if rev_b_start - rev_a_end < min_forward_frames:
+                reversing[rev_a_end:rev_b_start] = True
+
+            elif min_forward_distance > 0:
+                X_fwd = X_slice[rev_a_end:rev_b_start]
+                fwd_distance = np.linalg.norm(X_fwd[0] - X_fwd[-1], axis=-1)
+                if fwd_distance < min_forward_distance:
+                    reversing[rev_a_end:rev_b_start] = True
+
+        # Recalculate peaks
+        reversal_centre_idxs, reversal_props = find_peaks(reversing, width=min_reversal_frames)
 
     # Loop over reversal events
     for i, reversal_centre_idx in enumerate(reversal_centre_idxs):
