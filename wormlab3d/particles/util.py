@@ -29,7 +29,11 @@ def centre_select(X: np.ndarray, T: int) -> np.ndarray:
     assert len(X) >= T
     if len(X) == T:
         return X
-    Xc = X[int(np.ceil((len(X) - T) / 2)):-int(np.floor((len(X) - T) / 2))]
+    start_idx = int(np.ceil((len(X) - T) / 2))
+    end_idx = -int(np.floor((len(X) - T) / 2))
+    if end_idx == 0:
+        end_idx = None
+    Xc = X[start_idx:end_idx]
     assert len(Xc) == T
     return Xc
 

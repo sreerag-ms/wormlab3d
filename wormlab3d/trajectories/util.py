@@ -255,8 +255,8 @@ def fetch_reconstruction(
     return reconstruction
 
 
-def get_deltas_from_args(args: Namespace, fps: int = DEFAULT_FPS, min_delta: int = None) -> Tuple[
-    np.ndarray, np.ndarray]:
+def get_deltas_from_args(args: Namespace, fps: int = DEFAULT_FPS, min_delta: int = None) \
+        -> Tuple[np.ndarray, np.ndarray]:
     """
     Get deltas and delta times from command line arguments.
     """
