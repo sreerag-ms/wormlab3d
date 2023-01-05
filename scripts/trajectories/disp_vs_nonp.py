@@ -175,7 +175,6 @@ def _calculate_data(
                 smoothing_window=args.smoothing_window,
                 tracking_only=True
             )
-            X = X - X.mean(axis=(0, 1), keepdims=True)
 
             # Calculate non-planarities
             pcas, meta = generate_or_load_pca_cache(
@@ -192,7 +191,6 @@ def _calculate_data(
                 smoothing_window=args.smoothing_window,
                 trajectory_point=args.trajectory_point
             )
-            X = X - X.mean(axis=(0, 1), keepdims=True)
 
             # Calculate non-planarities
             pcas, meta = generate_or_load_pca_cache(
@@ -201,6 +199,11 @@ def _calculate_data(
                 trajectory_point=args.trajectory_point,
                 window_size=delta,
             )
+
+        # Squeeze unnecessary dimension and centre
+        if X.ndim == 3:
+            X = X.mean(axis=1)
+        X = X - X.mean(axis=0, keepdims=True)
 
         # Get displacements, non-planarity, speeds and distances
         d = calculate_displacements(X, delta, aggregation=args.aggregation)
