@@ -157,7 +157,7 @@ def _calculate_box_dimension(
         counts[j] = np.unique(Xd, axis=0).shape[0]
 
     # Estimate the slope using different window sizes to find the best range
-    window_sizes = [5, 10, 15, 20]
+    window_sizes = np.round(np.linspace(0.1, 0.5, 5) * len(voxel_sizes)).astype(int).tolist()
     r2s = np.zeros((len(window_sizes), len(voxel_sizes)))
     ssrs = np.zeros((len(window_sizes), len(voxel_sizes)))
     for i, ws in enumerate(window_sizes):
@@ -166,10 +166,11 @@ def _calculate_box_dimension(
             y = np.log(counts[j:j + ws])
             k, m, r, p, std_err = linregress(x, y)
             r2s[i, j + int(ws / 2)] = r**2
-            ssrs[i, j + int(ws / 2)] = ((y - (k * x + m))**2).sum()
+            # ssrs[i, j + int(ws / 2)] = ((y - (k * x + m))**2).sum()
 
     # Find the peak and plateau
-    err = (r2s - ssrs).sum(axis=0)
+    # err = (r2s - ssrs).sum(axis=0)
+    err = r2s.sum(axis=0)
     good_vals = err > err[np.argmax(err)] * plateau_threshold
     midpoints, stats = find_peaks(good_vals, width=5)
     peak_idx = -1
@@ -397,6 +398,7 @@ def plot_reconstruction_box_dimension(
         sample_size=args.sample_size,
         sf_min=args.sf_min,
         sf_max=args.sf_max,
+        parallel=True
     )
     D = res['D']
     D_std = res['D_std']
@@ -422,7 +424,7 @@ def plot_reconstruction_box_dimension(
     ax.set_title(f'Trial={reconstruction.trial.id}. Rec={reconstruction.id}.\n'
                  f'[u={args.trajectory_point}, smoothing={args.smoothing_window}, '
                  f'pt={args.plateau_threshold}, samples={args.sample_size}]\n'
-                 f'D={D:.4f} $\pm$ {D_std} (std)')
+                 f'D={D:.4f} $\pm$ {D_std:.3E} (std)')
     ax.grid()
 
     # # Use 60 second chunks
@@ -536,7 +538,7 @@ def fractal_dimensions_by_conc(
     out_reconst = {}
     for u in us:
         args.trajectory_point = u
-        ds, ids, results = _generate_or_load_data(args, rebuild_cache=True, cache_only=False)
+        ds, ids, results = _generate_or_load_data(args, rebuild_cache=False, cache_only=False)
         out_conc[u] = {}
         out_reconst[u] = {}
         i = 0
