@@ -1450,19 +1450,20 @@ def volume_metric_sweeps_cuboids_voxels():
             return r1 * r2 * r3
 
     # Plot combined
-    plt.rc('axes', titlesize=7)  # fontsize of the title
+    plt.rc('axes', titlesize=7, titlepad=4)  # fontsize of the title
     plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
     plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+    plt.rc('xtick.major', pad=2)
     plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
     plt.rc('legend', fontsize=6)  # fontsize of the legend
 
-    fig, axes = plt.subplots(2, 2, figsize=(8, 4), gridspec_kw={
+    fig, axes = plt.subplots(2, 2, figsize=(7, 4), gridspec_kw={
         'hspace': 0.35,
-        'wspace': 0.15,
+        'wspace': 0.2,
         'top': 0.94,
         'bottom': 0.08,
-        'left': 0.05,
-        'right': 0.93,
+        'left': 0.06,
+        'right': 0.92,
     })
 
     # Fix the pause and sweep over the durations
@@ -1494,8 +1495,9 @@ def volume_metric_sweeps_cuboids_voxels():
     ax.scatter(optimal_sigmas_vols, optimal_vols, marker='o', zorder=100, s=50, facecolors='none', edgecolors='red',
                linewidths=2)
     ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=3, zorder=-1)
-    ax.set_title(f'$\delta_{{max}}={fix_pause:.1f}$s')
-    ax.set_xlabel(f'$\sigma_\phi$')
+    # ax.set_title(f'$\delta_{{max}}={fix_pause:.1f}$s')
+    ax.set_title(f'$\delta_{{max}}={int(fix_pause)}$ seconds')
+    ax.set_xlabel(f'$\sigma_\phi$', labelpad=0)
     ax.set_xscale('log')
     ax.set_xticks([1e-3, 1e-1, 1e1])
     trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
@@ -1516,8 +1518,9 @@ def volume_metric_sweeps_cuboids_voxels():
                linewidths=2)
     ax.axvline(x=model_phi, c='orange', linestyle='--')
     ax.legend(loc='upper left', bbox_to_anchor=(1, 1), bbox_transform=ax.transAxes)
-    ax.set_title(f'$\delta_{{max}}={fix_pause:.1f}$s')
-    ax.set_xlabel(f'$\sigma_\psi$')
+    # ax.set_title(f'$\delta_{{max}}={fix_pause:.1f}$s')
+    ax.set_title(f'$\delta_{{max}}={int(fix_pause)}$ seconds')
+    ax.set_xlabel(f'$\sigma_\psi$', labelpad=0)
     ax.set_xscale('log')
     ax.set_xticks([1e-3, 1e-1, 1e1])
     trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
@@ -1556,8 +1559,9 @@ def volume_metric_sweeps_cuboids_voxels():
     ax.scatter(optimal_sigmas_vols, optimal_vols, marker='o', zorder=100, s=50, facecolors='none', edgecolors='red',
                linewidths=2)
     ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=3, zorder=-1)
-    ax.set_title(f'T={fix_duration}s')
-    ax.set_xlabel(f'$\sigma_\phi$')
+    # ax.set_title(f'T={fix_duration}s')
+    ax.set_title(f'T={int(fix_duration/60)} minutes')
+    ax.set_xlabel(f'$\sigma_\phi$', labelpad=0)
     ax.set_xscale('log')
     ax.set_xticks([1e-3, 1e-1, 1e1])
     trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
@@ -1578,8 +1582,9 @@ def volume_metric_sweeps_cuboids_voxels():
                linewidths=2)
     ax.axvline(x=model_phi, c='orange', linestyle='--')
     ax.legend(loc='upper left', bbox_to_anchor=(1, 1), bbox_transform=ax.transAxes)
-    ax.set_title(f'T={fix_duration}s')
-    ax.set_xlabel(f'$\sigma_\psi$')
+    # ax.set_title(f'T={fix_duration}s')
+    ax.set_title(f'T={int(fix_duration/60)} minutes')
+    ax.set_xlabel(f'$\sigma_\phi$', labelpad=0)
     ax.set_xscale('log')
     ax.set_xticks([1e-3, 1e-1, 1e1])
     trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
