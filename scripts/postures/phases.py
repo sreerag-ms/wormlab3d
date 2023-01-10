@@ -6,24 +6,23 @@ import numpy as np
 from PIL import Image
 from matplotlib import cm
 from matplotlib.collections import LineCollection
+from matplotlib.gridspec import GridSpec
 from matplotlib.ticker import MaxNLocator
 from mayavi import mlab
 from scipy.stats import gaussian_kde
 
-from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT
-from simple_worm.plot3d import interactive
+from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT, interactive
 from wormlab3d import LOGS_PATH, logger, START_TIMESTAMP
-from wormlab3d.data.model import Eigenworms
-from wormlab3d.data.model import Reconstruction
+from wormlab3d.data.model import Eigenworms, Reconstruction
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.postures.plot_utils import plot_natural_frame_3d_mlab
 from wormlab3d.toolkit.plot_utils import to_rgb
 from wormlab3d.toolkit.util import print_args, str2bool
 from wormlab3d.trajectories.cache import get_trajectory
 
-interactive = False
+interactive_plots = True
 show_plots = True
-save_plots = True
+save_plots = False
 img_extension = 'svg'
 eigenworm_length = 1
 eigenworm_scale = 64
@@ -384,10 +383,10 @@ def coefficient_phases(style: str = 'paper'):
 
 
 if __name__ == '__main__':
-    if interactive:
+    if interactive_plots:
         interactive()
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
 
-    # plot_phases()
-    coefficient_phases(style='paper')
+    plot_phases()
+    # coefficient_phases(style='paper')
