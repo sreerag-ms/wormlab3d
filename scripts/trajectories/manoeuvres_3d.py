@@ -647,9 +647,9 @@ def plot_dataset_reversal_durations_vs_angles():
         plt.close(fig)
 
 
-def plot_dataset_reversal_durations_vs_prev_next_angles():
+def plot_dataset_reversal_distance_vs_prev_next_angles():
     """
-    Plot the distributions of reversal durations against the incoming/outgoing
+    Plot the distributions of reversal distance against the incoming/outgoing
     trajectory and planar angles for a dataset.
     """
     args = get_args(validate_source=False)
@@ -682,8 +682,11 @@ def plot_dataset_reversal_durations_vs_prev_next_angles():
             X_slice,
             min_reversal_frames=args.min_reversal_frames,
             min_reversal_distance=args.min_reversal_distance,
+            min_forward_frames=args.min_forward_frames,
+            min_forward_distance=args.min_forward_distance,
             window_size=args.manoeuvre_window,
-            cut_windows_at_manoeuvres=False
+            cut_windows_at_manoeuvres=True,
+            align_components_with_traj=True
         )
 
         # Loop over manoeuvres
@@ -713,7 +716,7 @@ def plot_dataset_reversal_durations_vs_prev_next_angles():
         right=0.95,
     )
     fig = plt.figure(figsize=(2.94, 2.176))
-    fig.suptitle('Angles between pre- and post-manoeuvre trajectories.', fontsize=6)
+    fig.suptitle('Angles between pre- and post-manoeuvre trajectories', fontsize=6)
 
     cmap_traj = plt.get_cmap('autumn_r')
     cmap_planar = plt.get_cmap('winter_r')
@@ -722,9 +725,9 @@ def plot_dataset_reversal_durations_vs_prev_next_angles():
 
     # Scatter plot
     ax_scat = fig.add_subplot(gs[1, 0])
-    scatter_args = dict(s=10, c=durations, alpha=0.6)
+    scatter_args = dict(s=6, c=durations, alpha=0.6)
     s = ax_scat.scatter(traj_angles, distances, marker='x', cmap=cmap_traj, label='Trajectory angles', **scatter_args)
-    s2 = ax_scat.scatter(planar_angles, distances, marker='o', cmap=cmap_planar, label='Planar angles', **scatter_args)
+    s2 = ax_scat.scatter(planar_angles, distances, marker='$\u25EF$', cmap=cmap_planar, label='IP angles', **scatter_args)
     ax_scat.set_xlabel('Angle')
     ax_scat.set_xlim(left=-0.1, right=np.pi + 0.1)
     ax_scat.set_xticks([0, np.pi])
@@ -749,7 +752,7 @@ def plot_dataset_reversal_durations_vs_prev_next_angles():
     ax_hist_angles.tick_params(axis='x', bottom=False, labelbottom=False)
     ax_hist_angles.spines['bottom'].set(linestyle='--', color='grey')
     ax_hist_angles.set_ylabel('Density')
-    ax_hist_angles.set_yticks([0, 0.2, 0.4])
+    ax_hist_angles.set_yticks([0, 0.4, 0.8])
     ax_hist_angles.yaxis.set_label_coords(-.15, .5)
 
     ax_hist_dists = fig.add_subplot(gs[1, 1], sharey=ax_scat)
@@ -781,17 +784,19 @@ def plot_dataset_reversal_durations_vs_prev_next_angles():
     handles = legend.legendHandles
     labels = [t.get_text() for t in legend.get_texts()]
     ax_cb.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.83, 0.96),
-                 bbox_transform=fig.transFigure)
+                 handletextpad=0.4, labelspacing=0.3, bbox_transform=fig.transFigure)
     legend.remove()
 
     if save_plots:
         fn = START_TIMESTAMP \
              + f'_rev_dist_vs_inout_angles' \
                f'_ds={args.dataset}' \
-               f'_rev={args.min_reversal_frames}' \
-               f'_revd={args.min_reversal_distance}' \
                f'_u={args.trajectory_point}' \
                f'_sw={args.smoothing_window}' \
+               f'_rf={args.min_reversal_frames}' \
+               f'_rd={args.min_reversal_distance}' \
+               f'_ff={args.min_forward_frames}' \
+               f'_fd={args.min_forward_distance}' \
                f'_mw={args.manoeuvre_window}'
         save_path = LOGS_PATH / (fn + f'.{img_extension}')
         logger.info(f'Saving plot to {save_path}.')
@@ -1025,6 +1030,8 @@ def plot_dataset_reversal_durations_vs_angles_combined():
             X_slice,
             min_reversal_frames=args.min_reversal_frames,
             min_reversal_distance=args.min_reversal_distance,
+            min_forward_frames=args.min_forward_frames,
+            min_forward_distance=args.min_forward_distance,
             window_size=args.manoeuvre_window,
             cut_windows_at_manoeuvres=True,
             align_components_with_traj=True
@@ -1121,7 +1128,7 @@ def plot_dataset_reversal_durations_vs_angles_combined():
     ax_hist_angles_ir = fig.add_subplot(gs[0, 0], sharex=ax_scat_in_rev)
     _make_angles_hist(ax_hist_angles_ir, traj_angles_in_rev, planar_angles_in_rev)
     ax_hist_angles_ir.set_ylabel('Density')
-    ax_hist_angles_ir.set_yticks([0, 0.4, 0.8])
+    ax_hist_angles_ir.set_yticks([0, 0.4, 0.8, 1.2])
     ax_hist_angles_ir.yaxis.set_label_coords(-.15, .5)
     ax_hist_angles_ir.set_title('Angles between incoming\nand reversal trajectories', fontsize=6)
 
@@ -1176,10 +1183,12 @@ def plot_dataset_reversal_durations_vs_angles_combined():
         fn = START_TIMESTAMP \
              + f'_rev_dist_vs_all_angles' \
                f'_ds={args.dataset}' \
-               f'_rev={args.min_reversal_frames}' \
-               f'_revd={args.min_reversal_distance}' \
                f'_u={args.trajectory_point}' \
                f'_sw={args.smoothing_window}' \
+               f'_rf={args.min_reversal_frames}' \
+               f'_rd={args.min_reversal_distance}' \
+               f'_ff={args.min_forward_frames}' \
+               f'_fd={args.min_forward_distance}' \
                f'_mw={args.manoeuvre_window}'
         save_path = LOGS_PATH / (fn + f'.{img_extension}')
         logger.info(f'Saving plot to {save_path}.')
@@ -1333,14 +1342,17 @@ def plot_dataset_speeds_vs_nonp():
             X_full,
             X_slice,
             min_reversal_frames=args.min_reversal_frames,
+            min_forward_frames=args.min_forward_frames,
+            min_forward_distance=args.min_forward_distance,
             window_size=args.manoeuvre_window,
-            cut_windows_at_manoeuvres=True
+            cut_windows_at_manoeuvres=False
         )
         for i, m in enumerate(manoeuvres):
             nonp_turns.append(m['nonp_all'])
-            durations_turns.append(m['duration_all'] / fps)
+            # durations_turns.append(m['duration_all'] / fps)
+            durations_turns.append(m['reversal_duration'] / fps)
             distances_turns.append(m['distance_all'])
-            speeds_turns.append(m['speed_all'])
+            speeds_turns.append(m['speed_all_signed'])
 
         runs = get_forward_stats(
             X_full,
@@ -1365,8 +1377,10 @@ def plot_dataset_speeds_vs_nonp():
     ax_turns = axes[0, 0]
     ax_turns.set_title(f'Turns. Window={args.manoeuvre_window * 2 / fps:.1f}s.')
     ax_turns.set_xlabel('Non-planarity')
-    ax_turns.set_ylabel('Distance (mm)')
-    s = ax_turns.scatter(nonp_turns, distances_turns, c=speeds_turns, **scatter_args)
+    # ax_turns.set_ylabel('Distance (mm)')
+    # s = ax_turns.scatter(nonp_turns, distances_turns, c=speeds_turns, **scatter_args)
+    ax_turns.set_ylabel('Reversal duration (s)')
+    s = ax_turns.scatter(nonp_turns, durations_turns, c=speeds_turns, **scatter_args)
     cb = fig.colorbar(s, ax=ax_turns)
     cb.solids.set(alpha=1)
     cb.set_label('Speed (mm/s)', rotation=270, labelpad=15)
@@ -1407,6 +1421,266 @@ def plot_dataset_speeds_vs_nonp():
                f'_ff={args.min_forward_frames}' \
                f'_fs={args.min_forward_speed}' \
                f'_rf={args.min_reversal_frames}' \
+               f'_mw={args.manoeuvre_window}'
+        save_path = LOGS_PATH / (fn + f'.{img_extension}')
+        logger.info(f'Saving plot to {save_path}.')
+        plt.savefig(save_path)
+
+    if show_plots:
+        plt.show()
+    plt.close(fig)
+
+
+def plot_dataset_turn_angles_duration():
+    """
+    Plot the distributions of turn angles against durations in a dataset.
+    """
+    args = get_args(validate_source=False)
+
+    # Get dataset
+    assert args.dataset is not None
+    ds = Dataset.objects.get(id=args.dataset)
+
+    # Unset trial and midline source args
+    args.trial = None
+    args.midline3d_source = None
+    args.midline3d_source_file = None
+
+    angles_traj = []
+    angles_plan = []
+    durations = []
+    distances = []
+    displacements = []
+    speeds = []
+
+    # Loop over reconstructions
+    for r_ref in ds.reconstructions:
+        reconstruction = Reconstruction.objects.get(id=r_ref.id)
+        args.reconstruction = reconstruction.id
+        fps = reconstruction.trial.fps
+        X_full, X_slice = get_trajectory(args)
+
+        # Loop over manoeuvres to get the turn statistics
+        manoeuvres = get_manoeuvres(
+            X_full,
+            X_slice,
+            min_reversal_frames=args.min_reversal_frames,
+            min_reversal_distance=args.min_reversal_distance,
+            min_forward_frames=0,  # args.min_forward_frames,
+            min_forward_distance=0,  # args.min_forward_distance,
+            window_size=args.manoeuvre_window,
+            cut_windows_at_manoeuvres=True,
+            align_components_with_traj=True
+        )
+        for i, m in enumerate(manoeuvres):
+            angles_traj.append(m['angle_prev_next_t'])
+            angles_plan.append(m['angle_prev_next_n'])
+            # durations.append(m['duration_all'] / fps)
+            durations.append(m['reversal_duration'] / fps)
+            distances.append(m['distance_all'])
+            displacements.append(m['displacement'])
+            speeds.append(m['speed_all_signed'])
+
+    speeds = np.array(speeds) * fps
+
+    # Plot correlations
+    fig, axes = plt.subplots(2, 3, figsize=(14, 9))
+    fig.suptitle(f'Turn angles vs duration. Window={args.manoeuvre_window * 2 / fps:.1f}s.')
+    scatter_args = dict(s=10, alpha=0.4, linewidths=0)
+
+    ax = axes[0, 0]
+    ax.set_xlabel('Trajectory Angle')
+    ax.set_ylabel('Reversal duration (s)')
+    s = ax.scatter(angles_traj, durations, c=speeds, **scatter_args)
+    cb = fig.colorbar(s, ax=ax)
+    cb.solids.set(alpha=1)
+    cb.set_label('Speed (mm/s)', rotation=270, labelpad=15)
+
+    ax = axes[0, 1]
+    ax.set_xlabel('Trajectory Angle')
+    ax.set_ylabel('Distance (mm)')
+    s = ax.scatter(angles_traj, distances, c=speeds, **scatter_args)
+    cb = fig.colorbar(s, ax=ax)
+    cb.solids.set(alpha=1)
+    cb.set_label('Speed (mm/s)', rotation=270, labelpad=15)
+
+    ax = axes[0, 2]
+    ax.set_xlabel('Trajectory Angle')
+    ax.set_ylabel('Displacement (mm)')
+    s = ax.scatter(angles_traj, displacements, c=speeds, **scatter_args)
+    cb = fig.colorbar(s, ax=ax)
+    cb.solids.set(alpha=1)
+    cb.set_label('Speed (mm/s)', rotation=270, labelpad=15)
+
+    ax = axes[1, 0]
+    ax.set_xlabel('sin(Planar Angle)')
+    ax.set_ylabel('Reversal duration (s)')
+    s = ax.scatter(np.sin(angles_plan), durations, c=speeds, **scatter_args)
+    cb = fig.colorbar(s, ax=ax)
+    cb.solids.set(alpha=1)
+    cb.set_label('Speed (mm/s)', rotation=270, labelpad=15)
+
+    ax = axes[1, 1]
+    ax.set_xlabel('sin(Planar Angle)')
+    ax.set_ylabel('Distance (mm)')
+    s = ax.scatter(np.sin(angles_plan), distances, c=speeds, **scatter_args)
+    cb = fig.colorbar(s, ax=ax)
+    cb.solids.set(alpha=1)
+    cb.set_label('Speed (mm/s)', rotation=270, labelpad=15)
+
+    ax = axes[1, 2]
+    ax.set_xlabel('Trajectory Angle')
+    ax.set_ylabel('Distance (mm)')
+    s = ax.scatter(np.sin(angles_plan), displacements, c=speeds, **scatter_args)
+    cb = fig.colorbar(s, ax=ax)
+    cb.solids.set(alpha=1)
+    cb.set_label('Speed (mm/s)', rotation=270, labelpad=15)
+
+    fig.tight_layout()
+
+    if save_plots:
+        fn = START_TIMESTAMP \
+             + f'_angles_vs_duration' \
+               f'_ds={args.dataset}' \
+               f'_sw={args.smoothing_window}' \
+               f'_u={args.trajectory_point}' \
+               f'_ff={args.min_forward_frames}' \
+               f'_fs={args.min_forward_speed}' \
+               f'_rf={args.min_reversal_frames}' \
+               f'_mw={args.manoeuvre_window}'
+        save_path = LOGS_PATH / (fn + f'.{img_extension}')
+        logger.info(f'Saving plot to {save_path}.')
+        plt.savefig(save_path)
+
+    if show_plots:
+        plt.show()
+    plt.close(fig)
+
+
+def plot_dataset_ip_angles_vs_rev_duration(
+        layout: str = 'paper'
+):
+    """
+    Plot the distributions of turn angles against durations in a dataset.
+    """
+    args = get_args(validate_source=False)
+
+    # Get dataset
+    assert args.dataset is not None
+    ds = Dataset.objects.get(id=args.dataset)
+
+    # Unset trial and midline source args
+    args.trial = None
+    args.midline3d_source = None
+    args.midline3d_source_file = None
+
+    angles = []
+    durations = []
+    distances = []
+    displacements = []
+    speeds = []
+
+    # Loop over reconstructions
+    for r_ref in ds.reconstructions:
+        reconstruction = Reconstruction.objects.get(id=r_ref.id)
+        args.reconstruction = reconstruction.id
+        fps = reconstruction.trial.fps
+        X_full, X_slice = get_trajectory(args)
+
+        # Loop over manoeuvres to get the turn statistics
+        manoeuvres = get_manoeuvres(
+            X_full,
+            X_slice,
+            min_reversal_frames=args.min_reversal_frames,
+            min_reversal_distance=args.min_reversal_distance,
+            min_forward_frames=args.min_forward_frames,
+            min_forward_distance=args.min_forward_distance,
+            window_size=args.manoeuvre_window,
+            cut_windows_at_manoeuvres=True,
+            align_components_with_traj=True
+        )
+        for i, m in enumerate(manoeuvres):
+            angles.append(m['angle_prev_next_n'])
+            # durations.append(m['duration_all'] / fps)
+            durations.append(m['reversal_duration'] / fps)
+            distances.append(m['distance_all'])
+            displacements.append(m['displacement'])
+            speeds.append(m['speed_all_signed'])
+
+    speeds = np.array(speeds) * fps
+    durations = np.array(durations)
+    angles = np.sin(angles)
+
+    # Divide up into bins
+    d_interval = 2
+    d_max = 12
+    n_boxes = int(d_max / d_interval)
+    data = []
+    labels = []
+    rhs = np.linspace(0, d_max, n_boxes + 1)
+    for i, edge in enumerate(rhs):
+        if i == 0:
+            continue
+        d_min = rhs[i - 1]
+        if i == n_boxes:
+            d_max = durations.max()
+        else:
+            d_max = rhs[i]
+        angles_i = angles[(durations > d_min) & (durations <= d_max)]
+        data.append(angles_i)
+        labels.append(f'{d_min:.0f}-{d_max:.0f}\n({len(angles_i)})')
+
+    # Set up plot
+    if layout == 'paper':
+        plt.rc('axes', titlesize=7)  # fontsize of the title
+        plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
+        plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+        plt.rc('legend', fontsize=5)  # fontsize of the legend
+        fig, ax = plt.subplots(1, figsize=(2.56, 2.13), gridspec_kw={
+            'top': 0.93,
+            'bottom': 0.2,
+            'left': 0.13,
+            'right': 0.99,
+        })
+        ax.set_title('Reversal duration vs IP angle', pad=3)
+        xlabel_pad = 4
+        ylabel_pad = 2
+    else:
+        plt.rc('axes', labelsize=8)  # fontsize of the x and y labels
+        plt.rc('xtick', labelsize=6.5)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=6.5)  # fontsize of the y tick labels
+        fig, ax = plt.subplots(1, figsize=(3.1, 2.3), gridspec_kw={
+            'top': 0.99,
+            'bottom': 0.22,
+            'left': 0.17,
+            'right': 0.99,
+        })
+        xlabel_pad = 6
+        ylabel_pad = 7
+
+    ax.set_xlabel('Reversal duration (s)', labelpad=xlabel_pad)
+    ax.set_ylabel('sin(IP angle)', labelpad=ylabel_pad)
+    ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1])
+    ax.boxplot(data, labels=labels, widths=0.6)
+
+    # # Add labels on the RHS
+    # ax2 = ax.twinx()
+    # ax2.set_ylabel('IP angle', labelpad=4, rotation=270)
+    # ax2.set_ylim(ax.get_ylim())
+    # ax2.set_yticks([0, 0.38, 0.7, 1])
+    # ax2.set_yticklabels(['$0, \pi \\rbrace$', '$\lbrace \\frac{\pi}{8},\\frac{7\pi}{8} \\rbrace$', '$\lbrace \\frac{\pi}{4},\\frac{3\pi}{4} \\rbrace$', '$\\frac{\pi}{2}$'])
+
+    if save_plots:
+        fn = START_TIMESTAMP \
+             + f'_pi_angles_vs_rev_duration' \
+               f'_ds={args.dataset}' \
+               f'_sw={args.smoothing_window}' \
+               f'_u={args.trajectory_point}' \
+               f'_rf={args.min_reversal_frames}' \
+               f'_rd={args.min_reversal_distance}' \
+               f'_ff={args.min_forward_frames}' \
+               f'_fd={args.min_forward_distance}' \
                f'_mw={args.manoeuvre_window}'
         save_path = LOGS_PATH / (fn + f'.{img_extension}')
         logger.info(f'Saving plot to {save_path}.')
@@ -1461,7 +1735,7 @@ def plot_dataset_distances_vs_nonp():
             nonp_turns.append(m['nonp_all'])
             durations_turns.append(m['duration_all'] / fps)
             distances_turns.append(m['distance_all'])
-            speeds_turns.append(m['speed_all'])
+            speeds_turns.append(m['speed_all_abs'])
 
         runs = get_forward_stats(
             X_full,
@@ -1534,7 +1808,9 @@ def plot_dataset_distances_vs_nonp():
     plt.close(fig)
 
 
-def plot_dataset_run_distances():
+def plot_dataset_run_distances(
+        layout: str = 'paper'
+):
     """
     Plot the distributions of run distances in a dataset.
     """
@@ -1578,31 +1854,47 @@ def plot_dataset_run_distances():
     logger.info('Fitting distribution.')
     x = np.linspace(min(distances), max(distances), 200)
     levy_dist = levy_stable(*levy_stable.fit(distances))
-    cauchy_dist = cauchy(*cauchy.fit(distances))
+    # levy_dist = levy_stable(1.1, 1.0)
+    # cauchy_dist = cauchy(*cauchy.fit(distances))
 
-    # Set up plots
-    plt.rc('axes', titlesize=7)  # fontsize of the title
-    plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
-    plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
-    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
-    plt.rc('legend', fontsize=5)  # fontsize of the legend
-
-    gs = GridSpec(
-        nrows=1,
-        ncols=1,
-        top=0.92,
-        bottom=0.16,
-        left=0.2,
-        right=0.96,
-    )
-    fig = plt.figure(figsize=(1.74, 2.19))
+    # Set up plot
+    if layout == 'paper':
+        plt.rc('axes', titlesize=7)  # fontsize of the title
+        plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
+        plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+        plt.rc('legend', fontsize=5)  # fontsize of the legend
+        gs = GridSpec(
+            nrows=1,
+            ncols=1,
+            top=0.92,
+            bottom=0.16,
+            left=0.2,
+            right=0.96,
+        )
+        fig = plt.figure(figsize=(1.74, 2.19))
+    else:
+        plt.rc('axes', titlesize=9)  # fontsize of the title
+        plt.rc('axes', labelsize=8)  # fontsize of the x and y labels
+        plt.rc('xtick', labelsize=6.5)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=6.5)  # fontsize of the y tick labels
+        plt.rc('legend', fontsize=7)  # fontsize of the legend
+        gs = GridSpec(
+            nrows=1,
+            ncols=1,
+            top=0.91,
+            bottom=0.16,
+            left=0.14,
+            right=0.99,
+        )
+        fig = plt.figure(figsize=(3.1, 2.3))
 
     # Plot correlations
     logger.info('Plotting')
     ax = fig.add_subplot(gs[0, 0])
     ax.hist(distances, bins=20, density=True, rwidth=0.9)
-    ax.plot(x, cauchy_dist.pdf(x),
-            label=f'Cauchy fit\n($x_0=${cauchy_dist.args[0]:.1f}, $\gamma=${cauchy_dist.args[1]:.1f})')
+    # ax.plot(x, cauchy_dist.pdf(x),
+    #         label=f'Cauchy fit\n($x_0=${cauchy_dist.args[0]:.1f}, $\gamma=${cauchy_dist.args[1]:.1f})')
     ax.plot(x, levy_dist.pdf(x),
             label=f'Levy fit\n($\\alpha=${levy_dist.args[0]:.1f}, $\\beta=${levy_dist.args[1]:.1f})')
     ax.set_title(f'Run distances ($\geq$ {args.min_forward_frames / fps:.1f}s)')
@@ -1765,12 +2057,14 @@ if __name__ == '__main__':
     # plot_manoeuvre_rate()
     # plot_dataset_distributions()
     # plot_dataset_reversal_durations_vs_angles()
-    # plot_dataset_reversal_durations_vs_prev_next_angles()
+    # plot_dataset_reversal_distance_vs_prev_next_angles()
     # plot_dataset_reversal_durations_vs_rev_angles()
-    plot_dataset_reversal_durations_vs_angles_combined()
+    # plot_dataset_reversal_durations_vs_angles_combined()
     # plot_angle_correlations()
     # plot_dataset_speeds_vs_nonp()
-    # plot_dataset_run_distances()
+    # plot_dataset_turn_angles_duration()
+    # plot_dataset_ip_angles_vs_rev_duration(layout='thesis')
+    plot_dataset_run_distances(layout='thesis')
 
     # plot_single_manoeuvre(index=2, plot_mlab_postures=True)
     # plot_single_manoeuvre(frame_num=11400)

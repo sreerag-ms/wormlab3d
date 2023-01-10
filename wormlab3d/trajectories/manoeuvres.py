@@ -107,9 +107,10 @@ def get_manoeuvres(
         pca_all.fit(X_window)
         duration_all = next_end_idx - prev_start_idx
         distance_all = np.linalg.norm(X_window[1:] - X_window[:-1], axis=-1).sum()
-        # distance_all = np.linalg.norm(X_window[0] - X_window[-1], axis=-1)
+        displacement = np.linalg.norm(X_window[0] - X_window[-1])
         # speed_all = distance_all / duration_all
-        speed_all = np.abs(signed_speeds[prev_start_idx:next_end_idx]).mean()
+        speed_all_abs = np.abs(signed_speeds[prev_start_idx:next_end_idx]).mean()
+        speed_all_signed = signed_speeds[prev_start_idx:next_end_idx].mean()
 
         # Get component vectors for each section
         prev_t = pca_prev.components_[0]
@@ -163,7 +164,9 @@ def get_manoeuvres(
             'nonp_all': _nonp(pca_all),
             'duration_all': duration_all,
             'distance_all': distance_all,
-            'speed_all': speed_all,
+            'displacement': displacement,
+            'speed_all_abs': speed_all_abs,
+            'speed_all_signed': speed_all_signed,
         })
 
     return manoeuvres

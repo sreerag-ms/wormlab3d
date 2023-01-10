@@ -90,6 +90,8 @@ def get_args(
                             help='Minimum number of forward frames before counting a forward locomotion section.')
         parser.add_argument('--min-forward-speed', type=float, default=0.,
                             help='Minimum speed of forward frames before counting a forward locomotion section.')
+        parser.add_argument('--min-forward-distance', type=float, default=0.,
+                            help='Minimum distance of forward frames before counting a forward locomotion section.')
         parser.add_argument('--min-reversal-frames', type=int, default=25,
                             help='Minimum number of reversal frames to use to identify a manoeuvre.')
         parser.add_argument('--min-reversal-distance', type=float, default=0.,
