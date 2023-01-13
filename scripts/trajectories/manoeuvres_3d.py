@@ -9,7 +9,7 @@ from matplotlib import animation
 from matplotlib.axes import Axes, GridSpec
 from mayavi import mlab
 from mpl_toolkits.mplot3d.art3d import Line3DCollection, Poly3DCollection
-from scipy.stats import levy_stable, cauchy
+from scipy.stats import levy_stable, cauchy, ks_1samp
 
 from simple_worm.frame import FrameSequenceNumpy
 from simple_worm.plot3d import FrameArtist, Arrow3D, MidpointNormalize
@@ -1853,8 +1853,10 @@ def plot_dataset_run_distances(
     # Fit distribution
     logger.info('Fitting distribution.')
     x = np.linspace(min(distances), max(distances), 200)
-    levy_dist = levy_stable(*levy_stable.fit(distances))
-    # levy_dist = levy_stable(1.1, 1.0)
+    # levy_params = levy_stable.fit(distances)
+    levy_params = (1.1021059443934766, 0.9999906365019289, 4.058541870865994, 0.4265810216580477)
+    levy_dist = levy_stable(*levy_params)
+    ks_res = ks_1samp(distances, levy_dist.cdf)
     # cauchy_dist = cauchy(*cauchy.fit(distances))
 
     # Set up plot
@@ -1908,7 +1910,8 @@ def plot_dataset_run_distances(
                f'_ds={args.dataset}' \
                f'_sw={args.smoothing_window}' \
                f'_ff={args.min_forward_frames}' \
-               f'_fs={args.min_forward_speed}'
+               f'_fs={args.min_forward_speed}' \
+               f'_N={len(distances)}'
         save_path = LOGS_PATH / (fn + f'.{img_extension}')
         logger.info(f'Saving plot to {save_path}.')
         plt.savefig(save_path)
