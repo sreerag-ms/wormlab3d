@@ -16,6 +16,7 @@ def get_args(
         include_manoeuvre_options: bool = True,
         include_approximation_options: bool = True,
         include_pe_options: bool = True,
+        include_fractal_dim_options: bool = True,
         validate_source: bool = True
 ) -> Namespace:
     """
@@ -64,6 +65,7 @@ def get_args(
         parser.add_argument('--min-delta', type=int, default=1, help='Minimum time lag.')
         parser.add_argument('--max-delta', type=int, default=10000, help='Maximum time lag.')
         parser.add_argument('--delta-step', type=float, default=1, help='Step between deltas. -ve=exponential steps.')
+        parser.add_argument('--min-duration', type=int, default=-1, help='Min trajectory duration to include. -ve=include all.')
         parser.add_argument('--aggregation', type=str, choices=DISPLACEMENT_AGGREGATION_OPTIONS,
                             default=DISPLACEMENT_AGGREGATION_SQUARED_SUM,
                             help='Displacements can be taken as L2 norms or as the squared sum of components.')
@@ -159,6 +161,16 @@ def get_args(
                             help='Interval between pauses.')
         parser.add_argument('--volume-metric', type=str, choices=['disks', 'cuboids'], default='disks',
                             help='How to calculate the volume estimates.')
+
+    if include_fractal_dim_options:
+        parser.add_argument('--fd-plateau-threshold', type=float, default=0.95,
+                            help='Percentage of the best fit value to include when finding the plateau range.')
+        parser.add_argument('--fd-sample-size', type=int, default=100,
+                            help='Number of randomisations to average over when calculating the box dimension.')
+        parser.add_argument('--fd-sf-min', type=float, default=0.9,
+                            help='Minimum trajectory scaling factor.')
+        parser.add_argument('--fd-sf-max', type=float, default=1.1,
+                            help='Maximum trajectory scaling factor.')
 
     args = parser.parse_args()
 

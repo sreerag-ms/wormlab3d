@@ -13,6 +13,7 @@ from sklearn.decomposition import PCA
 
 from wormlab3d import logger, PE_CACHE_PATH, N_WORKERS
 from wormlab3d.data.model import PEParameters
+from wormlab3d.particles.fractal_dimensions import calculate_box_dimension
 from wormlab3d.particles.three_state_explorer import ThreeStateExplorer
 from wormlab3d.particles.tumble_run import find_approximation
 from wormlab3d.toolkit.util import hash_data, normalise
@@ -278,7 +279,7 @@ class SimulationState:
                 shape = (mp.batch_size, T, 3)
             elif k_like == 'states':
                 shape = (mp.batch_size, T)
-            elif k_like in ['nonp', 'coverage', 'crossings']:
+            elif k_like in ['nonp', 'coverage', 'crossings', 'fractal_dimensions']:
                 shape = (mp.batch_size,)
             elif shape is None:
                 raise RuntimeError(f'Unknown shape for variable key: {k}')
@@ -672,6 +673,67 @@ class SimulationState:
         self.needs_save = True
 
         return Xt
+
+    def get_fractal_dimensions(
+            self,
+            noise_scale: Optional[float],
+            smoothing_window: Optional[int],
+            voxel_sizes: np.ndarray,
+            plateau_threshold: float,
+            sample_size: int = 1,
+            sf_min: float = 1.,
+            sf_max: float = 1.,
+    ) -> np.ndarray:
+        """
+        Calculate the fractal dimensions of the trajectories.
+        """
+
+        args = {
+            'noise_scale': f'{noise_scale:.4f}' if noise_scale is not None else '',
+            'smoothing_window': smoothing_window,
+            'vxs': [f'{v:.5E}' for v in voxel_sizes],
+            'pt': plateau_threshold,
+            'ss': sample_size,
+            'sf_min': sf_min,
+            'sf_max': sf_max,
+        }
+        k = 'fractal_dimensions_' + hash_data(args)
+
+        try:
+            fractal_dimensions = getattr(self, k)
+            return fractal_dimensions
+        except AttributeError:
+            pass
+
+        # Add some noise to the trajectories then smooth
+        Xs = self.X.copy().astype(np.float64)
+        Xs = Xs - Xs.mean(axis=1, keepdims=True)
+        if noise_scale is not None and noise_scale > 0:
+            Xs = Xs + np.random.normal(np.zeros_like(Xs), noise_scale)
+        if smoothing_window is not None and smoothing_window > 0:
+            Xs = smooth_trajectory(Xs.transpose(1, 0, 2), window_len=smoothing_window).transpose(1, 0, 2)
+
+        # Loop over the trajectories and calculate the dimensions.
+        dims = np.zeros(len(self))
+        for i, X in enumerate(Xs):
+            dims[i] = calculate_box_dimension(
+                X=X,
+                voxel_sizes=voxel_sizes,
+                plateau_threshold=plateau_threshold,
+                sample_size=sample_size,
+                sf_min=sf_min,
+                sf_max=sf_max,
+                parallel=True
+            )['D']
+
+        self.states[k], self.shapes[k] = self._init_state_component(
+            k=k,
+            k_like='fractal_dimensions',
+        )
+        self.states[k][:] = dims
+        self.needs_save = True
+
+        return dims
 
     def _get_dists(self) -> np.ndarray:
         """

@@ -284,3 +284,113 @@ def generate_or_load_voxel_scores(
         np.savez(cache_path, **save_arrs)
 
     return scores
+
+
+def _calculate_fractal_dimensions(
+        args: Namespace
+) -> np.ndarray:
+    """
+    Calculate the fractal dimensions across a range of sigmas, durations, pauses and voxel sizes.
+    """
+    npa_sigmas = args.npas
+    n_sigmas = len(npa_sigmas)
+    sim_durations = args.sim_durations
+    n_durations = len(sim_durations)
+    pauses = args.pauses
+    n_pauses = len(pauses)
+    assert args.vxs_num > 20, 'More voxel sizes required!'
+    voxel_sizes = get_voxel_sizes_from_args(args)[::-1]
+
+    # Outputs
+    fds = np.zeros((n_sigmas, n_durations, n_pauses, 4))
+    n_sims = n_sigmas * n_durations * n_pauses
+    sim_idx = 0
+
+    # Sweep over the combinations
+    for i, npas in enumerate(npa_sigmas):
+        for j, duration in enumerate(sim_durations):
+            for k, pause in enumerate(pauses):
+                logger.info(
+                    f'{sim_idx + 1}/{n_sims}: '
+                    f'sigma={npas:.2E}, duration={duration:.2f}, pause={pause:.2f}.'
+                )
+                args.phi_dist_params[1] = npas
+                args.sim_duration = duration
+                args.nonp_pause_max = pause
+                SS = get_sim_state_from_args(args)
+
+                # Calculate dimensions
+                dims = SS.get_fractal_dimensions(
+                    noise_scale=args.approx_noise,
+                    smoothing_window=args.smoothing_window,
+                    voxel_sizes=voxel_sizes,
+                    plateau_threshold=args.fd_plateau_threshold,
+                    sample_size=args.fd_sample_size,
+                    sf_min=args.fd_sf_min,
+                    sf_max=args.fd_sf_max,
+                )
+                fds[i, j, k] = [dims.mean(), dims.min(), dims.max(), dims.std()]
+
+                if SS.needs_save:
+                    SS.save()
+
+                sim_idx += 1
+
+    return fds
+
+
+def generate_or_load_fractal_dimensions(
+        args: Namespace,
+        rebuild_cache: bool = False,
+        cache_only: bool = False
+) -> np.ndarray:
+    """
+    Generate or load the fractal dimensions of trajectories.
+    """
+    if not hasattr(args, 'npas'):
+        npas = get_npas_from_args(args)
+    else:
+        npas = args.npas
+    if not hasattr(args, 'sim_durations'):
+        durations = get_durations_from_args(args)
+    else:
+        durations = args.sim_durations
+    if not hasattr(args, 'pauses'):
+        pauses = get_pauses_from_args(args)
+    else:
+        pauses = args.pauses
+
+    voxel_sizes = get_voxel_sizes_from_args(args)[::-1]
+
+    keys = {
+        'npas': [f'{s:.3E}' for s in npas],
+        'durations': [f'{d:.4f}' for d in durations],
+        'pauses': [f'{p:.4f}' for p in pauses],
+        'noise_scale': f'{args.approx_noise:.4f}' if args.approx_noise is not None else '',
+        'smoothing_window': args.smoothing_window,
+        'vxs': [f'{v:.5E}' for v in voxel_sizes],
+        'pt': args.fd_plateau_threshold,
+        'ss': args.fd_sample_size,
+        'sf_min': args.fd_sf_min,
+        'sf_max': args.fd_sf_max,
+    }
+    cache_path = PE_CACHE_PATH / f'fractal_dims_{hash_data(keys)}'
+    cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
+    fds = None
+    if not rebuild_cache and cache_fn.exists():
+        data = np.load(cache_fn)
+        fds = data['fds']
+        logger.info(f'Loaded fractal dimensions from cache: {cache_fn}')
+
+    if fds is None:
+        if cache_only:
+            raise RuntimeError(f'Cache "{cache_fn}" could not be loaded!')
+        logger.info('Calculating fractal dimensions.')
+        fds = _calculate_fractal_dimensions(args)
+        save_arrs = {
+            'fds': fds,
+        }
+        logger.info(f'Saving fractal dimensions to {cache_path}.')
+        np.savez(cache_path, **save_arrs)
+
+    return fds

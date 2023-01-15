@@ -16,7 +16,7 @@ def calculate_angle(v1: np.ndarray, v2: np.ndarray) -> float:
     elif len(v1) == 3:
         abs_val = np.linalg.norm(v1) * np.linalg.norm(v2)
         try:
-            cos = np.dot(v1, v2) / abs_val
+            cos = np.clip(np.dot(v1, v2) / abs_val, a_max=1, a_min=-1)
             angle = np.arccos(cos)
             if np.isnan(angle):
                 angle = 0

@@ -11,7 +11,8 @@ from scipy.stats import ttest_ind
 from simple_worm.plot3d import MidpointNormalize
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.particles.cache import get_sim_state_from_args, generate_or_load_voxel_scores, generate_or_load_r_values, \
-    get_npas_from_args, get_voxel_sizes_from_args, get_durations_from_args, get_pauses_from_args
+    get_npas_from_args, get_voxel_sizes_from_args, get_durations_from_args, get_pauses_from_args, \
+    generate_or_load_fractal_dimensions
 from wormlab3d.toolkit.plot_utils import tex_mode
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.util import get_deltas_from_args
@@ -1604,6 +1605,124 @@ def volume_metric_sweeps_cuboids_voxels():
         plt.show()
 
 
+
+def fractal_dimension_sweeps():
+    """
+    Simulate across a range of non-planarities and calculate fractal dimension.
+    """
+    args = get_args(validate_source=False)
+    model_phi = args.phi_dist_params[1]
+
+    # Set parameter ranges
+    npa_sigmas = get_npas_from_args(args)
+    args.npas = npa_sigmas
+    sim_durations = get_durations_from_args(args)
+    pauses = get_pauses_from_args(args)
+    voxel_sizes = get_voxel_sizes_from_args(args)
+    args.voxel_sizes = voxel_sizes
+
+    fix_pause = args.nonp_pause_max
+    fix_duration = args.sim_duration
+
+    # Plot combined
+    plt.rc('axes', titlesize=7)  # fontsize of the title
+    plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
+    plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+    plt.rc('legend', fontsize=6)  # fontsize of the legend
+
+    fig, axes = plt.subplots(2, figsize=(4.53, 4.62), gridspec_kw={
+        'hspace': 0.33,
+        'top': 0.94,
+        'bottom': 0.08,
+        'left': 0.09,
+        'right': 0.88,
+    })
+
+    # Fix the pause and sweep over the durations
+    args.sim_durations = sim_durations
+    args.pauses = [fix_pause]
+    fds = generate_or_load_fractal_dimensions(args, cache_only=False, rebuild_cache=False)
+    optimal_sigmas_idxs = fds[..., 0].argmax(axis=0).squeeze()
+    optimal_sigmas = npa_sigmas[optimal_sigmas_idxs]
+    optimal_vols = []
+    plot_start = 0
+    plot_end = 6
+    sim_durations = sim_durations[plot_start:plot_end]
+    optimal_sigmas = optimal_sigmas[plot_start:plot_end]
+
+    # Plot the volumes
+    ax = axes[0]
+    cmap = plt.get_cmap('winter')
+    colours = cmap(np.linspace(0, 1, len(sim_durations)))
+    for j, duration in enumerate(sim_durations):
+        fds_j = fds[:, j, 0].T
+        optimal_vols.append(fds_j[0, optimal_sigmas_idxs[j]])
+        ax.plot(npa_sigmas, fds_j[0], label=f'{duration / 60:.0f}m', c=colours[j], marker='o', alpha=0.7)
+    ax.scatter(optimal_sigmas, optimal_vols, marker='o', zorder=100, s=50, facecolors='none', edgecolors='red',
+               linewidths=2)
+    ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=3, zorder=-1)
+    ax.legend(loc='upper left', bbox_to_anchor=(1, 1), bbox_transform=ax.transAxes)
+    ax.set_title(f'$\delta_{{max}}={fix_pause:.1f}$s')
+    ax.set_xlabel(f'$\sigma_\phi$')
+    ax.set_xscale('log')
+    # ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
+    ax.set_xticks([1e-3, 1e-1, 1e1])
+    trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
+    ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=7, fontweight='bold',
+            horizontalalignment='center', verticalalignment='top', transform=trans)
+    ax.set_ylabel('Fractal dimension')
+    # ax.set_yticks([0, 1000, 2000])
+    ax.grid()
+
+    # Fix the duration and sweep over the pauses
+    args.sim_durations = [fix_duration]
+    args.pauses = pauses
+    fds = generate_or_load_fractal_dimensions(args, cache_only=False, rebuild_cache=False)
+    optimal_sigmas_idxs = fds[..., 0].argmax(axis=0).squeeze()
+    optimal_sigmas = npa_sigmas[optimal_sigmas_idxs]
+    optimal_vols = []
+    plot_start = 0
+    plot_end = 6
+    pauses = pauses[plot_start:plot_end]
+    optimal_sigmas = optimal_sigmas[plot_start:plot_end]
+
+    # Plot the volumes
+    ax = axes[1]
+    cmap = plt.get_cmap('summer')
+    colours = cmap(np.linspace(0, 1, len(pauses)))
+    for k, pause in enumerate(pauses):
+        fds_k = fds[:, 0, k].T
+        optimal_vols.append(fds_k[0, optimal_sigmas_idxs[k]])
+        ax.plot(npa_sigmas, fds_k[0], label=f'{pause:.0f}s', c=colours[k], marker='o', alpha=0.7)
+        # ax.axhline(y=vols[0, optimal_sigmas_idxs[j]], color='red', zorder=-2, linewidth=2, linestyle=':', alpha=0.6)
+    ax.scatter(optimal_sigmas, optimal_vols, marker='o', zorder=100, s=50, facecolors='none', edgecolors='red',
+               linewidths=2)
+    ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=3, zorder=-1)
+    ax.legend(loc='upper left', bbox_to_anchor=(1, 1), bbox_transform=ax.transAxes)
+    ax.set_title(f'T={fix_duration}s')
+    ax.set_xlabel(f'$\sigma_\phi$')
+    ax.set_xscale('log')
+    ax.set_xticks([1e-3, 1e-1, 1e1])
+    trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
+    ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=7, fontweight='bold',
+            horizontalalignment='center', verticalalignment='top', transform=trans)
+    ax.set_ylabel('Fractal dimension')
+    # ax.set_yticks([0, 100, 200, 300])
+    ax.grid()
+
+    # fig.tight_layout()
+    if save_plots:
+        plt.savefig(
+            make_filename('fractal_dimensions_sweep', args,
+                          excludes=['voxel_sizes', 'vxs', 'deltas', 'delta_step', 'n_targets', 'epsilon',
+                                    'duration']),
+            transparent=True
+        )
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
@@ -1619,4 +1738,5 @@ if __name__ == '__main__':
     # volume_metric_sweeps()
     # volume_metric_sweeps2()
     # voxel_scores_sweeps()
-    volume_metric_sweeps_cuboids_voxels()
+    # volume_metric_sweeps_cuboids_voxels()
+    fractal_dimension_sweeps()
