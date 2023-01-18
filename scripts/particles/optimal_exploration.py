@@ -19,6 +19,8 @@ from wormlab3d.trajectories.util import get_deltas_from_args
 
 show_plots = False
 save_plots = True
+# show_plots = True
+# save_plots = False
 img_extension = 'svg'
 
 
@@ -1068,7 +1070,12 @@ def volume_metric_sweeps():
         plt.show()
 
 
-def volume_metric_sweeps2():
+def volume_metric_sweeps2(
+        plot_duration_sweep: bool = False,
+        plot_pause_sweep: bool = False,
+        plot_combined: bool = True,
+        layout: str = 'paper'
+):
     """
     Estimate the volume explored by a typical trajectory.
     """
@@ -1100,7 +1107,7 @@ def volume_metric_sweeps2():
             r3 = r_[:, :, :, 2]
             return r1 * r2 * r3
 
-    if 0:
+    if plot_duration_sweep:
         # Fix the pause and sweep over the durations
         args.sim_durations = sim_durations
         args.pauses = [fix_pause]
@@ -1156,7 +1163,7 @@ def volume_metric_sweeps2():
         if show_plots:
             plt.show()
 
-    if 0:
+    if plot_pause_sweep:
         # Fix the duration and sweep over the pauses
         args.sim_durations = [fix_duration]
         args.pauses = pauses
@@ -1209,20 +1216,39 @@ def volume_metric_sweeps2():
             plt.show()
 
     # Plot combined
-    if 1:
-        plt.rc('axes', titlesize=7)  # fontsize of the title
-        plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
-        plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
-        plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
-        plt.rc('legend', fontsize=6)  # fontsize of the legend
-
-        fig, axes = plt.subplots(2, figsize=(4.53, 4.62), gridspec_kw={
-            'hspace': 0.33,
-            'top': 0.94,
-            'bottom': 0.08,
-            'left': 0.09,
-            'right': 0.88,
-        })
+    if plot_combined:
+        if layout == 'paper':
+            plt.rc('axes', titlesize=7)  # fontsize of the title
+            plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
+            plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+            plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+            plt.rc('legend', fontsize=6)  # fontsize of the legend
+            fig, axes = plt.subplots(2, figsize=(4.53, 4.62), gridspec_kw={
+                'hspace': 0.33,
+                'top': 0.94,
+                'bottom': 0.08,
+                'left': 0.09,
+                'right': 0.88,
+            })
+            model_phi_fontsize = 7
+            legend_anchor = (1, 1)
+            y_label = 'Volume explored'
+        else:
+            plt.rc('axes', titlesize=9)  # fontsize of the title
+            plt.rc('axes', labelsize=9, labelpad=2)  # fontsize of the x and y labels
+            plt.rc('xtick', labelsize=7)  # fontsize of the x tick labels
+            plt.rc('ytick', labelsize=7)  # fontsize of the y tick labels
+            plt.rc('legend', fontsize=8)  # fontsize of the legend
+            fig, axes = plt.subplots(2, figsize=(5.8, 4.5), gridspec_kw={
+                'hspace': 0.4,
+                'top': 0.95,
+                'bottom': 0.1,
+                'left': 0.09,
+                'right': 0.86,
+            })
+            model_phi_fontsize = 9
+            legend_anchor = (1.01, 1)
+            y_label = '$V_s$'
 
         # Fix the pause and sweep over the durations
         args.sim_durations = sim_durations
@@ -1250,16 +1276,16 @@ def volume_metric_sweeps2():
         ax.scatter(optimal_sigmas, optimal_vols, marker='o', zorder=100, s=50, facecolors='none', edgecolors='red',
                    linewidths=2)
         ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=3, zorder=-1)
-        ax.legend(loc='upper left', bbox_to_anchor=(1, 1), bbox_transform=ax.transAxes)
+        ax.legend(loc='upper left', bbox_to_anchor=legend_anchor, bbox_transform=ax.transAxes)
         ax.set_title(f'$\delta_{{max}}={fix_pause:.1f}$s')
         ax.set_xlabel(f'$\sigma_\phi$')
         ax.set_xscale('log')
         # ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
         ax.set_xticks([1e-3, 1e-1, 1e1])
         trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
-        ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=7, fontweight='bold',
+        ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=model_phi_fontsize, fontweight='bold',
                 horizontalalignment='center', verticalalignment='top', transform=trans)
-        ax.set_ylabel('Volume explored')
+        ax.set_ylabel(y_label)
         ax.set_yticks([0, 1000, 2000])
         ax.grid()
 
@@ -1288,15 +1314,15 @@ def volume_metric_sweeps2():
         ax.scatter(optimal_sigmas, optimal_vols, marker='o', zorder=100, s=50, facecolors='none', edgecolors='red',
                    linewidths=2)
         ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=3, zorder=-1)
-        ax.legend(loc='upper left', bbox_to_anchor=(1, 1), bbox_transform=ax.transAxes)
+        ax.legend(loc='upper left', bbox_to_anchor=legend_anchor, bbox_transform=ax.transAxes)
         ax.set_title(f'T={fix_duration}s')
         ax.set_xlabel(f'$\sigma_\phi$')
         ax.set_xscale('log')
         ax.set_xticks([1e-3, 1e-1, 1e1])
         trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
-        ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=7, fontweight='bold',
+        ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=model_phi_fontsize, fontweight='bold',
                 horizontalalignment='center', verticalalignment='top', transform=trans)
-        ax.set_ylabel('Volume explored')
+        ax.set_ylabel(y_label)
         ax.set_yticks([0, 100, 200, 300])
         ax.grid()
 
@@ -1421,7 +1447,9 @@ def voxel_scores_sweeps():
             plt.show()
 
 
-def volume_metric_sweeps_cuboids_voxels():
+def volume_metric_sweeps_cuboids_voxels(
+        layout: str = 'paper'
+):
     """
     Estimate the volume explored by a typical trajectory by cuboids and voxels.
     """
@@ -1435,6 +1463,7 @@ def volume_metric_sweeps_cuboids_voxels():
     pauses = get_pauses_from_args(args)
     fix_duration = args.sim_duration
     fix_pause = args.nonp_pause_max
+    args.volume_metric = 'cuboids'
     assert args.volume_metric == 'cuboids'
 
     def _calculate_volumes(r_):
@@ -1451,21 +1480,38 @@ def volume_metric_sweeps_cuboids_voxels():
             return r1 * r2 * r3
 
     # Plot combined
-    plt.rc('axes', titlesize=7, titlepad=4)  # fontsize of the title
-    plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
-    plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
-    plt.rc('xtick.major', pad=2)
-    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
-    plt.rc('legend', fontsize=6)  # fontsize of the legend
-
-    fig, axes = plt.subplots(2, 2, figsize=(7, 4), gridspec_kw={
-        'hspace': 0.35,
-        'wspace': 0.2,
-        'top': 0.94,
-        'bottom': 0.08,
-        'left': 0.06,
-        'right': 0.92,
-    })
+    if layout == 'paper':
+        plt.rc('axes', titlesize=7, titlepad=4)  # fontsize of the title
+        plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
+        plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+        plt.rc('xtick.major', pad=2)
+        plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+        plt.rc('legend', fontsize=6)  # fontsize of the legend
+        fig, axes = plt.subplots(2, 2, figsize=(7, 4), gridspec_kw={
+            'hspace': 0.35,
+            'wspace': 0.2,
+            'top': 0.94,
+            'bottom': 0.08,
+            'left': 0.06,
+            'right': 0.92,
+        })
+        model_phi_fontsize = 7
+    else:
+        plt.rc('axes', titlesize=8, titlepad=4)  # fontsize of the title
+        plt.rc('axes', labelsize=8, labelpad=2)  # fontsize of the x and y labels
+        plt.rc('xtick', labelsize=6)  # fontsize of the x tick labels
+        plt.rc('xtick.major', pad=2)
+        plt.rc('ytick', labelsize=6)  # fontsize of the y tick labels
+        plt.rc('legend', fontsize=7)  # fontsize of the legend
+        fig, axes = plt.subplots(2, 2, figsize=(6, 3.8), gridspec_kw={
+            'hspace': 0.4,
+            'wspace': 0.3,
+            'top': 0.95,
+            'bottom': 0.1,
+            'left': 0.07,
+            'right': 0.895,
+        })
+        model_phi_fontsize = 9
 
     # Fix the pause and sweep over the durations
     args.sim_durations = sim_durations
@@ -1475,6 +1521,7 @@ def volume_metric_sweeps_cuboids_voxels():
     optimal_sigmas_vols_idxs = vols[..., 0].argmax(axis=0).squeeze()
     optimal_sigmas_vols = npa_sigmas[optimal_sigmas_vols_idxs]
     scores = generate_or_load_voxel_scores(args, cache_only=True, rebuild_cache=False)
+    scores *= args.vxs
     optimal_sigmas_scores_idxs = scores[..., 0].argmax(axis=0).squeeze()
     optimal_sigmas_scores = npa_sigmas[optimal_sigmas_scores_idxs]
 
@@ -1502,7 +1549,7 @@ def volume_metric_sweeps_cuboids_voxels():
     ax.set_xscale('log')
     ax.set_xticks([1e-3, 1e-1, 1e1])
     trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
-    ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=7, fontweight='bold',
+    ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=model_phi_fontsize, fontweight='bold',
             horizontalalignment='center', verticalalignment='top', transform=trans)
     ax.set_ylabel('Cuboid volume explored')
     ax.set_yticks([0, 100, 200])
@@ -1517,7 +1564,7 @@ def volume_metric_sweeps_cuboids_voxels():
         ax.plot(npa_sigmas, score, label=f'{duration / 60:.0f}m', c=colours[j], marker='o', alpha=0.7)
     ax.scatter(optimal_sigmas_scores, optimal_scores, marker='o', zorder=100, s=50, facecolors='none', edgecolors='red',
                linewidths=2)
-    ax.axvline(x=model_phi, c='orange', linestyle='--')
+    ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=3, zorder=-1)
     ax.legend(loc='upper left', bbox_to_anchor=(1, 1), bbox_transform=ax.transAxes)
     # ax.set_title(f'$\delta_{{max}}={fix_pause:.1f}$s')
     ax.set_title(f'$\delta_{{max}}={int(fix_pause)}$ seconds')
@@ -1525,10 +1572,11 @@ def volume_metric_sweeps_cuboids_voxels():
     ax.set_xscale('log')
     ax.set_xticks([1e-3, 1e-1, 1e1])
     trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
-    ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=7, fontweight='bold',
+    ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=model_phi_fontsize, fontweight='bold',
             horizontalalignment='center', verticalalignment='top', transform=trans)
-    ax.set_ylabel('Voxels visited')
-    ax.set_yticks([0, 100, 200])
+    # ax.set_ylabel('Voxels visited')
+    ax.set_ylabel('Voxel volume explored')
+    ax.set_yticks([0, 50, 100])
     ax.grid()
 
     # Fix the duration and sweep over the pauses
@@ -1539,6 +1587,7 @@ def volume_metric_sweeps_cuboids_voxels():
     optimal_sigmas_vols_idxs = vols[..., 0].argmax(axis=0).squeeze()
     optimal_sigmas_vols = npa_sigmas[optimal_sigmas_vols_idxs]
     scores = generate_or_load_voxel_scores(args, cache_only=True, rebuild_cache=False)
+    scores *= args.vxs
     optimal_sigmas_scores_idxs = scores[..., 0].argmax(axis=0).squeeze()
     optimal_sigmas_scores = npa_sigmas[optimal_sigmas_scores_idxs]
 
@@ -1561,12 +1610,12 @@ def volume_metric_sweeps_cuboids_voxels():
                linewidths=2)
     ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=3, zorder=-1)
     # ax.set_title(f'T={fix_duration}s')
-    ax.set_title(f'T={int(fix_duration/60)} minutes')
+    ax.set_title(f'T={int(fix_duration / 60)} minutes')
     ax.set_xlabel(f'$\sigma_\phi$', labelpad=0)
     ax.set_xscale('log')
     ax.set_xticks([1e-3, 1e-1, 1e1])
     trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
-    ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=7, fontweight='bold',
+    ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=model_phi_fontsize, fontweight='bold',
             horizontalalignment='center', verticalalignment='top', transform=trans)
     ax.set_ylabel('Cuboid volume explored')
     ax.set_yticks([0, 10, 20])
@@ -1581,18 +1630,19 @@ def volume_metric_sweeps_cuboids_voxels():
         ax.plot(npa_sigmas, score, label=f'{pause:.0f}s', c=colours[k], marker='o', alpha=0.7)
     ax.scatter(optimal_sigmas_scores, optimal_scores, marker='o', zorder=100, s=50, facecolors='none', edgecolors='red',
                linewidths=2)
-    ax.axvline(x=model_phi, c='orange', linestyle='--')
+    ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=3, zorder=-1)
     ax.legend(loc='upper left', bbox_to_anchor=(1, 1), bbox_transform=ax.transAxes)
     # ax.set_title(f'T={fix_duration}s')
-    ax.set_title(f'T={int(fix_duration/60)} minutes')
+    ax.set_title(f'T={int(fix_duration / 60)} minutes')
     ax.set_xlabel(f'$\sigma_\phi$', labelpad=0)
     ax.set_xscale('log')
     ax.set_xticks([1e-3, 1e-1, 1e1])
     trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
-    ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=7, fontweight='bold',
+    ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=model_phi_fontsize, fontweight='bold',
             horizontalalignment='center', verticalalignment='top', transform=trans)
-    ax.set_ylabel('Voxels visited')
-    ax.set_yticks([20, 40, 60])
+    # ax.set_ylabel('Voxels visited')
+    ax.set_ylabel('Voxel volume explored')
+    ax.set_yticks([10, 20, 30])
     ax.grid()
 
     if save_plots:
@@ -1603,7 +1653,6 @@ def volume_metric_sweeps_cuboids_voxels():
         )
     if show_plots:
         plt.show()
-
 
 
 def fractal_dimension_sweeps():
@@ -1736,7 +1785,7 @@ if __name__ == '__main__':
     # crossings_nonp()
     # volume_metric()
     # volume_metric_sweeps()
-    # volume_metric_sweeps2()
+    volume_metric_sweeps2(plot_pause_sweep=False, plot_duration_sweep=False, plot_combined=True, layout='thesis')
     # voxel_scores_sweeps()
-    # volume_metric_sweeps_cuboids_voxels()
-    fractal_dimension_sweeps()
+    # volume_metric_sweeps_cuboids_voxels(layout='thesis')
+    # fractal_dimension_sweeps()
