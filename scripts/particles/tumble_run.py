@@ -23,6 +23,8 @@ from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.pca import get_pca_cache_from_args
 from wormlab3d.trajectories.util import get_deltas_from_args
 
+# show_plots = True
+# save_plots = False
 show_plots = False
 save_plots = True
 img_extension = 'svg'
@@ -400,7 +402,7 @@ def single_trial_approximation():
     """
     Plot a single trial
     """
-    args = get_args()
+    args = get_args(validate_source=False)
     assert args.trial is not None
     assert args.trajectory_point is None  # Use the full postures
     assert args.planarity_window is not None
@@ -789,6 +791,7 @@ def dataset_against_three_state_histogram_comparison(
         use_approximation_stats: bool = True,
         plot_sweep: bool = False,
         plot_basic: bool = False,
+        layout: str = 'paper'
 ):
     """
     Plot comparisons between simulation runs and the experimental data.
@@ -893,6 +896,8 @@ def dataset_against_three_state_histogram_comparison(
                             f'_noise={f"{args.approx_noise:.2f}" if args.approx_noise is not None else "0"}'
                             f'_ds={ds.id}'
                             f'_ss={SS.parameters.id}'
+                            f'_pw={args.planarity_window_vertices}'
+                            f'_mrsd={min_run_speed_duration[0]:.2f},{min_run_speed_duration[1]:.1f}'
                             f'.{img_extension}',
                 transparent=True
             )
@@ -911,20 +916,35 @@ def dataset_against_three_state_histogram_comparison(
         colour_real = default_colours[0]
         colour_sim = default_colours[1]
 
-        plt.rc('axes', titlesize=7)  # fontsize of the title
-        plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
-        plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
-        plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
-        plt.rc('legend', fontsize=6)  # fontsize of the legend
-
-        fig, axes = plt.subplots(2, 2, figsize=(2.7, 2.6), gridspec_kw={
-            'hspace': 0.6,
-            'wspace': 0.45,
-            'top': 0.92,
-            'bottom': 0.14,
-            'left': 0.15,
-            'right': 0.98,
-        })
+        if layout == 'paper':
+            plt.rc('axes', titlesize=7)  # fontsize of the title
+            plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
+            plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+            plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+            plt.rc('legend', fontsize=6)  # fontsize of the legend
+            fig, axes = plt.subplots(2, 2, figsize=(2.7, 2.6), gridspec_kw={
+                'hspace': 0.6,
+                'wspace': 0.45,
+                'top': 0.92,
+                'bottom': 0.14,
+                'left': 0.15,
+                'right': 0.98,
+            })
+            axes_positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
+        else:
+            plt.rc('axes', titlesize=9)  # fontsize of the title
+            plt.rc('axes', labelsize=8, labelpad=0)  # fontsize of the x and y labels
+            plt.rc('xtick', labelsize=7)  # fontsize of the x tick labels
+            plt.rc('ytick', labelsize=7)  # fontsize of the y tick labels
+            plt.rc('legend', fontsize=7)  # fontsize of the legend
+            fig, axes = plt.subplots(1, 4, figsize=(5.9, 1.6), gridspec_kw={
+                'wspace': 0.5,
+                'top': 0.85,
+                'bottom': 0.2,
+                'left': 0.08,
+                'right': 0.98,
+            })
+            axes_positions = [0, 1, 2, 3]
 
         for i, (param_name, values) in enumerate({
                                                      'Run durations': [durations, stats['durations']],
@@ -932,7 +952,7 @@ def dataset_against_three_state_histogram_comparison(
                                                      'Planar angles': [planar_angles, stats['planar_angles']],
                                                      'Non-planar angles': [nonplanar_angles, stats['nonplanar_angles']]
                                                  }.items()):
-            ax = axes[[(0, 0), (0, 1), (1, 0), (1, 1)][i]]
+            ax = axes[axes_positions[i]]
             ax.set_title(param_name)
 
             values_ds = np.array(values[0][j])
@@ -940,6 +960,12 @@ def dataset_against_three_state_histogram_comparison(
 
             if param_name not in ['Planar angles', 'Non-planar angles']:
                 ax.set_yscale('log')
+                bin_range = None
+
+            if param_name == 'Planar angles':
+                bin_range = (-np.pi, np.pi)
+            elif param_name == 'Non-planar angles':
+                bin_range = (-np.pi / 2, np.pi / 2)
             if param_name == 'Speeds':
                 weights = [
                     np.array(durations[j]),
@@ -951,14 +977,15 @@ def dataset_against_three_state_histogram_comparison(
                     np.ones_like(values_sim),
                 ]
 
-            ax.hist(
+            hv = ax.hist(
                 [values_ds, values_sim],
                 weights=weights,
                 color=[colour_real, colour_sim],
                 bins=11,
                 density=True,
                 alpha=0.75,
-                label=['Real', 'Simulation']
+                label=['Real', 'Simulation'],
+                range=bin_range
             )
             ax.set_title(param_name)
             ax.set_ylabel('Density')
@@ -997,12 +1024,135 @@ def dataset_against_three_state_histogram_comparison(
                             f'_noise={f"{args.approx_noise:.2f}" if args.approx_noise is not None else "0"}'
                             f'_ds={ds.id}'
                             f'_ss={SS.parameters.id}'
+                            f'_pw={args.planarity_window_vertices}'
+                            f'_mrsd={min_run_speed_duration[0]:.2f},{min_run_speed_duration[1]:.1f}'
                             f'.{img_extension}',
                 transparent=True
             )
 
         if show_plots:
             plt.show()
+
+
+def dataset_histograms(
+        error_limit: float = 0.05
+):
+    """
+    Plot histogram statistics of the experimental data.
+    """
+    args = get_args(validate_source=False)
+    assert args.dataset is not None
+    ds = Dataset.objects.get(id=args.dataset)
+    min_run_speed_duration = (0.01, 60.)
+    error_limits = np.array([0.5, 0.2, 0.1, 0.05, 0.01])
+    assert error_limit in error_limits
+
+    # Unset midline source args
+    args.midline3d_source = None
+    args.midline3d_source_file = None
+    args.tracking_only = True
+
+    # Generate or load tumble/run values
+    trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles = generate_or_load_ds_statistics(
+        ds=ds,
+        error_limits=error_limits,
+        min_run_speed_duration=min_run_speed_duration,
+        rebuild_cache=args.regenerate
+    )
+    j = np.argmin(np.abs(error_limits - error_limit))
+
+    prop_cycle = plt.rcParams['axes.prop_cycle']
+    default_colours = prop_cycle.by_key()['color']
+    colour = default_colours[0]
+
+    plt.rc('axes', titlesize=9)  # fontsize of the title
+    plt.rc('axes', labelsize=8, labelpad=1)  # fontsize of the x and y labels
+    plt.rc('xtick', labelsize=7)  # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=7)  # fontsize of the y tick labels
+
+    fig, axes = plt.subplots(2, 2, figsize=(5.8, 3.5), gridspec_kw={
+        'hspace': 0.8,
+        'wspace': 0.3,
+        'top': 0.92,
+        'bottom': 0.11,
+        'left': 0.08,
+        'right': 0.99,
+    })
+
+    for i, (param_name, values) in enumerate({
+                                                 'Run durations': durations[j],
+                                                 'Run speeds': speeds[j],
+                                                 'Planar angles': planar_angles[j],
+                                                 'Non-planar angles': nonplanar_angles[j]
+                                             }.items()):
+
+        ax = axes[[(0, 0), (0, 1), (1, 0), (1, 1)][i]]
+        ax.set_title(param_name)
+
+        if param_name not in ['Planar angles', 'Non-planar angles']:
+            ax.set_yscale('log')
+            bin_range = None
+
+        if param_name == 'Planar angles':
+            bin_range = (-np.pi, np.pi)
+        elif param_name == 'Non-planar angles':
+            bin_range = (-np.pi / 2, np.pi / 2)
+        if param_name == 'Speeds':
+            weights = np.array(durations[j])
+        else:
+            weights = np.ones_like(values)
+
+        hv = ax.hist(
+            values,
+            weights=weights,
+            color=colour,
+            bins=15,
+            density=True,
+            # alpha=0.75,
+            rwidth=0.9,
+            range=bin_range
+        )
+        ax.set_title(param_name)
+        ax.set_ylabel('Density')
+
+        if param_name == 'Run durations':
+            ax.set_xticks([0, 50, 100])
+            ax.set_xticklabels(['0', '50', '100'])
+            ax.set_xlabel('s')
+            ax.set_yticks([1e-5, 1e-2])
+        if param_name == 'Run speeds':
+            ax.set_xticks([0, 0.1, 0.2])
+            ax.set_xticklabels(['0', '0.1', '0.2'])
+            ax.set_xlabel('mm/s')
+            ax.set_yticks([1e-1, 1e1])
+        if param_name == 'Planar angles':
+            ax.set_xlim(left=-np.pi - 0.1, right=np.pi + 0.1)
+            ax.set_xticks([-np.pi, np.pi])
+            ax.set_xticklabels(['$-\pi$', '$\pi$'])
+            ax.set_xlabel('$\\theta$', labelpad=-5)
+            ax.set_yticks([0, 0.2])
+        if param_name == 'Non-planar angles':
+            ax.set_xlim(left=-np.pi / 2 - 0.1, right=np.pi / 2 + 0.1)
+            ax.set_xticks([-np.pi / 2, np.pi / 2])
+            ax.set_xticklabels(['$-\\frac{\pi}{2}$', '$\\frac{\pi}{2}$'])
+            ax.set_xlabel('$\\phi$', labelpad=-13)
+            ax.set_yticks([0, 0.6])
+
+    if save_plots:
+        plt.savefig(
+            LOGS_PATH / f'{START_TIMESTAMP}'
+                        f'_histograms'
+                        f'_err={error_limit:.2f}'
+                        f'_noise={f"{args.approx_noise:.2f}" if args.approx_noise is not None else "0"}'
+                        f'_ds={ds.id}'
+                        f'_pw={args.planarity_window_vertices}'
+                        f'_mrsd={min_run_speed_duration[0]:.2f},{min_run_speed_duration[1]:.1f}'
+                        f'.{img_extension}',
+            transparent=True
+        )
+
+    if show_plots:
+        plt.show()
 
 
 if __name__ == '__main__':
@@ -1025,4 +1175,7 @@ if __name__ == '__main__':
         use_approximation_stats=True,
         plot_sweep=False,
         plot_basic=True,
+        layout='thesis'
     )
+
+    # dataset_histograms(error_limit=0.05)
