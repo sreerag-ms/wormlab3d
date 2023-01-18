@@ -20,9 +20,9 @@ from wormlab3d.toolkit.plot_utils import to_rgb
 from wormlab3d.toolkit.util import print_args, str2bool
 from wormlab3d.trajectories.cache import get_trajectory
 
-interactive_plots = True
+interactive_plots = False
 show_plots = True
-save_plots = False
+save_plots = True
 img_extension = 'svg'
 eigenworm_length = 1
 eigenworm_scale = 64
@@ -110,6 +110,7 @@ def plot_phases():
     for c in args.plot_components:
         logger.info(f'Making worms for component {c}.')
         cs = c.split('+')
+        NFs = []
 
         if len(cs) == 1:
             component = ew.components[int(cs[0])]
@@ -132,6 +133,7 @@ def plot_phases():
             else:
                 a = r_egs[i] / np.sqrt(2) * c1 + r_egs[i] / np.sqrt(2) * np.exp(1j * theta_egs[i]) * c2
                 NF = NaturalFrame(a)
+            NFs.append(NF)
 
             # 3D plot of eigenworm
             fig = plot_natural_frame_3d_mlab(
@@ -198,6 +200,50 @@ def plot_phases():
                     fig_mpl.tight_layout()
                     plt.show()
                     plt.close(fig_mpl)
+
+        # Plot curvatures
+        plt.rc('axes', labelsize=6)  # fontsize of the axis labels
+        plt.rc('xtick', labelsize=6)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+        plt.rc('xtick.major', pad=2)
+        plt.rc('ytick.major', pad=1, size=2)
+        fig, ax = plt.subplots(1, figsize=(0.85, 0.7), gridspec_kw={
+            'left': 0.28,
+            'right': 0.95,
+            'top': 0.95,
+            'bottom': 0.27,
+        })
+        ax.spines['top'].set_visible(False)
+
+        trim_start = 3
+        trim_end = 5
+        if len(cs) == 1:
+            ax.plot(NF.kappa[trim_start:-trim_end], color='blue')
+        else:
+            cmap = plt.get_cmap('CMRmap')
+            colours = cmap(np.linspace(0, 1, len(NFs) + 2)[1:-1])
+            for i, NF in enumerate(NFs):
+                ax.plot(NF.kappa[:-1], color=colours[i])
+
+        # Set up x-axis
+        ax.set_xticks([])
+        ax.set_xlim(left=trim_start, right=NF.N - trim_end - 1)
+        ax.set_xticks([trim_start, NF.N - trim_end - 1])
+        ax.set_xticklabels(['H', 'T'])
+
+        # Set up y-axis
+        ax.set_ylim(bottom=0, top=12)
+        ax.set_yticks([0, 5, 10])
+        ax.set_ylabel('Curvature (mm$^{-1}$)', labelpad=-3)
+
+        if save_plots:
+            path = save_dir / f'curvature_{c}.{img_extension}'
+            logger.info(f'Saving plot to {path}.')
+            plt.savefig(path, transparent=True)
+        if show_plots:
+            plt.show()
+        plt.close(fig)
+        plt.show()
 
 
 def coefficient_phases(style: str = 'paper'):
