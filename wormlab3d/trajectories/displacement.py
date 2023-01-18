@@ -17,7 +17,8 @@ DISPLACEMENT_AGGREGATION_OPTIONS = [DISPLACEMENT_AGGREGATION_SQUARED_SUM, DISPLA
 def calculate_displacements(
         trajectory: Union[np.ndarray, torch.Tensor],
         deltas: Union[int, List[int]],
-        aggregation: str = DISPLACEMENT_AGGREGATION_L2
+        aggregation: str = DISPLACEMENT_AGGREGATION_L2,
+        quiet: bool = False
 ) -> Union[np.ndarray, Dict[int, np.ndarray]]:
     """
     Calculate the squared displacement for given trajectory and deltas.
@@ -37,7 +38,8 @@ def calculate_displacements(
         trajectory = trajectory.numpy()
 
     for delta in deltas:
-        logger.info(f'Calculating displacements for delta = {delta}.')
+        if not quiet:
+            logger.info(f'Calculating displacements for delta = {delta}.')
         diff = trajectory[delta:] - trajectory[:-delta]
         if diff.ndim == 1:
             diff = diff[:, None]
