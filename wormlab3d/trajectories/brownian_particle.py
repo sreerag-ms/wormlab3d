@@ -160,8 +160,10 @@ class ConfinedParticle(BoundedParticle):
             bounds: np.ndarray = None,
             unconfined_duration_mean: float = 10.,
             unconfined_duration_variance: float = 1.,
+            unconfined_momentum: float = 0.9,
             confined_duration_mean: float = 10.,
             confined_duration_variance: float = 1.,
+            confined_momentum: float = 0.9,
             D_confined: float = 1.,
     ):
         super().__init__(x0, D, momentum, bounds)
@@ -170,8 +172,10 @@ class ConfinedParticle(BoundedParticle):
 
         self.unconfined_duration_mean = unconfined_duration_mean
         self.unconfined_duration_variance = unconfined_duration_variance
+        self.unconfined_momentum = unconfined_momentum
         self.confined_duration_mean = confined_duration_mean
         self.confined_duration_variance = confined_duration_variance
+        self.confined_momentum = confined_momentum
 
         self.is_confined = False
         self.T_state = 0
@@ -205,8 +209,10 @@ class ConfinedParticle(BoundedParticle):
         # Vary the diffusivity depending on confined state
         if self.is_confined:
             self.D = self.D_confined
+            self.cone_angle = (1 - self.confined_momentum) * np.pi
         else:
             self.D = self.D_unconfined
+            self.cone_angle = (1 - self.unconfined_momentum) * np.pi
 
         dx = super()._step(dt)
         self.T_state += dt
