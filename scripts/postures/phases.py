@@ -379,8 +379,8 @@ def coefficient_phases(style: str = 'paper'):
             'wspace': 0.3,
             'left': 0.07,
             'right': 0.99,
-            'top': 0.98,
-            'bottom': 0.18,
+            'top': 0.86,
+            'bottom': 0.24,
         })
 
     for i, c in enumerate(plot_components):
@@ -434,5 +434,5 @@ if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
 
-    plot_phases()
-    # coefficient_phases(style='paper')
+    # plot_phases()
+    coefficient_phases(style='thesis')
