@@ -428,6 +428,8 @@ def eigenworm_modulation_by_rec(
         })
         ax.set_xlabel('Concentration (% gelatin)')
         ax.set_ylabel('Relative contribution', labelpad=1)
+        scatter_args = dict(linewidths=0.5, alpha=0.5)
+        error_args = dict(elinewidth=1, capsize=3)
     else:
         plt.rc('axes', labelsize=9)  # fontsize of the X label
         plt.rc('xtick', labelsize=8)  # fontsize of the x tick labels
@@ -435,7 +437,7 @@ def eigenworm_modulation_by_rec(
         plt.rc('legend', fontsize=8)  # fontsize of the legend
         plt.rc('xtick.major', pad=2, size=3)
         plt.rc('ytick.major', pad=2, size=3)
-        fig, ax = plt.subplots(1, figsize=(5.5, 2.6), gridspec_kw={
+        fig, ax = plt.subplots(1, figsize=(5.5, 3), gridspec_kw={
             'left': 0.1,
             'right': 0.87,
             'top': 0.97,
@@ -443,6 +445,8 @@ def eigenworm_modulation_by_rec(
         })
         ax.set_xlabel('Concentration (% gelatin)', labelpad=5)
         ax.set_ylabel('Relative contribution', labelpad=8)
+        scatter_args = dict(linewidths=0.8, alpha=0.6)
+        error_args = dict(elinewidth=1.3, capsize=5)
 
     ax.set_xticks(ticks)
     ax.set_xticklabels(concs)
@@ -457,9 +461,8 @@ def eigenworm_modulation_by_rec(
                 color=colours[i],
                 marker='o',
                 facecolor='none',
-                linewidths=0.5,
                 s=20,
-                alpha=0.5,
+                **scatter_args
             )
 
         means = out_reconst_stats[:, idx, 0]
@@ -473,11 +476,10 @@ def eigenworm_modulation_by_rec(
                 ticks[start_idx:end_idx] + offsets[i],
                 means[start_idx:end_idx],
                 yerr=stds[start_idx:end_idx],
-                elinewidth=1,
-                capsize=3,
                 color=colours[i],
                 label=label,
                 alpha=0.7,
+                **error_args
             )
 
             if break_at < len(ticks):
@@ -536,4 +538,4 @@ if __name__ == '__main__':
     #     by_reconstruction=True,
     # )
     # eigenworm_modulation_by_conc()
-    eigenworm_modulation_by_rec(layout='paper')
+    eigenworm_modulation_by_rec(layout='thesis')
