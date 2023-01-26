@@ -310,6 +310,10 @@ class ParameterArgs(BaseArgs):
                            help='Minimum rendering sigma. Tapers to this value at head and tail. Default=0.04.')
         group.add_argument('--sigmas-max', type=float, default=0.08,
                            help='Maximum rendering sigma. Default=0.08.')
+        group.add_argument('--exponents-init', type=float, default=1.,
+                           help='Initial rendering exponents. Default=1.')
+        group.add_argument('--intensities-init', type=float, default=1.,
+                           help='Initial rendering intensities. Default=1.')
         group.add_argument('--intensities-min', type=float, default=0.4,
                            help='Minimum rendering intensity. Tapers to this value at head and tail. Default=0.4.')
 
