@@ -28,6 +28,8 @@ class ParameterArgs(BaseArgs):
             sigmas_init: float = 0.1,
             sigmas_min: float = 0.04,
             sigmas_max: float = 0.08,
+            exponents_init: float = 1.,
+            intensities_init: float = 1.,
             intensities_min: float = 0.4,
 
             curvature_mode: bool = False,
@@ -129,6 +131,8 @@ class ParameterArgs(BaseArgs):
         self.sigmas_init = sigmas_init
         self.sigmas_min = sigmas_min
         self.sigmas_max = sigmas_max
+        self.exponents_init = exponents_init
+        self.intensities_init = intensities_init
         self.intensities_min = intensities_min
 
         self.curvature_mode = curvature_mode

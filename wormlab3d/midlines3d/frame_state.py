@@ -302,17 +302,19 @@ class FrameState(nn.Module):
             sigmas.append(sigmas_d)
         self.register_parameter('sigmas', sigmas)
 
-        # Initialise the exponents all to 1
+        # Initialise the exponents
         exponents = []
+        exponents_init = max(0.51, mp.exponents_init)
         for d in range(mp.depth_min, mp.depth):
-            exponents_d = nn.Parameter(torch.tensor(1.), requires_grad=mp.optimise_exponents)
+            exponents_d = nn.Parameter(torch.tensor(exponents_init), requires_grad=mp.optimise_exponents)
             exponents.append(exponents_d)
         self.register_parameter('exponents', exponents)
 
-        # Initialise the intensities all to 1
+        # Initialise the intensities
         intensities = []
+        intensities_init = max(mp.intensities_min + 0.02, mp.intensities_init)
         for d in range(mp.depth_min, mp.depth):
-            intensities_d = nn.Parameter(torch.tensor(1.), requires_grad=mp.optimise_intensities)
+            intensities_d = nn.Parameter(torch.tensor(intensities_init), requires_grad=mp.optimise_intensities)
             intensities.append(intensities_d)
         self.register_parameter('intensities', intensities)
 
