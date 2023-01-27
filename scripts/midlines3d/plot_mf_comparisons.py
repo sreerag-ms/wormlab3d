@@ -13,6 +13,7 @@ from matplotlib.axes import Axes
 from matplotlib.ticker import NullFormatter
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy import interpolate
+from torch import nn
 from torch.backends import cudnn
 
 from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT
@@ -22,7 +23,7 @@ from wormlab3d.data.model.dataset import DatasetMidline3D
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF, Midline3D, M3D_SOURCE_WT3D, M3D_SOURCE_RECONST
 from wormlab3d.midlines3d.project_render_score import render_points
 from wormlab3d.midlines3d.trial_state import TrialState
-from wormlab3d.toolkit.util import print_args, to_numpy, str2bool
+from wormlab3d.toolkit.util import print_args, to_numpy, str2bool, is_bad
 from wormlab3d.trajectories.cache import get_trajectory
 
 POINTS_CACHE_PATH = LOGS_PATH / 'cache'
@@ -61,17 +62,28 @@ def get_args() -> Namespace:
 
     parser.add_argument('--dataset', type=str, help='Dataset by id.')
     parser.add_argument('--reconstruction', type=str, help='Reconstruction by id.')
+
+    # Processing args
     parser.add_argument('--batch-size', type=int, default=10, help='Batch size.')
     parser.add_argument('--gpu-id', type=int, default=-1, help='GPU id to use if using GPUs.')
-    parser.add_argument('--x-label', type=str, default='frame', help='Label x-axis with time or frame number.')
-    parser.add_argument('--stats-window', type=int, default=5, help='Averaging window for the stats.')
     parser.add_argument('--rebuild-cache', type=str2bool, default=False, help='Rebuild caches.')
     parser.add_argument('--cache-only', type=str2bool, default=False, help='Use cache only.')
+
+    # Optimisation args
+    parser.add_argument('--lr', type=float, help='Learning rate.')
+    parser.add_argument('--max-train-steps', type=int, default=0, help='Maximum training steps.')
+    parser.add_argument('--conv-tol', type=float, default=0.1, help='Convergence relative tolerance.')
+    parser.add_argument('--conv-patience', type=int, default=5,
+                        help='Convergence patience (number of train steps to wait).')
+
+    # Plot args
+    parser.add_argument('--x-label', type=str, default='frame', help='Label x-axis with time or frame number.')
+    parser.add_argument('--stats-window', type=int, default=5, help='Averaging window for the stats.')
     parser.add_argument('--plot-n-examples', type=int, default=3, help='Number of examples to plot.')
     parser.add_argument('--plot-example-frames', type=lambda s: [int(item) for item in s.split(',')], default=[],
                         help='Plot these frame numbers.')
-    args = parser.parse_args()
 
+    args = parser.parse_args()
     print_args(args)
 
     return args
@@ -345,12 +357,95 @@ def _make_renders(
     return masks
 
 
+def _optimise_parameters(
+        points_2d: torch.Tensor,
+        sigmas: torch.Tensor,
+        sigmas_min: float,
+        exponents: torch.Tensor,
+        intensities: torch.Tensor,
+        intensities_min: float,
+        camera_sigmas: torch.Tensor,
+        camera_exponents: torch.Tensor,
+        camera_intensities: torch.Tensor,
+        image_size: int,
+        images: torch.Tensor,
+        lr: float,
+        max_train_steps: int,
+        conv_tol: float,
+        conv_patience: int,
+):
+    """
+    Optimise the parameters.
+    """
+    sigmas = nn.Parameter(sigmas.detach().clone(), requires_grad=True)
+    exponents = nn.Parameter(exponents.detach().clone(), requires_grad=True)
+    intensities = nn.Parameter(intensities.detach().clone(), requires_grad=True)
+    camera_sigmas = nn.Parameter(camera_sigmas.detach().clone(), requires_grad=True)
+    camera_exponents = nn.Parameter(camera_exponents.detach().clone(), requires_grad=True)
+    camera_intensities = nn.Parameter(camera_intensities.detach().clone(), requires_grad=True)
+    params = {
+        'sigmas': sigmas,
+        'exponents': exponents,
+        'intensities': intensities,
+        'camera_sigmas': camera_sigmas,
+        'camera_exponents': camera_exponents,
+        'camera_intensities': camera_intensities,
+    }
+    if max_train_steps == 0:
+        return params
+
+    optimiser = torch.optim.AdamW(params=list(params.values()), lr=lr, weight_decay=0)
+
+    def _train_loop():
+        optimiser.zero_grad()
+        renders = _make_renders(
+            points_2d=points_2d,
+            sigmas=sigmas,
+            sigmas_min=sigmas_min,
+            exponents=exponents,
+            intensities=intensities,
+            intensities_min=intensities_min,
+            camera_sigmas=camera_sigmas,
+            camera_exponents=camera_exponents,
+            camera_intensities=camera_intensities,
+            image_size=image_size
+        )
+        loss = ((renders - images)**2).mean()
+        loss.backward()
+        if is_bad(loss):
+            raise RuntimeError('Bad loss!')
+        optimiser.step()
+        return loss.item()
+
+    l_prev = np.inf
+    conv_count = 0
+    for i in range(max_train_steps):
+        l = _train_loop()
+        if i % 5 == 0:
+            logger.info(f'Optimisation step {i + 1}/{max_train_steps}: Loss = {l:.5f} \t (cc={conv_count})')
+        is_converged = abs(l - l_prev) / l_prev < conv_tol
+        if is_converged:
+            conv_count += 1
+            if conv_count > conv_patience:
+                logger.info('Converged')
+                break
+        else:
+            conv_count = 0
+        l_prev = l
+
+    return params
+
+
 def _calculate_errors(
         rec_mf: Reconstruction,
         rec: Reconstruction,
         points_2d: np.ndarray,
         batch_size: int,
-        device: torch.device
+        device: torch.device,
+        lr: float,
+        max_train_steps: int,
+        conv_tol: float,
+        conv_patience: int,
 ) -> np.ndarray:
     """
     Render the 2D points and compute errors.
@@ -378,8 +473,18 @@ def _calculate_errors(
         end_idx = min(n_frames + 1, (i + 1) * batch_size)
         if end_idx == start_idx:
             continue
-        renders = _make_renders(
-            points_2d=torch.from_numpy(points_2d[start_idx:end_idx]).to(device),
+        p2d_batch = torch.from_numpy(points_2d[start_idx:end_idx]).to(device)
+
+        # Get targets
+        start_frame = rec.start_frame + start_idx
+        end_frame = start_frame + len(p2d_batch)
+        images = torch.from_numpy(np.stack([
+            np.load(PREPARED_IMAGES_PATH / f'{ts.trial.id:03d}' / f'{n:06d}.npz')['images']
+            for n in range(start_frame, end_frame)
+        ])).to(device)
+
+        parameters = _optimise_parameters(
+            points_2d=p2d_batch,
             sigmas=torch.from_numpy(sigmas[start_idx:end_idx]).to(device),
             sigmas_min=ts.parameters.sigmas_min,
             exponents=torch.from_numpy(exponents[start_idx:end_idx]).to(device),
@@ -388,16 +493,20 @@ def _calculate_errors(
             camera_sigmas=torch.from_numpy(camera_sigmas[start_idx:end_idx]).to(device),
             camera_exponents=torch.from_numpy(camera_exponents[start_idx:end_idx]).to(device),
             camera_intensities=torch.from_numpy(camera_intensities[start_idx:end_idx]).to(device),
+            image_size=ts.trial.crop_size,
+            images=images,
+            lr=lr,
+            max_train_steps=max_train_steps,
+            conv_tol=conv_tol,
+            conv_patience=conv_patience,
+        )
+        renders = _make_renders(
+            **parameters,
+            points_2d=p2d_batch,
+            sigmas_min=ts.parameters.sigmas_min,
+            intensities_min=ts.parameters.intensities_min,
             image_size=ts.trial.crop_size
         )
-
-        # Get targets
-        start_frame = rec.start_frame + start_idx
-        end_frame = start_frame + len(renders)
-        images = torch.from_numpy(np.stack([
-            np.load(PREPARED_IMAGES_PATH / f'{ts.trial.id:03d}' / f'{n:06d}.npz')['images']
-            for n in range(start_frame, end_frame)
-        ])).to(device)
 
         # MSE
         errors[start_idx:end_idx] = to_numpy(((renders - images)**2).mean(axis=(1, 2, 3)))
@@ -412,13 +521,20 @@ def _generate_or_load_errors(
         points_2d: np.ndarray,
         batch_size: int,
         device: torch.device,
+        lr: float,
+        max_train_steps: int,
+        conv_tol: float,
+        conv_patience: int,
         rebuild_cache: bool = False,
         cache_only: bool = False
 ) -> np.ndarray:
     """
     Generate or load the errors.
     """
-    cache_path = POINTS_CACHE_PATH / f'rec_{rec.id}_N={N}_errors'
+    cache_id = f'rec_{rec.id}_N={N}_errors'
+    if max_train_steps > 0:
+        cache_id += f'_lr={lr:.2E}_mts={max_train_steps}_ctol={conv_tol:.3f}_cpat={conv_patience}'
+    cache_path = POINTS_CACHE_PATH / cache_id
     cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
     data = None
     if not rebuild_cache and cache_fn.exists():
@@ -441,7 +557,11 @@ def _generate_or_load_errors(
             rec=rec,
             points_2d=points_2d,
             batch_size=batch_size,
-            device=device
+            device=device,
+            lr=lr,
+            max_train_steps=max_train_steps,
+            conv_tol=conv_tol,
+            conv_patience=conv_patience,
         )
         save_arrs = {'data': data}
         logger.info(f'Saving errors data to {cache_path}.')
@@ -455,6 +575,10 @@ def _fetch_errors(
         recs_to_compare: Dict[str, Reconstruction],
         batch_size: int,
         device: torch.device,
+        lr: float,
+        max_train_steps: int,
+        conv_tol: float,
+        conv_patience: int,
         rebuild_cache: bool = False,
         cache_only: bool = False
 ) -> List[np.ndarray]:
@@ -489,6 +613,10 @@ def _fetch_errors(
             points_2d=points_2d[i],
             batch_size=batch_size,
             device=device,
+            lr=lr,
+            max_train_steps=max_train_steps,
+            conv_tol=conv_tol,
+            conv_patience=conv_patience,
             rebuild_cache=rebuild_cache,
             cache_only=cache_only,
         )
@@ -686,6 +814,10 @@ def plot_mf_comparisons(
         recs_to_compare=recs_to_compare,
         batch_size=args.batch_size,
         device=device,
+        lr=args.lr,
+        max_train_steps=args.max_train_steps,
+        conv_tol=args.conv_tol,
+        conv_patience=args.conv_patience,
         rebuild_cache=args.rebuild_cache,
         cache_only=args.cache_only,
     )
@@ -969,6 +1101,10 @@ def plot_losses_combined(
         recs_to_compare=recs_to_compare,
         batch_size=args.batch_size,
         device=device,
+        lr=args.lr,
+        max_train_steps=args.max_train_steps,
+        conv_tol=args.conv_tol,
+        conv_patience=args.conv_patience,
         rebuild_cache=args.rebuild_cache,
         cache_only=args.cache_only,
     )
@@ -1125,8 +1261,8 @@ if __name__ == '__main__':
         os.makedirs(LOGS_PATH, exist_ok=True)
     # from simple_worm.plot3d import interactive
     # interactive()
-    # plot_mf_comparisons()
+    plot_mf_comparisons()
     # plot_examples(save_singles=False, crop_size=150, invert=True)
     # plot_smoothness_comparisons()
-    plot_losses_combined()
+    # plot_losses_combined()
     # plot_all_comparisons_in_dataset()
