@@ -179,18 +179,36 @@ def _calculate_errors(
         end_idx = min(n_frames + 1, (i + 1) * batch_size)
         if end_idx == start_idx or start_idx == len(points_2d):
             continue
+        bs = end_idx - start_idx
+
+        batch_params = {
+            'points_2d': torch.from_numpy(points_2d[start_idx:end_idx].copy()).to(device),
+            'sigmas': torch.from_numpy(sigmas[start_idx:end_idx].copy()).to(device),
+            'exponents': torch.from_numpy(exponents[start_idx:end_idx].copy()).to(device),
+            'intensities': torch.from_numpy(intensities[start_idx:end_idx].copy()).to(device),
+            'camera_sigmas': torch.from_numpy(camera_sigmas[start_idx:end_idx].copy()).to(device),
+            'camera_exponents': torch.from_numpy(camera_exponents[start_idx:end_idx].copy()).to(device),
+            'camera_intensities': torch.from_numpy(camera_intensities[start_idx:end_idx].copy()).to(device),
+        }
+
+        # Pad the last batch so the batch size is the same
+        if bs != batch_size:
+            n_pad = batch_size - bs
+            for k, v in batch_params.items():
+                batch_params[k] = torch.concatenate([
+                    batch_params[k],
+                    torch.zeros((n_pad, *batch_params[k].shape[1:]), device=device)
+                ])
+
         renders = _make_renders(
-            points_2d=torch.from_numpy(points_2d[start_idx:end_idx].copy()).to(device),
-            sigmas=torch.from_numpy(sigmas[start_idx:end_idx].copy()).to(device),
             sigmas_min=ts.parameters.sigmas_min,
-            exponents=torch.from_numpy(exponents[start_idx:end_idx].copy()).to(device),
-            intensities=torch.from_numpy(intensities[start_idx:end_idx].copy()).to(device),
             intensities_min=ts.parameters.intensities_min,
-            camera_sigmas=torch.from_numpy(camera_sigmas[start_idx:end_idx].copy()).to(device),
-            camera_exponents=torch.from_numpy(camera_exponents[start_idx:end_idx].copy()).to(device),
-            camera_intensities=torch.from_numpy(camera_intensities[start_idx:end_idx].copy()).to(device),
-            image_size=ts.trial.crop_size
+            image_size=ts.trial.crop_size,
+            **batch_params
         )
+
+        if bs != batch_size:
+            renders = renders[:bs]
 
         # Get targets
         start_frame = ts.start_frame + start_idx
