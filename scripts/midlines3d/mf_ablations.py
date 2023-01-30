@@ -1,3 +1,4 @@
+import gc
 import os
 from argparse import Namespace, ArgumentParser
 from typing import Tuple
@@ -179,15 +180,15 @@ def _calculate_errors(
         if end_idx == start_idx or start_idx == len(points_2d):
             continue
         renders = _make_renders(
-            points_2d=torch.from_numpy(points_2d[start_idx:end_idx]).to(device),
-            sigmas=torch.from_numpy(sigmas[start_idx:end_idx]).to(device),
+            points_2d=torch.from_numpy(points_2d[start_idx:end_idx].copy()).to(device),
+            sigmas=torch.from_numpy(sigmas[start_idx:end_idx].copy()).to(device),
             sigmas_min=ts.parameters.sigmas_min,
-            exponents=torch.from_numpy(exponents[start_idx:end_idx]).to(device),
-            intensities=torch.from_numpy(intensities[start_idx:end_idx]).to(device),
+            exponents=torch.from_numpy(exponents[start_idx:end_idx].copy()).to(device),
+            intensities=torch.from_numpy(intensities[start_idx:end_idx].copy()).to(device),
             intensities_min=ts.parameters.intensities_min,
-            camera_sigmas=torch.from_numpy(camera_sigmas[start_idx:end_idx]).to(device),
-            camera_exponents=torch.from_numpy(camera_exponents[start_idx:end_idx]).to(device),
-            camera_intensities=torch.from_numpy(camera_intensities[start_idx:end_idx]).to(device),
+            camera_sigmas=torch.from_numpy(camera_sigmas[start_idx:end_idx].copy()).to(device),
+            camera_exponents=torch.from_numpy(camera_exponents[start_idx:end_idx].copy()).to(device),
+            camera_intensities=torch.from_numpy(camera_intensities[start_idx:end_idx].copy()).to(device),
             image_size=ts.trial.crop_size
         )
 
@@ -201,6 +202,10 @@ def _calculate_errors(
 
         # MSE
         errors[start_idx:end_idx] = to_numpy(((renders - images)**2).sum(axis=(1, 2, 3)))
+
+        renders = None
+        del renders
+        gc.collect()
 
     return errors
 
