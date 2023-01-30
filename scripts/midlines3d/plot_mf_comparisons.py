@@ -1,3 +1,4 @@
+import gc
 import os
 from argparse import Namespace, ArgumentParser
 from pathlib import Path
@@ -42,12 +43,16 @@ colours = {
     M3D_SOURCE_WT3D: 'forestgreen',
     'highlight': 'darkviolet'
 }
+colours_opt = {
+    M3D_SOURCE_RECONST: 'red',
+    M3D_SOURCE_WT3D: 'lime',
+}
 
 show_plots = False
 save_plots = True
 # show_plots = True
 # save_plots = False
-img_extension = 'svg'
+img_extension = 'png'
 
 
 class NothingToCompare(Exception):
@@ -422,16 +427,19 @@ def _optimise_parameters(
     for i in range(max_train_steps):
         l = _train_loop()
         if i % 5 == 0:
-            logger.info(f'Optimisation step {i + 1}/{max_train_steps}: Loss = {l:.5f} \t (cc={conv_count})')
+            logger.info(f'Optimisation step {i + 1}/{max_train_steps}: Loss = {l:.5E} \t (cc={conv_count})')
         is_converged = abs(l - l_prev) / l_prev < conv_tol
         if is_converged:
             conv_count += 1
             if conv_count > conv_patience:
-                logger.info('Converged')
+                logger.info(f'Converged after {i + 1} steps. Loss = {l:.5E}')
                 break
         else:
             conv_count = 0
         l_prev = l
+
+    params = {k: v.clone().detach() for k, v in params.items()}
+    gc.collect()
 
     return params
 
@@ -510,6 +518,12 @@ def _calculate_errors(
 
         # MSE
         errors[start_idx:end_idx] = to_numpy(((renders - images)**2).mean(axis=(1, 2, 3)))
+
+        parameters = None
+        del parameters
+        renders = None
+        del renders
+        gc.collect()
 
     return errors
 
@@ -861,18 +875,16 @@ def plot_mf_comparisons(
     fig.tight_layout()
 
     if save_plots:
+        fn = f'trial={trial.id:03d}' \
+             f'_mf={rec_mf.id}' \
+             f'_comp={",".join([str(rec.id) for rec in recs_to_compare.values()])}' \
+             f'_sw={args.stats_window}'
+        if args.max_train_steps > 0:
+            fn += f'_lr={args.lr:.2E}_mts={args.max_train_steps}_ctol={args.conv_tol:.3f}_cpat={args.conv_patience}'
         if save_dir is None:
-            path = LOGS_PATH / f'{START_TIMESTAMP}_losses' \
-                               f'_trial={trial.id:03d}' \
-                               f'_mf={rec_mf.id}' \
-                               f'_comp={",".join([str(rec.id) for rec in recs_to_compare.values()])}' \
-                               f'_sw={args.stats_window}' \
-                               f'.{img_extension}'
+            path = LOGS_PATH / f'{START_TIMESTAMP}_losses_{fn}.{img_extension}'
         else:
-            path = save_dir / f'trial={trial.id:03d}' \
-                              f'_mf={rec_mf.id}' \
-                              f'_comp={",".join([str(rec.id) for rec in recs_to_compare.values()])}' \
-                              f'.{img_extension}'
+            path = save_dir / f'{fn}.{img_extension}'
         logger.info(f'Saving plot to {path}.')
         plt.savefig(path, transparent=True)
     if show_plots:
@@ -1201,19 +1213,16 @@ def plot_losses_combined(
         ax.set_xlabel('Frame #')
 
     if save_plots:
+        fn = f'trial={trial.id:03d}' \
+             f'_mf={rec_mf.id}' \
+             f'_comp={",".join([str(rec.id) for rec in recs_to_compare.values()])}' \
+             f'_sw={args.stats_window}'
+        if args.max_train_steps > 0:
+            fn += f'_lr={args.lr:.2E}_mts={args.max_train_steps}_ctol={args.conv_tol:.3f}_cpat={args.conv_patience}'
         if save_dir is None:
-            path = LOGS_PATH / f'{START_TIMESTAMP}_losses_combined' \
-                               f'_trial={trial.id:03d}' \
-                               f'_mf={rec_mf.id}' \
-                               f'_comp={",".join([str(rec.id) for rec in recs_to_compare.values()])}' \
-                               f'_sw={args.stats_window}' \
-                               f'.{img_extension}'
+            path = LOGS_PATH / f'{START_TIMESTAMP}_losses_combined_{fn}.{img_extension}'
         else:
-            path = save_dir / f'trial={trial.id:03d}' \
-                              f'_mf={rec_mf.id}' \
-                              f'_comp={",".join([str(rec.id) for rec in recs_to_compare.values()])}' \
-                              f'_losses_combined' \
-                              f'.{img_extension}'
+            path = save_dir / f'{fn}_losses_combined.{img_extension}'
         logger.info(f'Saving plot to {path}.')
         plt.savefig(path, transparent=True)
     if show_plots:
@@ -1256,13 +1265,132 @@ def plot_all_comparisons_in_dataset():
             continue
 
 
+def plot_pixel_losses_opt_comparison():
+    """
+    Plot the pixel losses with and without optimisations
+    """
+    args = get_args()
+    assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
+    assert args.max_train_steps > 0, '--max-train-steps must be > 0 to find a comparison.'
+    rec_mf: Reconstruction = Reconstruction.objects.get(id=args.reconstruction)
+    assert rec_mf.source == M3D_SOURCE_MF, 'A MF reconstruction is required!'
+    device = _init_devices(args)
+    trial: Trial = rec_mf.trial
+    start_frame = rec_mf.start_frame_valid
+    end_frame = rec_mf.end_frame_valid
+    frame_nums = np.arange(start_frame, end_frame + 1)
+    recs_to_compare = _get_recs_to_compare(trial)
+
+    # Generate or load the errors with and without optimisations
+    common_args = dict(
+        rec_mf=rec_mf,
+        recs_to_compare=recs_to_compare,
+        batch_size=args.batch_size,
+        device=device,
+        rebuild_cache=args.rebuild_cache,
+        cache_only=args.cache_only,
+    )
+    lp_raw = _fetch_errors(
+        **common_args,
+        lr=0,
+        max_train_steps=0,
+        conv_tol=0,
+        conv_patience=0,
+    )
+    lp_opt = _fetch_errors(
+        **common_args,
+        lr=args.lr,
+        max_train_steps=args.max_train_steps,
+        conv_tol=args.conv_tol,
+        conv_patience=args.conv_patience,
+    )
+
+    # Get moving averages
+    lpr_means, lpr_stds = _rolling_stats(lp_raw, args.stats_window)
+    lpo_means, lpo_stds = _rolling_stats(lp_opt, args.stats_window)
+
+    # Make plots
+    plt.rc('axes', labelsize=6)  # fontsize of the X label
+    plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+    plt.rc('legend', fontsize=6)  # fontsize of the legend
+    plt.rc('xtick.major', pad=2)
+    plt.rc('ytick.major', pad=2, size=2)
+
+    fig, ax = plt.subplots(1, figsize=(3.6, 2.4), sharex=True, gridspec_kw={
+        'left': 0.09,
+        'right': 0.97,
+        'top': 0.8,
+        'bottom': 0.12,
+    })
+
+    def _make_plot(
+            ax_: Axes,
+            means_raw: np.ndarray,
+            means_opt: np.ndarray,
+    ):
+        for i in range(1 + len(recs_to_compare)):
+            if i == 0:
+                src = M3D_SOURCE_MF
+                lbl = src + ' (ours)'
+                x = frame_nums
+            else:
+                src = list(recs_to_compare.keys())[i - 1]
+                lbl = src
+                rec = recs_to_compare[src]
+                x = np.arange(
+                    max(rec.start_frame, rec_mf.start_frame_valid),
+                    min(rec.end_frame, rec_mf.end_frame_valid) + 1
+                )
+            if args.x_label == 'time':
+                x = x / trial.fps
+
+            if i == 0:
+                ax_.plot(x, means_raw[i], label=lbl, color=colours[src], linewidth=0.5)
+            else:
+                ax_.plot(x, means_raw[i], label=lbl, color=colours[src], linewidth=0.5)
+                ax_.plot(x, means_opt[i], label=lbl + ' opt', color=colours_opt[src], linewidth=0.6, linestyle='--')
+        ax_.set_xlim(left=start_frame, right=end_frame)
+        ax_.set_xticks([0, 5000, 10000, 15000, 20000])
+        ax_.set_yscale('log')
+        ax_.grid()
+
+    # Pixel losses
+    _make_plot(ax, lpr_means, lpo_means)
+    ax.set_ylabel('$\mathcal{L}_{px}$', labelpad=-1)
+    ax.set_ylim(bottom=1e-3, top=1e-2)
+    ax.set_yticks([1e-3, 1e-2])
+    ax.yaxis.set_minor_formatter(NullFormatter())
+    legend = ax.legend(loc='lower center', mode=None, ncol=3, bbox_to_anchor=(0.5, 1), bbox_transform=ax.transAxes)
+    for line in legend.get_lines():
+        line.set_linewidth(2)
+    if args.x_label == 'time':
+        ax.set_xlabel('Time (s)')
+    else:
+        ax.set_xlabel('Frame #')
+
+    if save_plots:
+        fn = f'trial={trial.id:03d}' \
+             f'_mf={rec_mf.id}' \
+             f'_comp={",".join([str(rec.id) for rec in recs_to_compare.values()])}' \
+             f'_sw={args.stats_window}'
+        if args.max_train_steps > 0:
+            fn += f'_lr={args.lr:.2E}_mts={args.max_train_steps}_ctol={args.conv_tol:.3f}_cpat={args.conv_patience}'
+        path = LOGS_PATH / f'{START_TIMESTAMP}_losses_opt_comparison_{fn}.{img_extension}'
+        logger.info(f'Saving plot to {path}.')
+        plt.savefig(path, transparent=True)
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
     # from simple_worm.plot3d import interactive
     # interactive()
-    plot_mf_comparisons()
+    # plot_mf_comparisons()
     # plot_examples(save_singles=False, crop_size=150, invert=True)
     # plot_smoothness_comparisons()
     # plot_losses_combined()
     # plot_all_comparisons_in_dataset()
+    plot_pixel_losses_opt_comparison()
