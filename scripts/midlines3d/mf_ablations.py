@@ -374,6 +374,18 @@ def plot_comparisons(
             # Write meta data
             meta = to_dict(args)
             meta['date'] = START_TIMESTAMP
+
+            # Add results
+            res = {}
+            for k, rec in recs.items():
+                res[k] = {
+                    'n_frames': len(errors[k]),
+                    'error_mean': float(errors[k].mean()),
+                    'error_std': float(errors[k].std()),
+                    'rel_mean': float(rel_errors[k].mean()),
+                    'rel_std': float(rel_errors[k].std()),
+                }
+            meta['results'] = res
             with open(path.with_suffix('.yml'), 'w') as f:
                 yaml.dump(meta, f)
         if show_plots:
