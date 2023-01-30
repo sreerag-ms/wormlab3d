@@ -6,6 +6,7 @@ from typing import Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import yaml
 from numpy.lib.stride_tricks import sliding_window_view
 from torch.backends import cudnn
 
@@ -13,7 +14,7 @@ from wormlab3d import logger, LOGS_PATH, PREPARED_IMAGES_PATH, START_TIMESTAMP
 from wormlab3d.data.model import Reconstruction, Trial
 from wormlab3d.midlines3d.project_render_score import render_points
 from wormlab3d.midlines3d.trial_state import TrialState
-from wormlab3d.toolkit.util import print_args, to_numpy, str2bool
+from wormlab3d.toolkit.util import print_args, to_numpy, str2bool, to_dict
 
 ERRORS_CACHE_PATH = LOGS_PATH / 'cache'
 os.makedirs(ERRORS_CACHE_PATH, exist_ok=True)
@@ -174,12 +175,10 @@ def _calculate_errors(
     camera_exponents = ts.get('camera_exponents')
 
     for i in range(n_batches):
-        logger.info(f'Calculating errors for batch {i + 1}/{n_batches}.')
         start_idx = i * batch_size
         end_idx = min(n_frames + 1, (i + 1) * batch_size)
         if end_idx == start_idx or start_idx == len(points_2d):
             continue
-        bs = end_idx - start_idx
 
         batch_params = {
             'points_2d': torch.from_numpy(points_2d[start_idx:end_idx].copy()).to(device),
@@ -190,12 +189,15 @@ def _calculate_errors(
             'camera_exponents': torch.from_numpy(camera_exponents[start_idx:end_idx].copy()).to(device),
             'camera_intensities': torch.from_numpy(camera_intensities[start_idx:end_idx].copy()).to(device),
         }
+        bs = batch_params['points_2d'].shape[0]
+        logger.info(f'Calculating errors for batch {i + 1}/{n_batches} (batch size = {bs}).')
 
         # Pad the last batch so the batch size is the same
         if bs != batch_size:
             n_pad = batch_size - bs
+            logger.info(f'Padding batch with {n_pad} vals.')
             for k, v in batch_params.items():
-                batch_params[k] = torch.concatenate([
+                batch_params[k] = torch.cat([
                     batch_params[k],
                     torch.zeros((n_pad, *batch_params[k].shape[1:]), device=device)
                 ])
@@ -362,14 +364,18 @@ def plot_comparisons(
         fig.tight_layout()
 
         if save_plots:
-            recs_str = ','.join([f'{k}={rec.id}' for k, rec in recs.items()])
             path = LOGS_PATH / f'{START_TIMESTAMP}_losses' \
                                f'_trial={trial.id:03d}' \
-                               f'{recs_str}' \
-                               f'_sw={args.stats_window}' \
-                               f'.{img_extension}'
+                               f'_frames={args.start_frame}-{args.start_frame}' \
+                               f'_sw={args.stats_window}'
             logger.info(f'Saving plot to {path}.')
-            plt.savefig(path, transparent=True)
+            plt.savefig(path.with_suffix(f'.{img_extension}'), transparent=True)
+
+            # Write meta data
+            meta = to_dict(args)
+            meta['date'] = START_TIMESTAMP
+            with open(path.with_suffix('.yml'), 'w') as f:
+                yaml.dump(meta, f)
         if show_plots:
             plt.show()
 
