@@ -1,11 +1,12 @@
 import os
 from argparse import Namespace, ArgumentParser
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
+from mongoengine import DoesNotExist
 from scipy import interpolate
 from scipy.optimize import minimize
 from scipy.spatial.distance import cdist
@@ -13,7 +14,7 @@ from scipy.spatial.distance import cdist
 from wormlab3d import logger, LOGS_PATH, START_TIMESTAMP
 from wormlab3d.data.model import Reconstruction, Trial, Dataset, Midline2D, Frame
 from wormlab3d.data.model.dataset import DatasetMidline3D
-from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
+from wormlab3d.data.model.midline3d import M3D_SOURCE_MF, M3D_SOURCE_RECONST, M3D_SOURCE_WT3D, Midline3D, M3D_SOURCES
 from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.toolkit.util import print_args, str2bool
 
@@ -230,22 +231,26 @@ def validate_reconstruction(
         args = get_args()
     assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
     rec: Reconstruction = Reconstruction.objects.get(id=args.reconstruction)
-    assert rec.source == M3D_SOURCE_MF, 'A MF reconstruction is required!'
     trial: Trial = rec.trial
-    N = rec.mf_parameters.n_points_total
 
     # Fetch 2D midlines
     pipeline = [
         {'$match': {'trial': trial.id}},
         {'$lookup': {'from': 'midline2d', 'localField': '_id', 'foreignField': 'frame', 'as': 'midline'}},
         {'$unwind': {'path': '$midline'}},
+        {'$sort': {'frame_num': 1}},
         {'$project': {
-            '_id': 0,
+            '_id': 1,
+            'frame_num': 1,
             'midline_id': '$midline._id',
         }},
     ]
     cursor = Frame.objects().aggregate(pipeline)
-    mids = [res['midline_id'] for res in cursor]
+    frame_ids, frame_nums, mids = [], [], []
+    for res in cursor:
+        frame_ids.append(res['_id'])
+        frame_nums.append(res['frame_num'])
+        mids.append(res['midline_id'])
     if len(mids) == 0:
         raise NothingToCompare
     logger.info(f'Found {len(mids)} 2d midlines for trial {trial.id}.')
@@ -263,9 +268,28 @@ def validate_reconstruction(
         os.makedirs(plots_dir, exist_ok=True)
 
     # Load the reconstruction data
-    ts = TrialState(rec)
-    p2d = ts.get('points_2d')
-    x = np.linspace(0, 1, N)
+    p2d = {}
+    if rec.source == M3D_SOURCE_MF:
+        ts = TrialState(rec)
+        points_2d = ts.get('points_2d')
+        for n in frame_nums:
+            if rec.start_frame_valid <= n <= rec.end_frame_valid:
+                p2d[n] = points_2d[n]
+
+    else:
+        for i, frame_id in enumerate(frame_ids):
+            try:
+                m3d = Midline3D.objects.get(
+                    frame=frame_id,
+                    source=rec.source,
+                    source_file=rec.source_file,
+                )
+                X = np.stack(m3d.prepare_2d_coordinates(), axis=1)
+                if np.isnan(X).any():
+                    continue
+                p2d[frame_nums[i]] = X
+            except DoesNotExist:
+                continue
 
     def _calculate_error(shift: np.ndarray, p2d_man_: np.ndarray, p2d_rec_: np.ndarray) -> float:
         dists_ = cdist(p2d_man_ + shift, p2d_rec_)
@@ -281,16 +305,17 @@ def validate_reconstruction(
     res = {}
     users = {}
     cams = {}
+    keys = {}
     for i, mid in enumerate(mids):
         if (i + 1) % 10 == 0:
             logger.info(f'Validating against midline {i + 1}/{len(mids)}.')
         m2d: Midline2D = Midline2D.objects.get(id=mid)
         n = m2d.frame.frame_num
-        if n < rec.start_frame_valid or n > rec.end_frame_valid:
+        if n not in p2d:
             continue
 
         # Get the image points
-        p2d_rec = p2d[n, :, m2d.camera]
+        p2d_rec = p2d[n][:, m2d.camera]
         p2d_man = m2d.get_prepared_coordinates()
         if len(p2d_man) == 0:
             continue
@@ -311,10 +336,13 @@ def validate_reconstruction(
 
         # Resample to match the same resolution as the rec
         f = interpolate.interp1d(np.linspace(0, 1, len(dists_man_raw)), dists_man_raw, kind='cubic')
+        x = np.linspace(0, 1, p2d_rec.shape[0])  # should be N
         dists_man = f(x)
 
         # Get the overall error
         error = dists_rec.sum() + dists_man.sum()
+        if np.isnan(error).any():
+            raise RuntimeError('Bad loss!')
 
         # Plot the comparison
         if n_examples_plotted < args.plot_n_examples:
@@ -329,6 +357,7 @@ def validate_reconstruction(
             else:
                 n_matched -= 1
         n_matched += 1
+        keys[key] = key
         users[key] = m2d.user if m2d.user is not None else '-'
         cams[key] = m2d.camera
         res[key] = np.stack([dists_rec, dists_man], axis=-1)
@@ -337,7 +366,8 @@ def validate_reconstruction(
     # Combine the results
     logger.info(f'Matched {n_matched} manual annotations.')
     if n_matched == 0:
-        raise NothingToCompare
+        raise NothingToCompare('No annotations found to compare against!')
+    keys = list(keys.values())
     users = np.array(list(users.values()))
     cams = np.array(list(cams.values()))
     res = np.stack(list(res.values()))
@@ -376,7 +406,7 @@ def validate_reconstruction(
         if show_plots:
             plt.show()
 
-    return res, users, cams
+    return res, users, cams, keys
 
 
 def _plot_errors(
@@ -449,7 +479,7 @@ def validate_all_in_dataset(plot_all: bool = True):
         logger.info(f'Reconstruction {i + 1}/{len(ds.reconstructions)}.')
         args.reconstruction = rec.id
         try:
-            res_i, users_i, cams_i = validate_reconstruction(args, save_dir)
+            res_i, users_i, cams_i, keys_i = validate_reconstruction(args, save_dir)
             res.append(res_i)
             users.append(users_i)
             cams.append(cams_i)
@@ -550,12 +580,158 @@ def validate_all_in_dataset(plot_all: bool = True):
             plt.show()
 
 
+def _get_recs_to_compare(trial: Trial) -> Dict[str, Reconstruction]:
+    """
+    Fetch reconstructions to compare against, max one from each source
+    """
+    recs = Reconstruction.objects(trial=trial, source__ne=M3D_SOURCE_MF)
+    n_results = recs.count()
+    if n_results == 0:
+        raise NothingToCompare('No reconstructions found to compare against!')
+    recs_to_compare = {}
+    for rec in recs:
+        if rec.source not in recs_to_compare:
+            recs_to_compare[rec.source] = rec
+        elif rec.source == M3D_SOURCE_RECONST and len(rec.source_file) < len(recs_to_compare[rec.source].source_file):
+            recs_to_compare[rec.source] = rec
+        elif rec.source == M3D_SOURCE_WT3D:
+            sfA = recs_to_compare[rec.source].source_file[:8]
+            sfB = rec.source_file[:8]
+            if sfB.isnumeric() and (not sfA.isnumeric() or (sfA.isnumeric() and int(sfA) < int(sfB))):
+                recs_to_compare[rec.source] = rec
+
+    return recs_to_compare
+
+
+def validation_comparisons():
+    """
+    Validate all reconstructions in a dataset and compare between methods.
+    """
+    args = get_args()
+    assert args.dataset is not None, 'This script requires setting --dataset=id.'
+    ds = Dataset.objects.get(id=args.dataset)
+    assert type(ds) == DatasetMidline3D, 'Only DatasetMidline3D datasets work here!'
+
+    # Make save dir
+    save_dir = LOGS_PATH / f'{START_TIMESTAMP}_comparisons_ds={ds.id}_align={args.align}'
+    if save_plots:
+        os.makedirs(save_dir, exist_ok=True)
+
+    # Loop over reconstructions
+    res_MF = {}
+    res_reconst = {}
+    res_WT3D = {}
+    n_matched = 0
+    for i, rec in enumerate(ds.reconstructions):
+        logger.info(f'Reconstruction {i + 1}/{len(ds.reconstructions)}.')
+
+        # Fetch any comparable reconstructions
+        try:
+            recs_to_compare = _get_recs_to_compare(rec.trial)
+        except NothingToCompare as e:
+            recs_to_compare = {}
+            logger.info(e)
+
+        # Get the validation errors
+        for src in M3D_SOURCES:
+            if src == M3D_SOURCE_MF:
+                res = res_MF
+                rec_id = rec.id
+            else:
+                if src not in recs_to_compare:
+                    continue
+                if src == M3D_SOURCE_RECONST:
+                    res = res_reconst
+                else:
+                    res = res_WT3D
+                rec_id = recs_to_compare[src].id
+
+            args.reconstruction = rec_id
+            try:
+                res_i, users_i, cams_i, keys_i = validate_reconstruction(args, save_dir)
+                for j, key in enumerate(keys_i):
+                    res[f'{rec.trial.id}_{key}'] = res_i[j]
+            except NothingToCompare as e:
+                logger.info(e)
+                continue
+
+    # Combine the results
+    logger.info(f'Found {n_matched} reconstructions for comparisons.')
+
+    # MF vs reconst
+    keys_mf_reconst = set(res_MF.keys()).intersection(set(res_reconst.keys()))
+    errors_mf_reconst = np.zeros((2, len(keys_mf_reconst), 2))
+    for i, k in enumerate(keys_mf_reconst):
+        errors_mf_reconst[0, i] = res_MF[k].mean(axis=0)
+        errors_mf_reconst[1, i] = res_reconst[k].mean(axis=0)
+
+    # MF vs WT3D
+    keys_mf_wt3d = set(res_MF.keys()).intersection(set(res_WT3D.keys()))
+    errors_mf_wt3d = np.zeros((2, len(keys_mf_wt3d), 2))
+    for i, k in enumerate(keys_mf_wt3d):
+        errors_mf_wt3d[0, i] = res_MF[k].mean(axis=0)
+        errors_mf_wt3d[1, i] = res_WT3D[k].mean(axis=0)
+
+    # Print results
+    logger.info(
+        '\n\n------ MF vs reconst ------\n'
+        f'N={len(keys_mf_reconst)}\n'
+        f'MF = {errors_mf_reconst[0].mean():.4f} ({errors_mf_reconst[0].std():.4f})\n'
+        f'reconst = {errors_mf_reconst[1].mean():.4f} ({errors_mf_reconst[1].std():.4f})\n'
+        '\n------ MF vs WT3D ------\n'
+        f'N={len(keys_mf_wt3d)}\n'
+        f'MF = {errors_mf_wt3d[0].mean():.4f} ({errors_mf_wt3d[0].std():.4f})\n'
+        f'WT3D = {errors_mf_wt3d[1].mean():.4f} ({errors_mf_wt3d[1].std():.4f})\n'
+    )
+
+
+def duration_comparisons():
+    """
+    Count the total reconstruction durations across each source.
+    (Doesn't really belong here but...)
+    """
+    args = get_args()
+    assert args.dataset is not None, 'This script requires setting --dataset=id.'
+    ds = Dataset.objects.get(id=args.dataset)
+    assert type(ds) == DatasetMidline3D, 'Only DatasetMidline3D datasets work here!'
+
+    # Loop over reconstructions
+    num_frames = {src: 0 for src in M3D_SOURCES}
+    durations = {src: 0 for src in M3D_SOURCES}
+    for i, rec_mf in enumerate(ds.reconstructions):
+        logger.info(f'Reconstruction {i + 1}/{len(ds.reconstructions)}.')
+
+        # Fetch any comparable reconstructions
+        try:
+            recs_to_compare = _get_recs_to_compare(rec_mf.trial)
+        except NothingToCompare:
+            recs_to_compare = {}
+
+        # Get the durations
+        for src in M3D_SOURCES:
+            if src == M3D_SOURCE_MF:
+                rec = rec_mf
+            else:
+                if src not in recs_to_compare:
+                    continue
+                rec = recs_to_compare[src]
+
+            num_frames[src] += rec.n_frames
+            durations[src] += rec.n_frames / rec.trial.fps
+
+    # Print the results
+    print('num_frames', num_frames)
+    print('durations', durations)
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
     # from simple_worm.plot3d import interactive
     # interactive()
 
-    plot_simple_frame_comparison()
+    # plot_simple_frame_comparison()
     # validate_reconstruction()
     # validate_all_in_dataset(plot_all=False)
+    validation_comparisons()
+    # duration_comparisons()
