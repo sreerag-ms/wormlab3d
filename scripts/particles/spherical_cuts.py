@@ -19,7 +19,7 @@ from wormlab3d.particles.cache import generate_or_load_r_values, get_sim_state_f
 from wormlab3d.toolkit.plot_utils import overlay_image, to_rgb
 from wormlab3d.toolkit.util import to_dict
 from wormlab3d.trajectories.args import get_args
-from wormlab3d.trajectories.util import smooth_trajectory
+from wormlab3d.trajectories.util import smooth_trajectory, calculate_speeds
 
 show_plots = False
 save_plots = True
@@ -635,7 +635,7 @@ def _make_label_overlay(
     fig = plt.figure(figsize=(width / 100, height / 100))
     ax = fig.add_subplot(111)
     ax.axis('off')
-    fig.text(0.1, 0.9, text, ha='left', va='top', fontsize=12, linespacing=1.5)
+    fig.text(0.1, 0.9, text, ha='left', va='top', fontsize=14, linespacing=1.5)
     fig.tight_layout()
     fig.canvas.draw()
     overlay = np.asarray(fig.canvas.renderer._renderer).take([0, 1, 2], axis=2)
@@ -661,10 +661,17 @@ def _make_traces_plots(
     N = rs.shape[1]
     ts = np.linspace(0, N / fps, N)
 
+    plt.rc('axes', titlesize=14)  # fontsize of the title
+    plt.rc('axes', labelsize=12)  # fontsize of the x and y labels
+    plt.rc('xtick', labelsize=11)  # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=11)  # fontsize of the y tick labels
+    plt.rc('legend', fontsize=13)  # fontsize of the legend
+    line_width = 2
+
     # Plot
     fig, axes = plt.subplots(3, figsize=(width / 100, height / 100), gridspec_kw={
         'hspace': 0.6,
-        'top': 0.93,
+        'top': 0.95,
         'bottom': 0.07,
         'left': 0.1,
         'right': 0.9,
@@ -674,17 +681,17 @@ def _make_traces_plots(
     ax_r = axes[0]
     ax_r.set_title('Radius (planar distance)')
     for i, sigma in enumerate(sigma_labels):
-        p = ax_r.plot(rs[i][0], label=f'$\sigma$ = {sigma}')
+        p = ax_r.plot(rs[i][0], label=f'$\sigma$ = {sigma}', linewidth=line_width)
         r_plots.append(p[0])
     # ax_r.legend(loc='upper left', bbox_to_anchor=(1, 1), bbox_transform=ax_r.transAxes, fontsize=18)
-    ax_r.legend(loc='upper left', fontsize=14)
+    ax_r.legend(loc='upper left')
     ax_r.set_xlabel('Time (s)')
 
     z_plots = []
     ax_z = axes[1]
     ax_z.set_title('Height (non-planar distance)')
     for i, sigma in enumerate(sigma_labels):
-        p = ax_z.plot(zs[i][0], label=f'$\sigma$ = {sigma}')
+        p = ax_z.plot(zs[i][0], label=f'$\sigma$ = {sigma}', linewidth=line_width)
         z_plots.append(p[0])
     # ax_z.legend(loc='upper left', bbox_to_anchor=(1, 1), bbox_transform=ax_z.transAxes)
     ax_z.set_xlabel('Time (s)')
@@ -693,7 +700,7 @@ def _make_traces_plots(
     ax_v = axes[2]
     ax_v.set_title('Volume explored')
     for i, sigma in enumerate(sigma_labels):
-        p = ax_v.plot(vs[i][0], label=f'$\sigma$ = {sigma}')
+        p = ax_v.plot(vs[i][0], label=f'$\sigma$ = {sigma}', linewidthq=line_width)
         v_plots.append(p[0])
     # ax_v.legend(loc='upper left', bbox_to_anchor=(1, 1), bbox_transform=ax_v.transAxes)
     ax_v.set_xlabel('Time (s)')
@@ -1026,9 +1033,145 @@ def spherical_cut_stacked_animation():
         mlab.show()
 
 
+def single_trajectory_animation():
+    """
+    3D animation of a single trajectory.
+    """
+    args = get_args(validate_source=False)
+
+    npa_sigmas = get_npas_from_args(args)
+    args.npas = npa_sigmas
+    args.pauses = [args.nonp_pause_max]
+    args.sim_durations = [args.sim_duration]
+    r_values = generate_or_load_r_values(args, rebuild_cache=False, cache_only=False)
+    sigma_idx = 11
+    r0 = r_values[sigma_idx, 0, 0, 0, 0]
+    r2 = r_values[sigma_idx, 0, 0, 2, 0]
+    npa_sigma = npa_sigmas[sigma_idx]
+    args.npas = [npa_sigma, ]
+
+    width = args.video_width
+    height = args.video_height
+    traj_anim_rate = 100
+    args.traj_anim_rate = traj_anim_rate
+    T = int(args.sim_duration / args.sim_dt)
+
+    # Set up plot
+    logger.info('Instantiating renderer.')
+    mlab.options.offscreen = save_plots
+    fig = mlab.figure(size=(width, height), bgcolor=(1, 1, 1))
+    fig.scene.renderer.use_depth_peeling = True
+    fig.scene.renderer.maximum_number_of_peels = 32
+    fig.scene.render_window.point_smoothing = True
+    fig.scene.render_window.line_smoothing = True
+    fig.scene.render_window.polygon_smoothing = True
+    fig.scene.render_window.multi_samples = 20
+    fig.scene.anti_aliasing_frames = 20
+
+    # Fetch trajectories
+    args.phi_dist_params[1] = npa_sigma
+    SS = get_sim_state_from_args(args)
+    Xt = SS.get_Xt()
+
+    # Pick trajectory which come closest to the average r and z values
+    r0_dist = np.abs(np.max(np.abs(Xt[:, :, 0]), axis=1) - r0)
+    r2_dist = np.abs(np.max(np.abs(Xt[:, :, 2]), axis=1) - r2)
+    best_fit_idx = np.argsort(r0_dist * r2_dist)[0]
+    traj = Xt[best_fit_idx]
+
+    # Add noise
+    if args.approx_noise > 0:
+        traj = traj + np.random.normal(np.zeros_like(traj), args.approx_noise)
+        if args.smoothing_window > 0:
+            traj = smooth_trajectory(traj, window_len=args.smoothing_window)
+
+    # Calculate speeds
+    s = calculate_speeds(Xt[best_fit_idx])
+    if args.smoothing_window > 0:
+        s = smooth_trajectory(s, window_len=args.smoothing_window)
+        s = smooth_trajectory(s, window_len=251)
+        s = smooth_trajectory(s, window_len=251)
+        s = smooth_trajectory(s, window_len=125)
+        s = smooth_trajectory(s, window_len=125)
+        s = smooth_trajectory(s, window_len=25)
+        s = smooth_trajectory(s, window_len=25)
+    cmap = plt.get_cmap('plasma')
+    cmaplist = np.array([cmap(i) for i in range(cmap.N)]) * 255
+
+    # Smooth the trajectory again for nicer camera tracking
+    mps = smooth_trajectory(traj, window_len=3001)
+
+    # Draw start of path
+    x, y, z = traj[0].T
+    path = mlab.plot3d(x, y, z, s[0], tube_radius=0.08, vmin=0, vmax=s.max() * 1.1)
+    path.module_manager.scalar_lut_manager.lut.table = cmaplist
+
+    def update_scene(t):
+        fig.scene.disable_render = True
+        X = traj[:t * traj_anim_rate]
+        max_dist = np.log(1 + np.max(np.linalg.norm(X, axis=-1)))
+        x, y, z = X.T
+        path.mlab_source.scalars = s[:t * traj_anim_rate]
+        path.mlab_source.reset(x=x, y=y, z=z)
+        fig.scene.disable_render = False
+
+        mlab.view(
+            azimuth=np.fmod(t / 2, 360),
+            elevation=np.sin(t / 50) * 20 + 90,
+            distance=10 + max_dist * 3,
+            focalpoint=mps[t * traj_anim_rate]
+        )
+
+        fig.scene.render()
+
+    # Initialise ffmpeg process
+    output_path = make_filename(
+        'sim_single_trajectory',
+        args,
+        excludes=['voxel_sizes', 'deltas', 'delta_step', 'targets_radii',
+                  'n_targets', 'epsilon', 'max_nonplanar_pause_duration', 'detection_area'],
+        extension=None
+    )
+    output_args = {
+        'pix_fmt': 'yuv444p',
+        'vcodec': 'libx264',
+        'r': 25,
+        'metadata:g:0': 'title=Simulation output.',
+        'metadata:g:1': 'artist=Leeds Wormlab',
+        'metadata:g:2': f'year={time.strftime("%Y")}',
+    }
+
+    process = (
+        ffmpeg
+            .input('pipe:', format='rawvideo', pix_fmt='rgb24', s=f'{width}x{height}')
+            .output(str(output_path) + '.mp4', **output_args)
+            .overwrite_output()
+            .run_async(pipe_stdin=True)
+    )
+
+    fig.scene._lift()
+    for t in range(1, int(T / traj_anim_rate)):
+        update_scene(t)
+        screenshot = mlab.screenshot(mode='rgb', antialiased=True)
+        frame = Image.fromarray(screenshot, 'RGB')
+        process.stdin.write(frame.tobytes())
+
+    # Flush video
+    process.stdin.close()
+    process.wait()
+
+    # Write meta data
+    meta = to_dict(args)
+    meta['date'] = START_TIMESTAMP
+    meta['sigma_idx'] = sigma_idx
+    with open(output_path.with_suffix(output_path.suffix + '.yml'), 'w') as f:
+        yaml.dump(meta, f)
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
     # spherical_cut_plot()
     # spherical_cut_animation()
-    spherical_cut_stacked_animation()
+    # spherical_cut_stacked_animation()
+    single_trajectory_animation()
