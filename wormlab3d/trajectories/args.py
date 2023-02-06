@@ -17,6 +17,7 @@ def get_args(
         include_approximation_options: bool = True,
         include_pe_options: bool = True,
         include_fractal_dim_options: bool = True,
+        include_video_options: bool = True,
         validate_source: bool = True
 ) -> Namespace:
     """
@@ -171,6 +172,10 @@ def get_args(
                             help='Minimum trajectory scaling factor.')
         parser.add_argument('--fd-sf-max', type=float, default=1.1,
                             help='Maximum trajectory scaling factor.')
+
+    if include_video_options:
+        parser.add_argument('--video-width', type=int, default=1920, help='Width of video in pixels.')
+        parser.add_argument('--video-height', type=int, default=1080, help='Height of video in pixels.')
 
     args = parser.parse_args()
 

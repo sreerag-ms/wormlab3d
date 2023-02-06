@@ -7,6 +7,7 @@ import cv2
 import ffmpeg
 import matplotlib.pyplot as plt
 import numpy as np
+import yaml
 from PIL import Image
 from matplotlib.figure import Figure
 from mayavi import mlab
@@ -16,6 +17,7 @@ from tvtk.tools import visual
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.particles.cache import generate_or_load_r_values, get_sim_state_from_args, get_npas_from_args
 from wormlab3d.toolkit.plot_utils import overlay_image, to_rgb
+from wormlab3d.toolkit.util import to_dict
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.util import smooth_trajectory
 
@@ -735,12 +737,12 @@ def spherical_cut_stacked_animation():
     args.npas = npa_sigmas
 
     # sigma_labels = ['0.003', '0.6', '10']
-    sigma_labels = [f'{s:.2E}' for s in npa_sigmas]
+    sigma_labels = [f'{s:.1E}' for s in npa_sigmas]
 
-    width = 1280
-    height = 720
     n_points = 100
+    width, height = args.video_width, args.video_height
     traj_anim_rate = 100
+    args.traj_anim_rate = traj_anim_rate
     args.plot_n_trajectories_per_sigma = 1  # 5
     args.pick_trajectories_on = ['averages', 'extremes', 'exemplars'][2]
     T = int(args.sim_duration / args.sim_dt)
@@ -938,7 +940,6 @@ def spherical_cut_stacked_animation():
             figs[i].scene.render()
 
     if save_plots:
-        # Initialise ffmpeg process
         output_path = make_filename(
             'sim_animation_stacked',
             args,
@@ -946,6 +947,14 @@ def spherical_cut_stacked_animation():
                       'n_targets', 'epsilon', 'max_nonplanar_pause_duration', 'detection_area'],
             extension=None
         )
+
+        # Write meta data
+        meta = to_dict(args)
+        meta['date'] = START_TIMESTAMP
+        with open(output_path.with_suffix('.yml'), 'w') as f:
+            yaml.dump(meta, f)
+
+        # Initialise ffmpeg process
         output_args = {
             'pix_fmt': 'yuv444p',
             'vcodec': 'libx264',
@@ -1020,6 +1029,6 @@ def spherical_cut_stacked_animation():
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
-    spherical_cut_plot()
+    # spherical_cut_plot()
     # spherical_cut_animation()
-    # spherical_cut_stacked_animation()
+    spherical_cut_stacked_animation()
