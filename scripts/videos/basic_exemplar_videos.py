@@ -67,6 +67,8 @@ def get_args() -> Namespace:
     # Renders/midline
     parser.add_argument('--overlay-midlines', type=str2bool, default=True,
                         help='Add midlines to the rendered images.')
+    parser.add_argument('--posture-outline', type=str2bool, default=False,
+                        help='Add outline box around the postures.')
     parser.add_argument('--show-renders', type=str2bool, default=False,
                         help='Show renders alongside the images.')
     parser.add_argument('--renders-white-at', type=float, default=0.1,
@@ -82,7 +84,7 @@ def _make_info_panel(
         width: int,
         height: int,
         caption: str
-) -> Tuple[Figure, Callable]:
+) -> Figure:
     """
     Info panel.
     """
@@ -157,6 +159,8 @@ def _make_3d_plot(
     )
     fa.add_midline(fig)
     fa.add_surface(fig, v_min=-curvatures.max(), v_max=curvatures.max())
+    if args.posture_outline:
+        fa.add_outline(fig)
 
     # Aspects
     n_revolutions = T / trial.fps / 60 * args.revolution_rate
