@@ -12,6 +12,7 @@ import torch
 import yaml
 from matplotlib.figure import Figure
 from mayavi import mlab
+from scipy.signal import find_peaks
 
 from wormlab3d import PREPARED_IMAGES_PATH
 from wormlab3d import logger, START_TIMESTAMP, LOGS_PATH
@@ -23,10 +24,10 @@ from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.midlines3d.util import generate_annotated_images
 from wormlab3d.postures.natural_frame import NaturalFrame
 from wormlab3d.postures.plot_utils import FrameArtistMLab
-from wormlab3d.toolkit.plot_utils import overlay_image
+from wormlab3d.toolkit.plot_utils import overlay_image, make_box_from_pca_mlab
 from wormlab3d.toolkit.util import print_args, str2bool, to_dict
 from wormlab3d.trajectories.cache import get_trajectory
-from wormlab3d.trajectories.util import smooth_trajectory
+from wormlab3d.trajectories.util import smooth_trajectory, calculate_speeds
 
 # Off-screen rendering
 mlab.options.offscreen = True
@@ -57,8 +58,12 @@ def get_args() -> Namespace:
     parser.add_argument('--smoothing-window-postures', type=int, default=0, help='Smoothing window for the postures.')
     parser.add_argument('--smoothing-window-components', type=int, default=0,
                         help='Smoothing window for the components.')
+    parser.add_argument('--smoothing-window-speed', type=int, default=25,
+                        help='Smoothing window for the speed calculation.')
 
     # 3D plot
+    parser.add_argument('--manoeuvres-mode', type=str2bool, default=False,
+                        help='Render in manoeuvres mode.')
     parser.add_argument('--revolution-rate', type=float, default=1 / 3,
                         help='Rate of 3D plot revolution in revolutions/minute.')
     parser.add_argument('--distance', type=float, default=2.,
@@ -178,6 +183,144 @@ def _make_3d_plot(
     return fig, update
 
 
+def _make_3d_manoeuvres_plot(
+        width: int,
+        height: int,
+        trial: Trial,
+        X_postures: np.ndarray,
+        X_trajectory: np.ndarray,
+        curvatures: np.ndarray,
+        lengths: np.ndarray,
+        distance: float,
+        azim_offset: int,
+        args: Namespace,
+        manoeuvre_spec: dict,
+        speeds: np.ndarray,
+        r_start_frame: int,
+) -> Tuple[Figure, Callable]:
+    """
+    Build a 3D trajectory plot with worm using mayavi.
+    Returns an update function to call which rotates the view and updates the worm.
+    """
+    logger.info('Building 3D plot.')
+    distance = lengths.max() * distance
+    T = len(X_postures)
+
+    inc_start_frame = manoeuvre_spec['inc_start']
+    inc_end_frame = manoeuvre_spec['inc_end']
+    man_start_frame = manoeuvre_spec['man_start']
+    man_end_frame = manoeuvre_spec['man_end']
+    out_start_frame = manoeuvre_spec['out_start']
+    out_end_frame = manoeuvre_spec['out_end']
+
+    # Guess missing ranges
+    if man_start_frame is None:
+        rev_peaks, rev_props = find_peaks(speeds < 0, width=5)
+        assert len(rev_peaks) > 0, 'No reversals found in clip!'
+        rev_idx = rev_props['widths'].argmax()
+        man_start_idx = rev_props['left_bases'][rev_idx] + 10
+        man_end_idx = rev_props['right_bases'][rev_idx] - 10
+    else:
+        man_start_idx = man_start_frame - r_start_frame
+        man_end_idx = man_end_frame - r_start_frame
+    if inc_start_frame is None:
+        inc_end_idx = man_start_idx - 20
+        inc_start_idx = max(0, inc_end_idx - 250)
+    else:
+        inc_start_idx = max(0, inc_start_frame - r_start_frame)
+        inc_end_idx = inc_end_frame - r_start_frame
+    if out_start_frame is None:
+        out_start_idx = man_end_idx + 20
+        out_end_idx = min(len(X_trajectory), out_start_idx + 250)
+    else:
+        out_start_idx = out_start_frame - r_start_frame
+        out_end_idx = min(len(X_trajectory), out_end_frame - r_start_frame)
+
+    # Construct colours
+    s = speeds
+    cmap = plt.get_cmap('PRGn')
+    vmax = np.abs(s).max()
+    vmin = -vmax
+    cmaplist = np.array([cmap(i) for i in range(cmap.N)]) * 255
+
+    # Set up mlab figure
+    fig = mlab.figure(size=(width * 2, height * 2), bgcolor=(1, 1, 1))
+
+    # Depth peeling required for nice opacity, the rest don't seem to make any difference
+    fig.scene.renderer.use_depth_peeling = True
+    fig.scene.renderer.maximum_number_of_peels = 32
+    fig.scene.render_window.point_smoothing = True
+    fig.scene.render_window.line_smoothing = True
+    fig.scene.render_window.polygon_smoothing = True
+    fig.scene.render_window.multi_samples = 20
+    fig.scene.anti_aliasing_frames = 20
+
+    # Render the trajectory with simple lines
+    path = mlab.plot3d(*X_trajectory.T, s, vmax=vmax, vmin=vmin, opacity=0.8, tube_radius=None, line_width=9)
+    path.module_manager.scalar_lut_manager.lut.table = cmaplist
+
+    # Add the cuboids
+    cuboid_args = dict(
+        dimensions='extents',
+        opacity=0.2,
+        draw_outline=True,
+        outline_opacity=0.8,
+        outline_tube_radius=0.001,
+        fig=fig
+    )
+    make_box_from_pca_mlab(
+        X=X_trajectory[inc_start_idx:inc_end_idx],
+        colour='aqua',
+        outline_colour='teal',
+        **cuboid_args
+    )
+    make_box_from_pca_mlab(
+        X=X_trajectory[man_start_idx:man_end_idx],
+        colour='plum',
+        outline_colour='hotpink',
+        **cuboid_args
+    )
+    make_box_from_pca_mlab(
+        X=X_trajectory[out_start_idx:out_end_idx],
+        colour='aqua',
+        outline_colour='teal',
+        **cuboid_args
+    )
+
+    # Smooth the midpoints for nicer camera tracking
+    mps = np.zeros((T, 3))
+    for i, X in enumerate(X_postures):
+        mps[i] = X.min(axis=0) + np.ptp(X, axis=0) / 2
+    mps = smooth_trajectory(mps, window_len=51)
+
+    # Set up the artist and add the pieces
+    NF = NaturalFrame(X_postures[0])
+    fa = FrameArtistMLab(
+        NF,
+        use_centred_midline=False,
+        midline_opts={'opacity': 1, 'line_width': 8},
+        surface_opts={'radius': 0.024 * lengths.mean()}
+    )
+    fa.add_midline(fig)
+    fa.add_surface(fig, v_min=-curvatures.max(), v_max=curvatures.max())
+    # fa.add_outline(fig)
+
+    # Aspects
+    n_revolutions = T / trial.fps / 60 * args.revolution_rate
+    azims = azim_offset + np.linspace(start=0, stop=360 * n_revolutions, num=T)
+    mlab.view(figure=fig, azimuth=azims[0], distance=distance, focalpoint=mps[0])
+
+    def update(frame_idx: int):
+        fig.scene.disable_render = True
+        NF = NaturalFrame(X_postures[frame_idx])
+        fa.update(NF)
+        fig.scene.disable_render = False
+        mlab.view(figure=fig, azimuth=azims[frame_idx], distance=distance, focalpoint=mps[frame_idx])
+        fig.scene.render()
+
+    return fig, update
+
+
 def _resize_image_panel(
         width: int,
         height: int,
@@ -275,6 +418,7 @@ def prepare_panels(
         caption: str,
         distance: float,
         azim_offset: int,
+        manoeuvre_spec: dict,
 ):
     """
     Prepare the panel of plots for the given reconstruction.
@@ -282,12 +426,23 @@ def prepare_panels(
     logger.info(f'Preparing panels for reconstruction {reconstruction.id}.')
     assert reconstruction.source == M3D_SOURCE_MF, 'Only MF reconstructions supported!'
     trial = reconstruction.trial
-    if args.buffer_window is not None:
-        r_start_frame = max(reconstruction.start_frame_valid, start_frame - args.buffer_window)
-        r_end_frame = min(reconstruction.end_frame_valid, end_frame + args.buffer_window)
+
+    if args.manoeuvres_mode:
+        start_frame = manoeuvre_spec['anim_start']
+        end_frame = manoeuvre_spec['anim_end']
+        if manoeuvre_spec['traj_start'] is None:
+            manoeuvre_spec['traj_start'] = start_frame - 500
+        if manoeuvre_spec['traj_end'] is None:
+            manoeuvre_spec['traj_end'] = end_frame + 500
+        r_start_frame = max(reconstruction.start_frame_valid, manoeuvre_spec['traj_start'])
+        r_end_frame = min(reconstruction.end_frame_valid, manoeuvre_spec['traj_end'])
     else:
-        r_start_frame = reconstruction.start_frame_valid
-        r_end_frame = reconstruction.end_frame_valid
+        if args.buffer_window is not None:
+            r_start_frame = max(reconstruction.start_frame_valid, start_frame - args.buffer_window)
+            r_end_frame = min(reconstruction.end_frame_valid, end_frame + args.buffer_window)
+        else:
+            r_start_frame = reconstruction.start_frame_valid
+            r_end_frame = reconstruction.end_frame_valid
 
     # Instantiate renderer
     renderer = RenderWrapper(reconstruction, trial.get_frame(r_start_frame))
@@ -299,6 +454,13 @@ def prepare_panels(
         'end_frame': r_end_frame,
     }
     Xr, _ = get_trajectory(**common_args)
+
+    # Calculate speed
+    if args.smoothing_window_speed > 1:
+        Xc_smoothed = smooth_trajectory(Xr, window_len=args.smoothing_window_speed)
+        speeds = calculate_speeds(Xc_smoothed, signed=True) * trial.fps
+    else:
+        speeds = calculate_speeds(Xr, signed=True) * trial.fps
 
     # Pick trajectory point and smooth
     if args.trajectory_point == -1:
@@ -357,7 +519,7 @@ def prepare_panels(
     )
     plot_info = np.asarray(fig_info.canvas.renderer._renderer).take([0, 1, 2], axis=2)
 
-    fig_3d, update_3d_plot = _make_3d_plot(
+    args_3d = dict(
         width=int(args.width - imgs_width),
         height=args.height,
         trial=trial,
@@ -369,6 +531,15 @@ def prepare_panels(
         azim_offset=azim_offset,
         args=args,
     )
+    if args.manoeuvres_mode:
+        fig_3d, update_3d_plot = _make_3d_manoeuvres_plot(
+            **args_3d,
+            manoeuvre_spec=manoeuvre_spec,
+            speeds=speeds,
+            r_start_frame=r_start_frame
+        )
+    else:
+        fig_3d, update_3d_plot = _make_3d_plot(**args_3d)
 
     # Fetch the frames
     logger.info('Querying database for frames.')
@@ -461,14 +632,27 @@ def generate_clip(
     and camera images with overlaid 2D midline reprojections.
     """
     reconstruction = Reconstruction.objects.get(id=clip['reconstruction'])
+
+    if args.manoeuvres_mode:
+        manoeuvre_spec = clip['manoeuvre_spec']
+        for k in ['traj_start', 'traj_end', 'inc_start', 'inc_end',
+                  'man_start', 'man_end', 'out_start', 'out_end']:
+            if k not in manoeuvre_spec:
+                manoeuvre_spec[k] = None
+        clip['start'] = manoeuvre_spec['anim_start']
+        clip['end'] = manoeuvre_spec['anim_end']
+    else:
+        manoeuvre_spec = None
+
     update_fn, frame_nums = prepare_panels(
         args=args,
         reconstruction=reconstruction,
-        start_frame=clip['start'],
-        end_frame=clip['end'],
+        start_frame=clip['start'] if 'start' in clip else 0,
+        end_frame=clip['end'] if 'end' in clip else 0,
         caption=clip['caption'] if 'caption' in clip else '',
         azim_offset=clip['azim_offset'] if 'azim_offset' in clip else 0,
-        distance=clip['distance'] if 'distance' in clip else args.distance
+        distance=clip['distance'] if 'distance' in clip else args.distance,
+        manoeuvre_spec=manoeuvre_spec,
     )
 
     # Initialise ffmpeg process
@@ -533,9 +717,12 @@ def generate_from_spec():
     clips = spec['clips']
     for i, clip in enumerate(clips):
         assert 'reconstruction' in clip
-        assert 'start' in clip
-        assert 'end' in clip
-
+        if args.manoeuvres_mode:
+            assert 'manoeuvre_spec' in clip
+        else:
+            assert 'manoeuvre_spec' not in clip
+            assert 'start' in clip
+            assert 'end' in clip
         logger.info(f'Generating clip {i + 1}/{len(clips)}.')
         generate_clip(
             args,
