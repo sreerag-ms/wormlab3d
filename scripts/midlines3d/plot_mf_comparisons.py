@@ -52,7 +52,7 @@ show_plots = False
 save_plots = True
 # show_plots = True
 # save_plots = False
-img_extension = 'png'
+img_extension = 'svg'
 
 
 class NothingToCompare(Exception):
@@ -546,7 +546,7 @@ def _generate_or_load_errors(
     Generate or load the errors.
     """
     cache_id = f'rec_{rec.id}_N={N}_errors'
-    if max_train_steps > 0:
+    if max_train_steps > 0 and rec.source != M3D_SOURCE_MF:
         cache_id += f'_lr={lr:.2E}_mts={max_train_steps}_ctol={conv_tol:.3f}_cpat={conv_patience}'
     cache_path = POINTS_CACHE_PATH / cache_id
     cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
@@ -1317,11 +1317,11 @@ def plot_pixel_losses_opt_comparison():
     plt.rc('xtick.major', pad=2)
     plt.rc('ytick.major', pad=2, size=2)
 
-    fig, ax = plt.subplots(1, figsize=(3.6, 2.4), sharex=True, gridspec_kw={
-        'left': 0.09,
+    fig, ax = plt.subplots(1, figsize=(3.12, 1.8), sharex=True, gridspec_kw={
+        'left': 0.11,
         'right': 0.97,
         'top': 0.8,
-        'bottom': 0.12,
+        'bottom': 0.16,
     })
 
     def _make_plot(
