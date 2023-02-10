@@ -221,7 +221,7 @@ def _calculate_errors(
         ])).to(device)
 
         # MSE
-        errors[start_idx:end_idx] = to_numpy(((renders - images)**2).sum(axis=(1, 2, 3)))
+        errors[start_idx:end_idx] = to_numpy(((renders - images)**2).mean(axis=(1, 2, 3)))
 
         renders = None
         del renders
