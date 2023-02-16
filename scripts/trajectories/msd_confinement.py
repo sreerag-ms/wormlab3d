@@ -23,6 +23,8 @@ from wormlab3d.trajectories.util import DEFAULT_FPS, get_deltas_from_args
 
 show_plots = False
 save_plots = True
+# show_plots = True
+# save_plots = False
 img_extension = 'svg'
 
 
@@ -124,7 +126,7 @@ def _calculate_sim_msd(
         bounds: np.ndarray,
         sim_time: float,
         deltas: np.ndarray,
-        bounded: int,
+        bounded: bool,
         truncated: int,
         truncate_attempts: int,
 ):
@@ -331,21 +333,24 @@ def plot_confinement():
 
 
 def plot_sim_trajectory_3d(
-        truncated: bool = False
+        bounded: bool = True,
+        truncated: bool = False,
 ):
     """
-    Generate and plot trajectory of a bounded randomly generated brownian particle with momentum.
+    Generate and plot trajectory of a randomly generated brownian particle with momentum.
     """
     from mayavi import mlab
     mlab.options.offscreen = save_plots
     args = parse_args()
-    _set_seed(args.seed)
+    # _set_seed(args.seed)
     bs = args.box_size
     bounds = np.array([[-bs / 2, bs / 2]] * 3)
 
     logger.info('Simulating trajectory.')
     x0 = np.clip(np.random.normal(np.zeros(3), bs / 10), a_min=-bs / 2 + 0.01, a_max=bs / 2 - 0.01)
-    p_args = dict(x0=x0, D=args.diffusion, momentum=args.momentum, bounds=bounds)
+    p_args = dict(x0=x0, D=args.diffusion, momentum=args.momentum)
+    if bounded or truncated:
+        p_args['bounds'] = bounds
 
     if truncated:
         truncate_steps = args.truncate_time * DEFAULT_FPS
@@ -383,18 +388,22 @@ def plot_sim_trajectory_3d(
     s = np.linspace(0, 1, len(X))
     cmap = plt.get_cmap('viridis_r')
     cmaplist = np.array([cmap(i) for i in range(cmap.N)]) * 255
-    path = mlab.plot3d(*X.T, s, opacity=0.6, tube_radius=0.025)
+    path = mlab.plot3d(*X.T, s, opacity=0.7, tube_radius=0.04)
     path.module_manager.scalar_lut_manager.lut.table = cmaplist
 
     # Add outline box aligned with PCA components
     bound_points = np.array(list(itertools.product(*[[-bs / 2, bs / 2]] * 3)))
     lines = make_box_outline(X=bound_points, use_extents=True)
+    if bounded and not truncated:
+        box_colour = 'red'
+    else:
+        box_colour = 'darkgrey'
     for l in lines:
         mlab.plot3d(
             *l.T,
             figure=fig,
-            color=to_rgb('darkgrey'),
-            tube_radius=0.005,
+            color=to_rgb(box_colour),
+            tube_radius=0.02,
         )
 
     # Draw plot
@@ -426,6 +435,9 @@ def plot_sim_trajectory_3d(
                            f'_D={args.diffusion}' \
                            f'_m={args.momentum}' \
                            f'_bs={args.box_size}' \
+                           f'_bounded={"yes" if bounded or truncated else "no"}' \
+                           f'_truncated={"yes" if truncated else "no"}' \
+                           f'_seed={os.environ["PYTHONHASHSEED"]}' \
                            f'.png'
         logger.info(f'Saving 3D plot to {path}.')
         fig.scene._lift()
@@ -443,6 +455,15 @@ if __name__ == '__main__':
         os.makedirs(LOGS_PATH, exist_ok=True)
 
     plot_confinement()
-    # plot_sim_trajectory_3d(truncated=True)
+    
+    # # Plot lots of examples...
+    # for seed in range(20):
+    #     _set_seed(seed)
+    #     try:
+    #         plot_sim_trajectory_3d(bounded=False)
+    #         plot_sim_trajectory_3d(truncated=False)
+    #         plot_sim_trajectory_3d(truncated=True)
+    #     except Exception as e:
+    #         logger.warn(e)
 
     # trials=162,73,114,103,76,35,168,37
