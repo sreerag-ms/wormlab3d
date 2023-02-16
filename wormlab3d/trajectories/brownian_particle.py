@@ -151,6 +151,45 @@ class BoundedParticle(ActiveParticle):
         return dx2
 
 
+class TruncatedParticle(BoundedParticle):
+    def __init__(
+            self,
+            x0: np.ndarray = np.array([0, 0, 0]),
+            D: float = 10.,
+            momentum: float = 0,
+            bounds: np.ndarray = None,
+    ):
+        super().__init__(x0, D, momentum, bounds)
+        self.truncation_bounds = bounds
+        self.bounds = np.array([[-np.inf, np.inf], [-np.inf, np.inf], [-np.inf, np.inf]])
+
+    def generate_trajectory(self, n_steps: int, total_time: float) -> np.ndarray:
+        """
+        Generate a random trajectory as a Wiener process.
+        """
+        dt = total_time / float(n_steps - 1)
+        x = np.zeros([n_steps, self.m])
+        x[0] = self.x0
+
+        escaped = False
+        for j in range(1, n_steps):
+            step = self._step(dt)
+            xj = x[j - 1] + step
+            for k in range(self.m):
+                if not (self.truncation_bounds[k][0] < xj[k] < self.truncation_bounds[k][1]):
+                    escaped = True
+                    break
+            if escaped:
+                break
+            x[j] = xj
+            self.x_prev = self.x
+            self.x = x[j]
+        if escaped:
+            x = x[:j]
+
+        return x
+
+
 class ConfinedParticle(BoundedParticle):
     def __init__(
             self,

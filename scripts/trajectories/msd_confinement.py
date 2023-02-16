@@ -3,18 +3,19 @@ import os
 import random
 from argparse import ArgumentParser, Namespace
 from multiprocessing import Pool
+from multiprocessing.process import current_process
+from time import time
 from typing import Dict, Tuple, List
 
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
-from mayavi import mlab
 
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger, N_WORKERS
 from wormlab3d.data.model import Trial
 from wormlab3d.toolkit.plot_utils import make_box_outline, to_rgb
 from wormlab3d.toolkit.util import print_args
-from wormlab3d.trajectories.brownian_particle import BoundedParticle
+from wormlab3d.trajectories.brownian_particle import BoundedParticle, TruncatedParticle
 from wormlab3d.trajectories.cache import get_trajectory
 from wormlab3d.trajectories.displacement import calculate_displacements_parallel, DISPLACEMENT_AGGREGATION_SQUARED_SUM, \
     calculate_displacements
@@ -23,9 +24,6 @@ from wormlab3d.trajectories.util import DEFAULT_FPS, get_deltas_from_args
 show_plots = False
 save_plots = True
 img_extension = 'svg'
-
-# Off-screen rendering
-mlab.options.offscreen = save_plots
 
 
 def parse_args() -> Namespace:
@@ -48,6 +46,9 @@ def parse_args() -> Namespace:
     parser.add_argument('--momentum', type=float, default=0.9, help='Momentum.')
     parser.add_argument('--box-size', type=float, default=10., help='Box size.')
     parser.add_argument('--n-runs', type=int, default=10, help='Number of simulation runs.')
+    parser.add_argument('--truncate-time', type=int, default=240, help='Simulation time (seconds).')
+    parser.add_argument('--truncate-attempts', type=int, default=100,
+                        help='Number of attempts to find a truncated trajectory.')
 
     # 3D plots
     parser.add_argument('--width-3d', type=int, default=1000, help='Width of 3D plot (in pixels).')
@@ -64,9 +65,10 @@ def parse_args() -> Namespace:
     return args
 
 
-def _set_seed(seed):
+def _set_seed(seed, quiet: bool = False):
     """Set the random seed."""
-    logger.info(f'Setting random seed = {seed}.')
+    if not quiet:
+        logger.info(f'Setting random seed = {seed}.')
     random.seed(seed)
     os.environ['PYTHONHASHSEED'] = str(seed)
     np.random.seed(seed)
@@ -122,30 +124,52 @@ def _calculate_sim_msd(
         bounds: np.ndarray,
         sim_time: float,
         deltas: np.ndarray,
+        bounded: int,
+        truncated: int,
+        truncate_attempts: int,
 ):
     """
     Generate a simulation trajectory and calculate MSD.
     """
     bs = np.ptp(bounds[0])
-    x0 = np.clip(np.random.normal(np.zeros(3), bs / 3), a_min=-bs / 2 + 0.01, a_max=bs / 2 - 0.01)
-    p = BoundedParticle(
-        x0=x0,
-        D=D,
-        momentum=momentum,
-        bounds=bounds
-    )
-    X = p.generate_trajectory(n_steps=sim_time * DEFAULT_FPS, total_time=sim_time)
+    x0 = np.clip(np.random.normal(np.zeros(3), bs / 10), a_min=-bs / 2 + 0.01, a_max=bs / 2 - 0.01)
+    p_args = dict(x0=x0, D=D, momentum=momentum)
+    if bounded:
+        p_args['bounds'] = bounds
+    if truncated > -1:
+        p = TruncatedParticle(**p_args)
+        X = []
+        attempt = 0
+        while len(X) < truncated and attempt < truncate_attempts:
+            attempt += 1
+            if attempt % 5 == 0:
+                logger.info(f'Attempt {attempt}/{truncate_attempts} to generate a truncated trajectory.')
+            X = p.generate_trajectory(n_steps=sim_time * DEFAULT_FPS, total_time=sim_time)
+        if len(X) < truncated:
+            err = 'Failed to find truncated trajectory!'
+            logger.warning(err)
+            return False
+        else:
+            logger.info(f'Generated a truncated trajectory after {attempt} attempts.')
+    else:
+        p = BoundedParticle(**p_args)
+        X = p.generate_trajectory(n_steps=sim_time * DEFAULT_FPS, total_time=sim_time)
+
     d = calculate_displacements(X, deltas, aggregation=DISPLACEMENT_AGGREGATION_SQUARED_SUM, quiet=True)
 
     return d
 
 
 def _calculate_sim_msd_wrapper(args):
+    p = current_process()
+    _set_seed(int(time() / p._identity[0]), quiet=True)
     return _calculate_sim_msd(*args)
 
 
-def _get_msds_bounded_particles(
+def _get_msds_particles(
         args: Namespace,
+        bounded: bool = True,
+        truncated: bool = False,
 ) -> Tuple[Dict[int, Dict[int, List[float]]], Dict[int, List[float]]]:
     """
     Generate bounded particle trajectories and calculate the msds.
@@ -153,19 +177,38 @@ def _get_msds_bounded_particles(
     bounds = np.array([[-args.box_size / 2, args.box_size / 2]] * 3)
     deltas, delta_ts = get_deltas_from_args(args)
 
-    logger.info('Simulating trajectories in parallel.')
     sim_args = dict(
         D=args.diffusion,
         momentum=args.momentum,
         bounds=bounds,
         sim_time=args.sim_time,
         deltas=deltas,
+        bounded=bounded,
+        truncated=args.truncate_time * DEFAULT_FPS if truncated else -1,
+        truncate_attempts=args.truncate_attempts,
     )
-    with Pool(processes=N_WORKERS) as pool:
-        res = pool.map(
-            _calculate_sim_msd_wrapper,
-            [list(sim_args.values()) for _ in range(args.n_runs)]
-        )
+
+    if N_WORKERS > 1:
+        logger.info('Simulating trajectories in parallel.')
+        with Pool(processes=N_WORKERS) as pool:
+            res = pool.map(
+                _calculate_sim_msd_wrapper,
+                [list(sim_args.values()) for _ in range(args.n_runs)]
+            )
+            res = [r for r in res if r != False]
+    else:
+        logger.info('Simulating trajectories.')
+        res = []
+        for i in range(args.n_runs):
+            try:
+                res_i = _calculate_sim_msd(**sim_args)
+            except RuntimeError:
+                continue
+            if not res_i:
+                continue
+            res.append(res_i)
+    if len(res) == 0:
+        raise RuntimeError('Found no trajectories!')
     sim_displacements = {i: res for i, res in enumerate(res)}
     all_displacements = {
         delta: np.concatenate([sd[delta] for sd in sim_displacements.values()])
@@ -195,7 +238,9 @@ def plot_confinement():
     _set_seed(args.seed)
     deltas, delta_ts = get_deltas_from_args(args)
     trials, msds, msds_all_traj = _get_msds_trials(args)
-    msds_sim, msds_all_sim = _get_msds_bounded_particles(args)
+    msds_unbounded, msds_all_unbounded = _get_msds_particles(args, bounded=False)
+    msds_bounded, msds_all_bounded = _get_msds_particles(args, truncated=False)
+    msds_trunc, msds_all_trunc = _get_msds_particles(args, truncated=True)
 
     # Sort the trials by concentration
     trial_ids = list(trials.keys())
@@ -208,17 +253,17 @@ def plot_confinement():
     plt.rc('xtick', labelsize=7)  # fontsize of the x tick labels
     plt.rc('ytick', labelsize=7)  # fontsize of the y tick labels
     plt.rc('legend', fontsize=7)  # fontsize of the legend
-    fig, axes = plt.subplots(1, 2, figsize=(6, 2.8), gridspec_kw={
-        'wspace': 1,
+    fig, axes = plt.subplots(4, 1, figsize=(3.6, 6.5), gridspec_kw={
+        'hspace': 0.5,
         'top': 0.99,
-        'bottom': 0.15,
-        'left': 0.08,
+        'bottom': 0.07,
+        'left': 0.13,
         'right': 0.99,
     })
 
     def _complete_msd_plot(ax_):
         ax_.set_ylabel('MSD')
-        ax_.set_xlabel('$\Delta\ (s)$')
+        ax_.set_xlabel('$\Delta\ (s)$', labelpad=1)
         ax_.set_yscale('log')
         ax_.set_xscale('log')
         ax_.grid()
@@ -227,6 +272,22 @@ def plot_confinement():
         ylim = ax_.get_ylim()[1] * 1.1
         ax_.set_ylim(top=ylim)
         ax_.fill_between(np.arange(30, 100), ylim, color='red', alpha=0.3, zorder=-1, linewidth=0)
+
+    def _plot_sim_msds(ax_, msds_, msds_all_):
+        colours_ = cmap(np.linspace(0, 1, len(msds_)))
+        msd_vals_all = np.array(list(msds_all_.values()))
+        ax_.plot(delta_ts, msd_vals_all, label='Average',
+                 alpha=0.8, c='black', linestyle='--', linewidth=3, zorder=80)
+        for i_ in range(len(msds_)):
+            msd_vals = np.array(list(msds_[i_].values()))
+            ax_.plot(
+                delta_ts,
+                msd_vals,
+                alpha=0.5,
+                c=colours_[i_]
+            )
+        ax_.set_ylim(axes[0].get_ylim())
+        _complete_msd_plot(ax_)
 
     # Plot the real data
     cmap = plt.get_cmap('brg')
@@ -248,23 +309,10 @@ def plot_confinement():
     _complete_msd_plot(ax)
     ax.legend(bbox_to_anchor=(1.04, 1))
 
-    # Plot the simulation results
-    cmap = plt.get_cmap('autumn')
-    colours = cmap(np.linspace(0, 1, len(msds_sim)))
-    ax = axes[1]
-    msd_vals_all_sim = np.array(list(msds_all_sim.values()))
-    ax.plot(delta_ts, msd_vals_all_sim, label='Average',
-            alpha=0.8, c='black', linestyle='--', linewidth=3, zorder=80)
-    for i in range(len(msds_sim)):
-        msd_vals = np.array(list(msds_sim[i].values()))
-        ax.plot(
-            delta_ts,
-            msd_vals,
-            alpha=0.5,
-            c=colours[i]
-        )
-    ax.set_ylim(axes[0].get_ylim())
-    _complete_msd_plot(ax)
+    # Plot simulation outputs
+    _plot_sim_msds(axes[1], msds_unbounded, msds_all_unbounded)
+    _plot_sim_msds(axes[2], msds_bounded, msds_all_bounded)
+    _plot_sim_msds(axes[3], msds_trunc, msds_all_trunc)
 
     if save_plots:
         path = LOGS_PATH / f'{START_TIMESTAMP}_msds' \
@@ -282,25 +330,43 @@ def plot_confinement():
         plt.show()
 
 
-def plot_sim_trajectory_3d():
+def plot_sim_trajectory_3d(
+        truncated: bool = False
+):
     """
     Generate and plot trajectory of a bounded randomly generated brownian particle with momentum.
     """
+    from mayavi import mlab
+    mlab.options.offscreen = save_plots
     args = parse_args()
     _set_seed(args.seed)
-    args.sim_time = 120
     bs = args.box_size
     bounds = np.array([[-bs / 2, bs / 2]] * 3)
 
     logger.info('Simulating trajectory.')
-    x0 = np.clip(np.random.normal(np.zeros(3), bs / 3), a_min=-bs / 2 + 0.01, a_max=bs / 2 - 0.01)
-    p = BoundedParticle(
-        x0=x0,
-        D=args.diffusion,
-        momentum=args.momentum,
-        bounds=bounds
-    )
-    X = p.generate_trajectory(n_steps=args.sim_time * DEFAULT_FPS, total_time=args.sim_time)
+    x0 = np.clip(np.random.normal(np.zeros(3), bs / 10), a_min=-bs / 2 + 0.01, a_max=bs / 2 - 0.01)
+    p_args = dict(x0=x0, D=args.diffusion, momentum=args.momentum, bounds=bounds)
+
+    if truncated:
+        truncate_steps = args.truncate_time * DEFAULT_FPS
+        p = TruncatedParticle(**p_args)
+        X = []
+        attempt = 0
+        while len(X) < truncate_steps and attempt < args.truncate_attempts:
+            attempt += 1
+            if attempt % 5 == 0:
+                logger.info(f'Attempt {attempt}/{args.truncate_attempts} to generate a truncated trajectory.')
+            p.x0 = np.clip(np.random.normal(np.zeros(3), bs / 4), a_min=-bs / 2 + 0.01, a_max=bs / 2 - 0.01)
+            X = p.generate_trajectory(n_steps=args.sim_time * DEFAULT_FPS, total_time=args.sim_time)
+        if len(X) < truncate_steps:
+            err = 'Failed to find truncated trajectory!'
+            logger.warning(err)
+            raise RuntimeError(err)
+        else:
+            logger.info(f'Generated a truncated trajectory after {attempt} attempts.')
+    else:
+        p = BoundedParticle(**p_args)
+        X = p.generate_trajectory(n_steps=args.sim_time * DEFAULT_FPS, total_time=args.sim_time)
 
     # Set up mlab figure
     fig = mlab.figure(size=(args.width_3d, args.height_3d), bgcolor=(1, 1, 1))
@@ -377,6 +443,6 @@ if __name__ == '__main__':
         os.makedirs(LOGS_PATH, exist_ok=True)
 
     plot_confinement()
-    # plot_sim_trajectory_3d()
+    # plot_sim_trajectory_3d(truncated=True)
 
     # trials=162,73,114,103,76,35,168,37
