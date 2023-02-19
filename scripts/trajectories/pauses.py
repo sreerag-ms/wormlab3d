@@ -5,6 +5,7 @@ from typing import Dict, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib import ticker
 from matplotlib.gridspec import GridSpec
 from matplotlib.transforms import Bbox
 from scipy.signal import find_peaks
@@ -205,7 +206,9 @@ def _generate_or_load_data(
     return ds, durations, activity, activity_dist, curvatures
 
 
-def plot_pauses():
+def plot_pauses(
+        layout: str = 'thesis'
+):
     """
     Plot the pauses, durations against activity.
     """
@@ -220,28 +223,51 @@ def plot_pauses():
     a_vals = np.concatenate([a for c, a in activity.items() if _is_included(c)])
     ad_vals = np.concatenate([ad for c, ad in activity_dist.items() if ad.ndim == 2 and _is_included(c)])
     k_vals = np.concatenate([k for c, k in curvatures.items() if _is_included(c)])
-    hist_args = dict(bins=10, density=True, rwidth=0.9)
+    hist_args = dict(density=True, rwidth=0.9)
+    logbins = np.logspace(np.log10(d_vals.min()), np.log10(d_vals.max()), 10)
 
     # Set up plot
-    plt.rc('axes', labelsize=9)  # fontsize of the X label
-    plt.rc('xtick', labelsize=8)  # fontsize of the x tick labels
-    plt.rc('ytick', labelsize=8)  # fontsize of the y tick labels
-    plt.rc('legend', fontsize=8)  # fontsize of the legend
-    plt.rc('xtick.major', pad=2, size=3)
-    plt.rc('ytick.major', pad=2, size=3)
+    if layout == 'thesis':
+        plt.rc('axes', labelsize=9)  # fontsize of the X label
+        plt.rc('xtick', labelsize=8)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=8)  # fontsize of the y tick labels
+        plt.rc('legend', fontsize=8)  # fontsize of the legend
+        plt.rc('xtick.major', pad=2, size=3)
+        plt.rc('xtick.minor', pad=2, size=3)
+        plt.rc('ytick.major', pad=2, size=3)
+        gs = GridSpec(
+            nrows=2,
+            ncols=2,
+            width_ratios=(4, 2.5),
+            height_ratios=(2.2, 3),
+            wspace=0,
+            hspace=0,
+            top=0.97,
+            bottom=0.14,
+            left=0.1,
+            right=0.99,
+        )
+    else:
+        plt.rc('axes', labelsize=7)  # fontsize of the x and y labels
+        plt.rc('xtick', labelsize=6)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=6)  # fontsize of the y tick labels
+        plt.rc('legend', fontsize=7)  # fontsize of the legend
+        plt.rc('xtick.major', pad=2, size=3)
+        plt.rc('xtick.minor', pad=2, size=3)
+        plt.rc('ytick.major', pad=2, size=3)
+        gs = GridSpec(
+            nrows=2,
+            ncols=2,
+            width_ratios=(4, 2.5),
+            height_ratios=(2.2, 3),
+            wspace=0,
+            hspace=0,
+            top=0.98,
+            bottom=0.13,
+            left=0.08,
+            right=0.99,
+        )
 
-    gs = GridSpec(
-        nrows=2,
-        ncols=2,
-        width_ratios=(4, 2.5),
-        height_ratios=(2.2, 3),
-        wspace=0,
-        hspace=0,
-        top=0.97,
-        bottom=0.14,
-        left=0.1,
-        right=0.99,
-    )
     fig = plt.figure(figsize=(6, 3))
 
     # Make scatter plot
@@ -260,28 +286,35 @@ def plot_pauses():
                 continue
             ax_scat.scatter(durations_c, activity[c], label=f'{c:.2f}% ({len(durations_c):,d})', s=20, marker='o',
                             facecolors='none', edgecolors=colours[c], alpha=0.6)
-        legend = ax_scat.legend()
+        legend = ax_scat.legend(loc='upper right', ncol=2, columnspacing=0.7, handletextpad=0.2)
     else:
         sc = ax_scat.scatter(d_vals, a_vals, s=20, marker='$\u25EF$', c=k_vals, alpha=0.6, cmap='coolwarm')
         cb = fig.colorbar(sc)
     ax_scat.spines['top'].set_visible(False)
     ax_scat.spines['right'].set_visible(False)
+    ax_scat.set_xscale('log')
+    subs = [1.0, 2.0, 3.0, 6.]  # ticks to show per decade
+    ax_scat.xaxis.set_minor_locator(ticker.LogLocator(subs=subs))
+    ax_scat.xaxis.set_major_formatter(ticker.FormatStrFormatter('%d'))
+    ax_scat.xaxis.set_minor_formatter(ticker.FormatStrFormatter('%d'))
+    ax_scat.set_yticks([0.05, 0.1, 0.15])
 
     # Duration histogram
     ax_hist_duration = fig.add_subplot(gs[0, 0])
-    ax_hist_duration.hist(d_vals, orientation='vertical', color='green', **hist_args)
+    ax_hist_duration.hist(d_vals, orientation='vertical', color='green', bins=logbins, **hist_args)
     ax_hist_duration.tick_params(axis='x', bottom=False, labelbottom=False)
     ax_hist_duration.spines['bottom'].set(linestyle='--', color='grey')
     ax_hist_duration.set_ylabel('Density')
-    ax_hist_duration.set_yticks([0.5])
+    ax_hist_duration.set_xscale('log')
+    ax_hist_duration.set_yscale('log')
 
     # Activity histogram
     ax_hist_activity = fig.add_subplot(gs[1, 1])
-    ax_hist_activity.hist(a_vals, orientation='horizontal', color='blue', **hist_args)
+    ax_hist_activity.hist(a_vals, orientation='horizontal', color='blue', bins=10, **hist_args)
     ax_hist_activity.tick_params(axis='y', left=False, labelleft=False)
     ax_hist_activity.spines['left'].set(linestyle='--', color='grey')
     ax_hist_activity.set_xlabel('Density')
-    ax_hist_activity.set_xticks([5])
+    ax_hist_activity.set_xticks([5, 10, 15, 20])
 
     # Activity distribution
     ax_dist = fig.add_subplot(gs[0, 1])
@@ -302,8 +335,13 @@ def plot_pauses():
     ax_dist.set_ylabel('Relative activity', labelpad=1)
     ax_dist.set_yticks([0, 1, 2, 3])
     pos = ax_dist.get_position().bounds
-    wpad = 0.06
-    hpad = 0.07
+    if layout == 'thesis':
+        wpad = 0.06
+        hpad = 0.07
+    else:
+        wpad = 0.05
+        hpad = 0.06
+
     ax_dist.set_position(Bbox.from_bounds(
         pos[0] + wpad,  # xmin
         pos[1] + hpad,  # ymin
@@ -311,15 +349,50 @@ def plot_pauses():
         pos[3] - hpad,  # height
     ))
 
-    if legend is not None:
-        handles = legend.legendHandles
-        labels = [t.get_text() for t in legend.get_texts()]
-        ax_hist_duration.legend(handles, labels, loc='upper right', ncol=2, columnspacing=0.7, handletextpad=0.2)
-        legend.remove()
-
     if save_plots:
         path = LOGS_PATH / (f'{START_TIMESTAMP}'
                             f'_pauses'
+                            f'_{_identifiers(args)}'
+                            f'_c={args.colouring}'
+                            f'_n={len(d_vals)}'
+                            f'.{img_extension}')
+        logger.info(f'Saving plot to {path}.')
+        plt.savefig(path, transparent=True)
+
+    if show_plots:
+        plt.show()
+
+
+def plot_pause_durations_cdfs():
+    """
+    Plot the pause durations cumulative distribution functions.
+    """
+    args = parse_args()
+    ds, durations, activity, activity_dist, curvatures = _generate_or_load_data(args, rebuild_cache=False,
+                                                                                cache_only=False)
+
+    def _is_included(c) -> bool:
+        return not (args.restrict_concs is not None and c not in args.restrict_concs)
+
+    d_vals = np.concatenate([d for c, d in durations.items() if _is_included(c)])
+
+    fig, ax = plt.subplots(1, figsize=(6, 3))
+    cm = plt.get_cmap('jet')
+    concs = [float(k) for k in durations.keys() if _is_included(k)]
+    ticks = np.arange(min(concs), max(concs) + 0.25, 0.25)
+    all_colours = cm(np.linspace(0, 1, len(ticks)))
+    colours = {c: all_colours[i] for i, c in enumerate(ticks) if c in concs}
+
+    for c, d in durations.items():
+        d = np.sort(d)
+        p = 1. * np.arange(len(d)) / (len(d) - 1)
+        ax.plot(d, p, color=colours[c], label=f'{c:.2f}% ({len(d):,d})')
+
+    ax.legend()
+
+    if save_plots:
+        path = LOGS_PATH / (f'{START_TIMESTAMP}'
+                            f'_pause_durations_cdfs'
                             f'_{_identifiers(args)}'
                             f'_c={args.colouring}'
                             f'_n={len(d_vals)}'
@@ -359,5 +432,6 @@ if __name__ == '__main__':
     # from simple_worm.plot3d import interactive
     # interactive()
 
-    plot_pauses()
+    plot_pauses(layout='paper')
+    # plot_pause_durations_cdfs()
     # plot_activity_dist()
