@@ -310,27 +310,28 @@ class NaturalFrame:
         r = self.pca.explained_variance_ratio_
         return r[2] / np.sqrt(r[1] * r[0])
 
-    def helicity(self, normalise_length: bool = True) -> float:
+    def helicity(self, normalise_length: bool = True, trim_ends_size: int = 3) -> float:
         """
         Compute the helicity of the curve.
         """
         if normalise_length and np.abs(self.length - 1) > EPS:
             NF_normed = NaturalFrame(self.X_pos / self.length)
-            kappa = NF_normed.kappa.copy()
-            tau = NF_normed.tau.copy()
-            speed = NF_normed.speed.copy()
+            m1 = NF_normed.m1.copy()
+            m2 = NF_normed.m2.copy()
         else:
-            kappa = self.kappa.copy()
-            tau = self.tau.copy()
-            speed = self.speed.copy()
+            m1 = self.m1.copy()
+            m2 = self.m2.copy()
 
-        c = kappa / (np.pi * 2)  # Number of coils
-        t = tau * (self.N - 1) / (np.pi * 2)  # Number of twists
-        u = speed * (self.N - 1) / self.N  # Arc speed
-        h1 = np.sum(t * c * u)
+        m1ds = np.gradient(m1)
+        m2ds = np.gradient(m2)
+        hs = m1 * m2ds - m2 * m1ds
+        if trim_ends_size > -1:
+            hs = hs[trim_ends_size:-trim_ends_size]
+            N = self.N - trim_ends_size * 2 - 1
+        else:
+            N = self.N - 1
 
-        # Smooth the peaks with a log
-        h = np.sign(h1) * np.log(1 + np.abs(h1))
+        h = np.sum(hs) / N
 
         return h
 
