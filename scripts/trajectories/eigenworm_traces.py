@@ -343,7 +343,9 @@ def traces_condensed(x_label: str = 'time'):
     # Eigenworms - absolute values
     prop_cycle = plt.rcParams['axes.prop_cycle']
     default_colours = prop_cycle.by_key()['color']
-    component_colours = [default_colours[i] for i in range(len(args.plot_components))]
+    color_reordering = list(range(len(args.plot_components)))
+    color_reordering[0:4] = [3, 1, 2, 0, 4]
+    component_colours = [default_colours[i] for i in color_reordering]
 
     ax_lam = fig.add_subplot(gs[2, 0])
     for i in args.plot_components:
