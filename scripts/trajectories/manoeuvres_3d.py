@@ -1,6 +1,6 @@
 import os
 from argparse import Namespace
-from typing import List, Union
+from typing import List, Union, Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +9,7 @@ from matplotlib import animation
 from matplotlib.axes import Axes, GridSpec
 from mayavi import mlab
 from mpl_toolkits.mplot3d.art3d import Line3DCollection, Poly3DCollection
-from scipy.stats import levy_stable, cauchy, ks_1samp
+from scipy.stats import levy_stable, ks_1samp
 
 from simple_worm.frame import FrameSequenceNumpy
 from simple_worm.plot3d import FrameArtist, Arrow3D, MidpointNormalize
@@ -21,7 +21,10 @@ from wormlab3d.toolkit.plot_utils import equal_aspect_ratio, make_box_from_pca
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.manoeuvres import get_manoeuvres, get_forward_durations, get_forward_stats
-from wormlab3d.trajectories.util import calculate_speeds
+from wormlab3d.trajectories.util import calculate_speeds, DEFAULT_FPS
+
+DATA_CACHE_PATH = LOGS_PATH / 'cache'
+os.makedirs(DATA_CACHE_PATH, exist_ok=True)
 
 animate = False
 show_plots = True
@@ -727,7 +730,8 @@ def plot_dataset_reversal_distance_vs_prev_next_angles():
     ax_scat = fig.add_subplot(gs[1, 0])
     scatter_args = dict(s=6, c=durations, alpha=0.6)
     s = ax_scat.scatter(traj_angles, distances, marker='x', cmap=cmap_traj, label='Trajectory angles', **scatter_args)
-    s2 = ax_scat.scatter(planar_angles, distances, marker='$\u25EF$', cmap=cmap_planar, label='IP angles', **scatter_args)
+    s2 = ax_scat.scatter(planar_angles, distances, marker='$\u25EF$', cmap=cmap_planar, label='IP angles',
+                         **scatter_args)
     ax_scat.set_xlabel('Angle')
     ax_scat.set_xlim(left=-0.1, right=np.pi + 0.1)
     ax_scat.set_xticks([0, np.pi])
@@ -1661,7 +1665,7 @@ def plot_dataset_ip_angles_vs_rev_duration(
 
     ax.set_xlabel('Reversal duration (s)', labelpad=xlabel_pad)
     ax.set_ylabel('sin(IP angle)', labelpad=ylabel_pad)
-    ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1])
+    # ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1])
     ax.boxplot(data, labels=labels, widths=0.6)
 
     # # Add labels on the RHS
@@ -1808,7 +1812,74 @@ def plot_dataset_distances_vs_nonp():
     plt.close(fig)
 
 
-def plot_dataset_run_distances(
+def _run_stats_identifiers(args: Namespace) -> str:
+    return f'ds={args.dataset}' \
+           f'_u={args.trajectory_point}' \
+           f'_sw={args.smoothing_window}' \
+           f'_ff={args.min_forward_frames}' \
+           f'_fs={args.min_forward_speed}'
+
+
+def _generate_or_load_run_stats(
+        args: Namespace,
+        rebuild_cache: bool = False,
+        cache_only: bool = False
+) -> Dict[str, np.ndarray]:
+    """
+    Generate or load the data.
+    """
+    logger.info('Fetching dataset.')
+    ds = Dataset.objects.get(id=args.dataset)
+    cache_path = DATA_CACHE_PATH / _run_stats_identifiers(args)
+    cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
+    keys = ['nonps', 'durations', 'distances', 'speeds']
+    res = None
+    if not rebuild_cache and cache_fn.exists():
+        try:
+            data = np.load(cache_fn)
+            res = {}
+            for k in keys:
+                res[k] = data[k]
+            logger.info(f'Loaded data from cache: {cache_fn}')
+        except Exception as e:
+            res = None
+            logger.warning(f'Could not load cache: {e}')
+
+    if res is None:
+        if cache_only:
+            raise RuntimeError(f'Cache "{cache_fn}" could not be loaded!')
+        logger.info('Generating data.')
+        res = {k: [] for k in keys}
+
+        # Loop over reconstructions
+        for r_ref in ds.reconstructions:
+            reconstruction = Reconstruction.objects.get(id=r_ref.id)
+            args.reconstruction = reconstruction.id
+            fps = reconstruction.trial.fps
+            X_full, X_slice = get_trajectory(args)
+            runs = get_forward_stats(
+                X_full,
+                X_slice,
+                min_forward_frames=args.min_forward_frames,
+                min_speed=args.min_forward_speed
+            )
+            for r in runs:
+                res['nonps'].append(r['nonp'])
+                res['durations'].append(r['duration'] / fps)
+                res['distances'].append(r['distance'])
+                res['speeds'].append(r['speed'] * fps)
+
+        for k in keys:
+            res[k] = np.array(res[k])
+        logger.info(f'Saving data to {cache_fn}.')
+        np.savez(cache_path, **res)
+
+    return res
+
+
+def plot_dataset_run_lengths(
+        distances_or_durations: str = 'distances',
+        log_y: bool = False,
         layout: str = 'paper'
 ):
     """
@@ -1816,48 +1887,31 @@ def plot_dataset_run_distances(
     """
     args = get_args(validate_source=False)
 
-    # Get dataset
-    assert args.dataset is not None
-    ds = Dataset.objects.get(id=args.dataset)
-
     # Unset trial and midline source args
     args.trial = None
     args.midline3d_source = None
     args.midline3d_source_file = None
 
-    nonp = []
-    durations = []
-    distances = []
-    speeds = []
+    res = _generate_or_load_run_stats(args, rebuild_cache=False, cache_only=False)
 
-    # Loop over reconstructions
-    for r_ref in ds.reconstructions:
-        reconstruction = Reconstruction.objects.get(id=r_ref.id)
-        args.reconstruction = reconstruction.id
-        fps = reconstruction.trial.fps
-        X_full, X_slice = get_trajectory(args)
-        runs = get_forward_stats(
-            X_full,
-            X_slice,
-            min_forward_frames=args.min_forward_frames,
-            min_speed=args.min_forward_speed
-        )
-        for r in runs:
-            nonp.append(r['nonp'])
-            durations.append(r['duration'] / fps)
-            distances.append(r['distance'])
-            speeds.append(r['speed'])
-
-    speeds = np.array(speeds) * fps
+    data = res[distances_or_durations]
+    if distances_or_durations == 'distances':
+        levy_params = (1.1021059443934766, 0.9999906365019289, 4.058541870865994, 0.4265810216580477)
+    else:
+        levy_params = (1.12087316881554, 0.9999999597206704, 24.15609209509127, 2.455502352507133)
 
     # Fit distribution
     logger.info('Fitting distribution.')
-    x = np.linspace(min(distances), max(distances), 200)
-    # levy_params = levy_stable.fit(distances)
-    levy_params = (1.1021059443934766, 0.9999906365019289, 4.058541870865994, 0.4265810216580477)
+    x = np.linspace(min(data), max(data), 200)
+    # levy_params = levy_stable.fit(data)
     levy_dist = levy_stable(*levy_params)
-    ks_res = ks_1samp(distances, levy_dist.cdf)
+    ks_res = ks_1samp(data, levy_dist.cdf)
+    print(ks_res)
     # cauchy_dist = cauchy(*cauchy.fit(distances))
+
+    y = levy_dist.pdf(x)
+    if np.argmin(y) == 82:
+        y[82] = (y[81] + y[83]) / 2
 
     # Set up plot
     if layout == 'paper':
@@ -1889,29 +1943,33 @@ def plot_dataset_run_distances(
             left=0.14,
             right=0.99,
         )
-        fig = plt.figure(figsize=(3.1, 2.3))
+        fig = plt.figure(figsize=(2.9, 2.3))
 
     # Plot correlations
     logger.info('Plotting')
     ax = fig.add_subplot(gs[0, 0])
-    ax.hist(distances, bins=20, density=True, rwidth=0.9)
+    ax.hist(data, bins=20, density=True, rwidth=0.9)
     # ax.plot(x, cauchy_dist.pdf(x),
     #         label=f'Cauchy fit\n($x_0=${cauchy_dist.args[0]:.1f}, $\gamma=${cauchy_dist.args[1]:.1f})')
-    ax.plot(x, levy_dist.pdf(x),
-            label=f'Levy fit\n($\\alpha=${levy_dist.args[0]:.1f}, $\\beta=${levy_dist.args[1]:.1f})')
-    ax.set_title(f'Run distances ($\geq$ {args.min_forward_frames / fps:.1f}s)')
-    ax.set_xlabel('Distance (mm)')
+    ax.plot(x, y, label=f'Levy fit\n($\\alpha=${levy_dist.args[0]:.1f}, $\\beta=${levy_dist.args[1]:.1f})')
+    ax.set_title(f'Run {distances_or_durations} ($\geq$ {args.min_forward_frames / DEFAULT_FPS:.1f}s)')
+    if log_y:
+        ax.set_yscale('log')
+    if distances_or_durations == 'distances':
+        ax.set_xlabel('Distance (mm)')
+    else:
+        ax.set_xlabel('Duration (s)')
     ax.set_ylabel('Density')
     ax.legend()
 
     if save_plots:
         fn = START_TIMESTAMP \
-             + f'_run_distances' \
+             + f'_run_{distances_or_durations}' \
                f'_ds={args.dataset}' \
                f'_sw={args.smoothing_window}' \
                f'_ff={args.min_forward_frames}' \
                f'_fs={args.min_forward_speed}' \
-               f'_N={len(distances)}'
+               f'_N={len(data)}'
         save_path = LOGS_PATH / (fn + f'.{img_extension}')
         logger.info(f'Saving plot to {save_path}.')
         plt.savefig(save_path)
@@ -2067,7 +2125,8 @@ if __name__ == '__main__':
     # plot_dataset_speeds_vs_nonp()
     # plot_dataset_turn_angles_duration()
     # plot_dataset_ip_angles_vs_rev_duration(layout='thesis')
-    plot_dataset_run_distances(layout='thesis')
+    # plot_dataset_run_lengths(distances_or_durations='distances', log_y=False, layout='thesis')
+    plot_dataset_run_lengths(distances_or_durations='durations', log_y=True, layout='thesis')
 
     # plot_single_manoeuvre(index=2, plot_mlab_postures=True)
     # plot_single_manoeuvre(frame_num=11400)
