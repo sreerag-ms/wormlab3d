@@ -1,4 +1,5 @@
 import os
+import argparse
 from argparse import ArgumentParser
 from argparse import Namespace
 
@@ -40,6 +41,12 @@ def parse_args() -> Namespace:
                         default='0,1', help='Comma delimited list of component idxs to plot.')
     parser.add_argument('--start-frame', type=int, help='Frame number to start from.')
     parser.add_argument('--end-frame', type=int, help='Frame number to end at.')
+    parser.add_argument(
+        '--vline',
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Add vlines on magnitude plot to show region changes",
+    )
     args = parser.parse_args()
     assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
 
@@ -346,6 +353,11 @@ def traces_condensed(x_label: str = 'time'):
                 x_r = ts[idxs[0]:idxs[1]]
             else:
                 x_r = np.arange(region['start'], region['end'] + 1)
+
+            # vertical line to show start of region
+            if args.vline and j > 0:
+                ax_lam.axvline(x=x_r[0], color="k", alpha=0.25, linewidth=0.5)
+
 
             if k in ['forwards_1', 'forwards_2', 'backwards', 'reversal']:
                 if i in [0, 1]:
