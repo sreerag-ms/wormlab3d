@@ -367,13 +367,13 @@ def traces_condensed(x_label: str = 'time'):
                     linewidth = 1.5
                     add_label = k == 'forwards_1'
                 else:
-                    alpha = 0.25
-                    linewidth = 0.8
+                    alpha = 0.8 * 0.75
+                    linewidth = 1.5 * 0.75
                     add_label = False
             elif k == 'reorientation':
                 if i in [0, 1]:
-                    alpha = 0.25
-                    linewidth = 0.8
+                    alpha = 0.8 * 0.75
+                    linewidth = 1.5 * 0.75
                     add_label = False
                 else:
                     alpha = 0.8
