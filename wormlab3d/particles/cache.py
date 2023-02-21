@@ -285,7 +285,7 @@ def generate_or_load_volumes(
         try:
             data = np.load(cache_fn)
             vols = data['vols']
-            assert vols.shape == (len(args.npas), len(args.sim_durations), len(args.pauses), 3, 4), \
+            assert vols.shape == (len(args.npas), len(args.sim_durations), len(args.pauses), 4), \
                 'Invalid vols shape.'
             logger.info(f'Loaded volume values from cache: {cache_fn}')
         except Exception as e:
