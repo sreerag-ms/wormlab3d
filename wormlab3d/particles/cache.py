@@ -213,7 +213,7 @@ def _calculate_volumes(
             return r1 * r2 * r3
 
     # Outputs
-    vols = np.zeros((n_sigmas, n_durations, n_pauses, 3, 4))
+    vols = np.zeros((n_sigmas, n_durations, n_pauses, 4))
     n_sims = n_sigmas * n_durations * n_pauses
     sim_idx = 0
 
