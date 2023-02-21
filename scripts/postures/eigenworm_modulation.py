@@ -296,7 +296,10 @@ def eigenworm_modulation_by_conc():
     # cmap = plt.get_cmap('jet')
     # colours = cmap(np.linspace(0, 1, len(args.plot_components)))
     prop_cycle = plt.rcParams['axes.prop_cycle']
-    colours = prop_cycle.by_key()['color']
+    default_colours = prop_cycle.by_key()['color']
+    color_reordering = list(range(len(args.plot_components)))
+    color_reordering[0:4] = [3, 1, 2, 0, 4]
+    colours = [default_colours[i] for i in color_reordering]
 
     plt.rc('axes', labelsize=6)  # fontsize of the X label
     plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels

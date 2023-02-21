@@ -1,4 +1,5 @@
 import os
+import argparse
 from argparse import ArgumentParser
 from argparse import Namespace
 
@@ -40,6 +41,12 @@ def parse_args() -> Namespace:
                         default='0,1', help='Comma delimited list of component idxs to plot.')
     parser.add_argument('--start-frame', type=int, help='Frame number to start from.')
     parser.add_argument('--end-frame', type=int, help='Frame number to end at.')
+    parser.add_argument(
+        '--vline',
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Add vlines on magnitude plot to show region changes",
+    )
     args = parser.parse_args()
     assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
 
@@ -336,7 +343,9 @@ def traces_condensed(x_label: str = 'time'):
     # Eigenworms - absolute values
     prop_cycle = plt.rcParams['axes.prop_cycle']
     default_colours = prop_cycle.by_key()['color']
-    component_colours = [default_colours[i] for i in range(len(args.plot_components))]
+    color_reordering = list(range(len(args.plot_components)))
+    color_reordering[0:4] = [3, 1, 2, 0, 4]
+    component_colours = [default_colours[i] for i in color_reordering]
 
     ax_lam = fig.add_subplot(gs[2, 0])
     for i in args.plot_components:
@@ -347,19 +356,24 @@ def traces_condensed(x_label: str = 'time'):
             else:
                 x_r = np.arange(region['start'], region['end'] + 1)
 
+            # vertical line to show start of region
+            if args.vline and j > 0:
+                ax_lam.axvline(x=x_r[0], color="k", alpha=0.25, linewidth=0.5)
+
+
             if k in ['forwards_1', 'forwards_2', 'backwards', 'reversal']:
                 if i in [0, 1]:
                     alpha = 0.8
                     linewidth = 1.5
                     add_label = k == 'forwards_1'
                 else:
-                    alpha = 0.25
-                    linewidth = 0.8
+                    alpha = 0.8 * 0.75
+                    linewidth = 1.5 * 0.75
                     add_label = False
             elif k == 'reorientation':
                 if i in [0, 1]:
-                    alpha = 0.25
-                    linewidth = 0.8
+                    alpha = 0.8 * 0.75
+                    linewidth = 1.5 * 0.75
                     add_label = False
                 else:
                     alpha = 0.8
