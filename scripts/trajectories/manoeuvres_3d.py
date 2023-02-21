@@ -7,6 +7,7 @@ import numpy as np
 from PIL import Image
 from matplotlib import animation
 from matplotlib.axes import Axes, GridSpec
+from matplotlib.ticker import LogLocator, FormatStrFormatter, NullFormatter
 from mayavi import mlab
 from mpl_toolkits.mplot3d.art3d import Line3DCollection, Poly3DCollection
 from scipy.stats import levy_stable, ks_1samp
@@ -1879,6 +1880,7 @@ def _generate_or_load_run_stats(
 
 def plot_dataset_run_lengths(
         distances_or_durations: str = 'distances',
+        log_x: bool = False,
         log_y: bool = False,
         layout: str = 'paper'
 ):
@@ -1948,11 +1950,25 @@ def plot_dataset_run_lengths(
     # Plot correlations
     logger.info('Plotting')
     ax = fig.add_subplot(gs[0, 0])
-    ax.hist(data, bins=20, density=True, rwidth=0.9)
+
+    if log_x:
+        bins = np.logspace(np.log2(data.min()), np.log2(data.max()), 20, base=2)
+    else:
+        bins = 20
+
+    ax.hist(data, bins=bins, density=True, rwidth=0.9)
     # ax.plot(x, cauchy_dist.pdf(x),
     #         label=f'Cauchy fit\n($x_0=${cauchy_dist.args[0]:.1f}, $\gamma=${cauchy_dist.args[1]:.1f})')
     ax.plot(x, y, label=f'Levy fit\n($\\alpha=${levy_dist.args[0]:.1f}, $\\beta=${levy_dist.args[1]:.1f})')
     ax.set_title(f'Run {distances_or_durations} ($\geq$ {args.min_forward_frames / DEFAULT_FPS:.1f}s)')
+    if log_x:
+        ax.set_xscale('log')
+        if distances_or_durations == 'durations':
+            subs = [1.6, 3.2, 6.4, 8.]  # ticks to show per decade
+            ax.xaxis.set_minor_locator(LogLocator(subs=subs))
+            # ax.xaxis.set_major_formatter(FormatStrFormatter('%d'))
+            ax.xaxis.set_major_formatter(NullFormatter())
+            ax.xaxis.set_minor_formatter(FormatStrFormatter('%d'))
     if log_y:
         ax.set_yscale('log')
     if distances_or_durations == 'distances':
@@ -2126,7 +2142,7 @@ if __name__ == '__main__':
     # plot_dataset_turn_angles_duration()
     # plot_dataset_ip_angles_vs_rev_duration(layout='thesis')
     # plot_dataset_run_lengths(distances_or_durations='distances', log_y=False, layout='thesis')
-    plot_dataset_run_lengths(distances_or_durations='durations', log_y=True, layout='thesis')
+    plot_dataset_run_lengths(distances_or_durations='durations', log_x=True, log_y=True, layout='thesis')
 
     # plot_single_manoeuvre(index=2, plot_mlab_postures=True)
     # plot_single_manoeuvre(frame_num=11400)
