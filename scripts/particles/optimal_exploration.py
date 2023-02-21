@@ -12,15 +12,15 @@ from simple_worm.plot3d import MidpointNormalize
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.particles.cache import get_sim_state_from_args, generate_or_load_voxel_scores, generate_or_load_r_values, \
     get_npas_from_args, get_voxel_sizes_from_args, get_durations_from_args, get_pauses_from_args, \
-    generate_or_load_fractal_dimensions
+    generate_or_load_fractal_dimensions, generate_or_load_volumes
 from wormlab3d.toolkit.plot_utils import tex_mode
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.util import get_deltas_from_args
 
-show_plots = False
-save_plots = True
-# show_plots = True
-# save_plots = False
+# show_plots = False
+# save_plots = True
+show_plots = True
+save_plots = False
 img_extension = 'svg'
 
 
@@ -1218,21 +1218,33 @@ def volume_metric_sweeps2(
     # Plot combined
     if plot_combined:
         if layout == 'paper':
-            plt.rc('axes', titlesize=7)  # fontsize of the title
-            plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
+            plt.rc('axes', titlesize=7, titlepad=1)  # fontsize of the title
+            plt.rc('axes', labelsize=6, labelpad=0)  # fontsize of the x and y labels
             plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
             plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
             plt.rc('legend', fontsize=6)  # fontsize of the legend
-            fig, axes = plt.subplots(2, figsize=(4.53, 4.62), gridspec_kw={
-                'hspace': 0.33,
-                'top': 0.94,
-                'bottom': 0.08,
-                'left': 0.09,
-                'right': 0.88,
+            plt.rc('ytick.major', pad=2, size=2)
+            # plt.rc('ytick.minor', size=1)
+            plt.rc('xtick.major', pad=2, size=2)
+            plt.rc('xtick.minor', size=1)
+            fig, axes = plt.subplots(2, figsize=(2.47, 2.6), gridspec_kw={
+                'hspace': 0.43,
+                'top': 0.95,
+                'bottom': 0.11,
+                'left': 0.125,
+                'right': 0.84,
             })
             model_phi_fontsize = 7
-            legend_anchor = (1, 1)
+            legend_anchor = (0.99, 0.9)
             y_label = 'Volume explored'
+            linewidth = 1
+            markersize = 3
+            markersize_opt = 20
+            linewidths_opt_markers = 1
+            phi_linewidth = 2
+            legend_args = dict(markerscale=1, handlelength=1, handletextpad=0.6,
+                               labelspacing=0, borderpad=0.2)
+
         else:
             plt.rc('axes', titlesize=9)  # fontsize of the title
             plt.rc('axes', labelsize=9, labelpad=2)  # fontsize of the x and y labels
@@ -1249,12 +1261,19 @@ def volume_metric_sweeps2(
             model_phi_fontsize = 9
             legend_anchor = (1.01, 1)
             y_label = '$V_s$'
+            linewidth = None
+            markersize = None
+            markersize_opt = 50
+            linewidths_opt_markers = 2
+            phi_linewidth = 3
+            legend_args = {}
 
         # Fix the pause and sweep over the durations
         args.sim_durations = sim_durations
         args.pauses = [fix_pause]
-        r_values = generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
-        vols = _calculate_volumes(r_values)
+        # r_values = generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
+        # vols = _calculate_volumes(r_values)
+        vols = generate_or_load_volumes(args, cache_only=False, rebuild_cache=False)
         optimal_sigmas_idxs = vols[..., 0].argmax(axis=0).squeeze()
         optimal_sigmas = npa_sigmas[optimal_sigmas_idxs]
         optimal_vols = []
@@ -1271,12 +1290,18 @@ def volume_metric_sweeps2(
             vols_j = vols[:, j, 0].T
             optimal_vols.append(vols_j[0, optimal_sigmas_idxs[j]])
             # ax.plot(npa_sigmas, vols[0], label=f'T={duration:.0f}s', c=colours[j], marker='o', alpha=0.7)
-            ax.plot(npa_sigmas, vols_j[0], label=f'{duration / 60:.0f}m', c=colours[j], marker='o', alpha=0.7)
+            ax.plot(npa_sigmas, vols_j[0], label=f'{duration / 60:.0f}m', c=colours[j], marker='o', alpha=0.7,
+                    markersize=markersize, linewidth=linewidth)
+
+            ax.fill_between(npa_sigmas, vols_j[0] - vols_j[-1], vols_j[0] + vols_j[-1], color=colours[j], alpha=0.4,
+                            linewidth=0, zorder=-1)
+
             # ax.axhline(y=vols[0, optimal_sigmas_idxs[j]], color='red', zorder=-2, linewidth=2, linestyle=':', alpha=0.6)
-        ax.scatter(optimal_sigmas, optimal_vols, marker='o', zorder=100, s=50, facecolors='none', edgecolors='red',
-                   linewidths=2)
-        ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=3, zorder=-1)
-        ax.legend(loc='upper left', bbox_to_anchor=legend_anchor, bbox_transform=ax.transAxes)
+        ax.scatter(optimal_sigmas, optimal_vols, marker='o', zorder=100, s=markersize_opt, facecolors='none',
+                   edgecolors='red',
+                   linewidths=linewidths_opt_markers)
+        ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=phi_linewidth, zorder=-1)
+        ax.legend(loc='upper left', bbox_to_anchor=legend_anchor, bbox_transform=ax.transAxes, **legend_args)
         ax.set_title(f'$\delta_{{max}}={fix_pause:.1f}$s')
         ax.set_xlabel(f'$\sigma_\phi$')
         ax.set_xscale('log')
@@ -1292,8 +1317,9 @@ def volume_metric_sweeps2(
         # Fix the duration and sweep over the pauses
         args.sim_durations = [fix_duration]
         args.pauses = pauses
-        r_values = generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
-        vols = _calculate_volumes(r_values)
+        # r_values = generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
+        # vols = _calculate_volumes(r_values)
+        vols = generate_or_load_volumes(args, cache_only=False, rebuild_cache=False)
         optimal_sigmas_idxs = vols[..., 0].argmax(axis=0).squeeze()
         optimal_sigmas = npa_sigmas[optimal_sigmas_idxs]
         optimal_vols = []
@@ -1309,12 +1335,14 @@ def volume_metric_sweeps2(
         for k, pause in enumerate(pauses):
             vols_k = vols[:, 0, k].T
             optimal_vols.append(vols_k[0, optimal_sigmas_idxs[k]])
-            ax.plot(npa_sigmas, vols_k[0], label=f'{pause:.0f}s', c=colours[k], marker='o', alpha=0.7)
+            ax.plot(npa_sigmas, vols_k[0], label=f'{pause:.0f}s', c=colours[k], marker='o', alpha=0.7,
+                    markersize=markersize, linewidth=linewidth)
             # ax.axhline(y=vols[0, optimal_sigmas_idxs[j]], color='red', zorder=-2, linewidth=2, linestyle=':', alpha=0.6)
-        ax.scatter(optimal_sigmas, optimal_vols, marker='o', zorder=100, s=50, facecolors='none', edgecolors='red',
-                   linewidths=2)
-        ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=3, zorder=-1)
-        ax.legend(loc='upper left', bbox_to_anchor=legend_anchor, bbox_transform=ax.transAxes)
+        ax.scatter(optimal_sigmas, optimal_vols, marker='o', zorder=100, s=markersize_opt, facecolors='none',
+                   edgecolors='red',
+                   linewidths=linewidths_opt_markers)
+        ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=phi_linewidth, zorder=-1)
+        ax.legend(loc='upper left', bbox_to_anchor=legend_anchor, bbox_transform=ax.transAxes, **legend_args)
         ax.set_title(f'T={fix_duration}s')
         ax.set_xlabel(f'$\sigma_\phi$')
         ax.set_xscale('log')
@@ -1785,7 +1813,7 @@ if __name__ == '__main__':
     # crossings_nonp()
     # volume_metric()
     # volume_metric_sweeps()
-    volume_metric_sweeps2(plot_pause_sweep=False, plot_duration_sweep=False, plot_combined=True, layout='thesis')
+    volume_metric_sweeps2(plot_pause_sweep=False, plot_duration_sweep=False, plot_combined=True, layout='paper')
     # voxel_scores_sweeps()
     # volume_metric_sweeps_cuboids_voxels(layout='thesis')
     # fractal_dimension_sweeps()
