@@ -1,7 +1,5 @@
 import os
-import argparse
-from argparse import ArgumentParser
-from argparse import Namespace
+from argparse import Namespace, ArgumentParser, BooleanOptionalAction
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,8 +9,7 @@ from scipy.stats import gaussian_kde
 
 from simple_worm.frame import FrameSequenceNumpy
 from simple_worm.plot3d import generate_interactive_scatter_clip
-from wormlab3d import LOGS_PATH, START_TIMESTAMP
-from wormlab3d import logger
+from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.data.model import Reconstruction
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.postures.helicities import calculate_helicities, plot_helicities
@@ -41,12 +38,8 @@ def parse_args() -> Namespace:
                         default='0,1', help='Comma delimited list of component idxs to plot.')
     parser.add_argument('--start-frame', type=int, help='Frame number to start from.')
     parser.add_argument('--end-frame', type=int, help='Frame number to end at.')
-    parser.add_argument(
-        '--vline',
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Add vlines on magnitude plot to show region changes",
-    )
+    parser.add_argument('--vline', action=BooleanOptionalAction, default=True,
+                        help='Add vlines on magnitude plot to show region changes')
     args = parser.parse_args()
     assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
 
@@ -272,19 +265,20 @@ def traces_condensed(x_label: str = 'time'):
     plt.rc('ytick.major', pad=2, size=2)
 
     # fig, axes = plt.subplots(2, figsize=(12, 8), sharex=True)
-    fig = plt.figure(figsize=(5, 3.2))
+    fig = plt.figure(figsize=(5, 2.4))
     gs = GridSpec(
-        nrows=3,
+        nrows=2,
         ncols=1,
-        hspace=0.05,
+        hspace=0.03,
+        height_ratios=(3, 2),
         left=0.07,
         right=0.94,
         top=0.99,
-        bottom=0.07,
+        bottom=0.1,
     )
 
     # Speeds
-    ax_sp = fig.add_subplot(gs[0:2, 0])  # axes[0]
+    ax_sp = fig.add_subplot(gs[0, 0])  # axes[0]
 
     for k, region in regions.items():
         if x_label == 'time':
@@ -302,7 +296,7 @@ def traces_condensed(x_label: str = 'time'):
         )
 
     ax_sp.axhline(y=0, color='darkgrey')
-    ax_sp.plot(ts, speeds, color='black')
+    ax_sp.plot(ts, speeds, color='black', linewidth=1.2)
     ax_sp.set_ylabel('Speed (mm/s)', labelpad=1)
     ax_sp.set_xticks([])
     ax_sp.set_yticks([-0.2, -0.1, 0, 0.1, 0.2])
@@ -313,7 +307,7 @@ def traces_condensed(x_label: str = 'time'):
 
     # Planarities
     ax_nonp = ax_sp.twinx()
-    ax_nonp.plot(ts, nonp, color='orange', alpha=0.6, linestyle='--')
+    ax_nonp.plot(ts, nonp, color='orange', alpha=0.6, linestyle='--', linewidth=1.2)
     ax_nonp.set_ylabel('Non-planarity / Helicity', rotation=270, labelpad=8)
     # ax_nonp.axhline(y=0, color='darkgrey')
     ax_nonp.set_yticks([0, 0.1, 0.2])
@@ -347,7 +341,7 @@ def traces_condensed(x_label: str = 'time'):
     color_reordering[0:4] = [3, 1, 2, 0, 4]
     component_colours = [default_colours[i] for i in color_reordering]
 
-    ax_lam = fig.add_subplot(gs[2, 0])
+    ax_lam = fig.add_subplot(gs[1, 0])
     for i in args.plot_components:
         for j, (k, region) in enumerate(regions.items()):
             idxs = region['start'] - args.start_frame, region['end'] - args.start_frame + 1
@@ -356,28 +350,25 @@ def traces_condensed(x_label: str = 'time'):
             else:
                 x_r = np.arange(region['start'], region['end'] + 1)
 
-            # vertical line to show start of region
+            # Add vertical line to show start of region
             if args.vline and j > 0:
-                ax_lam.axvline(x=x_r[0], color="k", alpha=0.25, linewidth=0.5)
+                ax_lam.axvline(x=x_r[0], color='k', alpha=0.25, linewidth=0.5)
 
-
+            alpha = 0.8
+            linewidth = 1
             if k in ['forwards_1', 'forwards_2', 'backwards', 'reversal']:
                 if i in [0, 1]:
-                    alpha = 0.8
-                    linewidth = 1.5
                     add_label = k == 'forwards_1'
                 else:
-                    alpha = 0.8 * 0.75
-                    linewidth = 1.5 * 0.75
+                    alpha *= 0.75
+                    linewidth *= 0.75
                     add_label = False
             elif k == 'reorientation':
                 if i in [0, 1]:
-                    alpha = 0.8 * 0.75
-                    linewidth = 1.5 * 0.75
+                    alpha *= 0.75
+                    linewidth *= 0.75
                     add_label = False
                 else:
-                    alpha = 0.8
-                    linewidth = 1.5
                     add_label = True
             ax_lam.plot(
                 x_r,

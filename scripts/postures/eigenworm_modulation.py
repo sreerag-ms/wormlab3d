@@ -414,7 +414,10 @@ def eigenworm_modulation_by_rec(
 
     # Make plots
     prop_cycle = plt.rcParams['axes.prop_cycle']
-    colours = prop_cycle.by_key()['color']
+    default_colours = prop_cycle.by_key()['color']
+    color_reordering = list(range(len(args.plot_components)))
+    color_reordering[0:4] = [3, 1, 2, 0, 4]
+    component_colours = [default_colours[i] for i in color_reordering]
 
     if layout == 'paper':
         plt.rc('axes', labelsize=6)  # fontsize of the X label
@@ -423,11 +426,11 @@ def eigenworm_modulation_by_rec(
         plt.rc('legend', fontsize=5)  # fontsize of the legend
         plt.rc('xtick.major', pad=2, size=2)
         plt.rc('ytick.major', pad=1, size=2)
-        fig, ax = plt.subplots(1, figsize=(2.15, 1.9), gridspec_kw={
+        fig, ax = plt.subplots(1, figsize=(2.15, 1.52), gridspec_kw={
             'left': 0.14,
             'right': 0.99,
-            'top': 0.97,
-            'bottom': 0.15,
+            'top': 0.972,
+            'bottom': 0.17,
         })
         ax.set_xlabel('Concentration (% gelatin)')
         ax.set_ylabel('Relative contribution', labelpad=1)
@@ -461,7 +464,7 @@ def eigenworm_modulation_by_rec(
             ax.scatter(
                 x=np.ones_like(ij_vals) * ticks[j] + offsets[i],
                 y=ij_vals,
-                color=colours[i],
+                color=component_colours[i],
                 marker='o',
                 facecolor='none',
                 s=20,
@@ -479,7 +482,7 @@ def eigenworm_modulation_by_rec(
                 ticks[start_idx:end_idx] + offsets[i],
                 means[start_idx:end_idx],
                 yerr=stds[start_idx:end_idx],
-                color=colours[i],
+                color=component_colours[i],
                 label=label,
                 alpha=0.7,
                 **error_args
@@ -541,4 +544,4 @@ if __name__ == '__main__':
     #     by_reconstruction=True,
     # )
     # eigenworm_modulation_by_conc()
-    eigenworm_modulation_by_rec(layout='thesis')
+    eigenworm_modulation_by_rec(layout='paper')

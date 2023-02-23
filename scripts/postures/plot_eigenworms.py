@@ -360,11 +360,11 @@ def _plot_eigenvalues_basic(
         plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
         plt.rc('xtick.major', pad=2, size=2)
         plt.rc('ytick.major', pad=2, size=2)
-        fig, ax = plt.subplots(1, figsize=(2.1, 1.6), gridspec_kw={
-            'left': 0.16,
-            'right': 0.85,
-            'top': 0.98,
-            'bottom': 0.15,
+        fig, ax = plt.subplots(1, figsize=(1.94, 1.2), gridspec_kw={
+            'left': 0.166,
+            'right': 0.843,
+            'top': 0.983,
+            'bottom': 0.173,
         })
         ax.set_xlabel('Component', labelpad=0)
         ax.set_ylabel('Cumulative variance', labelpad=2)
@@ -373,6 +373,8 @@ def _plot_eigenvalues_basic(
         ax.set_yticks(vr)
         ax.set_yticklabels([f'{v:.2f}' if i < 6 else None for i, v in enumerate(vr)])
         cv_colour = 'black'
+        scat_size = 35
+        redline_width = 1.5
 
     else:
         plt.rc('axes', labelsize=9)  # fontsize of the X label
@@ -391,9 +393,11 @@ def _plot_eigenvalues_basic(
         ax.set_yticks(vr)
         ax.set_yticklabels([f'{v:.2f}' if i < 6 else None for i, v in enumerate(vr)])
         cv_colour = 'C0'
+        scat_size = 50
+        redline_width = 2
 
     ax.grid()
-    ax.scatter(xs[1:], vr[1:], zorder=20, s=50, c=cv_colour)
+    ax.scatter(xs[1:], vr[1:], zorder=20, s=scat_size, c=cv_colour)
     ax.plot(xs, vr, zorder=5, alpha=0.5, linestyle=':', color=cv_colour)
     ax.set_xlim(0, plot_n_components + 0.5)
     ax.set_ylim(0, 1.05)
@@ -402,9 +406,9 @@ def _plot_eigenvalues_basic(
 
     for highlight_idx in highlight_idxs:
         ax.hlines(xmin=0, xmax=highlight_idx, y=vr[highlight_idx],
-                  color='red', linewidth=2, zorder=9)
+                  color='red', linewidth=redline_width, zorder=9)
         ax.vlines(ymin=0, ymax=vr[highlight_idx], x=highlight_idx,
-                  color='red', linewidth=2, zorder=9)
+                  color='red', linewidth=redline_width, zorder=9)
         # ax.text(-0.1, vr[highlight_idx], f'{vr[highlight_idx]:.2f}',
         #         color='red', fontsize=8, ha='right', va='center', transform=ax.transData)
 
