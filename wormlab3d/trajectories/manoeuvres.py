@@ -200,7 +200,7 @@ def get_forward_stats(
         start_idx = fwd_props['left_bases'][i] + 1
         end_idx = fwd_props['right_bases'][i]
 
-        # Calculate the distance, speed and non-planarity for the whole manoeuvre window
+        # Calculate the distance, speed and non-planarity for the whole run window
         X_window = X_slice[start_idx:end_idx]
         pca = PCA(svd_solver='full', copy=True, n_components=3)
         pca.fit(X_window)

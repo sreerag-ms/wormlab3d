@@ -9,6 +9,7 @@ from wormlab3d import LOGS_PATH, logger
 from wormlab3d.data.model import Dataset
 from wormlab3d.particles.util import calculate_trajectory_frame
 from wormlab3d.toolkit.util import normalise, orthogonalise
+from wormlab3d.trajectories.angles import calculate_angle
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.pca import get_pca_cache_from_args, calculate_pcas, PCACache
@@ -77,6 +78,8 @@ def get_approximate(
         if i > 0:
             run_durations[i - 1] = run_steps
         y = np.linspace(0, 1, run_steps)[:, None]
+        # \/\/ This should be what we use, bug in the line above means stops at tumbles for extra step
+        # y = np.linspace(0, 1, run_steps + 1)[:-1, None]
         X_approx[start_idx:end_idx] = (1 - y) * run_start + y * run_end
         x = run_end
         start_idx = tumble_idx
@@ -116,14 +119,38 @@ def get_approximate(
     # Calculate e0 as normalised line segments between tumbles
     e0 = normalise(vertices[1:] - vertices[:-1])
 
+    # e2 = normalise(np.cross(e0[:-1], e0[1:]))
+    # e1 = normalise(orthogonalise(e0[:-1], e0[1:]))
+    #
+    # e1 = np.r_[normalise(orthogonalise(e1[0], e0[0]))[None, ...], e1]
+    # e2 = np.r_[normalise(orthogonalise(orthogonalise(e2[0], e1[0]), e0[0]))[None, ...], e2]
+
     # e1 is the frame vector pointing out into the principal plane of the curve
     v1 = components[:, 1].copy()
 
     # Orthogonalise the pca planar direction vector against the trajectory to get e1
     e1 = normalise(orthogonalise(v1, e0))
 
+    # # Correct e1 sign flips
+    # e1dote1p = np.einsum('bi,bi->b', e1[:-1], e1[1:])
+    # flip_idxs = (e1dote1p < 0).nonzero()[0]
+    # sign = 1
+    # for i in range(len(e1)):
+    #     if i - 1 in flip_idxs:
+    #         sign = -sign
+    #     e1[i] = sign * e1[i]
+
     # e2 is the remaining cross product
     e2 = normalise(np.cross(e0, e1))
+
+    # # Correct e2 sign flips
+    # e2dote2p = np.einsum('bi,bi->b', e2[:-1], e2[1:])
+    # flip_idxs = (e2dote2p < 0).nonzero()[0]
+    # sign = 1
+    # for i in range(len(e2)):
+    #     if i - 1 in flip_idxs:
+    #         sign = -sign
+    #     e2[i] = sign * e2[i]
 
     # Duplicate final frame to line things up
     e0 = np.r_[e0, e0[-1][None, ...]]
@@ -139,18 +166,27 @@ def get_approximate(
         next_frame = np.stack([e0[i + 1], e1[i + 1], e2[i + 1]])
         R, rmsd = Rotation.align_vectors(prev_frame, next_frame)
         R = R.as_matrix()
+        # R = next_frame@np.linalg.inv(prev_frame)  #
+        # R2 = np.linalg.inv(prev_frame)@next_frame ## this is equivalent to what we're doing above
+        # assert np.allclose(R, R2)
 
         # Decompose rotation matrix R into the axes of A
         A = prev_frame
         rp = Rotation.from_matrix(A.T @ R @ A)
         a2, a1, a0 = rp.as_euler('zyx')
+        # a2, a1, a0 = rp.as_euler('ZYZ')
         # xp = A @ Rotation.from_rotvec(a0 * np.array([1, 0, 0])).as_matrix() @ A.T
         # yp = A @ Rotation.from_rotvec(a1 * np.array([0, 1, 0])).as_matrix() @ A.T
         # zp = A @ Rotation.from_rotvec(a2 * np.array([0, 0, 1])).as_matrix() @ A.T
         # assert np.allclose(xp @ yp @ zp, R)
-        planar_angles[i] = a2  # Rotation about e2
+        planar_angles[i] = a2   #+ a0 # Rotation about e2
         nonplanar_angles[i] = a1  # Rotation about e1
         twist_angles[i] = a0  # Rotation about e0
+
+        # e0_projected_in_prev_plane = orthogonalise(e0[i + 1], e2[i])
+        # planar_angles[i] = calculate_angle(e0[i], e0_projected_in_prev_plane)
+        # nonplanar_angles[i] = calculate_angle(e0[i+1], e0_projected_in_prev_plane)
+
 
     return X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles, nonplanar_angles, twist_angles, e0, e1, e2
 
@@ -260,7 +296,7 @@ def generate_or_load_ds_msds(
     """
 
     # Generate or load MSDs
-    msds_path = LOGS_PATH / f'ds={ds.id}_msds_d={args.min_delta}-{args.max_delta}_ds={args.delta_step}'
+    msds_path = LOGS_PATH / f'ds={ds.id}_msds_d={args.min_delta}-{args.max_delta}_ds={args.delta_step}_minT={args.min_duration}'
     msds_fn = msds_path.with_suffix(msds_path.suffix + '.npz')
     msds = None
     if not rebuild_cache and msds_fn.exists():
@@ -343,7 +379,7 @@ def _calculate_dataset_values(
             run_durations *= dt
             run_speeds /= dt
 
-            # Discard long runs where the distance travelled is too small
+            # Discard long runs where the distance travelled is too small  (0.01, 60.)
             include_idxs = np.unique(
                 np.concatenate([
                     np.argwhere(run_speeds > min_run_speed_duration[0]),
@@ -366,7 +402,7 @@ def _calculate_dataset_msds():
     """
     Calculate the MSDs for trials in a dataset.
     """
-    args = get_args()
+    args = get_args(validate_source=False)
     deltas, delta_ts = get_deltas_from_args(args)
 
     # Get dataset
@@ -391,7 +427,8 @@ def _calculate_dataset_msds():
         if X.ndim == 3:
             X = X.mean(axis=1)
         X -= X.mean(axis=0)
-        if X.shape[0] < 9 * 60 * 25:
+        if args.min_duration > -1 and X.shape[0] < args.min_duration:
+            logger.info('Trajectory too short, skipping.')
             continue
         for delta in deltas:
             if delta > X.shape[0] / 3:
