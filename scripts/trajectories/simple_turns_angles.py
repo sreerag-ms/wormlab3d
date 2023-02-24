@@ -640,7 +640,7 @@ def plot_dataset_ip_angles_vs_n_turns(
     labels = []
     start_c = 2 if which_angle == 'runs' else 1
     for c in range(start_c, args.max_cluster_size + 1):
-        data.append(np.sin(angles[c]))
+        data.append(np.arcsin(np.sin(angles[c])))
         labels.append(f'{c} turns\n({len(angles[c])})')
 
     # Set up plot
@@ -656,9 +656,9 @@ def plot_dataset_ip_angles_vs_n_turns(
             'left': 0.13,
             'right': 0.99,
         })
-        ax.set_title(f'Number of simple turns vs {which_angle} angle', pad=3)
+        # ax.set_title(f'Number of simple turns vs {which_angle} angle', pad=3)
         xlabel_pad = 4
-        ylabel_pad = 3
+        ylabel_pad = 0
     else:
         plt.rc('axes', labelsize=8)  # fontsize of the x and y labels
         plt.rc('xtick', labelsize=6.5)  # fontsize of the x tick labels
@@ -673,8 +673,10 @@ def plot_dataset_ip_angles_vs_n_turns(
         ylabel_pad = 7
 
     ax.set_xlabel('Number of simple turns', labelpad=xlabel_pad)
-    ax.set_ylabel('sin(IP angle)', labelpad=ylabel_pad)
-    ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1])
+    ax.set_ylabel('IP angle', labelpad=ylabel_pad)
+    # ax.set_yticks([0, 0.2, 0.4, 0.6, 0.8, 1])
+    ax.set_yticks([0, np.pi/2])
+    ax.set_yticklabels([0, '$\pi/2$'])
     ax.boxplot(data, labels=labels, widths=0.6)
 
     if save_plots:
@@ -697,4 +699,4 @@ if __name__ == '__main__':
 
     # plot_simple_turn_angles()
     # plot_dataset_ip_angles_vs_n_turns(which_angle='planar')
-    plot_dataset_ip_angles_vs_n_turns(which_angle='runs', layout='thesis')
+    plot_dataset_ip_angles_vs_n_turns(which_angle='runs', layout='paper')
