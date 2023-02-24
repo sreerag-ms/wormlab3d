@@ -17,10 +17,10 @@ from wormlab3d.toolkit.plot_utils import tex_mode
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.util import get_deltas_from_args
 
-# show_plots = False
-# save_plots = True
-show_plots = True
-save_plots = False
+show_plots = False
+save_plots = True
+# show_plots = True
+# save_plots = False
 img_extension = 'svg'
 
 
@@ -1074,6 +1074,7 @@ def volume_metric_sweeps2(
         plot_duration_sweep: bool = False,
         plot_pause_sweep: bool = False,
         plot_combined: bool = True,
+        show_std: bool = False,
         layout: str = 'paper'
 ):
     """
@@ -1148,7 +1149,7 @@ def volume_metric_sweeps2(
         trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
         ax.text(model_phi, -0.07, model_phi, color='orange', fontsize='large', fontweight='bold',
                 horizontalalignment='center', verticalalignment='top', transform=trans)
-        ax.set_ylabel('Volume explored')
+        ax.set_ylabel('Exploration volume')
         # ax.set_yticks([0, 2500, 5000, 7500, 10000])
         # ax.set_yticks([0, 2000, 4000, 6000])
         # ax.grid()
@@ -1200,7 +1201,7 @@ def volume_metric_sweeps2(
         trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
         ax.text(model_phi, -0.075, model_phi, color='orange', fontsize='large', fontweight='bold',
                 horizontalalignment='center', verticalalignment='top', transform=trans)
-        ax.set_ylabel('Volume explored')
+        ax.set_ylabel('Exploration volume')
         # ax.set_yticks([0, 200, 400])
 
         ax.grid()
@@ -1236,7 +1237,7 @@ def volume_metric_sweeps2(
             })
             model_phi_fontsize = 7
             legend_anchor = (0.99, 0.9)
-            y_label = 'Volume explored'
+            y_label = 'Exploration volume'
             linewidth = 1
             markersize = 3
             markersize_opt = 20
@@ -1286,20 +1287,20 @@ def volume_metric_sweeps2(
         ax = axes[0]
         cmap = plt.get_cmap('winter')
         colours = cmap(np.linspace(0, 1, len(sim_durations)))
+        alpha = 0.8 if show_std else 0.7
         for j, duration in enumerate(sim_durations):
             vols_j = vols[:, j, 0].T
             optimal_vols.append(vols_j[0, optimal_sigmas_idxs[j]])
             # ax.plot(npa_sigmas, vols[0], label=f'T={duration:.0f}s', c=colours[j], marker='o', alpha=0.7)
-            ax.plot(npa_sigmas, vols_j[0], label=f'{duration / 60:.0f}m', c=colours[j], marker='o', alpha=0.7,
+            ax.plot(npa_sigmas, vols_j[0], label=f'{duration / 60:.0f}m', c=colours[j], marker='o', alpha=alpha,
                     markersize=markersize, linewidth=linewidth)
-
-            ax.fill_between(npa_sigmas, vols_j[0] - vols_j[-1], vols_j[0] + vols_j[-1], color=colours[j], alpha=0.4,
-                            linewidth=0, zorder=-1)
+            if show_std:
+                ax.fill_between(npa_sigmas, vols_j[0] - vols_j[-1], vols_j[0] + vols_j[-1], color=colours[j],
+                                alpha=0.3, linewidth=0.5, edgecolor='purple', zorder=-1)
 
             # ax.axhline(y=vols[0, optimal_sigmas_idxs[j]], color='red', zorder=-2, linewidth=2, linestyle=':', alpha=0.6)
         ax.scatter(optimal_sigmas, optimal_vols, marker='o', zorder=100, s=markersize_opt, facecolors='none',
-                   edgecolors='red',
-                   linewidths=linewidths_opt_markers)
+                   edgecolors='red', linewidths=linewidths_opt_markers)
         ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=phi_linewidth, zorder=-1)
         ax.legend(loc='upper left', bbox_to_anchor=legend_anchor, bbox_transform=ax.transAxes, **legend_args)
         ax.set_title(f'$\delta_{{max}}={fix_pause:.1f}$s')
@@ -1311,7 +1312,10 @@ def volume_metric_sweeps2(
         ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=model_phi_fontsize, fontweight='bold',
                 horizontalalignment='center', verticalalignment='top', transform=trans)
         ax.set_ylabel(y_label)
-        ax.set_yticks([0, 1000, 2000])
+        if show_std:
+            ax.set_yticks([0, 1250, 2500, 3750, 5000])
+        else:
+            ax.set_yticks([0, 1000, 2000])
         ax.grid()
 
         # Fix the duration and sweep over the pauses
@@ -1337,6 +1341,10 @@ def volume_metric_sweeps2(
             optimal_vols.append(vols_k[0, optimal_sigmas_idxs[k]])
             ax.plot(npa_sigmas, vols_k[0], label=f'{pause:.0f}s', c=colours[k], marker='o', alpha=0.7,
                     markersize=markersize, linewidth=linewidth)
+            if show_std:
+                ax.fill_between(npa_sigmas, vols_k[0] - vols_k[-1], vols_k[0] + vols_k[-1], color=colours[k],
+                                alpha=0.3, linewidth=0.5, edgecolor='orange', zorder=-1)
+
             # ax.axhline(y=vols[0, optimal_sigmas_idxs[j]], color='red', zorder=-2, linewidth=2, linestyle=':', alpha=0.6)
         ax.scatter(optimal_sigmas, optimal_vols, marker='o', zorder=100, s=markersize_opt, facecolors='none',
                    edgecolors='red',
@@ -1351,7 +1359,10 @@ def volume_metric_sweeps2(
         ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=model_phi_fontsize, fontweight='bold',
                 horizontalalignment='center', verticalalignment='top', transform=trans)
         ax.set_ylabel(y_label)
-        ax.set_yticks([0, 100, 200, 300])
+        if show_std:
+            ax.set_yticks([0, 200, 400, 600])
+        else:
+            ax.set_yticks([0, 100, 200, 300])
         ax.grid()
 
         # fig.tight_layout()
@@ -1579,7 +1590,7 @@ def volume_metric_sweeps_cuboids_voxels(
     trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
     ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=model_phi_fontsize, fontweight='bold',
             horizontalalignment='center', verticalalignment='top', transform=trans)
-    ax.set_ylabel('Cuboid volume explored')
+    ax.set_ylabel('Cuboid exploration volume')
     ax.set_yticks([0, 100, 200])
     ax.grid()
 
@@ -1603,7 +1614,7 @@ def volume_metric_sweeps_cuboids_voxels(
     ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=model_phi_fontsize, fontweight='bold',
             horizontalalignment='center', verticalalignment='top', transform=trans)
     # ax.set_ylabel('Voxels visited')
-    ax.set_ylabel('Voxel volume explored')
+    ax.set_ylabel('Voxel exploration volume')
     ax.set_yticks([0, 50, 100])
     ax.grid()
 
@@ -1813,7 +1824,8 @@ if __name__ == '__main__':
     # crossings_nonp()
     # volume_metric()
     # volume_metric_sweeps()
-    volume_metric_sweeps2(plot_pause_sweep=False, plot_duration_sweep=False, plot_combined=True, layout='paper')
+    volume_metric_sweeps2(plot_pause_sweep=False, plot_duration_sweep=False, plot_combined=True,
+                          show_std=True, layout='thesis')
     # voxel_scores_sweeps()
     # volume_metric_sweeps_cuboids_voxels(layout='thesis')
     # fractal_dimension_sweeps()
