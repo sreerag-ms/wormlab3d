@@ -2,6 +2,8 @@ import os
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.collections import LineCollection
+
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.brownian_particle import BrownianParticle
@@ -135,7 +137,52 @@ def plot_brownian_trajectory_2d():
         plt.show()
 
 
+def plot_brownian_trajectory_2d_pol():
+    D = 1
+    n_steps = 200
+    total_time = 1
+    p = BrownianParticle(D=D)
+    X = p.generate_trajectory(n_steps=n_steps, total_time=total_time)
+
+    fig, ax = plt.subplots(1, figsize=(6, 6))
+    ax.set_aspect('equal')
+    X = X[:, 0:2]
+    ptp = np.ptp(X, axis=0).max()
+    mins = X.min(axis=0)
+    maxs = X.max(axis=0)
+    adj = (maxs - mins - ptp) / 2
+    lbs = mins + adj
+    ubs = maxs - adj
+
+    colours = np.linspace(0, 1, len(X))
+    cmap = plt.get_cmap('viridis_r')
+    points = X[:, None, :]
+    segments = np.concatenate([points[:-1], points[1:]], axis=1)
+    lc = LineCollection(segments, array=colours, cmap=cmap, linewidths=4)
+    ax.add_collection(lc)
+
+    ax.scatter(X[:, 0], X[:, 1], c=colours, cmap=cmap, s=10)
+
+    ax.set_xlim(left=lbs[0], right=ubs[0])
+    ax.set_ylim(bottom=lbs[1], top=ubs[1])
+    ax.axis('off')
+    fig.tight_layout()
+
+    if save_plots:
+        os.makedirs(LOGS_PATH, exist_ok=True)
+        plt.savefig(
+            LOGS_PATH / (START_TIMESTAMP +
+                         f'_brownian_particle'
+                         f'_D={D}_n={n_steps}_T={total_time}'
+                         '.svg'),
+            transparent=True
+        )
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
-    plot_trajectory_2d()
+    # plot_trajectory_2d()
     # plot_trajectory_2d_wt3d_vs_reconst()
     # plot_brownian_trajectory_2d()
+    plot_brownian_trajectory_2d_pol()
