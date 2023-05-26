@@ -9,7 +9,7 @@ from wormlab3d.data.model import Trial, Frame
 from wormlab3d.toolkit.util import resolve_targets
 
 
-def generate_tracking_video_trial(trial: Trial):
+def generate_tracking_video_trial(trial: Trial, invert: bool = False):
     if trial.fps == 0:
         logger.warning('Trial FPS=0. Cannot create video.')
         return
@@ -47,10 +47,10 @@ def generate_tracking_video_trial(trial: Trial):
     }
     process = (
         ffmpeg
-            .input('pipe:', format='rawvideo', pix_fmt='gray', s='{}x{}'.format(width, height))
-            .output(str(video_filename), **output_args)
-            .overwrite_output()
-            .run_async(pipe_stdin=True)
+        .input('pipe:', format='rawvideo', pix_fmt='gray', s='{}x{}'.format(width, height))
+        .output(str(video_filename), **output_args)
+        .overwrite_output()
+        .run_async(pipe_stdin=True)
     )
 
     frame_nums = []
@@ -77,6 +77,10 @@ def generate_tracking_video_trial(trial: Trial):
             break
         frame_nums.append(n)
 
+        # Invert colours if required
+        if invert:
+            image_triplet = 1 - image_triplet
+
         # Stack image triplet and convert
         image_triplet = np.floor(np.concatenate(image_triplet) * 255)
         image_triplet = image_triplet.astype(np.uint8).T
@@ -95,7 +99,7 @@ def generate_tracking_video_trial(trial: Trial):
                 f'(Total frames in database = {trial.n_frames_min}).')
 
 
-def generate_tracking_videos(missing_only: bool = True):
+def generate_tracking_videos(missing_only: bool = True, invert: bool = False):
     trials, _ = resolve_targets()
     trial_ids = [trial.id for trial in trials]
     for trial_id in trial_ids:
@@ -113,10 +117,10 @@ def generate_tracking_videos(missing_only: bool = True):
 
         # Soft fail on errors
         try:
-            generate_tracking_video_trial(trial)
+            generate_tracking_video_trial(trial, invert)
         except Exception as e:
             logger.error(str(e))
 
 
 if __name__ == '__main__':
-    generate_tracking_videos(missing_only=True)
+    generate_tracking_videos(missing_only=False, invert=True)
