@@ -9,10 +9,11 @@ from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.data.model import Dataset, Reconstruction
 from wormlab3d.postures.helicities import calculate_helicities, calculate_trajectory_helicities
 from wormlab3d.simple_worm.estimate_k import get_K_estimates_from_args
+from wormlab3d.toolkit.util import normalise
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.pca import generate_or_load_pca_cache
-from wormlab3d.trajectories.util import calculate_speeds, calculate_htd
+from wormlab3d.trajectories.util import calculate_speeds, calculate_htd, smooth_trajectory
 
 show_plots = True
 save_plots = True
@@ -73,6 +74,7 @@ def make_title(metric_a: str, metric_b: str, args: Namespace):
     nonp_title = f'Non-planarity ({args.planarity_window} frames)'
     helicity_p_title = f'Helicity of postures'
     helicity_t_title = f'Helicity of trajectory (u={args.trajectory_point}, {args.helicity_window} frames)'
+    curvature_t_title = f'Trajectory curvature (u=0.5, {args.smoothing_window_K} frames smoothing)'
 
     t = []
     for metric in [metric_a, metric_b]:
@@ -90,6 +92,8 @@ def make_title(metric_a: str, metric_b: str, args: Namespace):
             t.append(helicity_p_title)
         elif metric == 'helicity_t':
             t.append(helicity_t_title)
+        elif metric == 'curvature_t':
+            t.append(curvature_t_title)
         else:
             raise RuntimeError(f'Unrecognised metric: {metric}.')
     t = ' vs '.join(t) + '.'
@@ -103,6 +107,30 @@ def make_title(metric_a: str, metric_b: str, args: Namespace):
         t += f'\nSmoothing window = {args.smoothing_window} frames.'
 
     return t
+
+
+def calculate_trajectory_curvature(X: np.ndarray, window_size: int):
+    """
+    Calculate curvature along a trajectory.
+    """
+    logger.info(f'Calculating trajectory curvature for window size={window_size}.')
+
+    # Calculate e0 (the tangent to the trajectory curve)
+    logger.info('Calculating speed and tangents.')
+    speeds = calculate_speeds(X, signed=True)
+    X_com = X.mean(axis=1)
+    e0 = normalise(np.gradient(X_com, axis=0))
+    e0[speeds < 0] *= -1
+    e0 = smooth_trajectory(e0, window_len=window_size)
+    K = np.gradient(e0, 1 / (len(e0) - 1), axis=0, edge_order=1)
+
+    # Smooth the curvature
+    K = smooth_trajectory(K, window_len=window_size)
+
+    # Curvature magnitude
+    k = np.linalg.norm(K, axis=-1)
+
+    return k
 
 
 def _get_metric_values(metric: str, X: np.ndarray, args: Namespace) -> np.ndarray:
@@ -133,6 +161,8 @@ def _get_metric_values(metric: str, X: np.ndarray, args: Namespace) -> np.ndarra
             args.trajectory_point = 0.1
             X = get_trajectory_from_args(args)
         vals = calculate_trajectory_helicities(X, args.helicity_window)
+    elif metric == 'curvature_t':
+        vals = calculate_trajectory_curvature(X, args.smoothing_window_K)
     else:
         raise RuntimeError(f'Unrecognised metric {metric}.')
 
@@ -154,6 +184,8 @@ def _get_label_for_metric(metric: str):
         vals = 'Hp'
     elif metric == 'helicity_t':
         vals = 'Ht'
+    elif metric == 'curvature_t':
+        vals = 'curvature_t'
     else:
         raise RuntimeError(f'Unrecognised metric {metric}.')
 
@@ -213,6 +245,7 @@ def plot_dataset_metrics(metric_a: str, metric_b: str):
             res[c] = {metric_a: [], metric_b: []}
         vals_a = _get_metric_values(metric_a, X, args)
         vals_b = _get_metric_values(metric_b, X, args)
+        assert len(vals_a) == len(vals_b)
         res[c][metric_a].extend(vals_a)
         res[c][metric_b].extend(vals_b)
 
@@ -256,6 +289,7 @@ if __name__ == '__main__':
         plot_dataset_metrics('htd', 'speed')
         plot_dataset_metrics('nonp', 'speed')
         plot_dataset_metrics('htd', 'nonp')
+        plot_dataset_metrics('curvature_t', 'speed')
     else:
         # plot_reconstruction_metrics('htd', 'speed')
         plot_reconstruction_metrics('helicity_p', 'helicity_t')
