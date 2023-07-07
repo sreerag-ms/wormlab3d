@@ -6,22 +6,27 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.gridspec import GridSpec
 from scipy.optimize import curve_fit, minimize
+from sklearn.decomposition import PCA
 
 from simple_worm.plot3d import MidpointNormalize
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
 from wormlab3d import logger
 from wormlab3d.data.model import Dataset, Reconstruction
+from wormlab3d.particles.util import centre_select
 from wormlab3d.toolkit.util import to_dict, hash_data
 from wormlab3d.trajectories.args import get_args
+from wormlab3d.trajectories.cache import get_trajectory_from_args
+from wormlab3d.trajectories.manoeuvres import get_forward_stats
 from wormlab3d.trajectories.pca import get_pca_cache_from_args
 from wormlab3d.trajectories.statistics import calculate_trial_turn_statistics, calculate_trial_run_statistics, \
     calculate_windowed_statistics, calculate_windowed_helicity
 from wormlab3d.trajectories.util import get_deltas_from_args
 
-# tex_mode()
+DATA_CACHE_PATH = LOGS_PATH / 'cache'
+os.makedirs(DATA_CACHE_PATH, exist_ok=True)
 
 show_plots = True
-save_plots = True
+save_plots = False
 img_extension = 'svg'
 
 
@@ -685,6 +690,194 @@ def speed_vs_nonplanarity_of_turns_and_runs():
         plt.show()
 
 
+def _run_stats_identifiers(args: Namespace) -> str:
+    return f'ds={args.dataset}' \
+           f'_u={args.trajectory_point}' \
+           f'_sw={args.smoothing_window}' \
+           f'_ff={args.min_forward_frames}' \
+           f'_fs={args.min_forward_speed}' \
+           f'_d={args.min_delta}-{args.max_delta}_s{args.delta_step}'
+
+
+def _p_and_nonp(X: np.ndarray) -> np.ndarray:
+    pca = PCA(svd_solver='full', copy=True, n_components=3)
+    pca.fit(X)
+    r = pca.explained_variance_ratio_.T
+    p = r[1] / np.where(r[1] == 0, 1, (r[0] + r[2]))
+    nonp = r[2] / np.where(r[2] == 0, 1, np.sqrt(r[1] * r[0]))
+    return p, nonp
+
+
+def _get_trajectory(args: Namespace):
+    X_slice = get_trajectory_from_args(args)
+    trajectory_point = args.trajectory_point
+    args.trajectory_point = None
+    X_full = get_trajectory_from_args(args)
+    args.trajectory_point = trajectory_point
+    return X_full, X_slice
+
+
+def _generate_or_load_stats(
+        args: Namespace,
+        rebuild_cache: bool = False,
+        cache_only: bool = False
+) -> Dict[str, np.ndarray]:
+    """
+    Generate or load the data.
+    """
+    logger.info('Fetching dataset.')
+    args.trial = None
+    args.midline3d_source = None
+    args.midline3d_source_file = None
+    ds = Dataset.objects.get(id=args.dataset)
+    cache_path = DATA_CACHE_PATH / _run_stats_identifiers(args)
+    cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
+    deltas, delta_ts = get_deltas_from_args(args)
+    keys = [f'ps_{d}' for d in deltas] + [f'nonps_{d}' for d in deltas]
+    res = None
+    if not rebuild_cache and cache_fn.exists():
+        try:
+            data = np.load(cache_fn)
+            res = {}
+            for k in keys:
+                res[k] = data[k]
+            logger.info(f'Loaded data from cache: {cache_fn}')
+        except Exception as e:
+            res = None
+            logger.warning(f'Could not load cache: {e}')
+
+    if res is None:
+        if cache_only:
+            raise RuntimeError(f'Cache "{cache_fn}" could not be loaded!')
+        logger.info('Generating data.')
+        res = {k: [] for k in keys}
+
+        # Loop over reconstructions
+        for r_ref in ds.reconstructions:
+            reconstruction = Reconstruction.objects.get(id=r_ref.id)
+            args.reconstruction = reconstruction.id
+            X_full, X_slice = _get_trajectory(args)
+            runs = get_forward_stats(
+                X_full,
+                X_slice,
+                min_forward_frames=args.min_forward_frames,
+                min_speed=args.min_forward_speed
+            )
+            for r in runs:
+                Xr = X_slice[r['start_idx']:r['end_idx']]
+
+                # Split each run up into chunks of size delta
+                for delta in deltas:
+                    n_chunks = int(len(Xr) / delta)
+                    if n_chunks == 0:
+                        break
+                    Xrc = centre_select(Xr, n_chunks * delta)
+                    X_windows = np.split(Xrc, n_chunks)
+
+                    # Compute nonp for all windows
+                    for Xw in X_windows:
+                        p, nonp = _p_and_nonp(Xw)
+                        res[f'ps_{delta}'].append(p)
+                        res[f'nonps_{delta}'].append(nonp)
+
+        for k in keys:
+            res[k] = np.array(res[k])
+        logger.info(f'Saving data to {cache_fn}.')
+        np.savez(cache_path, **res)
+
+    return res
+
+
+def forward_locomotion_nonplanarity():
+    """
+    Plot the non-planarity of forward locomotion in a dataset.
+    """
+    args = get_args(validate_source=False)
+    deltas, delta_ts = get_deltas_from_args(args)
+
+    res = _generate_or_load_stats(args, rebuild_cache=True, cache_only=False)
+    p_means = np.zeros(len(deltas))
+    p_stds = np.zeros(len(deltas))
+    nonp_means = np.zeros(len(deltas))
+    nonp_stds = np.zeros(len(deltas))
+
+    logger.info('Plotting')
+    fig, ax = plt.subplots(1, figsize=(10, 10))
+
+    scatter_args = dict(
+        marker='o',
+        facecolor='none',
+        s=75,
+        linewidths=1.2,
+        alpha=0.8
+    )
+    ebar_args = dict(
+        alpha=0.7,
+        elinewidth=2,
+        capsize=6
+    )
+
+    offset = 0.2
+
+    for i, (delta, delta_t) in enumerate(zip(deltas, delta_ts)):
+        ps = res[f'ps_{delta}']
+        nonps = res[f'nonps_{delta}']
+        if len(ps) == 0:
+            continue
+
+        ax.scatter(
+            x=np.ones_like(ps) * delta_t - offset,
+            y=ps,
+            color='lightblue',
+            **scatter_args
+        )
+
+        ax.scatter(
+            x=np.ones_like(nonps) * delta_t + offset,
+            y=nonps,
+            color='red',
+            **scatter_args
+        )
+
+        p_means[i] = ps.mean()
+        p_stds[i] = ps.std()
+        nonp_means[i] = nonps.mean()
+        nonp_stds[i] = nonps.std()
+
+    ax.errorbar(
+        delta_ts - offset,
+        p_means,
+        yerr=p_stds,
+        color='darkblue',
+        **ebar_args
+    )
+    ax.errorbar(
+        delta_ts + offset,
+        nonp_means,
+        yerr=nonp_stds,
+        color='darkred',
+        **ebar_args
+    )
+
+    ax.set_xticks(delta_ts)
+    ax.set_xticklabels([
+        f'{dt:.2f}s\n(' + str(len(res[f"ps_{d}"])) + ')'
+        for d, dt in zip(deltas, delta_ts)
+    ])
+
+    if save_plots:
+        fn = START_TIMESTAMP \
+             + f'_forwards_nonp' \
+               f'_{_run_stats_identifiers(args)}'
+        save_path = LOGS_PATH / (fn + f'.{img_extension}')
+        logger.info(f'Saving plot to {save_path}.')
+        plt.savefig(save_path)
+
+    if show_plots:
+        plt.show()
+    plt.close(fig)
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
@@ -695,4 +888,5 @@ if __name__ == '__main__':
     # nonplanarity_postures_vs_trajectories()
     # nonplanarity_postures_vs_trajectory_windows()
     # helicity_postures_vs_trajectory_windows()
-    speed_vs_nonplanarity_of_turns_and_runs()
+    # speed_vs_nonplanarity_of_turns_and_runs()
+    forward_locomotion_nonplanarity()
