@@ -550,10 +550,10 @@ def plot_3d_with_pca(
     # 3D plot of midline
     fig = plot_natural_frame_3d_mlab(
         NF,
-        azimuth=-150,
-        elevation=100,
-        roll=60,
-        distance=1.65,
+        azimuth=-10,
+        elevation=35,
+        roll=-110,
+        distance=1.85,
         show_frame_arrows=False,
         show_pca_arrows=True,
         show_pca_arrow_labels=False,
@@ -571,7 +571,7 @@ def plot_3d_with_pca(
                            f'_trial={trial.id}' \
                            f'_frame={frame.frame_num}' \
                            f'_reconstruction={reconstruction.id}' \
-                           f'_3D_pca.{img_extension}'
+                           f'_3D_pca.png'
         logger.info(f'Saving plot to {path}.')
 
         if not transparent_bg:
@@ -708,8 +708,8 @@ def plot_reprojection_singles(
 
                 # Draw markers and connecting lines
                 if n_points == -1:
-                    img = cv2.drawMarker(
-                        img,
+                    z = cv2.drawMarker(
+                        z,
                         p,
                         color=col,
                         markerType=cv2.MARKER_CROSS,
@@ -718,7 +718,7 @@ def plot_reprojection_singles(
                         line_type=cv2.LINE_AA
                     )
                     if j > 0:
-                        cv2.line(img, p2d[j - 1], p2d[j], color=col, thickness=1, lineType=cv2.LINE_AA)
+                        cv2.line(z, p2d[j - 1], p2d[j], color=col, thickness=1, lineType=cv2.LINE_AA)
 
                 # Draw points
                 else:
@@ -754,11 +754,11 @@ def plot_reprojection_singles(
 if __name__ == '__main__':
     # from wormlab3d.toolkit.plot_utils import interactive_plots
     # interactive_plots()
-    reconstruction_, frame_, X_, points_2d_ = get_midline()
+    # reconstruction_, frame_, X_, points_2d_ = get_midline()
     # plot_3d(reconstruction_, frame_, X_)
     # plot_3d_mlab(reconstruction_, frame_, X_, interactive=False, transparent_bg=True)
     # plot_3d_with_points_mlab(reconstruction_, frame_, X_, interactive=False, transparent_bg=True, n_points=33)
-    plot_3d_construction(reconstruction_, frame_, X_, n_points=33, start_idx=0, n_stages=4, curvature_smoothing=11)
+    # plot_3d_construction(reconstruction_, frame_, X_, n_points=33, start_idx=0, n_stages=4, curvature_smoothing=11)
     # plot_n0_distribution(start_idx=40)
     # plot_3d_with_pca(reconstruction_, frame_, X_)
     # plot_reprojections(reconstruction_, frame_, points_2d_)
@@ -769,3 +769,10 @@ if __name__ == '__main__':
     # plot_3d_pca_sequence(frame_nums=[13788,13854,13931])  # (azim, elev, roll) = (10, 100, -10)
     # plot_3d_pca_sequence(frame_nums=[14378, 14474, 14533])
     # plot_3d_pca_sequence(frame_nums=[13931,])
+
+    args = parse_target_arguments()
+    for frame_num in [9114,9285,9382,9556]:
+    # for frame_num in [9382,]:
+        args.frame_num = frame_num
+        reconstruction_, frame_, X_, points_2d_ = get_midline(args)
+        plot_3d_with_pca(reconstruction_, frame_, X_, interactive=False)

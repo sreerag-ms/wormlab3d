@@ -455,7 +455,7 @@ def eigenworm_modulation_by_rec(
         error_args = dict(elinewidth=1.3, capsize=5)
 
     ax.set_xticks(ticks)
-    ax.set_xticklabels(concs)
+    ax.set_xticklabels([f'{c}\n({len(lambdas[c])})' for c in concs])
     offsets = np.linspace(-0.1, 0.1, len(args.plot_components))
 
     for i, idx in enumerate(args.plot_components):
@@ -544,4 +544,4 @@ if __name__ == '__main__':
     #     by_reconstruction=True,
     # )
     # eigenworm_modulation_by_conc()
-    eigenworm_modulation_by_rec(layout='paper')
+    eigenworm_modulation_by_rec(layout='thesis')
