@@ -91,6 +91,7 @@ def _make_info_panel(
     def get_details(frame_num: int) -> str:
         curr_time = datetime.fromtimestamp(np.floor(frame_num / trial.fps))
         total_time = datetime.fromtimestamp(np.floor(r_end_frame / trial.fps))
+        # return f'{curr_time:%M:%S}/{total_time:%M:%S}'
         return caption + \
                f'Concentration: {trial.experiment.concentration}%\n' \
                f'Time: {curr_time:%M:%S}/{total_time:%M:%S}\n' \
@@ -321,7 +322,7 @@ def generate_clip(
     )
 
     # Initialise ffmpeg process
-    output_path = output_dir / f'{clip_idx:03d}_trial={reconstruction.trial.id}_r={reconstruction.id}_f={frame_nums[0]}-{frame_nums[-1]}'
+    output_path = output_dir / f'{clip_idx:03d}_trial={reconstruction.trial.id}_r={reconstruction.id}_f={frame_nums[0]}-{frame_nums[-1]}_d={args.distance}_s={args.speed}'
     input_args = {
         'format': 'rawvideo',
         'pix_fmt': 'rgb24',
