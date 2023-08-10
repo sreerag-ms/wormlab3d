@@ -451,11 +451,11 @@ def generate_or_load_ds_statistics(
             ds=ds,
             error_limits=error_limits,
             min_run_speed_duration=min_run_speed_duration,
-            distance_first=500,
-            distance_min=3,
-            height_first=100,
-            smooth_e0_first=201,
-            smooth_K_first=201,
+            distance_first=distance_first,
+            distance_min=distance_min,
+            height_first=height_first,
+            smooth_e0_first=smooth_e0_first,
+            smooth_K_first=smooth_K_first
         )
         save_arrs = {'trajectory_lengths': trajectory_lengths}
         for i in range(len(error_limits)):
