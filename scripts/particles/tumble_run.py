@@ -11,11 +11,11 @@ from scipy.stats import expon
 
 from simple_worm.frame import FrameNumpy
 from simple_worm.plot3d import FrameArtist
-from wormlab3d import START_TIMESTAMP, LOGS_PATH, logger
-from wormlab3d.data.model import Trial, Dataset
+from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
+from wormlab3d.data.model import Dataset, Trial
 from wormlab3d.particles.cache import get_sim_state_from_args
-from wormlab3d.particles.tumble_run import calculate_curvature, get_approximate, find_approximation, \
-    generate_or_load_ds_statistics, generate_or_load_ds_msds
+from wormlab3d.particles.tumble_run import calculate_curvature, find_approximation, generate_or_load_ds_msds, \
+    generate_or_load_ds_statistics, get_approximate
 from wormlab3d.particles.util import calculate_trajectory_frame
 from wormlab3d.toolkit.plot_utils import equal_aspect_ratio
 from wormlab3d.trajectories.args import get_args
@@ -23,10 +23,10 @@ from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.pca import get_pca_cache_from_args
 from wormlab3d.trajectories.util import get_deltas_from_args
 
-# show_plots = True
-# save_plots = False
-show_plots = False
-save_plots = True
+show_plots = True
+save_plots = False
+# show_plots = False
+# save_plots = True
 img_extension = 'svg'
 
 
@@ -52,7 +52,7 @@ def _plot_trial_approximation(
     """
     dt = 1 / trial.fps
     ts = np.arange(len(X)) * dt
-    tumble_ts = tumble_idxs * dt
+    tumble_ts = np.array(tumble_idxs).astype(np.float64) * dt
     run_durations = run_steps * dt
     run_speeds = run_speeds / dt
 
@@ -193,7 +193,10 @@ def _plot_trial_approximations(
                 = get_approximate(X, k, distance=loop_var)
         else:
             approx, distance, height, smooth_e0, smooth_K \
-                = find_approximation(X, e0_raw, loop_var, max_attempts=50)
+                = find_approximation(X, e0_raw, loop_var, max_attempts=50, distance_first=100, smooth_e0_first=251,
+                                     smooth_K_first=251)
+            # approx, distance, height, smooth_e0, smooth_K \
+            #     = find_approximation2(X, e0_raw, loop_var, max_attempts=50)
             X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles, nonplanar_angles, twist_angles, e0, e1, e2 = approx
 
         # Plot approximation
@@ -268,7 +271,8 @@ def convert_trajectory_to_tumble_run(
     # distances = np.array([25, 50, 100, 200])
     # distances = np.arange(5, 500, 5)#
     distances = None
-    error_limits = np.array([0.1, 0.05, 0.01])
+    # error_limits = np.array([0.1, 0.05, 0.01])
+    error_limits = np.array([0.05])
 
     # Take centre of mass
     if X.ndim == 3:
@@ -280,7 +284,7 @@ def convert_trajectory_to_tumble_run(
 
 
 def plot_dataset_trajectories():
-    args = get_args()
+    args = get_args(validate_source=False)
 
     # Get dataset
     assert args.dataset is not None
@@ -808,21 +812,30 @@ def dataset_against_three_state_histogram_comparison(
     args.midline3d_source_file = None
     args.tracking_only = True
 
+    # Set the approximation parameters
+    approx_args = dict(
+        error_limits=error_limits,
+        min_run_speed_duration=min_run_speed_duration,
+        distance_first=args.approx_distance,
+        height_first=args.approx_curvature_height,
+        smooth_e0_first=args.smoothing_window_K,
+        smooth_K_first=args.smoothing_window_K,
+    )
+
     # Generate or load tumble/run values
     trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles = generate_or_load_ds_statistics(
         ds=ds,
-        error_limits=error_limits,
-        min_run_speed_duration=min_run_speed_duration,
-        rebuild_cache=args.regenerate
+        rebuild_cache=args.regenerate,
+        **approx_args
     )
 
     # Use the same approximation methods for the simulation runs as for real data
     if use_approximation_stats:
         stats = SS.get_approximation_statistics(
-            error_limits=error_limits,
             noise_scale=args.approx_noise,
             smoothing_window=args.smoothing_window,
             planarity_window=args.planarity_window_vertices,
+            **approx_args
         )
     else:
         stats = {

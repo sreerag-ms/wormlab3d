@@ -1,5 +1,5 @@
 from argparse import Namespace
-from typing import Tuple, List, Dict
+from typing import Dict, List, Tuple, Union
 
 import numpy as np
 from scipy.signal import find_peaks
@@ -9,11 +9,10 @@ from wormlab3d import LOGS_PATH, logger
 from wormlab3d.data.model import Dataset
 from wormlab3d.particles.util import calculate_trajectory_frame
 from wormlab3d.toolkit.util import normalise, orthogonalise
-from wormlab3d.trajectories.angles import calculate_angle
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
-from wormlab3d.trajectories.pca import get_pca_cache_from_args, calculate_pcas, PCACache
-from wormlab3d.trajectories.util import smooth_trajectory, get_deltas_from_args
+from wormlab3d.trajectories.pca import PCACache, calculate_pcas, get_pca_cache_from_args
+from wormlab3d.trajectories.util import get_deltas_from_args, smooth_trajectory
 
 
 def calculate_curvature(
@@ -179,7 +178,7 @@ def get_approximate(
         # yp = A @ Rotation.from_rotvec(a1 * np.array([0, 1, 0])).as_matrix() @ A.T
         # zp = A @ Rotation.from_rotvec(a2 * np.array([0, 0, 1])).as_matrix() @ A.T
         # assert np.allclose(xp @ yp @ zp, R)
-        planar_angles[i] = a2   #+ a0 # Rotation about e2
+        planar_angles[i] = a2  # + a0 # Rotation about e2
         nonplanar_angles[i] = a1  # Rotation about e1
         twist_angles[i] = a0  # Rotation about e0
 
@@ -187,8 +186,173 @@ def get_approximate(
         # planar_angles[i] = calculate_angle(e0[i], e0_projected_in_prev_plane)
         # nonplanar_angles[i] = calculate_angle(e0[i+1], e0_projected_in_prev_plane)
 
-
     return X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles, nonplanar_angles, twist_angles, e0, e1, e2
+
+
+def find_approximation2(
+        X: np.ndarray,
+        e0: np.ndarray,
+        error_limit: float,
+        planarity_window_vertices: int = 3,
+        distance_first: int = 500,
+        distance_min: int = 3,
+        height_first: int = 50,
+        smooth_e0_first: int = 101,
+        smooth_K_first: int = 101,
+        max_attempts: int = 10,
+        quiet: bool = False
+):
+    """
+    Find an approximation to the trajectory at a given error limit.
+    """
+    if not quiet:
+        logger.info(f'Finding approximation at error limit={error_limit:.3f}.')
+    mse = np.inf
+    attempts = 0
+
+    if X.ndim == 3:
+        X = X.mean(axis=1)
+
+    T = len(X)
+
+    def build_approx(X_section, tumble_idxs):
+        # Build the approximation and calculate run durations
+        X_approx = np.zeros_like(X_section)
+        X_approx[0] = X_section[0]
+        x = X_section[0]
+        start_idx = 0
+        for i in range(len(tumble_idxs) + 1):
+            end_idx = tumble_idxs[i] if i < len(tumble_idxs) else len(X_section)
+            run_start = x[None, :]
+            run_end = X_section[end_idx] if i < len(tumble_idxs) else X_section[-1]
+            run_steps = end_idx - start_idx
+            y = np.linspace(0, 1, run_steps + 1)[:-1, None]
+            X_approx[start_idx:end_idx] = (1 - y) * run_start + y * run_end
+            x = run_end
+            start_idx = end_idx
+
+        return X_approx
+
+    def find_best_idx(start_idx, end_idx):
+        X_section = X[start_idx:end_idx]
+        if len(X_section) < 3:
+            return -1
+        errors = np.zeros(end_idx - start_idx - 2)
+        for i in range(len(X_section) - 2):
+            X_sec_ap = build_approx(X_section, [i + 1])
+            errors[i] = np.mean(np.sum((X_section - X_sec_ap)**2, axis=-1))
+
+        return np.argmin(errors) + 1 + start_idx
+
+    mid_idx = find_best_idx(0, T)
+    logger.debug(f'Added vertex at {mid_idx}')
+    tumble_idxs = [mid_idx]
+
+    while mse > error_limit and attempts < max_attempts:
+        # Add more vertices by bisecting the segments
+        new_idxs = []
+        for i in range(len(tumble_idxs) + 1):
+            vl = tumble_idxs[i - 1] if i > 0 else 0
+            vr = tumble_idxs[i] if i < len(tumble_idxs) else T
+            new_idx = find_best_idx(vl, vr)
+            if new_idx > 0:
+                new_idxs.append(new_idx)
+
+        tumble_idxs = sorted(tumble_idxs + new_idxs)
+        logger.debug(f'Added tumble idxs at {new_idxs}')
+        X_approx = build_approx(X, tumble_idxs)
+        mse = np.mean(np.sum((X - X_approx)**2, axis=-1))
+        attempts += 1
+        print(f'Error: {mse:.3f}, attempts: {attempts}')
+
+    # Prune tumble idxs
+    removed_tumble_idxs = []
+    k = len(tumble_idxs)
+    i = 0
+    while i < k:
+        # Remove vertex i and check if the error is still below the limit
+        tumble_idxs_pruned = tumble_idxs[:i] + tumble_idxs[i + 1:]
+        X_approx = build_approx(X, tumble_idxs_pruned)
+        mse = np.mean(np.sum((X - X_approx)**2, axis=-1))
+        if mse < error_limit:
+            removed_tumble_idxs.append(tumble_idxs[i])
+            tumble_idxs = tumble_idxs_pruned
+            k -= 1
+        else:
+            i += 1
+    logger.debug(f'Removed tumble idxs at {removed_tumble_idxs}')
+
+    # Add vertices for start and end points
+    vertices = np.concatenate([
+        X[0][None, :],
+        X[tumble_idxs],
+        X[-1][None, :],
+    ], axis=0)
+
+    N = len(tumble_idxs)
+    if N <= 1:
+        raise RuntimeError('Too few peaks found! Try decreasing distance / height.')
+
+    # Calculate run durations
+    run_durations = (np.array(tumble_idxs[1:]) - np.array(tumble_idxs[:-1])).astype(np.float64)
+
+    # Calculate run speeds
+    run_distances = np.linalg.norm(vertices[2:-1] - vertices[1:-2], axis=-1)
+    run_speeds = run_distances / run_durations
+
+    # Calculate PCA along the vertices
+    pcas = calculate_pcas(vertices, window_size=min(vertices.shape[0] - 1, planarity_window_vertices), parallel=False)
+    pcas = PCACache(pcas)
+
+    # Pad the PCAs to match the number of tumbles/vertices
+    components = pcas.components.copy()
+    diff = N - components.shape[0] + 1
+    components = np.concatenate([
+        np.repeat(components[0][None, ...], repeats=np.ceil(diff / 2), axis=0),
+        components,
+        np.repeat(components[-1][None, ...], repeats=np.floor(diff / 2), axis=0)
+    ], axis=0)
+
+    # Calculate e0 as normalised line segments between tumbles
+    e0 = normalise(vertices[1:] - vertices[:-1])
+
+    # e1 is the frame vector pointing out into the principal plane of the curve
+    v1 = components[:, 1].copy()
+
+    # Orthogonalise the pca planar direction vector against the trajectory to get e1
+    e1 = normalise(orthogonalise(v1, e0))
+
+    # e2 is the remaining cross product
+    e2 = normalise(np.cross(e0, e1))
+
+    # Duplicate final frame to line things up
+    e0 = np.r_[e0, e0[-1][None, ...]]
+    e1 = np.r_[e1, e1[-1][None, ...]]
+    e2 = np.r_[e2, e2[-1][None, ...]]
+
+    # Calculate the angles
+    planar_angles = np.zeros(N)
+    nonplanar_angles = np.zeros(N)
+    twist_angles = np.zeros(N)
+    for i in range(N):
+        prev_frame = np.stack([e0[i], e1[i], e2[i]])
+        next_frame = np.stack([e0[i + 1], e1[i + 1], e2[i + 1]])
+        R, rmsd = Rotation.align_vectors(prev_frame, next_frame)
+        R = R.as_matrix()
+
+        # Decompose rotation matrix R into the axes of A
+        A = prev_frame
+        rp = Rotation.from_matrix(A.T @ R @ A)
+        a2, a1, a0 = rp.as_euler('zyx')
+        planar_angles[i] = a2  # + a0 # Rotation about e2
+        nonplanar_angles[i] = a1  # Rotation about e1
+        twist_angles[i] = a0  # Rotation about e0
+
+    approx = X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles, nonplanar_angles, twist_angles, e0, e1, e2
+
+    distance, height, smooth_e0, smooth_K = 0, 0, 0, 0
+
+    return approx, distance, height, smooth_e0, smooth_K
 
 
 def find_approximation(
@@ -238,8 +402,8 @@ def find_approximation(
 
         if mse > error_limit:
             distance = max(distance_min, distance - 10)
-            if attempts > 5:
-                height = max(10, height - 1)
+            # if attempts > 5:
+            height = max(10, height - 1)
             smooth_e0 = max(11, smooth_e0 - 6)
             smooth_K = max(11, smooth_K - 6)
 
@@ -251,17 +415,28 @@ def find_approximation(
 
 def generate_or_load_ds_statistics(
         ds: Dataset,
-        error_limits: List[float],
+        error_limits: Union[np.ndarray, List[float]],
         min_run_speed_duration: Tuple[float, float] = (0.01, 60.),
+        distance_first: int = 500,
+        distance_min: int = 3,
+        height_first: int = 100,
+        smooth_e0_first: int = 201,
+        smooth_K_first: int = 201,
         rebuild_cache: bool = False
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Generate or load tumble/run values
     """
     args = get_args(validate_source=False)
-    cache_path = LOGS_PATH / f'ds={ds.id}_errors={",".join([str(err) for err in error_limits])}' \
-                             f'_pw={args.planarity_window_vertices}' \
-                             f'_mrsd={min_run_speed_duration[0]:.2f},{min_run_speed_duration[1]:.1f}'
+    cache_path = LOGS_PATH / (f'ds={ds.id}'
+                              f'_errors={",".join([str(err) for err in error_limits])}'
+                              f'_pw={args.planarity_window_vertices}'
+                              f'_mrsd={min_run_speed_duration[0]:.2f},{min_run_speed_duration[1]:.1f}'
+                              f'_df={distance_first}'
+                              f'_dm={distance_min}'
+                              f'_hf={height_first}'
+                              f'_se0f={smooth_e0_first}'
+                              f'_skf={smooth_K_first}')
     cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
     if not rebuild_cache and cache_fn.exists():
         data = np.load(cache_fn)
@@ -272,8 +447,16 @@ def generate_or_load_ds_statistics(
         nonplanar_angles = [data[f'nonplanar_angles_{i}'] for i in range(len(error_limits))]
         twist_angles = [data[f'twist_angles_{i}'] for i in range(len(error_limits))]
     else:
-        trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles \
-            = _calculate_dataset_values(ds, error_limits, min_run_speed_duration)
+        trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles = _calculate_dataset_values(
+            ds=ds,
+            error_limits=error_limits,
+            min_run_speed_duration=min_run_speed_duration,
+            distance_first=500,
+            distance_min=3,
+            height_first=100,
+            smooth_e0_first=201,
+            smooth_K_first=201,
+        )
         save_arrs = {'trajectory_lengths': trajectory_lengths}
         for i in range(len(error_limits)):
             save_arrs[f'durations_{i}'] = durations[i]
@@ -324,9 +507,21 @@ def generate_or_load_ds_msds(
 
 def _calculate_dataset_values(
         ds: Dataset,
-        error_limits: List[float],
-        min_run_speed_duration: Tuple[float, float] = (0.01, 60.)
-) -> Tuple[np.ndarray, Dict[int, np.ndarray], Dict[int, np.ndarray], Dict[int, np.ndarray], Dict[int, np.ndarray]]:
+        error_limits: Union[np.ndarray, List[float]],
+        min_run_speed_duration: Tuple[float, float] = (0.01, 60.),
+        distance_first: int = 500,
+        distance_min: int = 3,
+        height_first: int = 100,
+        smooth_e0_first: int = 201,
+        smooth_K_first: int = 201,
+) -> Tuple[
+    np.ndarray,
+    Dict[int, np.ndarray],
+    Dict[int, np.ndarray],
+    Dict[int, np.ndarray],
+    Dict[int, np.ndarray],
+    Dict[int, np.ndarray]
+]:
     """
     Calculate the tumble/run approximation values across a dataset.
     """
@@ -362,12 +557,11 @@ def _calculate_dataset_values(
             X = X.mean(axis=1)
         X -= X.mean(axis=0)
 
-        # Calculate coefficients of variation for all params for all trials at all distances
-        distance = 500
-        distance_min = 3
-        height = 100
-        smooth_e0 = 201
-        smooth_K = 201
+        # Set initial approximation values
+        distance = distance_first
+        height = height_first
+        smooth_e0 = smooth_e0_first
+        smooth_K = smooth_K_first
 
         for j, error_limit in enumerate(error_limits):
             approx, distance, height, smooth_e0, smooth_K \
