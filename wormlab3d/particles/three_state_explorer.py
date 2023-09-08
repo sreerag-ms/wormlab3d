@@ -123,9 +123,11 @@ class ThreeStateExplorer(nn.Module):
             state0: torch.Tensor = None,
             nonp_pause_type: Optional[str] = None,
             nonp_pause_max: float = 0.,
+            quiet: bool = False,
     ):
         super().__init__()
         self.batch_size = batch_size
+        self.quiet = quiet
 
         # Transition rates
         self.rate_01 = rate_01
@@ -158,6 +160,10 @@ class ThreeStateExplorer(nn.Module):
         self._init_particle(x0)
         self._init_state(state0)
         self._init_distributions(theta_dist_params, phi_dist_params)
+
+    def _log(self, msg: str, level: str = 'info'):
+        if not self.quiet:
+            getattr(logger, level)(msg)
 
     def _init_particle(self, x0: Optional[torch.Tensor] = None):
         """
@@ -240,7 +246,7 @@ class ThreeStateExplorer(nn.Module):
         start_time = time.time()
 
         # Generate the state transitions
-        logger.info('Generating state transitions.')
+        self._log('Generating state transitions.')
         states = torch.zeros((self.batch_size, n_steps))
         bar = Bar('Generating', max=n_steps)
         bar.check_tty = False
@@ -251,13 +257,13 @@ class ThreeStateExplorer(nn.Module):
         bar.finish()
 
         # Calculate the sequences
-        logger.info('Calculating sequences.')
+        self._log('Calculating sequences.')
         sequences = []
         for i in range(self.batch_size):
             sequences.append(torch.unique_consecutive(states[i]))
 
         # Generate the tumbles
-        logger.info('Generating tumbles.')
+        self._log('Generating tumbles.')
         gc.collect()  # probably in the wrong place but seems to fix the random crashes
         tumble_idxs = (states == 2).nonzero()
         vertex_idxs = [tumble_idxs[tumble_idxs[:, 0] == i][:, 1] for i in range(self.batch_size)]
@@ -280,7 +286,7 @@ class ThreeStateExplorer(nn.Module):
         bar.finish()
 
         # Calculate the run durations
-        logger.info('Calculating run durations.')
+        self._log('Calculating run durations.')
         run_starts = {s: [[] for _ in range(self.batch_size)] for s in [0, 1]}
         durations = {s: [[] for _ in range(self.batch_size)] for s in [0, 1]}
 
@@ -312,7 +318,7 @@ class ThreeStateExplorer(nn.Module):
             bar.finish()
 
         # Calculate the pause durations based on how extreme the nonplanar angle is
-        logger.info('Calculating pause durations.')
+        self._log('Calculating pause durations.')
         if self.nonp_pause_type is not None:
             if self.nonp_pause_type == 'linear':
                 p = 1
@@ -325,7 +331,7 @@ class ThreeStateExplorer(nn.Module):
             pauses = torch.zeros_like(phis).to(torch.int32)
 
         # Simulate the particle exploration
-        logger.info('Simulating particle exploration.')
+        self._log('Simulating particle exploration.')
         if N_WORKERS > 1:
             with Pool(processes=N_WORKERS) as pool:
                 res = pool.map(
@@ -385,7 +391,7 @@ class ThreeStateExplorer(nn.Module):
         phis = [phis[i, :len(tumble_ts[i])] for i in range(self.batch_size)]
 
         sim_time = time.time() - start_time
-        logger.info(f'Time: {timedelta(seconds=sim_time)}')
+        self._log(f'Time: {timedelta(seconds=sim_time)}')
 
         return dict(
             ts=ts,

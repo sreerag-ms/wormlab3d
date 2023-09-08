@@ -417,6 +417,7 @@ def generate_or_load_ds_statistics(
         ds: Dataset,
         error_limits: Union[np.ndarray, List[float]],
         min_run_speed_duration: Tuple[float, float] = (0.01, 60.),
+        planarity_window: int = 3,
         distance_first: int = 500,
         distance_min: int = 3,
         height_first: int = 100,
@@ -427,11 +428,10 @@ def generate_or_load_ds_statistics(
     """
     Generate or load tumble/run values
     """
-    args = get_args(validate_source=False)
     cache_path = LOGS_PATH / (f'ds={ds.id}'
                               f'_errors={",".join([str(err) for err in error_limits])}'
-                              f'_pw={args.planarity_window_vertices}'
                               f'_mrsd={min_run_speed_duration[0]:.2f},{min_run_speed_duration[1]:.1f}'
+                              f'_pw={planarity_window}'
                               f'_df={distance_first}'
                               f'_dm={distance_min}'
                               f'_hf={height_first}'
@@ -446,7 +446,9 @@ def generate_or_load_ds_statistics(
         planar_angles = [data[f'planar_angles_{i}'] for i in range(len(error_limits))]
         nonplanar_angles = [data[f'nonplanar_angles_{i}'] for i in range(len(error_limits))]
         twist_angles = [data[f'twist_angles_{i}'] for i in range(len(error_limits))]
+        logger.info(f'Loaded dataset statistics from {cache_fn}.')
     else:
+        logger.info(f'Calculating dataset statistics.')
         trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles = _calculate_dataset_values(
             ds=ds,
             error_limits=error_limits,

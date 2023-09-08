@@ -129,7 +129,9 @@ class SimulationState:
             self,
             parameters: PEParameters,
             read_only: bool = True,
-            regenerate: bool = False
+            regenerate: bool = False,
+            no_cache: bool = False,
+            quiet: bool = False
     ):
         self.parameters: PEParameters = parameters
         self.read_only = read_only
@@ -137,6 +139,8 @@ class SimulationState:
         self.stats = {}
         self.meta = {'parameters': str(self.parameters.id)}
         self.needs_save = False
+        self.no_cache = no_cache
+        self.quiet = quiet
 
         # Extra properties not calculated immediately
         self.pcas = None
@@ -144,11 +148,11 @@ class SimulationState:
 
         # Load the state
         loaded = False
-        if not regenerate:
+        if not regenerate and not no_cache:
             loaded = self._load_state(read_only)
             if not loaded and read_only:
                 raise RuntimeError('Could not load simulation state.')
-        else:
+        elif regenerate:
             assert not read_only
 
         # (Re)generate data
@@ -163,6 +167,10 @@ class SimulationState:
 
     def __len__(self) -> int:
         return self.parameters.batch_size
+
+    def _log(self, msg: str, level: str = 'info'):
+        if not self.quiet:
+            getattr(logger, level)(msg)
 
     def __getattr__(self, key: str):
         """
@@ -211,7 +219,7 @@ class SimulationState:
             with open(path_meta, 'r') as f:
                 meta = json.load(f)
         except Exception as e:
-            logger.warning(f'Could not load from {path_meta}. {e}')
+            self._log(f'Could not load from {path_meta}. {e}', 'warning')
             return False
 
         # If metadata exists, use the shapes to load the other state files.
@@ -227,7 +235,7 @@ class SimulationState:
                     state = np.memmap(path_state, dtype=np.float32, mode=mode, shape=tuple(meta['shapes'][k]))
                     states[k] = state
             except Exception as e:
-                logger.warning(f'Could not load from {path_state}. {e}')
+                self._log(f'Could not load from {path_state}. {e}', 'warning')
                 if not partial_load_ok:
                     return False
 
@@ -235,7 +243,7 @@ class SimulationState:
         self.states = states
         self.shapes = meta['shapes']
 
-        logger.info(f'Loaded data from {self.path}.')
+        self._log(f'Loaded data from {self.path}.')
 
         return True
 
@@ -243,11 +251,12 @@ class SimulationState:
         """
         Initialise empty state.
         """
-        if self.path.exists():
-            logger.info(f'Wiping existing state in {self.path}.')
-            shutil.rmtree(self.path)
-        logger.info(f'Initialising state in {self.path}.')
-        os.makedirs(self.path, exist_ok=True)
+        if not self.no_cache:
+            if self.path.exists():
+                self._log(f'Wiping existing state in {self.path}.')
+                shutil.rmtree(self.path)
+            self._log(f'Initialising state in {self.path}.')
+            os.makedirs(self.path, exist_ok=True)
         states = {}
         shapes = {}
         for k in VAR_NAMES:
@@ -283,7 +292,10 @@ class SimulationState:
                 shape = (mp.batch_size,)
             elif shape is None:
                 raise RuntimeError(f'Unknown shape for variable key: {k}')
-            state = np.memmap(path_state, dtype=np.float32, mode='w+', shape=shape)
+            if self.no_cache:
+                state = np.zeros(shape, dtype=np.float32)
+            else:
+                state = np.memmap(path_state, dtype=np.float32, mode='w+', shape=shape)
 
         return state, shape
 
@@ -291,7 +303,7 @@ class SimulationState:
         """
         Generate the simulation trajectories.
         """
-        logger.info('Generating simulation state.')
+        self._log('Generating simulation state.')
         res = self.pe.forward(T=self.parameters.duration, dt=self.parameters.dt)
         for k in VAR_NAMES:
             if k in VAR_NAMES_VARIABLE_SIZE:
@@ -334,7 +346,8 @@ class SimulationState:
                 'params': p.phi_dist_params
             },
             nonp_pause_type=p.delta_type,
-            nonp_pause_max=p.delta_max
+            nonp_pause_max=p.delta_max,
+            quiet=self.quiet
         )
 
         return pe
@@ -343,7 +356,9 @@ class SimulationState:
         """
         Save the states to the hard drive.
         """
-        logger.info(f'Saving simulation state to {self.path}.')
+        if self.no_cache:
+            return
+        self._log(f'Saving simulation state to {self.path}.')
 
         for k, v in self.states.items():
             if (k in VAR_NAMES and k not in VAR_NAMES_VARIABLE_SIZE) \
@@ -405,7 +420,7 @@ class SimulationState:
 
         # Calculate anything missing
         if N > 0:
-            logger.info('Calculating approximation statistics.')
+            self._log('Calculating approximation statistics.')
             results = {k: {j: [] for j in range(N)} for k in keys}
 
             # Add some noise to the trajectories then smooth
@@ -441,7 +456,7 @@ class SimulationState:
                             results[k][j].extend(res[i][k][j])
             else:
                 for i, X in enumerate(self.states['X']):
-                    logger.info(f'Computing tumble-run model for sim={i + 1}/{self.parameters.batch_size}.')
+                    self._log(f'Computing tumble-run model for sim={i + 1}/{self.parameters.batch_size}.')
                     res_i = _compute_approximation_statistics(Xs[i], e0s[i], *common_args)
                     for k in keys:
                         for j in range(N):
@@ -485,7 +500,7 @@ class SimulationState:
         except AttributeError:
             pass
 
-        logger.info('Calculating non-planarity of trajectories.')
+        self._log('Calculating non-planarity of trajectories.')
         bs = self.parameters.batch_size
         nonp = np.zeros(bs)
         for i, X in enumerate(self.X):
@@ -509,7 +524,7 @@ class SimulationState:
         except AttributeError:
             pass
 
-        logger.info(f'Calculating non-planarity of trajectories with window size={ws}.')
+        self._log(f'Calculating non-planarity of trajectories with window size={ws}.')
         bs = self.parameters.batch_size
         nonp = np.zeros((bs, self.X.shape[1] - int(ws / 2) * 2))
         for i, X in enumerate(self.X):
