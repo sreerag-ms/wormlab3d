@@ -2,7 +2,7 @@ import gc
 import time
 from datetime import timedelta
 from multiprocessing import Pool
-from typing import Dict, Optional, Any, Union, Tuple, List
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -10,9 +10,9 @@ from progress.bar import Bar
 from scipy.signal import find_peaks
 from torch import nn
 
-from wormlab3d import logger, N_WORKERS
+from wormlab3d import N_WORKERS, logger
 from wormlab3d.midlines3d.mf_methods import normalise
-from wormlab3d.particles.particle_explorer import orthogonalise, init_dist
+from wormlab3d.particles.particle_explorer import init_dist, orthogonalise
 
 PARTICLE_PARAMETER_KEYS = ['thetas', 'phis']
 
@@ -165,6 +165,13 @@ class ThreeStateExplorer(nn.Module):
         if not self.quiet:
             getattr(logger, level)(msg)
 
+    def _progress(self, msg: str, n_steps: int) -> Optional[Bar]:
+        bar = None
+        if not self.quiet:
+            bar = Bar(msg, max=n_steps)
+            bar.check_tty = False
+        return bar
+
     def _init_particle(self, x0: Optional[torch.Tensor] = None):
         """
         Initialise the particle position and orientation.
@@ -248,13 +255,14 @@ class ThreeStateExplorer(nn.Module):
         # Generate the state transitions
         self._log('Generating state transitions.')
         states = torch.zeros((self.batch_size, n_steps))
-        bar = Bar('Generating', max=n_steps)
-        bar.check_tty = False
+        bar = self._progress('Generating', n_steps)
         for i in range(n_steps):
             self._update_state()
             states[:, i] = self.state
-            bar.next()
-        bar.finish()
+            if bar is not None:
+                bar.next()
+        if bar is not None:
+            bar.finish()
 
         # Calculate the sequences
         self._log('Calculating sequences.')
@@ -273,8 +281,7 @@ class ThreeStateExplorer(nn.Module):
         e0s[:, 0] = self.e0.clone()
         thetas = torch.zeros((self.batch_size, max_tumbles))
         phis = torch.zeros((self.batch_size, max_tumbles))
-        bar = Bar('Generating', max=max_tumbles)
-        bar.check_tty = False
+        bar = self._progress('Generating', max_tumbles)
         for i in range(max_tumbles):
             self._sample_parameters()
             self._rotate_frames(self.thetas, 'planar')
@@ -282,8 +289,10 @@ class ThreeStateExplorer(nn.Module):
             thetas[:, i] = self.thetas.clone()
             phis[:, i] = self.phis.clone()
             e0s[:, i + 1] = self.e0.clone()
-            bar.next()
-        bar.finish()
+            if bar is not None:
+                bar.next()
+        if bar is not None:
+            bar.finish()
 
         # Calculate the run durations
         self._log('Calculating run durations.')

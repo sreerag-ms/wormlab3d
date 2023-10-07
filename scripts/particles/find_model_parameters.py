@@ -1,23 +1,32 @@
 import os
+import shutil
 from argparse import Namespace
-from typing import Dict, Tuple
+from multiprocessing.pool import ThreadPool
+from pathlib import Path
+from typing import Dict, List, Tuple
 
+import dill
 import numpy as np
+import yaml
 from matplotlib import pyplot as plt
-from scipy.optimize import NonlinearConstraint, differential_evolution
+from pymoo.algorithms.soo.nonconvex.de import DE
+from pymoo.core.algorithm import Algorithm
+from pymoo.core.problem import ElementwiseProblem, StarmapParallelization
+from pymoo.operators.sampling.lhs import LHS
+from pymoo.util.display.display import Display
 from scipy.stats import kstest
 
 from simple_worm.plot3d import interactive
-from wormlab3d import LOGS_PATH, logger
+from wormlab3d import LOGS_PATH, N_WORKERS, START_TIMESTAMP, logger
 from wormlab3d.data.model import Dataset, PEParameters
-from wormlab3d.particles.cache import get_sim_state_from_args
 from wormlab3d.particles.simulation_state import SimulationState
-from wormlab3d.particles.tumble_run import find_approximation, find_approximation2, generate_or_load_ds_statistics
+from wormlab3d.particles.tumble_run import find_approximation, generate_or_load_ds_statistics
 from wormlab3d.particles.util import calculate_trajectory_frame
+from wormlab3d.toolkit.util import hash_data, print_args, to_dict
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.pca import get_pca_cache_from_args
-from wormlab3d.trajectories.util import calculate_speeds, smooth_trajectory
+from wormlab3d.trajectories.util import calculate_speeds
 
 show_plots = True
 save_plots = False
@@ -28,6 +37,8 @@ img_extension = 'svg'
 
 DATA_CACHE_PATH = LOGS_PATH / 'cache'
 DATA_CACHE_PATH.mkdir(parents=True, exist_ok=True)
+
+DIST_KEYS = ['durations', 'speeds', 'planar_angles', 'nonplanar_angles', 'twist_angles']
 
 
 def _identifiers(args: Namespace) -> str:
@@ -379,11 +390,15 @@ def _evaluate_pe(x, shared_pe_args, approx_args, data_values):
     stats = SS.get_approximation_statistics(**approx_args)
 
     # Calculate the statistical tests between the distributions
+    test_stats = np.zeros(len(data_values))
+    p_values = np.zeros(len(data_values))
     test_results = np.zeros(len(data_values))
     for i, k in enumerate(data_values.keys()):
         vals_real = data_values[k][0]
         vals_sim = stats[k][0]
         test_stat, p_value = kstest(vals_real, vals_sim)
+        test_stats[i] = test_stat
+        p_values[i] = p_value
 
         # Take the inverse log of the p-value (so smaller is better and very small p_values don't ruin the score)
         test_results[i] = np.log(1 / max(1e-20, p_value))
@@ -391,17 +406,173 @@ def _evaluate_pe(x, shared_pe_args, approx_args, data_values):
     # The score for this parameter set is the product of the test results (smaller is better)
     score = np.prod(test_results)
 
-    return score
+    return {
+        'score': score,
+        'test_stats': test_stats,
+        'p_values': p_values,
+        'test_results': test_results,
+        'vals': stats,
+    }
+
+
+class PEProblem(ElementwiseProblem):
+    def __init__(self, bounds, shared_pe_args, approx_args, data_values, **kwargs):
+        bounds = np.array(bounds)
+        self.shared_pe_args = shared_pe_args
+        self.approx_args = approx_args
+        self.data_values = data_values
+
+        super().__init__(
+            n_var=len(bounds),
+            n_obj=1,
+            n_constr=0,
+            xl=bounds[:, 0],
+            xu=bounds[:, 1],
+            **kwargs
+        )
+
+    def _evaluate(self, x, out, *args, **kwargs):
+        res = _evaluate_pe(
+            x,
+            self.shared_pe_args,
+            self.approx_args,
+            self.data_values
+        )
+
+        out['F'] = res['score']
+        out['n_runs'] = len(res['vals']['durations'][0])
+        out['n_tumbles'] = len(res['vals']['planar_angles'][0])
+        for k, v in res.items():
+            if k == 'score':
+                continue
+            if k in ['test_stats', 'p_values', 'test_results']:
+                out[k] = v
+            else:
+                for k2, v2 in v.items():
+                    out[f'{k}_{k2}'] = v2[0]
+
+    def _format_dict(self, out, N, return_values_of):
+        ret = super()._format_dict(out, N, return_values_of)
+
+        # Make the value arrays the same length
+        max_n_runs = int(ret['n_runs'].max())
+        max_n_tumbles = int(ret['n_tumbles'].max())
+        for k in DIST_KEYS:
+            if k in ['durations', 'speeds']:
+                max_length = max_n_runs
+            else:
+                max_length = max_n_tumbles
+            ret[f'vals_{k}'] = np.stack([
+                np.pad(ret[f'vals_{k}'][i], (0, max_length - len(ret[f'vals_{k}'][i])))
+                for i in range(N)
+            ])
+
+        return ret
+
+
+def _plot_population(
+        data_values: Dict[str, List[np.ndarray]],
+        algorithm: Algorithm,
+        save_dir: Path
+):
+    """
+    Plot histogram comparisons of the best scoring individuals against the real distributions.
+    """
+
+    # Select the best n individuals
+    pop = algorithm.pop.copy()
+    n_examples = min(5, len(pop))
+    scores = np.array([ind.F[0] for ind in pop])
+    positions = np.argsort(scores)
+    pop = pop[positions[:n_examples]]
+
+    # Plot histograms
+    fig, axes = plt.subplots(n_examples, 5, figsize=(12, 2 + 2 * n_examples))
+    prop_cycle = plt.rcParams['axes.prop_cycle']
+    default_colours = prop_cycle.by_key()['color']
+    colour_real = default_colours[0]
+    colour_sim = default_colours[1]
+
+    for i in range(n_examples):
+        p_vals = pop[i].get('p_values')
+        for j, k in enumerate(DIST_KEYS):
+            ax = axes[i, j]
+            vals_real = data_values[k][0]
+            vals_sim = pop[i].get(f'vals_{k}')
+            if k in ['durations', 'speeds']:
+                vals_sim = vals_sim[:int(pop[i].get('n_runs'))]
+            else:
+                vals_sim = vals_sim[:int(pop[i].get('n_tumbles'))]
+
+            # Set titles
+            if i == 0:
+                if k == 'durations':
+                    ax.set_title('Run durations')
+                elif k == 'speeds':
+                    ax.set_title('Run speeds')
+                elif k == 'planar_angles':
+                    ax.set_title('Planar angles')
+                elif k == 'nonplanar_angles':
+                    ax.set_title('Non-planar angles')
+                elif k == 'twist_angles':
+                    ax.set_title('Twist angles')
+
+            # Label individuals' scores
+            if j == 0:
+                ax.set_ylabel(f'Score={scores[positions[i]]:.3E}')
+            ax.set_xlabel(f'p={p_vals[j]:.3E}')
+
+            # Set weights for speeds
+            weights = [np.ones_like(vals_real), np.ones_like(vals_sim)]
+            if k == 'speeds':
+                durations = pop[i].get(f'vals_durations')[:int(pop[i].get('n_runs'))]
+                weights = [data_values['durations'][0], durations]
+
+            # Set bin range
+            bin_range = None
+            if k == 'planar_angles':
+                bin_range = (-np.pi, np.pi)
+            elif k == 'nonplanar_angles':
+                bin_range = (-np.pi / 2, np.pi / 2)
+            elif k == 'twist_angles':
+                bin_range = (-np.pi, np.pi)
+
+            # Set log scale for durations and speeds
+            if k in ['durations', 'speeds']:
+                ax.set_yscale('log')
+
+            ax.hist(
+                [vals_real, vals_sim],
+                weights=weights,
+                color=[colour_real, colour_sim],
+                bins=21,
+                density=True,
+                alpha=0.75,
+                range=bin_range
+            )
+            if k in ['planar_angles', 'twist_angles']:
+                ax.set_xlim(left=-np.pi - 0.1, right=np.pi + 0.1)
+                ax.set_xticks([-np.pi, 0, np.pi])
+                ax.set_xticklabels(['$-\pi$', '0', '$\pi$'])
+            if k == 'nonplanar_angles':
+                ax.set_xlim(left=-np.pi / 2 - 0.1, right=np.pi / 2 + 0.1)
+                ax.set_xticks([-np.pi / 2, np.pi / 2])
+                ax.set_xticklabels(['$-\pi/2$', '$\pi/2$'])
+
+    fig.tight_layout()
+    plt.savefig(save_dir / f'{algorithm.n_gen:05d}.png')
+    plt.close(fig)
+
 
 def _calculate_evolved_parameters(
         args: Namespace,
+        save_dir: Path,
         ds: Dataset,
 ):
     """
     Calculate the evolved parameters.
     """
     logger.info('Calculating evolved parameters.')
-    dist_keys = ['durations', 'speeds', 'planar_angles', 'nonplanar_angles', 'twist_angles']
 
     # Unset midline source args
     args.midline3d_source = None
@@ -425,24 +596,24 @@ def _calculate_evolved_parameters(
         **approx_args
     )
     # stats = trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles
-    data_values = {k: stats[i + 1] for i, k in enumerate(dist_keys)}
+    data_values = {k: stats[i + 1] for i, k in enumerate(DIST_KEYS)}
 
     # Define the initial model parameter values
     p0 = np.array([
-        0.1 * args.sim_dt,  # r01
-        0.1 * args.sim_dt,  # r10
-        0.1 * args.sim_dt,  # r02
-        0.8,  # r20
-        0.001,  # speed0_mu
-        0.0005,  # speed0_sig
-        0.007,  # speed1_mu
-        0.001,  # speed1_sig
-        1.,  # theta_w1
-        1.25,  # theta_sig1
-        0.35,  # theta_w2
-        0.8,  # theta_sig2
-        0.3,  # phi_sig
-        5,  # delta_max
+        args.rate_01 * args.sim_dt,
+        args.rate_10 * args.sim_dt,
+        args.rate_02 * args.sim_dt,
+        args.rate_20,
+        args.speeds_0_mu,
+        args.speeds_0_sig,
+        args.speeds_1_mu,
+        args.speeds_1_sig,
+        args.theta_dist_params[0],  # theta_w1
+        args.theta_dist_params[2],  # theta_sig1
+        args.theta_dist_params[3],  # theta_w2
+        args.theta_dist_params[5],  # theta_sig2
+        args.phi_dist_params[1],  # phi_sig
+        args.nonp_pause_max,  # delta_max
     ])
 
     # Define the bounds
@@ -479,31 +650,109 @@ def _calculate_evolved_parameters(
     approx_args['noise_scale'] = args.approx_noise
     approx_args['smoothing_window'] = args.smoothing_window
 
-    # Minimize the objective function
-    logger.info('Running differential evolution.')
-    result = differential_evolution(
-        _evaluate_pe,
+    # Initialize the thread pool and create the runner
+    pool = ThreadPool(N_WORKERS)
+    runner = StarmapParallelization(pool.starmap)
+
+    # Initialise problem
+    problem = PEProblem(
         bounds,
-        args=(shared_pe_args, approx_args, data_values),
-        strategy='best1bin',
-        x0=p0,
-        workers=1,
-        disp=True,
-        popsize=2,
-        maxiter=2,
-        # tol=0.1,
-        # atol=0,
-        constraints=[
-            NonlinearConstraint(lambda x: x[6] - x[4], 0, np.inf),  # slow speed < fast speed
-        ]
+        shared_pe_args,
+        approx_args,
+        data_values,
+        elementwise_runner=runner
     )
 
+    # Algorithm setup
+    algorithm_args = dict(
+        pop_size=args.pop_size,
+        variant=args.de_variant,
+        CR=args.de_cr,
+        dither='vector',
+        jitter=False,
+    )
+
+    # Check for a checkpoint
+    extra_args = {
+        'p0': p0,
+        'bounds': bounds,
+        'shared_pe_args': shared_pe_args,
+        'approx_args': approx_args,
+        'data_values': data_values,
+        'algorithm_args': algorithm_args,
+    }
+    checkpoint_path = (DATA_CACHE_PATH
+                       / ('evolved_checkpoint_' + hash_data(to_dict(args)) + '_' + hash_data(extra_args) + '.cp'))
+    algorithm = None
+    if checkpoint_path.exists():
+        try:
+            with open(checkpoint_path, 'rb') as f:
+                algorithm = dill.load(f)
+                algorithm.display = Display(algorithm.output, verbose=algorithm.verbose, progress=algorithm.progress)
+            logger.info(f'Restored checkpoint from {checkpoint_path} at generation {algorithm.n_gen}.')
+        except Exception as e:
+            logger.warning(f'Could not load checkpoint: {e}')
+    if algorithm is None:
+        # Set up optimisation algorithm
+        algorithm = DE(**algorithm_args, sampling=LHS())
+        algorithm.setup(
+            problem,
+            seed=1,
+            termination=('n_gen', args.n_generations),
+            verbose=True,
+            progress=True
+        )
+
+    # Set up the plot directories
+    hist_plots_dir = save_dir / 'histograms'
+    hist_plots_dir.mkdir(parents=True, exist_ok=True)
+    params_dir = save_dir / 'parameters'
+    params_dir.mkdir(parents=True, exist_ok=True)
+
+    # Minimize the objective function
+    logger.info('Running optimisation.')
+    display = algorithm.display
+    while algorithm.has_next():
+        algorithm.next()
+
+        # Make plots
+        _plot_population(data_values, algorithm, hist_plots_dir)
+
+        # Save the checkpoint
+        with open(checkpoint_path, 'wb') as f:
+            algorithm.display = None
+            dill.dump(algorithm, f)
+            algorithm.display = display
+
+        # Save the best parameters
+        opt = algorithm.opt[0]
+        opd = to_dict(opt)['data']
+        opd['rate_01'] = opt.x[0] / args.sim_dt
+        opd['rate_10'] = opt.x[1] / args.sim_dt
+        opd['rate_02'] = opt.x[2] / args.sim_dt
+        opd['rate_20'] = opt.x[3]
+        opd['speeds_0_mu'] = opt.x[4]
+        opd['speeds_0_sig'] = opt.x[5]
+        opd['speeds_1_mu'] = opt.x[6]
+        opd['speeds_1_sig'] = opt.x[7]
+        opd['theta_w1'] = opt.x[8]
+        opd['theta_sig1'] = opt.x[9]
+        opd['theta_w2'] = opt.x[10]
+        opd['theta_sig2'] = opt.x[11]
+        opd['phi_sig'] = opt.x[12]
+        opd['delta_max'] = opt.x[13]
+        for key, value in opd.items():
+            if isinstance(value, np.ndarray) or isinstance(value, np.generic):
+                opd[key] = value.tolist()
+        with open(params_dir / f'{algorithm.n_gen:05d}.yml', 'w') as f:
+            yaml.dump(opd, f)
+
     logger.info('Optimisation complete.')
-    print(result)
 
 
 def _generate_or_load_evolved_params(
         args: Namespace,
+        save_dir: Path,
         rebuild_cache: bool = False,
         cache_only: bool = False
 ) -> Tuple[
@@ -517,7 +766,7 @@ def _generate_or_load_evolved_params(
     """
     logger.info('Fetching dataset.')
     ds = Dataset.objects.get(id=args.dataset)
-    cache_path = DATA_CACHE_PATH / ('evolved' + _identifiers(args))
+    cache_path = DATA_CACHE_PATH / ('evolved' + hash_data(to_dict(args)))
     cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
     T = None
     if not rebuild_cache and cache_fn.exists():
@@ -535,7 +784,7 @@ def _generate_or_load_evolved_params(
         if cache_only:
             raise RuntimeError(f'Cache "{cache_fn}" could not be loaded!')
         logger.info('Generating data.')
-        low_speeds, high_speeds, T = _calculate_evolved_parameters(args, ds)
+        low_speeds, high_speeds, T = _calculate_evolved_parameters(args, save_dir, ds)
         data = {
             'low_speeds': low_speeds,
             'high_speeds': high_speeds,
@@ -562,16 +811,36 @@ def evolve_parameters():
         include_pe_options=True,
         include_fractal_dim_options=False,
         include_video_options=False,
+        include_evolution_options=True,
         validate_source=True,
     )
+
+    # Load arguments from spec file
+    if (LOGS_PATH / 'spec.yml').exists():
+        with open(LOGS_PATH / 'spec.yml') as f:
+            spec = yaml.load(f, Loader=yaml.FullLoader)
+        for k, v in spec.items():
+            assert hasattr(args, k), f'{k} is not a valid argument!'
+            setattr(args, k, v)
+    print_args(args)
 
     assert args.batch_size is not None, 'Must provide a batch size!'
     assert args.sim_duration is not None, 'Must provide a simulation duration!'
     assert args.sim_dt is not None, 'Must provide a simulation time step!'
     assert args.approx_noise is not None, 'Must provide an approximation noise level!'
 
+    # Create output directory
+    save_dir = LOGS_PATH / f'{START_TIMESTAMP}_{hash_data(to_dict(args))}'
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save the arguments
+    if (LOGS_PATH / 'spec.yml').exists():
+        shutil.copy(LOGS_PATH / 'spec.yml', save_dir / 'spec.yml')
+    with open(save_dir / 'args.yml', 'w') as f:
+        yaml.dump(to_dict(args), f)
+
     # Generate or load data
-    res = _generate_or_load_evolved_params(args, rebuild_cache=True, cache_only=False)
+    res = _generate_or_load_evolved_params(args, save_dir, rebuild_cache=True, cache_only=False)
 
 
 if __name__ == '__main__':

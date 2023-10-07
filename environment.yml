@@ -22,13 +22,14 @@ dependencies:
   - pims = 0.5
   - progress = 1.6
   - pymongo = 3.11
+  - pymoo = 0.6
+  - pyro-ppl = 1.8
   - python-blosc = 1.10
   - python-dotenv = 0.16
   - pytorch = 1.10
   - scikit-image = 0.18
   - scikit-learn = 0.24
   - scipy = 1.8
-  - snakemake
   - tensorboard = 2.4
   - torchvision = 0.11
   - pip

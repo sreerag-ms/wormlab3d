@@ -129,7 +129,7 @@ def print_args(args: Namespace):
 
 class NumpyCompatibleJSONEncoder(JSONEncoder):
     def default(self, obj):
-        if isinstance(obj, np.generic):
+        if isinstance(obj, np.generic) or isinstance(obj, np.ndarray):
             return obj.tolist()
         return JSONEncoder.default(self, obj)
 

@@ -18,6 +18,7 @@ def get_args(
         include_pe_options: bool = True,
         include_fractal_dim_options: bool = True,
         include_video_options: bool = True,
+        include_evolution_options: bool = True,
         validate_source: bool = True
 ) -> Namespace:
     """
@@ -66,7 +67,8 @@ def get_args(
         parser.add_argument('--min-delta', type=int, default=1, help='Minimum time lag.')
         parser.add_argument('--max-delta', type=int, default=10000, help='Maximum time lag.')
         parser.add_argument('--delta-step', type=float, default=1, help='Step between deltas. -ve=exponential steps.')
-        parser.add_argument('--min-duration', type=int, default=-1, help='Min trajectory duration to include. -ve=include all.')
+        parser.add_argument('--min-duration', type=int, default=-1,
+                            help='Min trajectory duration to include. -ve=include all.')
         parser.add_argument('--aggregation', type=str, choices=DISPLACEMENT_AGGREGATION_OPTIONS,
                             default=DISPLACEMENT_AGGREGATION_SQUARED_SUM,
                             help='Displacements can be taken as L2 norms or as the squared sum of components.')
@@ -176,6 +178,12 @@ def get_args(
     if include_video_options:
         parser.add_argument('--video-width', type=int, default=1920, help='Width of video in pixels.')
         parser.add_argument('--video-height', type=int, default=1080, help='Height of video in pixels.')
+
+    if include_evolution_options:
+        parser.add_argument('--n-generations', type=int, default=10, help='Number of generations to run.')
+        parser.add_argument('--pop-size', type=int, default=5, help='Population size.')
+        parser.add_argument('--de-variant', type=str, default='DE/rand/1/bin', help='DE variant.')
+        parser.add_argument('--de-cr', type=float, default=0.3, help='DE crossover rate.')
 
     args = parser.parse_args()
 

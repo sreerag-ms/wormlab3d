@@ -25,6 +25,8 @@ setup(
         'pims >= 0.5, <= 0.6',
         'progress >= 1.6, < 2.0',
         'pymongo >= 3.11, < 3.12',
+        'pymoo >= 0.6, < 0.7',
+        'pyro-ppl >= 1.8, < 1.9',
         'blosc >= 1.10, < 1.11',
         'python-dotenv >= 0.16, < 1',
         'torch >= 1.10, < 1.11',
