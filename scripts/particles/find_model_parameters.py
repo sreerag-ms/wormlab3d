@@ -812,7 +812,7 @@ def evolve_parameters():
         include_fractal_dim_options=False,
         include_video_options=False,
         include_evolution_options=True,
-        validate_source=True,
+        validate_source=False,
     )
 
     # Load arguments from spec file
