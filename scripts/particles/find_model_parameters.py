@@ -400,11 +400,14 @@ def _evaluate_pe(x, shared_pe_args, approx_args, data_values):
         test_stats[i] = test_stat
         p_values[i] = p_value
 
-        # Take the inverse log of the p-value (so smaller is better and very small p_values don't ruin the score)
-        test_results[i] = np.log(1 / max(1e-20, p_value))
+        # Prioritise the run statistics
+        if k in ['durations', 'speeds']:
+            test_results[i] = test_stat**2
+        else:
+            test_results[i] = 0.5 * test_stat**2
 
-    # The score for this parameter set is the product of the test results (smaller is better)
-    score = np.prod(test_results)
+    # The score for this parameter set is the sum of the test results (smaller is better)
+    score = np.sum(test_results)
 
     return {
         'score': score,
@@ -425,7 +428,7 @@ class PEProblem(ElementwiseProblem):
         super().__init__(
             n_var=len(bounds),
             n_obj=1,
-            n_constr=0,
+            n_ieq_constr=1,
             xl=bounds[:, 0],
             xu=bounds[:, 1],
             **kwargs
@@ -450,6 +453,9 @@ class PEProblem(ElementwiseProblem):
             else:
                 for k2, v2 in v.items():
                     out[f'{k}_{k2}'] = v2[0]
+
+        # Add constraint for speed0 < speed1
+        out["G"] = x[4] - x[6]
 
     def _format_dict(self, out, N, return_values_of):
         ret = super()._format_dict(out, N, return_values_of)
@@ -494,7 +500,7 @@ def _plot_population(
     colour_sim = default_colours[1]
 
     for i in range(n_examples):
-        p_vals = pop[i].get('p_values')
+        D_vals = pop[i].get('test_stats')
         for j, k in enumerate(DIST_KEYS):
             ax = axes[i, j]
             vals_real = data_values[k][0]
@@ -520,7 +526,7 @@ def _plot_population(
             # Label individuals' scores
             if j == 0:
                 ax.set_ylabel(f'Score={scores[positions[i]]:.3E}')
-            ax.set_xlabel(f'p={p_vals[j]:.3E}')
+            ax.set_xlabel(f'D={D_vals[j]:.3E}')
 
             # Set weights for speeds
             weights = [np.ones_like(vals_real), np.ones_like(vals_sim)]
@@ -689,6 +695,7 @@ def _calculate_evolved_parameters(
             with open(checkpoint_path, 'rb') as f:
                 algorithm = dill.load(f)
                 algorithm.display = Display(algorithm.output, verbose=algorithm.verbose, progress=algorithm.progress)
+            algorithm.problem.elementwise_runner = runner
             logger.info(f'Restored checkpoint from {checkpoint_path} at generation {algorithm.n_gen}.')
         except Exception as e:
             logger.warning(f'Could not load checkpoint: {e}')
