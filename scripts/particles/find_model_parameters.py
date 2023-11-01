@@ -455,7 +455,7 @@ class PEProblem(ElementwiseProblem):
                     out[f'{k}_{k2}'] = v2[0]
 
         # Add constraint for speed0 < speed1
-        out["G"] = x[4] - x[6]
+        out['G'] = x[4] - x[6]
 
     def _format_dict(self, out, N, return_values_of):
         ret = super()._format_dict(out, N, return_values_of)
@@ -623,7 +623,7 @@ def _calculate_evolved_parameters(
     ])
 
     # Define the bounds
-    eps = 1e-3
+    eps = 1e-5
     bounds = [
         (eps, 1 - eps),  # r01
         (eps, 1 - eps),  # r10
@@ -734,9 +734,9 @@ def _calculate_evolved_parameters(
         # Save the best parameters
         opt = algorithm.opt[0]
         opd = to_dict(opt)['data']
-        opd['rate_01'] = opt.x[0] / args.sim_dt
-        opd['rate_10'] = opt.x[1] / args.sim_dt
-        opd['rate_02'] = opt.x[2] / args.sim_dt
+        opd['rate_01'] = opt.x[0]
+        opd['rate_10'] = opt.x[1]
+        opd['rate_02'] = opt.x[2]
         opd['rate_20'] = opt.x[3]
         opd['speeds_0_mu'] = opt.x[4]
         opd['speeds_0_sig'] = opt.x[5]
