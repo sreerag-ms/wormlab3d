@@ -614,7 +614,7 @@ def plot_bishop_frame_components_for_trial():
         error_limit = 0.02
         e0, e1, e2 = calculate_trajectory_frame(X, pca_window=args.planarity_window)
         approx, distance, height, smooth_e0, smooth_K \
-            = find_approximation(X, e0, error_limit=error_limit, max_attempts=50)
+            = find_approximation(X, e0, error_limit=error_limit, max_iterations=50)
         X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles_j, nonplanar_angles_j, twist_angles_j, e0, e1, e2 = approx
 
         deltas = np.arange(2, 5, step=1)
@@ -645,7 +645,7 @@ def plot_bishop_frame_components_for_trial():
         error_limit = 0.0005
         e0, e1, e2 = calculate_trajectory_frame(X, pca_window=args.planarity_window)
         approx, distance, height, smooth_e0, smooth_K \
-            = find_approximation(X, e0, error_limit=error_limit, max_attempts=50)
+            = find_approximation(X, e0, error_limit=error_limit, max_iterations=50)
         X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles_j, nonplanar_angles_j, twist_angles_j, _, _, _ = approx
 
         nf = calculate_bishop_frame_components(vertices, smooth_K)

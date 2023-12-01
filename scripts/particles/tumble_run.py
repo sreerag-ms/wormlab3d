@@ -193,7 +193,7 @@ def _plot_trial_approximations(
                 = get_approximate(X, k, distance=loop_var)
         else:
             approx, distance, height, smooth_e0, smooth_K \
-                = find_approximation(X, e0_raw, loop_var, max_attempts=50, distance_first=100, smooth_e0_first=251,
+                = find_approximation(X, e0_raw, loop_var, max_iterations=50, distance_first=100, smooth_e0_first=251,
                                      smooth_K_first=251)
             # approx, distance, height, smooth_e0, smooth_K \
             #     = find_approximation2(X, e0_raw, loop_var, max_attempts=50)
@@ -347,7 +347,7 @@ def plot_coefficients_of_variation():
         for j, error_limit in enumerate(error_limits):
             approx, distance, height, smooth_e0, smooth_K \
                 = find_approximation(X, e0, error_limit, args.planarity_window_vertices,
-                                     distance, distance_min, height, smooth_e0, smooth_K, max_attempts=10)
+                                     distance, distance_min, height, smooth_e0, smooth_K, max_iterations=10)
             X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles, nonplanar_angles, twist_angles, _, _, _ = approx
 
             # cov[:, i, j] = [
@@ -814,6 +814,7 @@ def dataset_against_three_state_histogram_comparison(
 
     # Set the approximation parameters
     approx_args = dict(
+        approx_method=args.approx_method,
         error_limits=error_limits,
         min_run_speed_duration=min_run_speed_duration,
         distance_first=args.approx_distance,
@@ -823,7 +824,7 @@ def dataset_against_three_state_histogram_comparison(
     )
 
     # Generate or load tumble/run values
-    trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles = generate_or_load_ds_statistics(
+    trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles, tumble_idxs = generate_or_load_ds_statistics(
         ds=ds,
         rebuild_cache=args.regenerate,
         **approx_args
@@ -1168,6 +1169,55 @@ def dataset_histograms(
         plt.show()
 
 
+def plot_bisect_approximation_convergence():
+    """
+    Plot the tumble-run approximations and show the iterative convergences for the bisect method.
+    """
+    from wormlab3d.particles.tumble_run_bisect import find_approximation_bisect
+    args = get_args(validate_source=False)
+    assert args.dataset is not None
+    assert args.planarity_window is not None
+    ds = Dataset.objects.get(id=args.dataset)
+    # error_limits = np.array([0.5, 0.2, 0.1, 0.05, 0.01])
+    error_limits = np.array([0.01, ])
+
+    # Unset midline source args
+    args.midline3d_source = None
+    args.midline3d_source_file = None
+    args.tracking_only = True
+
+    # Set up plot output directory
+    save_dir = LOGS_PATH / 'approximation_convergence' / START_TIMESTAMP
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    # Calculate the approximation for all trials
+    for i, trial in enumerate(ds.include_trials):
+        if trial.id == 65:
+            continue
+        logger.info(f'Computing tumble-run model for trial={trial.id}.')
+        args.trial = trial.id
+        X = get_trajectory_from_args(args)
+        pcas = get_pca_cache_from_args(args)
+        e0, e1, e2 = calculate_trajectory_frame(X, pcas, args.planarity_window)
+
+        for j, error_limit in enumerate(error_limits):
+            plot_dir_ij = save_dir / f'error_threshold={error_limit:.2f}' / f'trial={trial.id:03d}'
+            plot_dir_ij.mkdir(parents=True, exist_ok=True)
+
+            find_approximation_bisect(
+                X=X,
+                e0=e0,
+                error_limit=error_limit,
+                planarity_window_vertices=args.planarity_window_vertices,
+                min_curvature=args.approx_curvature_height,
+                smooth_e0=args.smoothing_window_K,
+                smooth_K=args.smoothing_window_K,
+                max_iterations=50,
+                plot_dir=plot_dir_ij,
+                plot_every_n_changes=50
+            )
+
+
 if __name__ == '__main__':
     # from simple_worm.plot3d import interactive
     # interactive()
@@ -1186,9 +1236,11 @@ if __name__ == '__main__':
     # dataset_against_three_state_msd_comparison(resample_durations=True)
     dataset_against_three_state_histogram_comparison(
         use_approximation_stats=True,
-        plot_sweep=False,
-        plot_basic=True,
+        plot_sweep=True,
+        plot_basic=False,
         layout='thesis'
     )
 
     # dataset_histograms(error_limit=0.05)
+
+    # plot_bisect_approximation_convergence()

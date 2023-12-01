@@ -1,3 +1,4 @@
+import json
 from argparse import Namespace
 from typing import Dict, List, Tuple, Union
 
@@ -7,12 +8,14 @@ from scipy.spatial.transform import Rotation
 
 from wormlab3d import LOGS_PATH, logger
 from wormlab3d.data.model import Dataset
+from wormlab3d.particles.tumble_run_bisect import find_approximation_bisect
 from wormlab3d.particles.util import calculate_trajectory_frame
 from wormlab3d.toolkit.util import normalise, orthogonalise
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.pca import PCACache, calculate_pcas, get_pca_cache_from_args
-from wormlab3d.trajectories.util import get_deltas_from_args, smooth_trajectory
+from wormlab3d.trajectories.util import APPROXIMATION_METHOD_BISECT, APPROXIMATION_METHOD_FIND_PEAKS, \
+    get_deltas_from_args, smooth_trajectory
 
 
 def calculate_curvature(
@@ -189,7 +192,7 @@ def get_approximate(
     return X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles, nonplanar_angles, twist_angles, e0, e1, e2
 
 
-def find_approximation2(
+def find_approximation2_old(
         X: np.ndarray,
         e0: np.ndarray,
         error_limit: float,
@@ -216,7 +219,7 @@ def find_approximation2(
     T = len(X)
 
     def build_approx(X_section, tumble_idxs):
-        # Build the approximation and calculate run durations
+        # Build the approximation
         X_approx = np.zeros_like(X_section)
         X_approx[0] = X_section[0]
         x = X_section[0]
@@ -365,7 +368,7 @@ def find_approximation(
         height_first: int = 50,
         smooth_e0_first: int = 101,
         smooth_K_first: int = 101,
-        max_attempts: int = 10,
+        max_iterations: int = 10,
         quiet: bool = False
 ):
     """
@@ -374,7 +377,7 @@ def find_approximation(
     if not quiet:
         logger.info(f'Finding approximation at error limit={error_limit:.3f}.')
     mse = np.inf
-    attempts = 0
+    iteration = 0
 
     if X.ndim == 3:
         X = X.mean(axis=1)
@@ -385,7 +388,7 @@ def find_approximation(
     smooth_e0 = smooth_e0_first
     smooth_K = smooth_K_first
 
-    while mse > error_limit and attempts < max_attempts:
+    while mse > error_limit and iteration < max_iterations:
         k = calculate_curvature(e0, smooth_e0=smooth_e0, smooth_K=smooth_K)
 
         # Calculate the approximation, tumbles and runs
@@ -398,7 +401,7 @@ def find_approximation(
                 logger.warning(e)
             mse = np.inf
 
-        attempts += 1
+        iteration += 1
 
         if mse > error_limit:
             distance = max(distance_min, distance - 10)
@@ -416,6 +419,7 @@ def find_approximation(
 def generate_or_load_ds_statistics(
         ds: Dataset,
         error_limits: Union[np.ndarray, List[float]],
+        approx_method: str = APPROXIMATION_METHOD_FIND_PEAKS,
         min_run_speed_duration: Tuple[float, float] = (0.01, 60.),
         planarity_window: int = 3,
         distance_first: int = 500,
@@ -424,21 +428,26 @@ def generate_or_load_ds_statistics(
         smooth_e0_first: int = 201,
         smooth_K_first: int = 201,
         rebuild_cache: bool = False
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[List[int]]]:
     """
     Generate or load tumble/run values
     """
-    cache_path = LOGS_PATH / (f'ds={ds.id}'
-                              f'_errors={",".join([str(err) for err in error_limits])}'
-                              f'_mrsd={min_run_speed_duration[0]:.2f},{min_run_speed_duration[1]:.1f}'
-                              f'_pw={planarity_window}'
-                              f'_df={distance_first}'
-                              f'_dm={distance_min}'
-                              f'_hf={height_first}'
-                              f'_se0f={smooth_e0_first}'
-                              f'_skf={smooth_K_first}')
+    id_str = (f'ds={ds.id}'
+              f'_method={approx_method}'
+              f'_errors={",".join([str(err) for err in error_limits])}'
+              f'_mrsd={min_run_speed_duration[0]:.2f},{min_run_speed_duration[1]:.1f}'
+              f'_pw={planarity_window}'
+              f'_hf={height_first}'
+              f'_se0f={smooth_e0_first}'
+              f'_skf={smooth_K_first}')
+
+    if approx_method == APPROXIMATION_METHOD_FIND_PEAKS:
+        id_str += f'_df={distance_first}_dm={distance_min}'
+
+    cache_path = LOGS_PATH / id_str
     cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
-    if not rebuild_cache and cache_fn.exists():
+    tumble_idxs_fn = cache_path.with_suffix(cache_path.suffix + '.json')
+    if not rebuild_cache and cache_fn.exists() and tumble_idxs_fn.exists():
         data = np.load(cache_fn)
         trajectory_lengths = data[f'trajectory_lengths'].astype(np.uint32)
         durations = [data[f'durations_{i}'] for i in range(len(error_limits))]
@@ -446,12 +455,15 @@ def generate_or_load_ds_statistics(
         planar_angles = [data[f'planar_angles_{i}'] for i in range(len(error_limits))]
         nonplanar_angles = [data[f'nonplanar_angles_{i}'] for i in range(len(error_limits))]
         twist_angles = [data[f'twist_angles_{i}'] for i in range(len(error_limits))]
+        with open(tumble_idxs_fn, 'r') as f:
+            tumble_idxs = json.load(f)
         logger.info(f'Loaded dataset statistics from {cache_fn}.')
     else:
         logger.info(f'Calculating dataset statistics.')
-        trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles = _calculate_dataset_values(
+        trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles, tumble_idxs = _calculate_dataset_values(
             ds=ds,
             error_limits=error_limits,
+            approx_method=approx_method,
             min_run_speed_duration=min_run_speed_duration,
             distance_first=distance_first,
             distance_min=distance_min,
@@ -467,8 +479,10 @@ def generate_or_load_ds_statistics(
             save_arrs[f'nonplanar_angles_{i}'] = nonplanar_angles[i]
             save_arrs[f'twist_angles_{i}'] = twist_angles[i]
         np.savez(cache_path, **save_arrs)
+        with open(tumble_idxs_fn, 'w') as f:
+            json.dump(tumble_idxs, f)
 
-    return trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles
+    return trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles, tumble_idxs
 
 
 def generate_or_load_ds_msds(
@@ -510,6 +524,7 @@ def generate_or_load_ds_msds(
 def _calculate_dataset_values(
         ds: Dataset,
         error_limits: Union[np.ndarray, List[float]],
+        approx_method: str = APPROXIMATION_METHOD_FIND_PEAKS,
         min_run_speed_duration: Tuple[float, float] = (0.01, 60.),
         distance_first: int = 500,
         distance_min: int = 3,
@@ -522,7 +537,8 @@ def _calculate_dataset_values(
     Dict[int, np.ndarray],
     Dict[int, np.ndarray],
     Dict[int, np.ndarray],
-    Dict[int, np.ndarray]
+    Dict[int, np.ndarray],
+    Dict[int, List[int]]
 ]:
     """
     Calculate the tumble/run approximation values across a dataset.
@@ -542,6 +558,7 @@ def _calculate_dataset_values(
     planar_angles = {i: [] for i in range(len(error_limits))}
     nonplanar_angles = {i: [] for i in range(len(error_limits))}
     twist_angles = {i: [] for i in range(len(error_limits))}
+    tumble_idxs = {i: [] for i in range(len(error_limits))}
 
     # Calculate the model for all trials
     for i, trial in enumerate(ds.include_trials):
@@ -566,10 +583,38 @@ def _calculate_dataset_values(
         smooth_K = smooth_K_first
 
         for j, error_limit in enumerate(error_limits):
-            approx, distance, height, smooth_e0, smooth_K \
-                = find_approximation(X, e0, error_limit, args.planarity_window_vertices, distance, distance_min,
-                                     height, smooth_e0, smooth_K, max_attempts=50)
-            X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles_j, nonplanar_angles_j, twist_angles_j, _, _, _ = approx
+            shared_args = dict(
+                X=X,
+                e0=e0,
+                error_limit=error_limit,
+                planarity_window_vertices=args.planarity_window_vertices,
+                max_iterations=50,
+                quiet=False
+            )
+
+            if approx_method == APPROXIMATION_METHOD_FIND_PEAKS:
+                approx, distance, height, smooth_e0, smooth_K = find_approximation(
+                    distance_first=distance,
+                    distance_min=distance_min,
+                    height_first=height,
+                    smooth_e0_first=smooth_e0,
+                    smooth_K_first=smooth_K,
+                    **shared_args,
+                )
+
+            elif approx_method == APPROXIMATION_METHOD_BISECT:
+                approx = find_approximation_bisect(
+                    min_curvature=height,
+                    smooth_e0=smooth_e0,
+                    smooth_K=smooth_K,
+                    **shared_args,
+                )
+
+            else:
+                raise ValueError(f'Invalid approximation method: {approx_method}')
+
+            # Unpack approximation variables
+            X_approx, vertices, tumble_idxs_j, run_durations, run_speeds, planar_angles_j, nonplanar_angles_j, twist_angles_j, _, _, _ = approx
 
             # Put in time units
             run_durations *= dt
@@ -590,8 +635,9 @@ def _calculate_dataset_values(
             planar_angles[j].extend(planar_angles_j.tolist())
             nonplanar_angles[j].extend(nonplanar_angles_j.tolist())
             twist_angles[j].extend(twist_angles_j.tolist())
+            tumble_idxs[j].append(tumble_idxs_j.tolist())
 
-    return trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles
+    return trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles, tumble_idxs
 
 
 def _calculate_dataset_msds():

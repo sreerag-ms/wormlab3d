@@ -3,7 +3,7 @@ import os
 import shutil
 from multiprocessing import Pool
 from pathlib import Path
-from typing import Dict, Any, List, Union, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -11,14 +11,15 @@ from progress.bar import Bar
 from scipy.stats import norm
 from sklearn.decomposition import PCA
 
-from wormlab3d import logger, PE_CACHE_PATH, N_WORKERS
+from wormlab3d import N_WORKERS, PE_CACHE_PATH, logger
 from wormlab3d.data.model import PEParameters
 from wormlab3d.particles.fractal_dimensions import calculate_box_dimension
 from wormlab3d.particles.three_state_explorer import ThreeStateExplorer
 from wormlab3d.particles.tumble_run import find_approximation
+from wormlab3d.particles.tumble_run_bisect import find_approximation_bisect
 from wormlab3d.toolkit.util import hash_data, normalise
-from wormlab3d.trajectories.pca import calculate_pcas, PCACache
-from wormlab3d.trajectories.util import smooth_trajectory
+from wormlab3d.trajectories.pca import PCACache, calculate_pcas
+from wormlab3d.trajectories.util import APPROXIMATION_METHOD_BISECT, APPROXIMATION_METHOD_FIND_PEAKS, smooth_trajectory
 
 VAR_NAMES = [
     'ts',
@@ -69,6 +70,7 @@ def _compute_approximation_statistics(
         e0: np.ndarray,
         dt: float,
         error_limits: List[float],
+        approx_method: str,
         planarity_window_vertices: int,
         min_run_speed_duration: Tuple[float, float],
         distance_first,
@@ -89,9 +91,36 @@ def _compute_approximation_statistics(
     smooth_K = smooth_K_first
 
     for j, error_limit in enumerate(error_limits):
-        approx, distance, height, smooth_e0, smooth_K \
-            = find_approximation(X, e0, error_limit, planarity_window_vertices, distance, distance_min, height,
-                                 smooth_e0, smooth_K, max_attempts=50, quiet=True)
+        shared_args = dict(
+            X=X,
+            e0=e0,
+            error_limit=error_limit,
+            planarity_window_vertices=planarity_window_vertices,
+            max_iterations=50,
+            quiet=True
+        )
+
+        if approx_method == APPROXIMATION_METHOD_FIND_PEAKS:
+            approx, distance, height, smooth_e0, smooth_K = find_approximation(
+                distance_first=distance,
+                distance_min=distance_min,
+                height_first=height,
+                smooth_e0_first=smooth_e0,
+                smooth_K_first=smooth_K,
+                **shared_args,
+            )
+
+        elif approx_method == APPROXIMATION_METHOD_BISECT:
+            approx = find_approximation_bisect(
+                min_curvature=height,
+                smooth_e0=smooth_e0,
+                smooth_K=smooth_K,
+                **shared_args,
+            )
+
+        else:
+            raise ValueError(f'Invalid approximation method: {approx_method}')
+
         X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles_j, nonplanar_angles_j, twist_angles_j, _, _, _ = approx
 
         # Put in time units
@@ -387,6 +416,7 @@ class SimulationState:
             noise_scale: Optional[float],
             smoothing_window: Optional[int],
             planarity_window: int,
+            approx_method: str = APPROXIMATION_METHOD_FIND_PEAKS,
             min_run_speed_duration: Tuple[float, float] = (0.01, 60.),
             distance_first: int = 500,
             height_first: int = 100,
@@ -436,6 +466,7 @@ class SimulationState:
             common_args = [
                 self.parameters.dt,
                 error_limits,
+                approx_method,
                 planarity_window,
                 min_run_speed_duration,
                 distance_first,

@@ -187,7 +187,7 @@ def _plot_sim_approximations(
                 = get_approximate(X, k, distance=loop_var)
         else:
             approx, distance, height, smooth_e0, smooth_K \
-                = find_approximation(X, e0_raw, loop_var, max_attempts=50)
+                = find_approximation(X, e0_raw, loop_var, max_iterations=50)
             X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles, nonplanar_angles, twist_angles, e0, e1, e2 = approx
 
         # Plot approximation

@@ -64,7 +64,7 @@ def calculate_trial_turn_statistics(
             planarity_window_vertices=args.planarity_window_vertices,
             distance_first=args.approx_distance,
             distance_min=w2,
-            max_attempts=args.approx_max_attempts,
+            max_iterations=args.approx_max_attempts,
             quiet=False
         )
         X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles, nonplanar_angles, twist_angles, e0, e1, e2 = approx

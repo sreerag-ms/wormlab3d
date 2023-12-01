@@ -5,6 +5,7 @@ from wormlab3d.data.model.midline3d import M3D_SOURCES, M3D_SOURCE_MF
 from wormlab3d.particles.args.parameter_args import ParameterArgs
 from wormlab3d.toolkit.util import str2bool
 from wormlab3d.trajectories.displacement import DISPLACEMENT_AGGREGATION_OPTIONS, DISPLACEMENT_AGGREGATION_SQUARED_SUM
+from wormlab3d.trajectories.util import APPROXIMATION_METHODS, APPROXIMATION_METHOD_FIND_PEAKS
 
 
 def get_args(
@@ -106,6 +107,8 @@ def get_args(
 
     # Approximation arguments
     if include_approximation_options:
+        parser.add_argument('--approx-method', type=str, choices=APPROXIMATION_METHODS, default=APPROXIMATION_METHOD_FIND_PEAKS,
+                            help='Approximation algorithm.')
         parser.add_argument('--approx-error-limit', type=float,
                             help='Target approximation error.')
         parser.add_argument('--smoothing-window-K', type=int, default=101,

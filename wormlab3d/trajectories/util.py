@@ -10,6 +10,13 @@ DEFAULT_FPS = 25
 TRAJECTORY_CACHE_PATH = DATA_PATH / 'trajectory_cache'
 SMOOTHING_WINDOW_TYPES = ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']
 
+APPROXIMATION_METHOD_FIND_PEAKS = 'find_peaks'
+APPROXIMATION_METHOD_BISECT = 'bisect'
+APPROXIMATION_METHODS = [
+    APPROXIMATION_METHOD_FIND_PEAKS,
+    APPROXIMATION_METHOD_BISECT
+]
+
 
 def smooth_trajectory(X: np.ndarray, window_len: int = 5, window_type: str = 'flat') -> np.ndarray:
     """

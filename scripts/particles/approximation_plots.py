@@ -261,7 +261,7 @@ def plot_approximations(
             height_first=args.beta0,
             smooth_e0_first=args.alpha0,
             smooth_K_first=args.alpha0,
-            max_attempts=100
+            max_iterations=100
         )
         vertices = approx[1]
         tumble_idxs = approx[2]
