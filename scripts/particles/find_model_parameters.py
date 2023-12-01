@@ -29,9 +29,9 @@ from wormlab3d.trajectories.pca import get_pca_cache_from_args
 from wormlab3d.trajectories.util import calculate_speeds
 
 show_plots = True
-save_plots = False
+# save_plots = False
 # show_plots = False
-# save_plots = True
+save_plots = True
 interactive_plots = False
 img_extension = 'svg'
 
@@ -65,9 +65,7 @@ def _calculate_derived_parameters(
     logger.info('Calculating derived parameters.')
     # error_limits = np.array([0.5, 0.2, 0.1, 0.05, 0.01])
     error_limit = 0.05
-    avg_op = np.mean
-    # avg_op = np.median
-    avg_op = lambda x: np.quantile(x, 0.03)
+    quantile_op = lambda x: np.quantile(x, 0.25)
 
     # Unset midline source args
     args.midline3d_source = None
@@ -77,6 +75,7 @@ def _calculate_derived_parameters(
     # Log the speeds
     low_speeds = np.zeros(len(ds.include_trials))
     high_speeds = np.zeros(len(ds.include_trials))
+    speed_thresholds = np.zeros(len(ds.include_trials))
 
     # Transition matrix
     T = np.zeros((3, 3), dtype=int)
@@ -128,7 +127,7 @@ def _calculate_derived_parameters(
             height_first=80,
             smooth_e0_first=251,
             smooth_K_first=251,
-            max_attempts=50,
+            max_iterations=50,
             quiet=False
         )
         X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles_j, nonplanar_angles_j, twist_angles_j, _, _, _ = approx
@@ -173,9 +172,10 @@ def _calculate_derived_parameters(
             v0 = v1
 
         # Calculate the high and low speeds
-        avg_speed = avg_op(speed_ap)
-        low_speeds[i] = avg_op(speed_ap[speed_ap <= avg_speed])
-        high_speeds[i] = avg_op(speed_ap[speed_ap > avg_speed])
+        speed_threshold = quantile_op(speed_ap)
+        speed_thresholds[i] = speed_threshold
+        low_speeds[i] = np.mean(speed_ap[speed_ap <= speed_threshold])  # maybe median?
+        high_speeds[i] = np.mean(speed_ap[speed_ap > speed_threshold])
 
         # Split up the trajectory into the run sections to calculate scaled speeds per run
         logger.info('Calculating transitions.')
@@ -184,8 +184,8 @@ def _calculate_derived_parameters(
             v1 = tumble_idxs[j] if j < len(tumble_idxs) else -1
             run_speed = speed_ap[v0:v1]
 
-            # Get telegraph signal of above and below the mean trajectory speed
-            states = (run_speed > avg_speed).astype(int)
+            # Get telegraph signal of above and below the threshold trajectory speed
+            states = (run_speed > speed_threshold).astype(int)
 
             # Previously, started with a turn (unless first)
             if v0 > 0:
@@ -211,7 +211,7 @@ def _calculate_derived_parameters(
     if show_plots:
         plot_histograms(durations, speeds, planar_angles, nonplanar_angles)
 
-    return low_speeds, high_speeds, M
+    return low_speeds, high_speeds, M  # speed_thresholds
 
 
 def _generate_or_load_directly_derived_params(
@@ -873,53 +873,35 @@ def _calculate_approximation_speeds_and_tumbles(
     args.midline3d_source_file = None
     args.tracking_only = True
 
+    # Generate or load tumble idxs
+    _, _, _, _, _, _, tumble_idxs = generate_or_load_ds_statistics(
+        ds=ds,
+        approx_method=args.approx_method,
+        error_limits=[error_limit, ],
+        planarity_window=args.planarity_window_vertices,
+        distance_first=args.approx_distance,
+        height_first=args.approx_curvature_height,
+        smooth_e0_first=args.smoothing_window_K,
+        smooth_K_first=args.smoothing_window_K,
+        rebuild_cache=args.regenerate,
+    )
+
     # Values
     speeds_ap = []
-    tumble_idxs = []
+    tumble_idxs = tumble_idxs['0']
 
     # Calculate the approximation for all trials
     for i, trial in enumerate(ds.include_trials):
-        logger.info(f'Computing tumble-run model for trial={trial.id}.')
+        logger.info(f'Computing parameters for trial={trial.id}.')
+        tumble_idxs_i = tumble_idxs[i]
         args.trial = trial.id
-
         X = get_trajectory_from_args(args)
-        pcas = get_pca_cache_from_args(args)
-        e0, e1, e2 = calculate_trajectory_frame(X, pcas, args.planarity_window)
 
         # Take centre of mass
         if X.ndim == 3:
             X = X.mean(axis=1)
         X -= X.mean(axis=0)
-
-        # Defaults
-        # distance_first: int = 500,
-        # distance_min: int = 3,
-        # height_first: int = 50,
-        # smooth_e0_first: int = 101,
-        # smooth_K_first: int = 101,
-
-        # Paper values:
-        # distance = 500
-        # distance_min = 3
-        # height = 100
-        # smooth_e0 = 201
-        # smooth_K = 201
-
-        # Find the approximation
-        approx, distance, height, smooth_e0, smooth_K = find_approximation(
-            X=X,
-            e0=e0,
-            error_limit=error_limit,
-            planarity_window_vertices=args.planarity_window_vertices,
-            distance_first=500,
-            distance_min=3,
-            height_first=80,
-            smooth_e0_first=251,
-            smooth_K_first=251,
-            max_attempts=50,
-            quiet=False
-        )
-        X_approx, vertices, tumble_idxs_i, _, _, _, _, _, _, _, _ = approx
+        vertices = np.array([X[tumble_idx] for tumble_idx in [0, ] + tumble_idxs_i + [-1, ]])
 
         # Split up the trajectory into the run sections to calculate scaled speeds per run in approximation
         logger.info('Calculating approximation speeds.')
@@ -940,7 +922,6 @@ def _calculate_approximation_speeds_and_tumbles(
 
             v0 = v1
 
-        tumble_idxs.append(tumble_idxs_i)
         speeds_ap.append(speed_ap)
 
     return speeds_ap, tumble_idxs
@@ -990,16 +971,16 @@ def _calculate_rates_and_speeds(
 
             # End with a turn (unless last)
             if j < len(tumble_idxs_i):
-                # T[states[-1], 2] += 1
+                T[states[-1], 2] += 1
                 # Restrict turns from the slow state
-                if states[-1] == 1:
-                    T[1, 0] += 1
-                T[0, 2] += 1
+                # if states[-1] == 1:
+                #     T[1, 0] += 1
+                # T[0, 2] += 1
 
             v0 = v1
 
     # Calculate the final transition matrix to get the rates
-    M = T / T.sum(axis=1, keepdims=True)
+    M = T / (T.sum(axis=1, keepdims=True) + 1e-10)
     rates = {
         '01': M[0, 1],
         '10': M[1, 0],
@@ -1417,6 +1398,122 @@ def hybrid_evolve_parameters():
     res = _generate_or_load_hybrid_params(args, save_dir, rebuild_cache=True, cache_only=False)
 
 
+def sweep_speed_thresholds():
+    """
+    Sweep across the speed threshold values to see what the speed distributions look like.
+    """
+    args = get_args(
+        include_trajectory_options=True,
+        include_msd_options=False,
+        include_K_options=False,
+        include_planarity_options=True,
+        include_helicity_options=False,
+        include_manoeuvre_options=True,
+        include_approximation_options=True,
+        include_pe_options=True,
+        include_fractal_dim_options=False,
+        include_video_options=False,
+        include_evolution_options=True,
+        validate_source=False,
+    )
+
+    # Load arguments from spec file
+    if (LOGS_PATH / 'spec.yml').exists():
+        with open(LOGS_PATH / 'spec.yml') as f:
+            spec = yaml.load(f, Loader=yaml.FullLoader)
+        for k, v in spec.items():
+            assert hasattr(args, k), f'{k} is not a valid argument!'
+            setattr(args, k, v)
+    print_args(args)
+
+    assert args.batch_size is not None, 'Must provide a batch size!'
+    assert args.sim_duration is not None, 'Must provide a simulation duration!'
+    assert args.sim_dt is not None, 'Must provide a simulation time step!'
+    assert args.approx_noise is not None, 'Must provide an approximation noise level!'
+
+    # Create output directory
+    save_dir = LOGS_PATH / f'{START_TIMESTAMP}_{hash_data(to_dict(args))}'
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save the arguments
+    if (LOGS_PATH / 'spec.yml').exists():
+        shutil.copy(LOGS_PATH / 'spec.yml', save_dir / 'spec.yml')
+    with open(save_dir / 'args.yml', 'w') as f:
+        yaml.dump(to_dict(args), f)
+
+    # Fetch dataset
+    ds = Dataset.objects.get(id=args.dataset)
+
+    # Calculate the approximation speeds and tumble idxs
+    speeds_ap, tumble_idxs = _calculate_approximation_speeds_and_tumbles(args, ds)
+
+    # Iterate over the threshold range
+    n_thresholds = 10
+    thresholds = np.linspace(0, 1, n_thresholds, endpoint=True)
+    rates = np.zeros((n_thresholds, 6))
+    speeds = np.zeros((n_thresholds, 4))
+    for i, thresh in enumerate(thresholds):
+        logger.info(f'Calculating for threshold={thresh:.2f}.')
+        rates_i, speeds_i = _calculate_rates_and_speeds(
+            speed_threshold=thresh,
+            speeds_ap=speeds_ap,
+            tumble_idxs=tumble_idxs,
+            avg_op=np.mean
+        )
+        rates[i] = np.array([rates_i['01'], rates_i['10'], rates_i['02'], rates_i['12'], rates_i['20'], rates_i['21']])
+        speeds[i] = np.array([speeds_i['0_mu'], speeds_i['0_sig'], speeds_i['1_mu'], speeds_i['1_sig']])
+
+    # Plot
+    fig, axes = plt.subplots(4, 1, figsize=(7, 8), sharex=True)
+
+    # Run transition rates
+    ax = axes[0]
+    ax.set_title('Run to run transition rates')
+    ax.plot(thresholds, rates[:, 0], label='slow-fast')
+    ax.plot(thresholds, rates[:, 1], label='fast-slow')
+    ax.set_ylabel('Transition rate')
+    ax.legend()
+    ax.grid()
+
+    # Run-turn rates
+    ax = axes[1]
+    ax.set_title('Run to turn transition rates')
+    ax.plot(thresholds, rates[:, 2], label='slow-turn')
+    ax.plot(thresholds, rates[:, 3], label='fast-turn')
+    ax.set_ylabel('Transition rate')
+    ax.legend()
+    ax.grid()
+
+    # Turn-run rates
+    ax = axes[2]
+    ax.set_title('Turn to run transition rates')
+    ax.plot(thresholds, rates[:, 4], label='turn-slow')
+    ax.plot(thresholds, rates[:, 5], label='turn-fast')
+    ax.set_ylabel('Transition rate')
+    ax.legend()
+    ax.grid()
+
+    # Speeds
+    ax = axes[3]
+    ax.set_title('Speeds')
+    ax.plot(thresholds, speeds[:, 0], label='slow')
+    ax.plot(thresholds, speeds[:, 2], label='fast')
+    ax.set_ylabel('mean')
+    ax.set_xlabel('Threshold')
+    ax2 = ax.twinx()
+    ax2.plot(thresholds, speeds[:, 1], label='slow', linestyle=':')
+    ax2.plot(thresholds, speeds[:, 3], label='fast', linestyle=':')
+    ax2.set_ylabel('std')
+    ax.legend()
+    ax.grid()
+    fig.tight_layout()
+
+    if save_plots:
+        plt.savefig(save_dir / 'speed_thresholds.png')
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
@@ -1424,4 +1521,5 @@ if __name__ == '__main__':
         interactive()
     # directly_derive_parameters()
     # evolve_parameters()
-    hybrid_evolve_parameters()
+    # hybrid_evolve_parameters()
+    sweep_speed_thresholds()
