@@ -115,6 +115,7 @@ class ThreeStateExplorer(nn.Module):
             rate_10: float = 0.001,
             rate_02: float = 0.001,
             rate_20: float = 0.001,
+            rate_12: float = 0.,
             speed_0: Union[float, np.ndarray] = 0.001,
             speed_1: Union[float, np.ndarray] = 0.005,
             theta_dist_params: Optional[Dict[str, Any]] = None,
@@ -134,6 +135,7 @@ class ThreeStateExplorer(nn.Module):
         self.rate_10 = rate_10
         self.rate_02 = rate_02
         self.rate_20 = rate_20
+        self.rate_12 = rate_12
 
         # Speeds
         if type(speed_0) == np.ndarray:
@@ -448,8 +450,14 @@ class ThreeStateExplorer(nn.Module):
                     r1 < self.rate_10,
                     torch.zeros_like(self.state),
 
-                    # Stay in state 1
-                    torch.ones_like(self.state)
+                    torch.where(
+                        # Transition from 1->2
+                        r1 > (1 - self.rate_12),
+                        torch.ones_like(self.state) * 2,
+
+                        # Stay in state 1
+                        torch.zeros_like(self.state)
+                    )
                 ),
 
                 # --- State 2 ---

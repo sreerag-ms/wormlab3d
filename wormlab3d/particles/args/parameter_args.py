@@ -22,6 +22,7 @@ class ParameterArgs(BaseArgs):
             rate_10: float,
             rate_02: float,
             rate_20: float,
+            rate_12: float,
             speeds_0_mu: float,
             speeds_0_sig: float,
             speeds_1_mu: float,
@@ -49,6 +50,7 @@ class ParameterArgs(BaseArgs):
         self.rate_10 = rate_10
         self.rate_02 = rate_02
         self.rate_20 = rate_20
+        self.rate_12 = rate_12
 
         self.speeds_0_mu = speeds_0_mu
         self.speeds_0_sig = speeds_0_sig
@@ -92,6 +94,8 @@ class ParameterArgs(BaseArgs):
                             help='Transition rate from slow speed to turn.')
         parser.add_argument('--rate-20', type=float,
                             help='Transition rate from turn to slow speed.')
+        parser.add_argument('--rate-12', type=float, default=0,
+                            help='Transition rate from fast speed to turn.')
 
         parser.add_argument('--speeds-0-mu', type=float,
                             help='Slow speed average.')

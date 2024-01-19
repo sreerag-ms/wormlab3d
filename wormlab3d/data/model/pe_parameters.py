@@ -18,6 +18,7 @@ class PEParameters(Document):
     rate_10 = FloatField()
     rate_02 = FloatField()
     rate_20 = FloatField()
+    rate_12 = FloatField()
 
     speeds_0_mu = FloatField()
     speeds_0_sig = FloatField()

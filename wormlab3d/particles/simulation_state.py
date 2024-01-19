@@ -364,6 +364,7 @@ class SimulationState:
             rate_10=p.rate_10,
             rate_02=p.rate_02,
             rate_20=p.rate_20,  # not really a rate!
+            rate_12=p.rate_12,
             speed_0=speeds0,
             speed_1=speeds1,
             theta_dist_params={
