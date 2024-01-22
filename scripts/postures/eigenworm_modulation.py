@@ -1,17 +1,17 @@
 import os
 from argparse import ArgumentParser, Namespace
-from typing import Dict, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.transforms import blended_transform_factory
+from scipy.stats import linregress, pearsonr
 
-from wormlab3d import LOGS_PATH, START_TIMESTAMP
-from wormlab3d import logger
-from wormlab3d.data.model import Reconstruction, Eigenworms
+from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
+from wormlab3d.data.model import Eigenworms, Reconstruction
 from wormlab3d.data.model.dataset import Dataset
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
-from wormlab3d.toolkit.util import print_args, hash_data
+from wormlab3d.toolkit.util import hash_data, print_args
 from wormlab3d.trajectories.cache import get_trajectory
 from wormlab3d.trajectories.util import calculate_speeds
 
@@ -19,11 +19,11 @@ DATA_CACHE_PATH = LOGS_PATH / 'cache'
 os.makedirs(DATA_CACHE_PATH, exist_ok=True)
 
 show_plots = True
-save_plots = True
+save_plots = False
 img_extension = 'svg'
 
 
-def parse_args() -> Namespace:
+def parse_args(print_out: bool = True) -> Namespace:
     parser = ArgumentParser(description='Wormlab3D script to plot an eigenworm basis.')
     parser.add_argument('--dataset', type=str,
                         help='Dataset by id.')
@@ -44,7 +44,8 @@ def parse_args() -> Namespace:
     assert args.dataset is not None, \
         'This script must be run with the --dataset=ID argument defined.'
 
-    print_args(args)
+    if print_out:
+        print_args(args)
 
     return args
 
@@ -381,7 +382,8 @@ def eigenworm_modulation_by_conc():
 
 
 def eigenworm_modulation_by_rec(
-        layout: str = 'paper'
+        layout: str = 'paper',
+        plot_lin_reg: bool = True,
 ):
     """
     Show how eigenworms vary across reconstruction.
@@ -395,7 +397,7 @@ def eigenworm_modulation_by_rec(
     breaks_at = [5, 6]
 
     # Determine positions
-    concs = [float(k) for k in lambdas.keys() if k not in exclude_concs]
+    concs = np.array([float(k) for k in lambdas.keys() if k not in exclude_concs])
     ticks = np.arange(len(concs))
 
     # Prepare output
@@ -411,6 +413,9 @@ def eigenworm_modulation_by_rec(
         out_reconst[c] = np.array([rv.sum(axis=0) / rv.sum() for rv in r_vals.values()])
         out_reconst_stats[i] = np.array([out_reconst[c].mean(axis=0), out_reconst[c].std(axis=0)]).T
         i += 1
+
+    # Linear regression fit lines
+    lr_data = linear_regression_fit(exclude_concs=exclude_concs)
 
     # Make plots
     prop_cycle = plt.rcParams['axes.prop_cycle']
@@ -488,6 +493,21 @@ def eigenworm_modulation_by_rec(
                 **error_args
             )
 
+            # Linear regression fit
+            if plot_lin_reg:
+                slope = lr_data[idx]['slope']
+                intercept = lr_data[idx]['intercept']
+                x_vals = concs[start_idx:end_idx]
+                y_vals = slope * x_vals + intercept
+                ax.plot(
+                    ticks[start_idx:end_idx] + offsets[i],
+                    y_vals,
+                    color=component_colours[i],
+                    linestyle=':',
+                    alpha=0.7,
+                    linewidth=1
+                )
+
             if break_at < len(ticks):
                 if layout == 'paper':
                     dx = .1
@@ -536,6 +556,102 @@ def eigenworm_modulation_by_rec(
         plt.show()
 
 
+def linear_regression_fit(exclude_concs: Optional[List[float]] = None):
+    """
+    Do linear regression on the data to see how significant the increase/decrease is.
+    """
+    args = parse_args(print_out=False)
+    ds, ew, lambdas = _generate_or_load_data(args, rebuild_cache=False, cache_only=True)
+    if exclude_concs is None:
+        exclude_concs = []
+
+    x_vals = []
+    y_vals = {}
+    for c, r_vals in lambdas.items():
+        if c in exclude_concs:
+            continue
+        # means = np.array([rv.mean(axis=0) for rv in r_vals.values()])
+        means = np.array([rv.sum(axis=0) / rv.sum() for rv in r_vals.values()])
+        x_vals.extend(np.ones(len(means)) * c)
+        for i in range(ew.n_components):
+            if i not in y_vals:
+                y_vals[i] = []
+            y_vals[i].extend(means[:, i])
+
+    lr_data = {}
+    for i in range(ew.n_components):
+        slope, intercept, r_value, p_value, std_err = linregress(x_vals, y_vals[i])
+        lr_data[i] = {
+            'slope': slope,
+            'intercept': intercept,
+            'r_value': r_value,
+            'p_value': p_value,
+            'std_err': std_err,
+        }
+
+    return lr_data
+
+
+def pearson_correlation_fit(exclude_concs: Optional[List[float]] = None):
+    """
+    Do Pearson correlation fit on the data to see how significant the increase/decrease is.
+    """
+    args = parse_args(print_out=False)
+    ds, ew, lambdas = _generate_or_load_data(args, rebuild_cache=False, cache_only=True)
+    if exclude_concs is None:
+        exclude_concs = []
+
+    x_vals = []
+    y_vals = {}
+    for c, r_vals in lambdas.items():
+        if c in exclude_concs:
+            continue
+        # means = np.array([rv.mean(axis=0) for rv in r_vals.values()])
+        means = np.array([rv.sum(axis=0) / rv.sum() for rv in r_vals.values()])
+        x_vals.extend(np.ones(len(means)) * c)
+        for i in range(ew.n_components):
+            if i not in y_vals:
+                y_vals[i] = []
+            y_vals[i].extend(means[:, i])
+
+    p_data = {}
+    for i in range(ew.n_components):
+        res = pearsonr(x_vals, y_vals[i])
+        p_data[i] = {
+            'statistic': res[0],
+            'p_value': res[1],
+        }
+
+    return p_data
+
+
+def run_statistical_tests():
+    exclude_concs = [2.75, 4]
+    print_up_to = 5
+
+    lr_data = linear_regression_fit(exclude_concs=exclude_concs)
+    logger.info('==== Linear regression fits ====')
+    for i in range(print_up_to):
+        print(f'Component {i}')
+        print(f'\tSlope: {lr_data[i]["slope"]:.2f}')
+        print(f'\tIntercept: {lr_data[i]["intercept"]:.2f}')
+        print(f'\tr_value: {lr_data[i]["r_value"]:.2f}')
+        print(f'\tp_value: {lr_data[i]["p_value"]:.2f}')
+        print(f'\tstd_err: {lr_data[i]["std_err"]:.2f}')
+    print('\n\n')
+
+    p_data = pearson_correlation_fit(exclude_concs=exclude_concs)
+    logger.info('==== Pearson correlation statistics ====')
+    for i in range(print_up_to):
+        print(f'Component {i}')
+        print(f'\tStatistic: {p_data[i]["statistic"]:.3f}')
+        print(f'\tp_value: {p_data[i]["p_value"]:.3E}')
+        print(f'\tSignificant at 0.05: {p_data[i]["p_value"] < 0.05}')
+        print(f'\tSignificant at 0.005: {p_data[i]["p_value"] < 0.005}')
+        print(f'\tSignificant at 0.0005: {p_data[i]["p_value"] < 0.0005}')
+        print(f'\tSignificant at 0.00005: {p_data[i]["p_value"] < 0.00005}')
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
@@ -544,4 +660,5 @@ if __name__ == '__main__':
     #     by_reconstruction=True,
     # )
     # eigenworm_modulation_by_conc()
-    eigenworm_modulation_by_rec(layout='thesis')
+    # eigenworm_modulation_by_rec(layout='thesis', plot_lin_reg=True)
+    run_statistical_tests()
