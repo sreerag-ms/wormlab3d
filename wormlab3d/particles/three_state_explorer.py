@@ -131,11 +131,11 @@ class ThreeStateExplorer(nn.Module):
         self.quiet = quiet
 
         # Transition rates
-        self.rate_01 = rate_01
-        self.rate_10 = rate_10
-        self.rate_02 = rate_02
-        self.rate_20 = rate_20
-        self.rate_12 = rate_12
+        self.rate_01 = rate_01 if rate_01 is not None else 0.
+        self.rate_10 = rate_10 if rate_10 is not None else 0.
+        self.rate_02 = rate_02 if rate_02 is not None else 0.
+        self.rate_20 = rate_20 if rate_20 is not None else 0.
+        self.rate_12 = rate_12 if rate_12 is not None else 0.
 
         # Speeds
         if type(speed_0) == np.ndarray:
@@ -206,6 +206,10 @@ class ThreeStateExplorer(nn.Module):
         """
         if state0 is None:
             state0 = torch.zeros((self.batch_size,), dtype=torch.uint8)
+
+            # Start in the fast state if the slow state is not used
+            if self.rate_01 == 0 and self.rate_10 == 0 and self.rate_20 == 0:
+                state0[:] = 1
         else:
             assert state0.shape == (self.batch_size,)
             state0 = state0.to(torch.uint8)
@@ -456,7 +460,7 @@ class ThreeStateExplorer(nn.Module):
                         torch.ones_like(self.state) * 2,
 
                         # Stay in state 1
-                        torch.zeros_like(self.state)
+                        torch.ones_like(self.state)
                     )
                 ),
 

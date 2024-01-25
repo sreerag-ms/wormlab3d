@@ -1416,6 +1416,7 @@ def sweep_speed_thresholds():
         include_evolution_options=True,
         validate_source=False,
     )
+    use_approx_stats = True
 
     # Load arguments from spec file
     if (LOGS_PATH / 'spec.yml').exists():
@@ -1423,6 +1424,8 @@ def sweep_speed_thresholds():
             spec = yaml.load(f, Loader=yaml.FullLoader)
         for k, v in spec.items():
             assert hasattr(args, k), f'{k} is not a valid argument!'
+            if k in ['theta_dist_params', 'phi_dist_params']:
+                v = [float(vv) for vv in v.split(',')]
             setattr(args, k, v)
     print_args(args)
 
@@ -1441,29 +1444,128 @@ def sweep_speed_thresholds():
     with open(save_dir / 'args.yml', 'w') as f:
         yaml.dump(to_dict(args), f)
 
+    shared_pe_args = dict(
+        batch_size=args.batch_size,
+        duration=args.sim_duration,
+        dt=args.sim_dt,
+        n_steps=int(args.sim_duration / args.sim_dt),
+        theta_dist_type=args.theta_dist_type,
+        phi_dist_type=args.phi_dist_type,
+        delta_type=args.nonp_pause_type,
+        theta_dist_params=args.theta_dist_params,
+        phi_dist_params=args.phi_dist_params,
+        delta_max=args.nonp_pause_max
+    )
+
+    approx_args = dict(
+        approx_method=args.approx_method,
+        error_limits=[args.approx_error_limit],
+        planarity_window=args.planarity_window_vertices,
+        distance_first=args.approx_distance,
+        height_first=args.approx_curvature_height,
+        smooth_e0_first=args.smoothing_window_K,
+        smooth_K_first=args.smoothing_window_K,
+    )
+
     # Fetch dataset
     ds = Dataset.objects.get(id=args.dataset)
 
     # Calculate the approximation speeds and tumble idxs
     speeds_ap, tumble_idxs = _calculate_approximation_speeds_and_tumbles(args, ds)
 
+    # Generate or load tumble/run values
+    ds_stats = generate_or_load_ds_statistics(
+        ds=ds,
+        rebuild_cache=args.regenerate,
+        **approx_args
+    )
+    # stats = trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles
+    data_values = {k: ds_stats[i + 1] for i, k in enumerate(DIST_KEYS)}
+
+    # Update the approximation args to include noise and smoothing
+    approx_args['noise_scale'] = args.approx_noise
+    approx_args['smoothing_window'] = args.smoothing_window
+
     # Iterate over the threshold range
-    n_thresholds = 10
+    n_thresholds = 11
     thresholds = np.linspace(0, 1, n_thresholds, endpoint=True)
     rates = np.zeros((n_thresholds, 6))
     speeds = np.zeros((n_thresholds, 4))
+    sim_values = []
+    data = {}
     for i, thresh in enumerate(thresholds):
-        logger.info(f'Calculating for threshold={thresh:.2f}.')
+        logger.info(f'Calculating rates and speeds for threshold={thresh:.2f}.')
         rates_i, speeds_i = _calculate_rates_and_speeds(
             speed_threshold=thresh,
             speeds_ap=speeds_ap,
             tumble_idxs=tumble_idxs,
             avg_op=np.mean
         )
+        # rates_i['02'] = 0
+        # rates_i['12'] = 0
         rates[i] = np.array([rates_i['01'], rates_i['10'], rates_i['02'], rates_i['12'], rates_i['20'], rates_i['21']])
         speeds[i] = np.array([speeds_i['0_mu'], speeds_i['0_sig'], speeds_i['1_mu'], speeds_i['1_sig']])
 
-    # Plot
+        # Evaluate the parameter set
+        logger.info(f'Simulating particles.')
+        params = PEParameters(
+            **shared_pe_args,
+            rate_01=rates_i['01'],
+            rate_10=rates_i['10'],
+            rate_02=rates_i['02'],
+            rate_20=rates_i['20'],
+            rate_12=rates_i['12'],
+            speeds_0_mu=speeds_i['0_mu'],
+            speeds_0_sig=speeds_i['0_sig'],
+            speeds_1_mu=speeds_i['1_mu'],
+            speeds_1_sig=speeds_i['1_sig'],
+        )
+        SS = SimulationState(params, no_cache=False, quiet=True, read_only=False)
+        logger.info('Calculating simulation statistics.')
+        if use_approx_stats:
+            stats_i = SS.get_approximation_statistics(**approx_args)
+        else:
+            stats_i = {
+                'durations': {0: np.concatenate(SS.intervals).tolist()},
+                'speeds': {0: np.concatenate(SS.speeds).tolist()},
+                'planar_angles': {0: np.concatenate(SS.thetas).tolist()},
+                'nonplanar_angles': {0: np.concatenate(SS.phis).tolist()},
+                'twist_angles': {0: np.concatenate(SS.phis).tolist()},
+            }
+        sim_values.append(stats_i)
+
+        # Calculate the statistical tests between the distributions
+        test_stats = np.zeros(len(data_values))
+        p_values = np.zeros(len(data_values))
+        for j, k in enumerate(data_values.keys()):
+            vals_real = data_values[k][0]
+            vals_sim = stats_i[k][0]
+            test_stat, p_value = kstest(vals_real, vals_sim)
+            test_stats[j] = test_stat
+            p_values[j] = p_value
+
+        data[float(round(thresh, 2))] = {
+            'rate_01': float(rates_i['01']),
+            'rate_10': float(rates_i['10']),
+            'rate_02': float(rates_i['02']),
+            'rate_12': float(rates_i['12']),
+            'rate_20': float(rates_i['20']),
+            'speeds_0_mu': float(speeds_i['0_mu']),
+            'speeds_0_sig': float(speeds_i['0_sig']),
+            'speeds_1_mu': float(speeds_i['1_mu']),
+            'speeds_1_sig': float(speeds_i['1_sig']),
+            'scores': {
+                'score': float(np.sum(test_stats)),
+                'test_stats': test_stats.tolist(),
+                'p_values': p_values.tolist(),
+            }
+        }
+
+    # Save the values
+    with open(save_dir / 'results.yml', 'w') as f:
+        yaml.dump(data, f)
+
+    # Plot parameters
     fig, axes = plt.subplots(4, 1, figsize=(7, 8), sharex=True)
 
     # Run transition rates
@@ -1510,6 +1612,76 @@ def sweep_speed_thresholds():
 
     if save_plots:
         plt.savefig(save_dir / 'speed_thresholds.png')
+    if show_plots:
+        plt.show()
+
+    # Plot histogram comparisons
+    fig, axes = plt.subplots(n_thresholds, 5, figsize=(12, 2 + 2 * n_thresholds), squeeze=False)
+    prop_cycle = plt.rcParams['axes.prop_cycle']
+    default_colours = prop_cycle.by_key()['color']
+    colour_real = default_colours[0]
+    colour_sim = default_colours[1]
+
+    for i in range(n_thresholds):
+        for j, k in enumerate(DIST_KEYS):
+            ax = axes[i, j]
+            vals_real = data_values[k][0]
+            vals_sim = sim_values[i][k][0]
+
+            # Set titles
+            if i == 0:
+                if k == 'durations':
+                    ax.set_title('Run durations')
+                elif k == 'speeds':
+                    ax.set_title('Run speeds')
+                elif k == 'planar_angles':
+                    ax.set_title('Planar angles')
+                elif k == 'nonplanar_angles':
+                    ax.set_title('Non-planar angles')
+                elif k == 'twist_angles':
+                    ax.set_title('Twist angles')
+            if j == 0:
+                ax.set_ylabel(f'Threshold={thresholds[i]:.2f}')
+
+            # Set weights for speeds
+            weights = [np.ones_like(vals_real), np.ones_like(vals_sim)]
+            if k == 'speeds':
+                weights = [data_values['durations'][0], sim_values[i]['durations'][0]]
+
+            # Set bin range
+            bin_range = None
+            if k == 'planar_angles':
+                bin_range = (-np.pi, np.pi)
+            elif k == 'nonplanar_angles':
+                bin_range = (-np.pi / 2, np.pi / 2)
+            elif k == 'twist_angles':
+                bin_range = (-np.pi, np.pi)
+
+            # Set log scale for durations and speeds
+            if k in ['durations', 'speeds']:
+                ax.set_yscale('log')
+
+            ax.hist(
+                [vals_real, vals_sim],
+                weights=weights,
+                color=[colour_real, colour_sim],
+                bins=21,
+                density=True,
+                alpha=0.75,
+                range=bin_range
+            )
+            if k in ['planar_angles', 'twist_angles']:
+                ax.set_xlim(left=-np.pi - 0.1, right=np.pi + 0.1)
+                ax.set_xticks([-np.pi, 0, np.pi])
+                ax.set_xticklabels(['$-\pi$', '0', '$\pi$'])
+            if k == 'nonplanar_angles':
+                ax.set_xlim(left=-np.pi / 2 - 0.1, right=np.pi / 2 + 0.1)
+                ax.set_xticks([-np.pi / 2, np.pi / 2])
+                ax.set_xticklabels(['$-\pi/2$', '$\pi/2$'])
+
+    fig.tight_layout()
+    if save_plots:
+        plt.savefig(save_dir / 'histograms.png')
     if show_plots:
         plt.show()
 
