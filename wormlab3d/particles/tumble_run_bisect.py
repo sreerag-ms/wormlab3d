@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from multiprocessing import Pool
 from pathlib import Path
 from typing import List
 
@@ -232,7 +233,8 @@ def find_approximation_bisect(
 
     # Add an initial tumble vertex
     v0 = find_best_bisection_idx(X, allowable_tumble_idxs)
-    logger.debug(f'Added initial vertex at {v0}.')
+    if not quiet:
+        logger.debug(f'Added initial vertex at {v0}.')
     best_idx_cache[0, T] = v0
     tumble_idxs = [v0]
     X_approx = build_approx(X, tumble_idxs)
@@ -276,8 +278,8 @@ def find_approximation_bisect(
             new_idxs.append(add_idx)
             tumble_idxs = sorted(tumble_idxs + [add_idx, ])
             X_approx = build_approx(X, tumble_idxs)
-
-            logger.info(f'Added vertex at {add_idx}. Error = {approx_error():.4f}.')
+            if not quiet:
+                logger.info(f'Added vertex at {add_idx}. Error = {approx_error():.4f}.')
 
             if plot_dir is not None and (len(new_idxs) % plot_every_n_changes) == 0:
                 fig = make_plot(X_orig, K, X_approx, inverse_map_idxs(tumble_idxs), show_plot=False, azim=azim)
@@ -287,7 +289,8 @@ def find_approximation_bisect(
 
         if len(new_idxs) > 0:
             new_idxs = sorted(new_idxs)
-            logger.debug(f'Added tumble idxs at {new_idxs}')
+            if not quiet:
+                logger.debug(f'Added tumble idxs at {new_idxs}')
 
         # Prune vertices by removing ones that decrease the error the least until the error limit is reached
         removed_tumble_idxs = []
@@ -312,16 +315,19 @@ def find_approximation_bisect(
 
         if len(removed_tumble_idxs) > 0:
             removed_tumble_idxs = sorted(removed_tumble_idxs)
-            logger.debug(f'Removed tumble idxs at {removed_tumble_idxs}')
+            if not quiet:
+                logger.debug(f'Removed tumble idxs at {removed_tumble_idxs}')
 
         iteration += 1
-        logger.info(
-            f'Iteration {iteration} of {max_iterations}. '
-            f'Error = {approx_error():.3f}. '
-            f'Num vertices = {len(tumble_idxs)}.'
-        )
+        if not quiet:
+            logger.info(
+                f'Iteration {iteration} of {max_iterations}. '
+                f'Error = {approx_error():.3f}. '
+                f'Num vertices = {len(tumble_idxs)}.'
+            )
         if np.allclose(X_approx, X_approx_prev):
-            logger.info('Converged!')
+            if not quiet:
+                logger.info('Converged!')
             if plot_dir is not None:
                 fig = make_plot(X_orig, K, X_approx, inverse_map_idxs(tumble_idxs), show_plot=False, azim=azim)
                 fig.savefig(plot_dir / f'approx_{iteration:03d}.2.png')
