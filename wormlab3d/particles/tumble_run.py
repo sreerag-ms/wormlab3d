@@ -6,7 +6,7 @@ import numpy as np
 from scipy.signal import find_peaks
 from scipy.spatial.transform import Rotation
 
-from wormlab3d import LOGS_PATH, logger
+from wormlab3d import APPROX_CACHE_PATH, LOGS_PATH, logger
 from wormlab3d.data.model import Dataset
 from wormlab3d.particles.tumble_run_bisect import find_approximation_bisect
 from wormlab3d.particles.util import calculate_trajectory_frame
@@ -444,7 +444,7 @@ def generate_or_load_ds_statistics(
     if approx_method == APPROXIMATION_METHOD_FIND_PEAKS:
         id_str += f'_df={distance_first}_dm={distance_min}'
 
-    cache_path = LOGS_PATH / id_str
+    cache_path = APPROX_CACHE_PATH / id_str
     cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
     tumble_idxs_fn = cache_path.with_suffix(cache_path.suffix + '.json')
     if not rebuild_cache and cache_fn.exists() and tumble_idxs_fn.exists():

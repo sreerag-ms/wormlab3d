@@ -25,8 +25,7 @@ def _init_parameters(args: ParameterArgs) -> PEParameters:
         params_matching = PEParameters.objects(**db_params)
         if params_matching.count() > 0:
             parameters = params_matching[0]
-            logger.info(
-                f'Found {len(params_matching)} suitable parameter records in database, using most recent.')
+            logger.info(f'Found {len(params_matching)} suitable parameter records in database, using most recent.')
         else:
             logger.info(f'No suitable parameter records found in database.')
     if parameters is not None:
@@ -41,14 +40,14 @@ def _init_parameters(args: ParameterArgs) -> PEParameters:
     return parameters
 
 
-def get_sim_state_from_args(args: Union[ParameterArgs, Namespace]) -> SimulationState:
+def get_sim_state_from_args(args: Union[ParameterArgs, Namespace], no_cache: bool = False) -> SimulationState:
     """
     Generate or load the trajectories from parameters set in an argument namespace.
     """
     if type(args) == Namespace:
         args = ParameterArgs.from_args(args)
     params = _init_parameters(args)
-    SS = SimulationState(params, read_only=False, regenerate=args.regenerate)
+    SS = SimulationState(params, read_only=False, regenerate=args.regenerate, no_cache=no_cache)
     return SS
 
 

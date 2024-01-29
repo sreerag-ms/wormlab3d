@@ -12,6 +12,7 @@ __pycache__
 /logs
 
 # Data directories
+/data/approx_cache
 /data/backgrounds
 /data/db
 /data/datasets
