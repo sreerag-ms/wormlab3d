@@ -1,8 +1,8 @@
-from argparse import ArgumentParser, _ArgumentGroup
-from typing import Tuple, Optional
+from argparse import ArgumentParser, Namespace, _ArgumentGroup
+from typing import Optional, Tuple
 
 from wormlab3d.data.model import PEParameters
-from wormlab3d.data.model.pe_parameters import PE_PAUSE_TYPES, PE_ANGLE_DIST_TYPES
+from wormlab3d.data.model.pe_parameters import PE_ANGLE_DIST_TYPES, PE_MODEL_RUNTUMBLE, PE_MODEL_TYPES, PE_PAUSE_TYPES
 from wormlab3d.nn.args.base_args import BaseArgs
 from wormlab3d.toolkit.util import str2bool
 
@@ -10,6 +10,7 @@ from wormlab3d.toolkit.util import str2bool
 class ParameterArgs(BaseArgs):
     def __init__(
             self,
+            model_type: str,
             load: bool,
             params_id: Optional[str],
             regenerate: bool,
@@ -36,8 +37,13 @@ class ParameterArgs(BaseArgs):
             nonp_pause_type: str,
             nonp_pause_max: float,
 
+            # Run-and-tumble model parameters
+            dataset: Optional[str] = None,
+            approx_args: Optional[dict] = None,
+
             **kwargs
     ):
+        self.model_type = model_type
         self.load = load
         self.params_id = params_id
         self.regenerate = regenerate
@@ -65,6 +71,10 @@ class ParameterArgs(BaseArgs):
         self.delta_type = nonp_pause_type
         self.delta_max = nonp_pause_max
 
+        # Run-and-tumble model parameters, not included in args here but pulled in from elsewhere
+        self.dataset = dataset
+        self.approx_args = approx_args
+
     @classmethod
     def add_args(cls, parser: ArgumentParser) -> _ArgumentGroup:
         """
@@ -72,6 +82,8 @@ class ParameterArgs(BaseArgs):
         """
         group = parser.add_argument_group('Particle Explorer Parameters')
 
+        group.add_argument('--model-type', type=str, choices=PE_MODEL_TYPES,
+                           help=f'Particle explorer model type. Choices: {PE_MODEL_TYPES}.')
         group.add_argument('--load', type=str2bool, default=True,
                            help='Try to load an existing parameters database object if available matching the given parameters.')
         group.add_argument('--params-id', type=str,
@@ -128,3 +140,23 @@ class ParameterArgs(BaseArgs):
             if hasattr(self, k):
                 p[k] = getattr(self, k)
         return p
+
+    @classmethod
+    def from_args(cls, args: Namespace) -> 'ParameterArgs':
+        """
+        Create a ParameterArgs instance from command-line arguments.
+        """
+        if args.model_type == PE_MODEL_RUNTUMBLE:
+            assert args.dataset is not None, f'Run and tumble model requires a dataset!'
+            assert args.approx_error_limit is not None, f'Run and tumble model requires an approximation error limit!'
+            args.approx_args = dict(
+                approx_method=args.approx_method,
+                error_limits=[args.approx_error_limit],
+                planarity_window=args.planarity_window_vertices,
+                distance_first=args.approx_distance,
+                height_first=args.approx_curvature_height,
+                smooth_e0_first=args.smoothing_window_K,
+                smooth_K_first=args.smoothing_window_K,
+                # min_run_speed_duration=(0, 10000)
+            )
+        return cls(**vars(args))

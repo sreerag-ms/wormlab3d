@@ -2,12 +2,19 @@ import datetime
 
 from mongoengine import *
 
+PE_MODEL_TWOSTATE = 'two_state'
+PE_MODEL_THREESTATE = 'three_state'
+PE_MODEL_RUNTUMBLE = 'run_tumble'
+PE_MODEL_TYPES = [PE_MODEL_TWOSTATE, PE_MODEL_THREESTATE, PE_MODEL_RUNTUMBLE]
 PE_ANGLE_DIST_TYPES = ['norm', 'lognorm', 'cauchy', 'levy_stable', '2norm']
 PE_PAUSE_TYPES = ['linear', 'quadratic']
 
 
 class PEParameters(Document):
     created = DateTimeField(required=True, default=datetime.datetime.utcnow)
+    model_type = StringField(required=True, choices=PE_MODEL_TYPES, default=PE_MODEL_THREESTATE)
+    dataset = ReferenceField('Dataset')
+    approx_args = DictField()
 
     batch_size = IntField()
     duration = FloatField()
@@ -43,6 +50,11 @@ class PEParameters(Document):
         n_steps = self.duration / self.dt
         if int(n_steps) - n_steps != 0:
             raise ValidationError('Duration and dt must produce an even number of time steps!')
+        if self.model_type == PE_MODEL_RUNTUMBLE:
+            if self.dataset is None:
+                raise ValidationError('Run and tumble model requires a dataset!')
+            if self.approx_args is None:
+                raise ValidationError('Run and tumble model requires approx_args!')
 
     def save(self, *args, **kwargs):
         self.n_steps = int(self.duration / self.dt)

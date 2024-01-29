@@ -13,7 +13,9 @@ from sklearn.decomposition import PCA
 
 from wormlab3d import N_WORKERS, PE_CACHE_PATH, logger
 from wormlab3d.data.model import PEParameters
+from wormlab3d.data.model.pe_parameters import PE_MODEL_RUNTUMBLE
 from wormlab3d.particles.fractal_dimensions import calculate_box_dimension
+from wormlab3d.particles.rt_explorer import RTExplorer
 from wormlab3d.particles.three_state_explorer import ThreeStateExplorer
 from wormlab3d.particles.tumble_run import find_approximation
 from wormlab3d.particles.tumble_run_bisect import find_approximation_bisect
@@ -340,33 +342,14 @@ class SimulationState:
             else:
                 self.states[k][:] = _to_numpy(res[k])
 
-    def _instantiate_explorer(self) -> ThreeStateExplorer:
+    def _instantiate_explorer(self) -> Union[RTExplorer, ThreeStateExplorer]:
         """
         Instantiate the particle explorer.
         """
         p = self.parameters
 
-        # Sample speeds for the population
-        if p.speeds_0_sig > 0:
-            speeds_0_dist = norm(loc=p.speeds_0_mu, scale=p.speeds_0_sig)
-            speeds0 = np.abs(speeds_0_dist.rvs(p.batch_size))
-        else:
-            speeds0 = p.speeds_0_mu
-        if p.speeds_1_sig > 0:
-            speeds_1_dist = norm(loc=p.speeds_1_mu, scale=p.speeds_1_sig)
-            speeds1 = np.abs(speeds_1_dist.rvs(p.batch_size))
-        else:
-            speeds1 = p.speeds_1_mu
-
-        pe = ThreeStateExplorer(
+        shared_args = dict(
             batch_size=p.batch_size,
-            rate_01=p.rate_01,
-            rate_10=p.rate_10,
-            rate_02=p.rate_02,
-            rate_20=p.rate_20,  # not really a rate!
-            rate_12=p.rate_12,
-            speed_0=speeds0,
-            speed_1=speeds1,
             theta_dist_params={
                 'type': p.theta_dist_type,
                 'params': p.theta_dist_params
@@ -379,6 +362,33 @@ class SimulationState:
             nonp_pause_max=p.delta_max,
             quiet=self.quiet
         )
+
+        if p.model_type == PE_MODEL_RUNTUMBLE:
+            pe = RTExplorer(dataset=p.dataset, approx_args=p.approx_args, **shared_args)
+
+        else:
+            # Sample speeds for the population
+            if p.speeds_0_sig > 0:
+                speeds_0_dist = norm(loc=p.speeds_0_mu, scale=p.speeds_0_sig)
+                speeds0 = np.abs(speeds_0_dist.rvs(p.batch_size))
+            else:
+                speeds0 = p.speeds_0_mu
+            if p.speeds_1_sig > 0:
+                speeds_1_dist = norm(loc=p.speeds_1_mu, scale=p.speeds_1_sig)
+                speeds1 = np.abs(speeds_1_dist.rvs(p.batch_size))
+            else:
+                speeds1 = p.speeds_1_mu
+
+            pe = ThreeStateExplorer(
+                rate_01=p.rate_01,
+                rate_10=p.rate_10,
+                rate_02=p.rate_02,
+                rate_20=p.rate_20,  # not really a rate!
+                rate_12=p.rate_12,
+                speed_0=speeds0,
+                speed_1=speeds1,
+                **shared_args
+            )
 
         return pe
 
