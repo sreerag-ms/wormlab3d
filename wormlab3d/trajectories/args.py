@@ -7,6 +7,8 @@ from wormlab3d.toolkit.util import str2bool
 from wormlab3d.trajectories.displacement import DISPLACEMENT_AGGREGATION_OPTIONS, DISPLACEMENT_AGGREGATION_SQUARED_SUM
 from wormlab3d.trajectories.util import APPROXIMATION_METHODS, APPROXIMATION_METHOD_FIND_PEAKS
 
+_args = None
+
 
 def get_args(
         include_trajectory_options: bool = True,
@@ -26,6 +28,10 @@ def get_args(
     Parse command line arguments for the trajectory scripts.
     Not all arguments are used for all scripts, but this saves duplication.
     """
+    global _args
+    if _args is not None:
+        return _args
+
     parser = ArgumentParser(description='Wormlab3D trajectory script.')
 
     # Source arguments
@@ -107,7 +113,8 @@ def get_args(
 
     # Approximation arguments
     if include_approximation_options:
-        parser.add_argument('--approx-method', type=str, choices=APPROXIMATION_METHODS, default=APPROXIMATION_METHOD_FIND_PEAKS,
+        parser.add_argument('--approx-method', type=str, choices=APPROXIMATION_METHODS,
+                            default=APPROXIMATION_METHOD_FIND_PEAKS,
                             help='Approximation algorithm.')
         parser.add_argument('--approx-error-limit', type=float,
                             help='Target approximation error.')
@@ -200,5 +207,7 @@ def get_args(
     if validate_source:
         assert sum([getattr(args, k) is not None for k in ['dataset', 'reconstruction', 'trial', 'trials']]) == 1, \
             'Specify just one of dataset, reconstruction, trial OR trials.'
+
+    _args = args
 
     return args
