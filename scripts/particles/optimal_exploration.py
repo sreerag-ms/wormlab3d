@@ -1,27 +1,83 @@
 import os
+import shutil
 from argparse import Namespace
 from typing import List
 
 import matplotlib.pyplot as plt
 import numpy as np
+import yaml
 from matplotlib import transforms
 from progress.bar import Bar
 from scipy.stats import ttest_ind
 
 from simple_worm.plot3d import MidpointNormalize
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
-from wormlab3d.particles.cache import get_sim_state_from_args, generate_or_load_voxel_scores, generate_or_load_r_values, \
-    get_npas_from_args, get_voxel_sizes_from_args, get_durations_from_args, get_pauses_from_args, \
-    generate_or_load_fractal_dimensions, generate_or_load_volumes
+from wormlab3d.data.model.pe_parameters import PE_MODEL_RUNTUMBLE, PE_MODEL_THREESTATE
+from wormlab3d.particles.args.parameter_args import ParameterArgs
+from wormlab3d.particles.cache import generate_or_load_fractal_dimensions, generate_or_load_r_values, \
+    generate_or_load_volumes, generate_or_load_voxel_scores, get_durations_from_args, get_npas_from_args, \
+    get_pauses_from_args, get_sim_state_from_args, get_voxel_sizes_from_args
 from wormlab3d.toolkit.plot_utils import tex_mode
+from wormlab3d.toolkit.util import hash_data, print_args, to_dict
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.util import get_deltas_from_args
 
-show_plots = False
+# show_plots = False
 save_plots = True
-# show_plots = True
+show_plots = True
 # save_plots = False
 img_extension = 'svg'
+
+
+def _init():
+    """
+    Initialise the arguments and save dir.
+    """
+    args = get_args(
+        include_trajectory_options=True,
+        include_msd_options=False,
+        include_K_options=False,
+        include_planarity_options=True,
+        include_helicity_options=False,
+        include_manoeuvre_options=True,
+        include_approximation_options=True,
+        include_pe_options=True,
+        include_fractal_dim_options=True,
+        include_video_options=False,
+        include_evolution_options=True,
+        validate_source=False,
+    )
+
+    # Load arguments from spec file
+    if (LOGS_PATH / 'spec.yml').exists():
+        with open(LOGS_PATH / 'spec.yml') as f:
+            spec = yaml.load(f, Loader=yaml.FullLoader)
+        for k, v in spec.items():
+            assert hasattr(args, k), f'{k} is not a valid argument!'
+            if k in ['theta_dist_params', 'phi_dist_params']:
+                v = [float(vv) for vv in v.split(',')]
+            setattr(args, k, v)
+    print_args(args)
+
+    assert args.batch_size is not None, 'Must provide a batch size!'
+    assert args.sim_duration is not None, 'Must provide a simulation duration!'
+    assert args.sim_dt is not None, 'Must provide a simulation time step!'
+    assert args.approx_noise is not None, 'Must provide an approximation noise level!'
+
+    # Ensure that the approx_args is set for the run-tumble model if required
+    ParameterArgs.from_args(args)
+
+    # Create output directory
+    save_dir = LOGS_PATH / f'{START_TIMESTAMP}_{hash_data(to_dict(args))}'
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save the arguments
+    if (LOGS_PATH / 'spec.yml').exists():
+        shutil.copy(LOGS_PATH / 'spec.yml', save_dir / 'spec.yml')
+    with open(save_dir / 'args.yml', 'w') as f:
+        yaml.dump(to_dict(args), f)
+
+    return save_dir, args
 
 
 def make_filename(
@@ -1080,8 +1136,12 @@ def volume_metric_sweeps2(
     """
     Estimate the volume explored by a typical trajectory.
     """
-    args = get_args(validate_source=False)
-    model_phi = args.phi_dist_params[1]
+    save_dir, args = _init()
+    if args.model_type == PE_MODEL_THREESTATE:
+        model_phi = args.phi_dist_params[1]
+    else:
+        assert args.model_type == PE_MODEL_RUNTUMBLE
+        model_phi = 1.  # by definition
 
     # Set parameter ranges
     npa_sigmas = get_npas_from_args(args)
@@ -1367,12 +1427,7 @@ def volume_metric_sweeps2(
 
         # fig.tight_layout()
         if save_plots:
-            plt.savefig(
-                make_filename('volume_sweep_2c', args,
-                              excludes=['voxel_sizes', 'vxs', 'deltas', 'delta_step', 'n_targets', 'epsilon',
-                                        'duration']),
-                transparent=True
-            )
+            plt.savefig(save_dir / 'volume_sweeps_combined.png', transparent=True)
         if show_plots:
             plt.show()
 

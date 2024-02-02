@@ -356,7 +356,7 @@ class SimulationState:
         )
 
         if p.model_type == PE_MODEL_RUNTUMBLE:
-            pe = RTExplorer(dataset=p.dataset, approx_args=p.approx_args, **shared_args)
+            pe = RTExplorer(dataset=p.dataset, approx_args=p.approx_args, phi_factor=p.phi_factor_rt, **shared_args)
 
         else:
             # Sample speeds for the population
@@ -401,6 +401,8 @@ class SimulationState:
         self._log(f'Saving simulation state to {self.path}.')
 
         for k, v in self.states.items():
+            if v is None:
+                continue
             if (k in VAR_NAMES and k not in VAR_NAMES_VARIABLE_SIZE) \
                     or (k in self.shapes and self.shapes[k] != 'ragged'):
                 if self.shapes[k] != (0,):

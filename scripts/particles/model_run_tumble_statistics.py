@@ -26,7 +26,7 @@ DATA_KEYS = ['durations', 'speeds', 'planar_angles', 'nonplanar_angles', 'twist_
 
 def _init(include_all_runs: bool = False):
     """
-    Build a bivariate probability distribution for the runs based on speeds and durations.
+    Initialise the arguments, save dir and load the dataset statistics.
     """
     args = get_args(
         include_trajectory_options=True,
@@ -77,6 +77,7 @@ def _init(include_all_runs: bool = False):
         height_first=args.approx_curvature_height,
         smooth_e0_first=args.smoothing_window_K,
         smooth_K_first=args.smoothing_window_K,
+        use_euler_angles=args.approx_use_euler_angles,
     )
     if include_all_runs:
         approx_args['min_run_speed_duration'] = (0, 10000)

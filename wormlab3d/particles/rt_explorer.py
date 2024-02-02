@@ -109,6 +109,7 @@ class RTExplorer(nn.Module):
             batch_size: int = 20,
             x0: torch.Tensor = None,
             state0: torch.Tensor = None,
+            phi_factor: float = 1.,
             nonp_pause_type: Optional[str] = None,
             nonp_pause_max: float = 0.,
             quiet: bool = False,
@@ -118,6 +119,9 @@ class RTExplorer(nn.Module):
         self.approx_args = approx_args
         self.batch_size = batch_size
         self.quiet = quiet
+
+        # Squash or expand the sampled nonplanar angles
+        self.phi_factor = phi_factor
 
         # Should nonplanar turns induce a longer pause than planar turns
         self.nonp_pause_type = nonp_pause_type
@@ -255,6 +259,7 @@ class RTExplorer(nn.Module):
         thetas, phis = torch.from_numpy(self.angles_model.sample(self.batch_size * max_tumbles).values.T)
         thetas = torch.atan2(torch.sin(thetas), torch.cos(thetas))
         thetas = thetas.reshape(self.batch_size, max_tumbles)
+        phis *= self.phi_factor
         phis = phis.reshape(self.batch_size, max_tumbles)
 
         # Generate the directions of the runs

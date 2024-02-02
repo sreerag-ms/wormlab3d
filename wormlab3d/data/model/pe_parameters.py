@@ -37,6 +37,8 @@ class PEParameters(Document):
     phi_dist_type = StringField(choices=PE_ANGLE_DIST_TYPES)
     phi_dist_params = ListField(FloatField())
 
+    phi_factor_rt = FloatField(default=1.0)
+
     delta_type = StringField(choices=PE_PAUSE_TYPES)
     delta_max = FloatField()
 

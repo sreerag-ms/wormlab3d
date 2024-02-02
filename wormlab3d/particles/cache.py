@@ -5,6 +5,7 @@ import numpy as np
 
 from wormlab3d import PE_CACHE_PATH, logger
 from wormlab3d.data.model import PEParameters
+from wormlab3d.data.model.pe_parameters import PE_MODEL_RUNTUMBLE
 from wormlab3d.particles.args.parameter_args import ParameterArgs
 from wormlab3d.particles.simulation_state import SimulationState
 from wormlab3d.toolkit.util import hash_data
@@ -107,7 +108,10 @@ def _calculate_r_values(
                     f'({sim_idx + 1}/{n_sims}).'
                 )
 
-                args.phi_dist_params[1] = npas
+                if args.model_type == PE_MODEL_RUNTUMBLE:
+                    args.phi_factor_rt = npas
+                else:
+                    args.phi_dist_params[1] = npas
                 args.sim_duration = duration
                 args.nonp_pause_max = pause
                 SS = get_sim_state_from_args(args)
@@ -157,7 +161,21 @@ def generate_or_load_r_values(
         'durations': [f'{d:.4f}' for d in durations],
         'pauses': [f'{p:.4f}' for p in pauses],
     }
-    cache_path = PE_CACHE_PATH / f'r_vals_{hash_data(keys)}'
+
+    cache_id = 'r_vals_'
+    if args.model_type == PE_MODEL_RUNTUMBLE:
+        assert args.approx_args is not None, 'Run and tumble model requires approx_args!'
+        keys = {**keys, **{
+            'ds': args.dataset,
+            'approx_args': args.approx_args,
+            'batch_size': args.batch_size,
+            'nonp_pause_type': args.nonp_pause_type,
+            'nonp_pause_max': args.nonp_pause_max,
+        }}
+        cache_id += 'rt_'
+
+    cache_id += hash_data(keys)
+    cache_path = PE_CACHE_PATH / cache_id
     cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
     r_values = None
     if not rebuild_cache and cache_fn.exists():
@@ -225,7 +243,10 @@ def _calculate_volumes(
                     f'({sim_idx + 1}/{n_sims}).'
                 )
 
-                args.phi_dist_params[1] = npas
+                if args.model_type == PE_MODEL_RUNTUMBLE:
+                    args.phi_factor_rt = npas
+                else:
+                    args.phi_dist_params[1] = npas
                 args.sim_duration = duration
                 args.nonp_pause_max = pause
                 SS = get_sim_state_from_args(args)
@@ -277,7 +298,21 @@ def generate_or_load_volumes(
         'durations': [f'{d:.4f}' for d in durations],
         'pauses': [f'{p:.4f}' for p in pauses],
     }
-    cache_path = PE_CACHE_PATH / f'vols_{args.volume_metric}_{hash_data(keys)}'
+    cache_id = f'vols_{args.volume_metric}_'
+
+    if args.model_type == PE_MODEL_RUNTUMBLE:
+        assert args.approx_args is not None, 'Run and tumble model requires approx_args!'
+        keys = {**keys, **{
+            'ds': args.dataset,
+            'approx_args': args.approx_args,
+            'batch_size': args.batch_size,
+            'nonp_pause_type': args.nonp_pause_type,
+            'nonp_pause_max': args.nonp_pause_max,
+        }}
+        cache_id += 'rt_'
+
+    cache_id += hash_data(keys)
+    cache_path = PE_CACHE_PATH / cache_id
     cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
     vols = None
     if not rebuild_cache and cache_fn.exists():

@@ -2,7 +2,8 @@ from argparse import ArgumentParser, Namespace, _ArgumentGroup
 from typing import Optional, Tuple
 
 from wormlab3d.data.model import PEParameters
-from wormlab3d.data.model.pe_parameters import PE_ANGLE_DIST_TYPES, PE_MODEL_RUNTUMBLE, PE_MODEL_TYPES, PE_PAUSE_TYPES
+from wormlab3d.data.model.pe_parameters import PE_ANGLE_DIST_TYPES, PE_MODEL_RUNTUMBLE, PE_MODEL_THREESTATE, \
+    PE_MODEL_TYPES, PE_PAUSE_TYPES
 from wormlab3d.nn.args.base_args import BaseArgs
 from wormlab3d.toolkit.util import str2bool
 
@@ -33,6 +34,8 @@ class ParameterArgs(BaseArgs):
             theta_dist_params: Tuple[float],
             phi_dist_type: str,
             phi_dist_params: Tuple[float],
+
+            phi_factor_rt: float,
 
             nonp_pause_type: str,
             nonp_pause_max: float,
@@ -68,6 +71,8 @@ class ParameterArgs(BaseArgs):
         self.phi_dist_type = phi_dist_type
         self.phi_dist_params = phi_dist_params
 
+        self.phi_factor_rt = phi_factor_rt
+
         self.delta_type = nonp_pause_type
         self.delta_max = nonp_pause_max
 
@@ -82,7 +87,7 @@ class ParameterArgs(BaseArgs):
         """
         group = parser.add_argument_group('Particle Explorer Parameters')
 
-        group.add_argument('--model-type', type=str, choices=PE_MODEL_TYPES,
+        group.add_argument('--model-type', type=str, choices=PE_MODEL_TYPES, default=PE_MODEL_THREESTATE,
                            help=f'Particle explorer model type. Choices: {PE_MODEL_TYPES}.')
         group.add_argument('--load', type=str2bool, default=True,
                            help='Try to load an existing parameters database object if available matching the given parameters.')
@@ -126,6 +131,9 @@ class ParameterArgs(BaseArgs):
                             help='Non-planar angle distribution type.')
         parser.add_argument('--phi-dist-params', type=lambda s: [float(item) for item in s.split(',')],
                             help='Non-planar angle distribution parameters.')
+
+        parser.add_argument('--phi-factor-rt', type=float, default=1.,
+                            help='Non-planar angle distribution scale factor for run-tumble model.')
 
         parser.add_argument('--nonp-pause-type', type=str, choices=PE_PAUSE_TYPES,
                             help='Non-planar turn pause penalty type.')
