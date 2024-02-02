@@ -14,8 +14,8 @@ from wormlab3d.toolkit.util import normalise, orthogonalise
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.pca import PCACache, calculate_pcas, get_pca_cache_from_args
-from wormlab3d.trajectories.util import APPROXIMATION_METHOD_BISECT, APPROXIMATION_METHOD_FIND_PEAKS, \
-    get_deltas_from_args, smooth_trajectory
+from wormlab3d.trajectories.util import APPROXIMATION_METHODS, APPROXIMATION_METHOD_BISECT, \
+    APPROXIMATION_METHOD_FIND_PEAKS, get_deltas_from_args, smooth_trajectory
 
 
 def calculate_curvature(
@@ -427,11 +427,13 @@ def generate_or_load_ds_statistics(
         height_first: int = 100,
         smooth_e0_first: int = 201,
         smooth_K_first: int = 201,
+        use_euler_angles: bool = True,
         rebuild_cache: bool = False
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[List[int]]]:
     """
     Generate or load tumble/run values
     """
+    assert approx_method in APPROXIMATION_METHODS, f'Approximation method must be one of {APPROXIMATION_METHODS}.'
     id_str = (f'ds={ds.id}'
               f'_method={approx_method}'
               f'_errors={",".join([str(err) for err in error_limits])}'
@@ -443,6 +445,9 @@ def generate_or_load_ds_statistics(
 
     if approx_method == APPROXIMATION_METHOD_FIND_PEAKS:
         id_str += f'_df={distance_first}_dm={distance_min}'
+        assert use_euler_angles, 'The find_peaks method only supports finding angles from the euler angles.'
+    elif approx_method == APPROXIMATION_METHOD_BISECT and not use_euler_angles:
+        id_str += f'_a=proj'
 
     cache_path = APPROX_CACHE_PATH / id_str
     cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
@@ -457,6 +462,7 @@ def generate_or_load_ds_statistics(
         twist_angles = [data[f'twist_angles_{i}'] for i in range(len(error_limits))]
         with open(tumble_idxs_fn, 'r') as f:
             tumble_idxs = json.load(f)
+        tumble_idxs = {i: v for i, v in enumerate(tumble_idxs.values())}
         logger.info(f'Loaded dataset statistics from {cache_fn}.')
     else:
         logger.info(f'Calculating dataset statistics.')
@@ -469,7 +475,8 @@ def generate_or_load_ds_statistics(
             distance_min=distance_min,
             height_first=height_first,
             smooth_e0_first=smooth_e0_first,
-            smooth_K_first=smooth_K_first
+            smooth_K_first=smooth_K_first,
+            use_euler_angles=use_euler_angles
         )
         save_arrs = {'trajectory_lengths': trajectory_lengths}
         for i in range(len(error_limits)):
@@ -531,6 +538,7 @@ def _calculate_dataset_values(
         height_first: int = 100,
         smooth_e0_first: int = 201,
         smooth_K_first: int = 201,
+        use_euler_angles: bool = True,
 ) -> Tuple[
     np.ndarray,
     Dict[int, np.ndarray],
@@ -607,6 +615,7 @@ def _calculate_dataset_values(
                     min_curvature=height,
                     smooth_e0=smooth_e0,
                     smooth_K=smooth_K,
+                    use_euler_angles=use_euler_angles,
                     **shared_args,
                 )
 

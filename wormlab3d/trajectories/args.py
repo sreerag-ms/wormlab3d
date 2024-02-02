@@ -129,6 +129,8 @@ def get_args(
                             help='Min speed for detecting runs.')
         parser.add_argument('--approx-max-attempts', type=int, default=50,
                             help='Max attempts to find an approximation.')
+        parser.add_argument('--approx-use-euler-angles', type=str2bool, default=True,
+                            help='Use the euler angles to extract the planar/nonplanar tumble angles.')
 
     # Particle explorer arguments
     if include_pe_options:

@@ -1,12 +1,11 @@
 import os
 import shutil
-from argparse import Namespace
 
 import numpy as np
 import yaml
 from copulas.multivariate import GaussianMultivariate
 from matplotlib import pyplot as plt
-from scipy.stats import pearsonr
+from scipy.stats import gaussian_kde, pearsonr
 
 from simple_worm.plot3d import interactive
 from wormlab3d import LOGS_PATH, START_TIMESTAMP
@@ -22,23 +21,10 @@ save_plots = True
 interactive_plots = False
 img_extension = 'svg'
 
-DATA_CACHE_PATH = LOGS_PATH / 'cache'
-DATA_CACHE_PATH.mkdir(parents=True, exist_ok=True)
-
-DIST_KEYS = ['durations', 'speeds', 'planar_angles', 'nonplanar_angles', 'twist_angles']
+DATA_KEYS = ['durations', 'speeds', 'planar_angles', 'nonplanar_angles', 'twist_angles', 'tumble_idxs']
 
 
-def _identifiers(args: Namespace) -> str:
-    id_str = (f'_ds={args.dataset}'
-              f'_e={args.approx_error_limit}'
-              f'_pw={args.planarity_window_vertices}'
-              f'_df={args.approx_distance}'
-              f'_hf={args.approx_curvature_height}'
-              f'_sm={args.smoothing_window_K}')
-    return id_str
-
-
-def model_runs():
+def _init(include_all_runs: bool = False):
     """
     Build a bivariate probability distribution for the runs based on speeds and durations.
     """
@@ -91,8 +77,9 @@ def model_runs():
         height_first=args.approx_curvature_height,
         smooth_e0_first=args.smoothing_window_K,
         smooth_K_first=args.smoothing_window_K,
-        min_run_speed_duration=(0, 10000)
     )
+    if include_all_runs:
+        approx_args['min_run_speed_duration'] = (0, 10000)
 
     # Fetch dataset
     ds = Dataset.objects.get(id=args.dataset)
@@ -103,15 +90,108 @@ def model_runs():
         rebuild_cache=args.regenerate,
         **approx_args
     )
-    # stats = trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles
-    data_values = {k: ds_stats[i + 1] for i, k in enumerate(DIST_KEYS)}
-    durations = data_values['durations'][0]
-    speeds = data_values['speeds'][0]
+    # stats = trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles, tumble_idxs
+    data_values = {k: ds_stats[i + 1][0] for i, k in enumerate(DATA_KEYS)}
 
-    # Get the angles before and after each run
-    thetas = data_values['planar_angles'][0]
-    phis = data_values['nonplanar_angles'][0]
-    tumble_idxs = ds_stats[6]['0']
+    return save_dir, data_values
+
+
+def _make_surface(x, y, x_min, x_max, y_min, y_max, n_mesh_points):
+    """
+    Interpolate data to make a surface.
+    """
+    X, Y = np.mgrid[x_min:x_max:complex(n_mesh_points), y_min:y_max:complex(n_mesh_points)]
+    positions = np.vstack([X.ravel(), Y.ravel()])
+    values = np.vstack([x, y])
+    kernel = gaussian_kde(values)  # , bw_method=0.2)
+    Z = np.reshape(kernel(positions).T, X.shape)
+    return Z
+
+
+def model_runs(show_heatmap: bool = False):
+    """
+    Build a bivariate probability distribution for the runs based on speeds and durations.
+    """
+    save_dir, data_values = _init()
+    durations = data_values['durations']
+    speeds = data_values['speeds']
+
+    # Fit a copula to the durations and speeds
+    data = np.column_stack((durations, speeds))
+    copula = GaussianMultivariate()
+    copula.fit(data)
+
+    # Generate synthetic samples from the joint distribution
+    synth = copula.sample(len(data))
+
+    # Plot the results
+    fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+    if show_heatmap:
+        x_min, x_max = min(durations), max(durations)
+        y_min, y_max = min(speeds), max(speeds)
+        Z = _make_surface(durations, speeds, x_min, x_max, y_min, y_max, 1000)
+        ax.imshow(np.rot90(Z), cmap=plt.get_cmap('YlOrRd'), extent=[x_min, x_max, y_min, y_max], aspect='auto')
+    scatter_args = dict(alpha=0.5, s=20)
+    ax.scatter(durations, speeds, marker='o', label='Real', **scatter_args)
+    ax.scatter(synth[0], synth[1], marker='x', label='Synthetic', **scatter_args)
+    # ax.set_yscale('log')
+    # ax.set_xscale('log')
+    ax.set_xlabel('Run duration')
+    ax.set_ylabel('Run speed')
+    ax.legend()
+    fig.tight_layout()
+    if save_plots:
+        plt.savefig(save_dir / 'runs_scatter.png')
+    if show_plots:
+        plt.show()
+
+
+def model_tumbles(show_heatmap: bool = False):
+    """
+    Build a bivariate probability distribution for the tumbles based on planar and non-planar angles.
+    """
+    save_dir, data_values = _init()
+    thetas = data_values['planar_angles']
+    phis = data_values['nonplanar_angles']
+
+    # Fit a copula to the thetas and phis
+    data = np.column_stack((thetas, phis))
+    copula = GaussianMultivariate()
+    copula.fit(data)
+
+    # Generate synthetic samples from the joint distribution
+    synth = copula.sample(len(data))
+
+    # Plot the results
+    fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+    if show_heatmap:
+        x_min, x_max = min(thetas), max(thetas)
+        y_min, y_max = min(phis), max(phis)
+        Z = _make_surface(thetas, phis, x_min, x_max, y_min, y_max, 1000)
+        ax.imshow(np.rot90(Z), cmap=plt.get_cmap('YlOrRd'), extent=[x_min, x_max, y_min, y_max], aspect='auto')
+    scatter_args = dict(alpha=0.5, s=20)
+    ax.scatter(thetas, phis, marker='o', label='Real', **scatter_args)
+    ax.scatter(synth[0], synth[1], marker='x', label='Synthetic', **scatter_args)
+    ax.set_xlabel('Theta')
+    ax.set_ylabel('Phi')
+    ax.legend()
+    fig.tight_layout()
+    if save_plots:
+        plt.savefig(save_dir / 'tumbles_scatter.png')
+    if show_plots:
+        plt.show()
+
+
+def plot_correlations():
+    """
+    Check for correlations between the run durations/speeds and the angles before and after each run.
+    """
+    save_dir, data_values = _init(include_all_runs=True)
+    durations = data_values['durations']
+    speeds = data_values['speeds']
+    thetas = data_values['planar_angles']
+    phis = data_values['nonplanar_angles']
+    tumble_idxs = data_values['tumble_idxs']
     thetas_pre = []
     thetas_post = []
     phis_pre = []
@@ -133,32 +213,8 @@ def model_runs():
     phis_pre = np.array(phis_pre)
     phis_post = np.array(phis_post)
 
-    # Fit a copula to the durations and speeds
-    data = np.column_stack((durations, speeds))
-    copula = GaussianMultivariate()
-    copula.fit(data)
-
-    # Generate synthetic samples from the joint distribution
-    synth = copula.sample(len(data))
-
-    # Plot the results
-    fig, ax = plt.subplots(1, 1, figsize=(8, 8))
-    scatter_args = dict(alpha=0.5, s=20)
-    ax.scatter(durations, speeds, marker='o', label='Real', **scatter_args)
-    ax.scatter(synth[0], synth[1], marker='x', label='Synthetic', **scatter_args)
-    # ax.set_yscale('log')
-    # ax.set_xscale('log')
-    ax.set_xlabel('Run duration')
-    ax.set_ylabel('Run speed')
-    ax.legend()
-    fig.tight_layout()
-    if save_plots:
-        plt.savefig(save_dir / 'scatter.png')
-    if show_plots:
-        plt.show()
-
     # Plot the angles against the durations and speeds to check for correlations
-    scatter_args['marker'] = 'o'
+    scatter_args = dict(alpha=0.5, s=20, marker='o')
     fig, axes = plt.subplots(2, 4, figsize=(14, 10))
 
     for i, (x, x_lbl) in enumerate(zip([durations, speeds], ['Duration', 'Speed'])):
@@ -184,4 +240,6 @@ if __name__ == '__main__':
         os.makedirs(LOGS_PATH, exist_ok=True)
     if interactive_plots:
         interactive()
-    model_runs()
+    model_runs(show_heatmap=True)
+    model_tumbles(show_heatmap=True)
+    plot_correlations()

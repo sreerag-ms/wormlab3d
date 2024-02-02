@@ -157,6 +157,7 @@ class ParameterArgs(BaseArgs):
                 height_first=args.approx_curvature_height,
                 smooth_e0_first=args.smoothing_window_K,
                 smooth_K_first=args.smoothing_window_K,
+                use_euler_angles=args.approx_use_euler_angles,
                 # min_run_speed_duration=(0, 10000)
             )
         return cls(**vars(args))

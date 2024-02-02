@@ -14,7 +14,7 @@ from torch import nn
 from wormlab3d import N_WORKERS, logger
 from wormlab3d.data.model import Dataset
 from wormlab3d.midlines3d.mf_methods import normalise
-from wormlab3d.particles.particle_explorer import init_dist, orthogonalise
+from wormlab3d.particles.particle_explorer import orthogonalise
 from wormlab3d.particles.tumble_run import generate_or_load_ds_statistics
 
 PARTICLE_PARAMETER_KEYS = ['thetas', 'phis']
@@ -107,8 +107,6 @@ class RTExplorer(nn.Module):
             dataset: Dataset,
             approx_args: Dict[str, Any],
             batch_size: int = 20,
-            theta_dist_params: Optional[Dict[str, Any]] = None,
-            phi_dist_params: Optional[Dict[str, Any]] = None,
             x0: torch.Tensor = None,
             state0: torch.Tensor = None,
             nonp_pause_type: Optional[str] = None,
@@ -128,7 +126,7 @@ class RTExplorer(nn.Module):
         self._init_particle(x0)
         self._init_state(state0)
         self._init_run_model()
-        self._init_angles_model(theta_dist_params, phi_dist_params)
+        self._init_angles_model()
 
     def _log(self, msg: str, level: str = 'info'):
         if not self.quiet:
@@ -203,37 +201,33 @@ class RTExplorer(nn.Module):
         copula.fit(data)
         self.run_model = copula
 
-    def _init_angles_model(
-            self,
-            theta_dist_params: Optional[Dict[str, Any]] = None,
-            phi_dist_params: Optional[Dict[str, Any]] = None,
-    ):
+    def _init_angles_model(self):
         """
-        Initialise the angles distributions from which values are sampled.
+        Initialise the angles model.
         """
-        if theta_dist_params is None:
-            theta_dist_params = {
-                'type': 'cauchy',
-                'mu': 0,
-                'sigma': 0.1,
-            }
-        if phi_dist_params is None:
-            phi_dist_params = {
-                'type': 'cauchy',
-                'mu': 0,
-                'sigma': 0.5,
-            }
+        logger.info('Initialising angles model.')
 
-        self.theta_dist_params = theta_dist_params
-        self.phi_dist_params = phi_dist_params
-        self.theta_dist = init_dist(theta_dist_params)
-        self.phi_dist = init_dist(phi_dist_params)
+        # Generate or load tumble/run values
+        ds_stats = generate_or_load_ds_statistics(
+            ds=self.dataset,
+            rebuild_cache=False,
+            **self.approx_args
+        )
+        # stats = trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles
+        thetas = ds_stats[3][0]
+        phis = ds_stats[4][0]
+
+        # Fit a copula to the durations and speeds
+        data = np.column_stack((thetas, phis))
+        copula = GaussianMultivariate()
+        copula.fit(data)
+        self.angles_model = copula
 
     def forward(
             self,
             T: float,
             dt: float
-    ) -> 'TrajectoryCache':
+    ) -> Dict[str, Any]:
         """
         Simulate a batch of particle explorers.
         """
@@ -258,8 +252,10 @@ class RTExplorer(nn.Module):
 
         # Generate the tumble angles
         self._log('Generating tumble angles.')
-        thetas = self._sample_angles('thetas', max_tumbles)
-        phis = self._sample_angles('phis', max_tumbles)
+        thetas, phis = torch.from_numpy(self.angles_model.sample(self.batch_size * max_tumbles).values.T)
+        thetas = torch.atan2(torch.sin(thetas), torch.cos(thetas))
+        thetas = thetas.reshape(self.batch_size, max_tumbles)
+        phis = phis.reshape(self.batch_size, max_tumbles)
 
         # Generate the directions of the runs
         self._log('Generating tumbles.')

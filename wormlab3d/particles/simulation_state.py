@@ -350,14 +350,6 @@ class SimulationState:
 
         shared_args = dict(
             batch_size=p.batch_size,
-            theta_dist_params={
-                'type': p.theta_dist_type,
-                'params': p.theta_dist_params
-            },
-            phi_dist_params={
-                'type': p.phi_dist_type,
-                'params': p.phi_dist_params
-            },
             nonp_pause_type=p.delta_type,
             nonp_pause_max=p.delta_max,
             quiet=self.quiet
@@ -387,6 +379,14 @@ class SimulationState:
                 rate_12=p.rate_12,
                 speed_0=speeds0,
                 speed_1=speeds1,
+                theta_dist_params={
+                    'type': p.theta_dist_type,
+                    'params': p.theta_dist_params
+                },
+                phi_dist_params={
+                    'type': p.phi_dist_type,
+                    'params': p.phi_dist_params
+                },
                 **shared_args
             )
 

@@ -13,6 +13,7 @@ from simple_worm.frame import FrameNumpy
 from simple_worm.plot3d import FrameArtist
 from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.data.model import Dataset, Trial
+from wormlab3d.data.model.pe_parameters import PE_MODEL_RUNTUMBLE
 from wormlab3d.particles.cache import get_sim_state_from_args
 from wormlab3d.particles.tumble_run import calculate_curvature, find_approximation, generate_or_load_ds_msds, \
     generate_or_load_ds_statistics, get_approximate
@@ -24,7 +25,7 @@ from wormlab3d.trajectories.pca import get_pca_cache_from_args
 from wormlab3d.trajectories.util import get_deltas_from_args
 
 show_plots = True
-save_plots = False
+save_plots = True
 # show_plots = False
 # save_plots = True
 img_extension = 'svg'
@@ -805,7 +806,9 @@ def dataset_against_three_state_histogram_comparison(
     ds = Dataset.objects.get(id=args.dataset)
     min_run_speed_duration = (0.01, 60.)
     error_limits = np.array([0.5, 0.2, 0.1, 0.05, 0.01])
-    SS = get_sim_state_from_args(args)
+    if args.model_type == PE_MODEL_RUNTUMBLE:
+        args.approx_error_limit = 0.01  # Just set a default for ease of coding
+    SS = get_sim_state_from_args(args, no_cache=True)
 
     # Unset midline source args
     args.midline3d_source = None
@@ -821,6 +824,7 @@ def dataset_against_three_state_histogram_comparison(
         height_first=args.approx_curvature_height,
         smooth_e0_first=args.smoothing_window_K,
         smooth_K_first=args.smoothing_window_K,
+        use_euler_angles=args.approx_use_euler_angles
     )
 
     # Generate or load tumble/run values
@@ -839,13 +843,24 @@ def dataset_against_three_state_histogram_comparison(
             **approx_args
         )
     else:
-        stats = {
-            'durations': {i: np.concatenate(SS.intervals) for i in range(len(error_limits))},
-            'speeds': {i: np.concatenate(SS.speeds) for i in range(len(error_limits))},
-            'planar_angles': {i: np.concatenate(SS.thetas) for i in range(len(error_limits))},
-            'nonplanar_angles': {i: np.concatenate(SS.phis) for i in range(len(error_limits))},
-            'twist_angles': {i: twist_angles[i] for i in range(len(error_limits))},
-        }
+        if args.model_type == PE_MODEL_RUNTUMBLE:
+            stats = {'durations': {}, 'speeds': {}, 'planar_angles': {}, 'nonplanar_angles': {}, 'twist_angles': {}}
+            for i, err in enumerate(error_limits):
+                args.approx_error_limit = err
+                SS = get_sim_state_from_args(args, no_cache=True)
+                stats['durations'][i] = np.concatenate(SS.intervals)
+                stats['speeds'][i] = np.concatenate(SS.speeds)
+                stats['planar_angles'][i] = np.concatenate(SS.thetas)
+                stats['nonplanar_angles'][i] = np.concatenate(SS.phis)
+                stats['twist_angles'][i] = twist_angles[i]
+        else:
+            stats = {
+                'durations': {i: np.concatenate(SS.intervals) for i in range(len(error_limits))},
+                'speeds': {i: np.concatenate(SS.speeds) for i in range(len(error_limits))},
+                'planar_angles': {i: np.concatenate(SS.thetas) for i in range(len(error_limits))},
+                'nonplanar_angles': {i: np.concatenate(SS.phis) for i in range(len(error_limits))},
+                'twist_angles': {i: twist_angles[i] for i in range(len(error_limits))},
+            }
 
     # Plot histograms across different error limits
     if plot_sweep:
@@ -1235,7 +1250,7 @@ if __name__ == '__main__':
     # plot_dataset_angle_comparisons()
     # dataset_against_three_state_msd_comparison(resample_durations=True)
     dataset_against_three_state_histogram_comparison(
-        use_approximation_stats=True,
+        use_approximation_stats=False,
         plot_sweep=True,
         plot_basic=False,
         layout='thesis'

@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from multiprocessing import Pool, current_process
 from pathlib import Path
 from typing import List
 
@@ -6,10 +7,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.interpolate import interp1d
 from scipy.spatial.transform import Rotation
+from sklearn.decomposition import PCA
 
 from wormlab3d import N_WORKERS, logger
 from wormlab3d.toolkit.plot_utils import equal_aspect_ratio
 from wormlab3d.toolkit.util import normalise, orthogonalise
+from wormlab3d.trajectories.angles import calculate_angle
 from wormlab3d.trajectories.pca import PCACache, calculate_pcas
 
 
@@ -88,17 +91,19 @@ def find_best_bisection_idx(X: np.ndarray, check_idxs: List[int]):
     if len(X) < 3 or len(check_idxs) == 0:
         return -1
 
-    with ThreadPoolExecutor(max_workers=N_WORKERS) as executor:
-        errs = list(executor.map(
-            calculate_approximation_error,
-            [(X, [i, ]) for i in check_idxs]
-        ))
+    if current_process().name == 'MainProcess':
+        with Pool(processes=N_WORKERS) as pool:
+            errs = pool.map(
+                calculate_approximation_error,
+                [(X, [i, ]) for i in check_idxs]
+            )
+    else:
+        with ThreadPoolExecutor(max_workers=N_WORKERS) as executor:
+            errs = list(executor.map(
+                calculate_approximation_error,
+                [(X, [i, ]) for i in check_idxs]
+            ))
 
-    # with Pool(processes=N_WORKERS) as pool:
-    #     errs = pool.map(
-    #         calculate_approximation_error,
-    #         [(X, [i, ]) for i in check_idxs]
-    #     )
     errs = np.array(errs)
 
     # If all the bisections increase the error, then return the index of the biggest error
@@ -114,17 +119,18 @@ def find_best_vertex_to_add(X: np.ndarray, tumble_idxs: List[int], new_idxs: Lis
     if len(X) < 3 or len(tumble_idxs) == 0:
         return -1
 
-    with ThreadPoolExecutor(max_workers=N_WORKERS) as executor:
-        errs = list(executor.map(
-            calculate_approximation_error,
-            [(X, sorted(tumble_idxs + [new_idx, ])) for new_idx in new_idxs]
-        ))
-
-    # with Pool(processes=N_WORKERS) as pool:
-    #     errs = pool.map(
-    #         calculate_approximation_error,
-    #         [(X, sorted(tumble_idxs + [new_idx, ])) for new_idx in new_idxs]
-    #     )
+    if current_process().name == 'MainProcess':
+        with Pool(processes=N_WORKERS) as pool:
+            errs = pool.map(
+                calculate_approximation_error,
+                [(X, sorted(tumble_idxs + [new_idx, ])) for new_idx in new_idxs]
+            )
+    else:
+        with ThreadPoolExecutor(max_workers=N_WORKERS) as executor:
+            errs = list(executor.map(
+                calculate_approximation_error,
+                [(X, sorted(tumble_idxs + [new_idx, ])) for new_idx in new_idxs]
+            ))
     errs = np.array(errs)
 
     # If any of the errors increase the current error, pick the worst one
@@ -139,17 +145,19 @@ def find_best_vertex_to_add(X: np.ndarray, tumble_idxs: List[int], new_idxs: Lis
 def find_best_vertex_to_prune(X: np.ndarray, tumble_idxs: List[int]):
     if len(X) < 3 or len(tumble_idxs) == 0:
         return -1
-    with ThreadPoolExecutor(max_workers=N_WORKERS) as executor:
-        errs = list(executor.map(
-            calculate_approximation_error,
-            [(X, tumble_idxs[:i] + tumble_idxs[i + 1:]) for i in range(len(tumble_idxs))]
-        ))
 
-    # with Pool(processes=N_WORKERS) as pool:
-    #     errs = pool.map(
-    #         calculate_approximation_error,
-    #         [(X, tumble_idxs[:i] + tumble_idxs[i + 1:]) for i in range(len(tumble_idxs))]
-    #     )
+    if current_process().name == 'MainProcess':
+        with Pool(processes=N_WORKERS) as pool:
+            errs = pool.map(
+                calculate_approximation_error,
+                [(X, tumble_idxs[:i] + tumble_idxs[i + 1:]) for i in range(len(tumble_idxs))]
+            )
+    else:
+        with ThreadPoolExecutor(max_workers=N_WORKERS) as executor:
+            errs = list(executor.map(
+                calculate_approximation_error,
+                [(X, tumble_idxs[:i] + tumble_idxs[i + 1:]) for i in range(len(tumble_idxs))]
+            ))
     errs = np.array(errs)
     return tumble_idxs[np.argmin(errs)]
 
@@ -162,6 +170,7 @@ def find_approximation_bisect(
         min_curvature: int = 50,
         smooth_e0: int = 101,
         smooth_K: int = 101,
+        use_euler_angles: bool = True,
         max_iterations: int = 10,
         quiet: bool = False,
         plot_dir: Path = None,
@@ -356,15 +365,38 @@ def find_approximation_bisect(
     # Calculate PCA along the vertices
     pcas = calculate_pcas(vertices, window_size=min(vertices.shape[0] - 1, planarity_window_vertices), parallel=False)
     pcas = PCACache(pcas)
-
-    # Pad the PCAs to match the number of tumbles/vertices
     components = pcas.components.copy()
     diff = N - components.shape[0] + 1
-    components = np.concatenate([
-        np.repeat(components[0][None, ...], repeats=np.ceil(diff / 2), axis=0),
-        components,
-        np.repeat(components[-1][None, ...], repeats=np.floor(diff / 2), axis=0)
-    ], axis=0)
+
+    # The first and last few tumbles don't change the plane so recalculate components using shrinking windows
+    n_pre = int(np.ceil(diff / 2))
+    n_post = int(np.floor(diff / 2))
+    if n_pre > 0:
+        prepend_components = []
+        for i in range(n_pre):
+            ws = planarity_window_vertices - i - 1
+            pca = PCA(svd_solver='full', copy=True, n_components=3)
+            if ws > 2 and i < n_pre - 1:
+                pca.fit(vertices[:ws])
+            else:
+                # Approximate the first components using the full trajectory
+                pca.fit(X[:tumble_idxs[i]])
+            prepend_components.append(pca.components_)
+        prepend_components = np.stack(prepend_components[::-1])
+        components = np.concatenate([prepend_components, components], axis=0)
+    if n_post > 0:
+        append_components = []
+        for i in range(n_post):
+            ws = planarity_window_vertices - i - 1
+            pca = PCA(svd_solver='full', copy=True, n_components=3)
+            if ws > 2 and i < n_post - 1:
+                pca.fit(vertices[-ws:])
+            else:
+                # Approximate the last components using the full trajectory
+                pca.fit(X[tumble_idxs[-1 - i]:])
+            append_components.append(pca.components_)
+        append_components = np.stack(append_components)
+        components = np.concatenate([components, append_components], axis=0)
 
     # Calculate e0 as normalised line segments between tumbles
     e0 = normalise(vertices[1:] - vertices[:-1])
@@ -378,6 +410,18 @@ def find_approximation_bisect(
     # e2 is the remaining cross product
     e2 = normalise(np.cross(e0, e1))
 
+    # e2a = -e2
+    # e2_tidied = np.zeros_like(e2)
+    # e2_tidied[0] = e2[0]
+    # for i in range(len(e0) - 1):
+    #     a0 = calculate_angle(e2_tidied[i], e2[i + 1])
+    #     a1 = calculate_angle(e2_tidied[i], e2a[i + 1])
+    #     if a0 < a1:
+    #         e2_tidied[i + 1] = e2[i + 1]
+    #     else:
+    #         e2_tidied[i + 1] = e2a[i + 1]
+    # e2 = e2_tidied
+
     # Duplicate final frame to line things up
     e0 = np.r_[e0, e0[-1][None, ...]]
     e1 = np.r_[e1, e1[-1][None, ...]]
@@ -388,19 +432,81 @@ def find_approximation_bisect(
     nonplanar_angles = np.zeros(N)
     twist_angles = np.zeros(N)
     for i in range(N):
-        prev_frame = np.stack([e0[i], e1[i], e2[i]])
-        next_frame = np.stack([e0[i + 1], e1[i + 1], e2[i + 1]])
-        R, rmsd = Rotation.align_vectors(prev_frame, next_frame)
-        R = R.as_matrix()
+        if use_euler_angles:
+            prev_frame = np.stack([e0[i], e1[i], e2[i]])
+            next_frame = np.stack([e0[i + 1], e1[i + 1], e2[i + 1]])
+            R, rmsd = Rotation.align_vectors(prev_frame, next_frame)
+            R = R.as_matrix()
 
-        # Decompose rotation matrix R into the axes of A
-        A = prev_frame
-        rp = Rotation.from_matrix(A.T @ R @ A)
-        a2, a1, a0 = rp.as_euler('zyx')
-        planar_angles[i] = a2  # + a0 # Rotation about e2
-        nonplanar_angles[i] = a1  # Rotation about e1
-        twist_angles[i] = a0  # Rotation about e0
+            # Decompose rotation matrix R into the axes of A
+            A = prev_frame
+            rp = Rotation.from_matrix(A.T @ R @ A)
+            a2, a1, a0 = rp.as_euler('zyx')
+            planar_angles[i] = a2  # + a0 # Rotation about e2
+            nonplanar_angles[i] = a1  # Rotation about e1
+            twist_angles[i] = a0  # Rotation about e0
+
+            R2 = Rotation.from_euler('zyx', [a2, a1, a0])
+            assert np.allclose(Rotation.from_matrix(R).magnitude(), R2.magnitude(), atol=0.1)
+
+        else:
+            # Project v onto the e0/e1 plane
+            v = e0[i + 1]
+            v_proj = v - np.dot(v, e2[i]) * e2[i]
+
+            # Find angles
+            alpha = calculate_angle(e0[i], v_proj)
+            beta = calculate_angle(v_proj, v)
+
+            # Check for flips
+            if np.dot(e2[i], np.cross(e0[i], v)) < 0:
+                alpha *= -1
+            if np.dot(e1[i], np.cross(e0[i], v)) < 0:
+                beta *= -1
+
+            planar_angles[i] = alpha
+            nonplanar_angles[i] = beta
 
     approx = X_approx, vertices, tumble_idxs, run_durations, run_speeds, planar_angles, nonplanar_angles, twist_angles, e0, e1, e2
 
     return approx
+
+
+def test_rotation_angles():
+    def generate_rotation_matrix(axis, angle):
+        return Rotation.from_rotvec(axis * angle).as_matrix()
+
+    # Example: Orthonormal frame e0/e1/e2
+    e0 = np.array([1, 0, 0])
+    e1 = np.array([0, 1, 0])
+    e2 = np.array([0, 0, 1])
+
+    # Example: Target vector v
+    for i in range(100):
+        v = np.random.randn(3)
+        v = v / np.linalg.norm(v)
+        v_proj = v - np.dot(v, e2) * e2
+        v_proj = v_proj / np.linalg.norm(v_proj)
+
+        # Find angles
+        alpha = np.arccos(np.dot(e0, v_proj))
+        beta = np.arccos(np.dot(v_proj, v))
+
+        # Check for flips
+        if np.dot(e2, np.cross(e0, v)) < 0:
+            alpha *= -1
+        if np.dot(e1, np.cross(e0, v)) < 0:
+            beta *= -1
+
+        # Generate rotation matrices for alpha and beta
+        R_alpha = generate_rotation_matrix(e2, alpha)
+        v_proj_generated = R_alpha @ e0
+        e1_rotated = R_alpha @ e1
+        R_beta = generate_rotation_matrix(e1_rotated, beta)
+
+        # Apply rotations to e0
+        v_generated = R_beta @ v_proj_generated
+        print("Original vector v:", v)
+        print("Generated vector v:", v_generated)
+
+        assert np.allclose(v, v_generated, atol=0.1)
