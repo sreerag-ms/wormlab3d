@@ -256,8 +256,17 @@ class RTExplorer(nn.Module):
 
         # Generate the tumble angles
         self._log('Generating tumble angles.')
-        thetas, phis = torch.from_numpy(self.angles_model.sample(self.batch_size * max_tumbles).values.T)
-        thetas = torch.atan2(torch.sin(thetas), torch.cos(thetas))
+        sample_attempts = 0
+        max_attempts = 10
+        while True:
+            thetas, phis = torch.from_numpy(self.angles_model.sample(self.batch_size * max_tumbles).values.T)
+            thetas = torch.atan2(torch.sin(thetas), torch.cos(thetas))
+            if (not torch.isnan(thetas).any() and not torch.isinf(thetas).any()
+                    and not torch.isnan(phis).any() and not torch.isinf(phis).any()):
+                break
+            elif sample_attempts == max_attempts:
+                raise RuntimeError('Failed to sample numerical angles from the copula!')
+            sample_attempts += 1
         thetas = thetas.reshape(self.batch_size, max_tumbles)
         phis *= self.phi_factor
         phis = phis.reshape(self.batch_size, max_tumbles)
