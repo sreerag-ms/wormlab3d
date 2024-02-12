@@ -266,6 +266,8 @@ class SimulationState:
                     state = np.memmap(path_state, dtype=np.float32, mode=mode, shape=tuple(meta['shapes'][k]))
                     states[k] = state
             except Exception as e:
+                if k == 'durations_1' and self.parameters.model_type == PE_MODEL_RUNTUMBLE:
+                    continue
                 self._log(f'Could not load from {path_state}. {e}', 'warning')
                 if not partial_load_ok:
                     return False
