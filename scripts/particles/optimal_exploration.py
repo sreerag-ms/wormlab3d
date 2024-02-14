@@ -22,9 +22,9 @@ from wormlab3d.toolkit.util import hash_data, print_args, to_dict
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.util import get_deltas_from_args
 
-# show_plots = False
+show_plots = False
 save_plots = True
-show_plots = True
+# show_plots = True
 # save_plots = False
 img_extension = 'svg'
 
@@ -1215,12 +1215,7 @@ def volume_metric_sweeps2(
         # ax.grid()
         fig.tight_layout()
         if save_plots:
-            plt.savefig(
-                make_filename('volume_sweep_2a', args,
-                              excludes=['voxel_sizes', 'vxs', 'deltas', 'delta_step', 'n_targets', 'epsilon',
-                                        'duration']),
-                transparent=True
-            )
+            plt.savefig(save_dir / 'duration_sweep.png', transparent=True)
         if show_plots:
             plt.show()
 
@@ -1267,12 +1262,7 @@ def volume_metric_sweeps2(
         ax.grid()
         fig.tight_layout()
         if save_plots:
-            plt.savefig(
-                make_filename('volume_sweep_2b', args,
-                              excludes=['voxel_sizes', 'vxs', 'deltas', 'delta_step', 'n_targets', 'epsilon',
-                                        'duration']),
-                transparent=True
-            )
+            plt.savefig(save_dir / 'pause_sweep.png', transparent=True)
         if show_plots:
             plt.show()
 
@@ -1427,7 +1417,8 @@ def volume_metric_sweeps2(
 
         # fig.tight_layout()
         if save_plots:
-            plt.savefig(save_dir / 'volume_sweeps_combined.png', transparent=True)
+            std = '_std' if show_std else ''
+            plt.savefig(save_dir / f'volume_sweeps_combined_{std}.png', transparent=True)
         if show_plots:
             plt.show()
 
@@ -1547,8 +1538,12 @@ def volume_metric_sweeps_cuboids_voxels(
     """
     Estimate the volume explored by a typical trajectory by cuboids and voxels.
     """
-    args = get_args(validate_source=False)
-    model_phi = args.phi_dist_params[1]
+    save_dir, args = _init()
+    if args.model_type == PE_MODEL_THREESTATE:
+        model_phi = args.phi_dist_params[1]
+    else:
+        assert args.model_type == PE_MODEL_RUNTUMBLE
+        model_phi = 1.  # by definition
 
     # Set parameter ranges
     npa_sigmas = get_npas_from_args(args)
@@ -1740,11 +1735,7 @@ def volume_metric_sweeps_cuboids_voxels(
     ax.grid()
 
     if save_plots:
-        plt.savefig(
-            make_filename('volume_sweep_cuboids_voxels', args,
-                          excludes=['voxel_sizes', 'deltas', 'delta_step', 'n_targets', 'epsilon', 'duration']),
-            transparent=True
-        )
+        plt.savefig(save_dir / 'volume_sweep_cuboids_voxels.png', transparent=True)
     if show_plots:
         plt.show()
 
@@ -1880,7 +1871,13 @@ if __name__ == '__main__':
     # volume_metric()
     # volume_metric_sweeps()
     volume_metric_sweeps2(plot_pause_sweep=False, plot_duration_sweep=False, plot_combined=True,
+                          show_std=False, layout='thesis')
+    volume_metric_sweeps2(plot_pause_sweep=False, plot_duration_sweep=False, plot_combined=True,
                           show_std=True, layout='thesis')
+    volume_metric_sweeps2(plot_pause_sweep=True, plot_duration_sweep=False, plot_combined=False,
+                          show_std=False, layout='thesis')
+    volume_metric_sweeps2(plot_pause_sweep=False, plot_duration_sweep=True, plot_combined=False,
+                          show_std=False, layout='thesis')
     # voxel_scores_sweeps()
-    # volume_metric_sweeps_cuboids_voxels(layout='thesis')
+    volume_metric_sweeps_cuboids_voxels(layout='thesis')
     # fractal_dimension_sweeps()
