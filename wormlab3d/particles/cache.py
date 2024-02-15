@@ -371,7 +371,10 @@ def _calculate_voxel_scores(
                     f'{sim_idx + 1}/{n_sims}: '
                     f'sigma={npas:.2E}, duration={duration:.2f}, pause={pause:.2f}.'
                 )
-                args.phi_dist_params[1] = npas
+                if args.model_type == PE_MODEL_RUNTUMBLE:
+                    args.phi_factor_rt = npas
+                else:
+                    args.phi_dist_params[1] = npas
                 args.sim_duration = duration
                 args.nonp_pause_max = pause
                 SS = get_sim_state_from_args(args)
