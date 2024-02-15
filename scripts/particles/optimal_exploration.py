@@ -1605,11 +1605,11 @@ def volume_metric_sweeps_cuboids_voxels(
     # Fix the pause and sweep over the durations
     args.sim_durations = sim_durations
     args.pauses = [fix_pause]
-    r_values = generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
+    r_values = generate_or_load_r_values(args, cache_only=False, rebuild_cache=False)
     vols = _calculate_volumes(r_values)
     optimal_sigmas_vols_idxs = vols[..., 0].argmax(axis=0).squeeze()
     optimal_sigmas_vols = npa_sigmas[optimal_sigmas_vols_idxs]
-    scores = generate_or_load_voxel_scores(args, cache_only=True, rebuild_cache=False)
+    scores = generate_or_load_voxel_scores(args, cache_only=False, rebuild_cache=False)
     scores *= args.vxs
     optimal_sigmas_scores_idxs = scores[..., 0].argmax(axis=0).squeeze()
     optimal_sigmas_scores = npa_sigmas[optimal_sigmas_scores_idxs]
@@ -1671,11 +1671,11 @@ def volume_metric_sweeps_cuboids_voxels(
     # Fix the duration and sweep over the pauses
     args.sim_durations = [fix_duration]
     args.pauses = pauses
-    r_values = generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
+    r_values = generate_or_load_r_values(args, cache_only=False, rebuild_cache=False)
     vols = _calculate_volumes(r_values)
     optimal_sigmas_vols_idxs = vols[..., 0].argmax(axis=0).squeeze()
     optimal_sigmas_vols = npa_sigmas[optimal_sigmas_vols_idxs]
-    scores = generate_or_load_voxel_scores(args, cache_only=True, rebuild_cache=False)
+    scores = generate_or_load_voxel_scores(args, cache_only=False, rebuild_cache=False)
     scores *= args.vxs
     optimal_sigmas_scores_idxs = scores[..., 0].argmax(axis=0).squeeze()
     optimal_sigmas_scores = npa_sigmas[optimal_sigmas_scores_idxs]
