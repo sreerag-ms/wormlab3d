@@ -1172,7 +1172,7 @@ def volume_metric_sweeps2(
         # Fix the pause and sweep over the durations
         args.sim_durations = sim_durations
         args.pauses = [fix_pause]
-        r_values = generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
+        r_values = generate_or_load_r_values(args, cache_only=False, rebuild_cache=False)
 
         start_idx = 1
         end_idx = n_durations - 1
@@ -1223,7 +1223,7 @@ def volume_metric_sweeps2(
         # Fix the duration and sweep over the pauses
         args.sim_durations = [fix_duration]
         args.pauses = pauses
-        r_values = generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
+        r_values = generate_or_load_r_values(args, cache_only=False, rebuild_cache=False)
         vols = _calculate_volumes(r_values)
         optimal_sigmas_idxs = vols[..., 0].argmax(axis=0).squeeze()
         optimal_sigmas = npa_sigmas[optimal_sigmas_idxs]
