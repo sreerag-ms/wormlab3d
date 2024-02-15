@@ -418,7 +418,21 @@ def generate_or_load_voxel_scores(
         'pauses': [f'{p:.4f}' for p in pauses],
         'vs': vs,
     }
-    cache_path = PE_CACHE_PATH / f'vox_vals_{hash_data(keys)}'
+    cache_id = 'vox_vals_'
+
+    if args.model_type == PE_MODEL_RUNTUMBLE:
+        assert args.approx_args is not None, 'Run and tumble model requires approx_args!'
+        keys = {**keys, **{
+            'ds': args.dataset,
+            'approx_args': args.approx_args,
+            'batch_size': args.batch_size,
+            'nonp_pause_type': args.nonp_pause_type,
+            'nonp_pause_max': args.nonp_pause_max,
+        }}
+        cache_id += 'rt_'
+
+    cache_id += hash_data(keys)
+    cache_path = PE_CACHE_PATH / cache_id
     cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
     scores = None
     if not rebuild_cache and cache_fn.exists():
