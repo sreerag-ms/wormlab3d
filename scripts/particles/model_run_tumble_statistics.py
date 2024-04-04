@@ -5,6 +5,7 @@ import numpy as np
 import yaml
 from copulas.multivariate import GaussianMultivariate
 from matplotlib import pyplot as plt
+from scipy.interpolate import PchipInterpolator
 from scipy.stats import gaussian_kde, pearsonr
 
 from simple_worm.plot3d import interactive
@@ -19,7 +20,6 @@ show_plots = True
 # show_plots = False
 save_plots = True
 interactive_plots = False
-img_extension = 'svg'
 
 DATA_KEYS = ['durations', 'speeds', 'planar_angles', 'nonplanar_angles', 'twist_angles', 'tumble_idxs']
 
@@ -104,7 +104,7 @@ def _make_surface(x, y, x_min, x_max, y_min, y_max, n_mesh_points):
     X, Y = np.mgrid[x_min:x_max:complex(n_mesh_points), y_min:y_max:complex(n_mesh_points)]
     positions = np.vstack([X.ravel(), Y.ravel()])
     values = np.vstack([x, y])
-    kernel = gaussian_kde(values)  # , bw_method=0.2)
+    kernel = gaussian_kde(values)  # , bw_method=0.4)
     Z = np.reshape(kernel(positions).T, X.shape)
     return Z
 
@@ -142,43 +142,307 @@ def model_runs(show_heatmap: bool = False):
     ax.legend()
     fig.tight_layout()
     if save_plots:
-        plt.savefig(save_dir / 'runs_scatter.png')
+        plt.savefig(save_dir / 'runs_scatter.svg')
     if show_plots:
         plt.show()
 
 
+def _fit_dual_cdf_model(
+        data: np.ndarray,
+        n_angle_bins: int = 5,
+):
+    # Put all data in the top right quadrant
+    data = np.abs(data)
+
+    # Convert data to polar coordinates
+    r = np.linalg.norm(data, axis=1)
+    psi = np.arctan2(data[:, 1], data[:, 0])
+    assert np.all(psi >= 0) and np.all(psi <= np.pi / 2), 'psi must be between 0 and pi/2!'
+    data_p = np.array([r, psi]).T
+
+    # Split the data into wedges based on the angles
+    angle_bins = np.linspace(0, np.pi / 2, n_angle_bins + 1)
+    psi_bin_idxs = np.digitize(psi, angle_bins)
+    psi_bin_idxs -= 1
+    data_slices_by_psi = [data_p[psi_bin_idxs == i] for i in range(n_angle_bins)]
+
+    def make_cdf(vals):
+        vals = np.sort(vals)
+        k = len(vals)
+        if k == 0:
+            vals = np.array([0, 1e-4])
+        elif k == 1:
+            vals = np.concatenate(([np.min(vals) * 0.9], vals))
+        k = len(vals)
+        y = np.arange(0, k) / (k - 1)
+        interp = PchipInterpolator(vals, y, extrapolate=False)
+        interp_inv = PchipInterpolator(y, vals, extrapolate=False)
+
+        def interp_func(x, inverse=False):
+            if inverse:
+                return interp_inv(x)
+            y = interp(x)
+            y = np.where(x < vals[0], 0, np.where(x > vals[-1], 1, y))
+            return y
+
+        return interp_func
+
+    # Calculate the psi distribution for all r values
+    cdfs_psi_all = make_cdf(data_p[:, 1])
+
+    # For each of the psi data slices, make a cdf for the distribution of r values
+    cdfs_r = []
+    for i, data_slice in enumerate(data_slices_by_psi):
+        cdfs_r.append(make_cdf(data_slice[:, 0]))
+
+    def sample_fake_data(n_fake_samples):
+        # Sample some new data
+        z1 = np.random.rand(n_fake_samples)
+        z2 = np.random.rand(n_fake_samples)
+        psi_vals = cdfs_psi_all(z1, inverse=True)
+        r_vals_all = np.zeros((n_angle_bins, n_fake_samples))
+        for i, cdf in enumerate(cdfs_r):
+            r_vals_all[i] = cdf(z2, inverse=True)
+        pbi = np.digitize(psi_vals, angle_bins) - 1
+
+        # Interpolate the r values across neighbouring bins depending on their position in the bin
+        psi_bin_positions = (psi_vals - angle_bins[pbi]) / (angle_bins[pbi + 1] - angle_bins[pbi])
+        pos_idx = np.arange(n_fake_samples)
+        r_vals_left = r_vals_all[np.clip(pbi - 1, a_min=0, a_max=None), pos_idx]
+        r_vals_middle = r_vals_all[pbi, pos_idx]
+        r_vals_right = r_vals_all[np.clip(pbi + 1, a_min=0, a_max=n_angle_bins - 1), pos_idx]
+        r_vals = (r_vals_middle * (1 - np.abs(psi_bin_positions - 0.5))
+                  + r_vals_left * np.clip(0.5 - psi_bin_positions, a_min=0, a_max=None)
+                  + r_vals_right * np.clip(psi_bin_positions - 0.5, a_min=0, a_max=None))
+
+        # Turn the data back into cartesian
+        fake_data = np.array([r_vals * np.cos(psi_vals), r_vals * np.sin(psi_vals)]).T
+
+        # Randomly flip the x and y values
+        flip_x = np.random.rand(n_fake_samples) > 0.5
+        flip_y = np.random.rand(n_fake_samples) > 0.5
+        fake_data[:, 0] *= np.where(flip_x, -1, 1)
+        fake_data[:, 1] *= np.where(flip_y, -1, 1)
+
+        return fake_data
+
+    return data_p, angle_bins, psi_bin_idxs, cdfs_psi_all, cdfs_r, sample_fake_data
+
+
+def _generate_noisy_donut_data(n_samples, radius, noise_std):
+    psi = np.linspace(0, 2 * np.pi, n_samples)
+    data = np.array([radius * np.cos(psi), radius * np.sin(psi)]).T
+    data += np.random.normal(0, noise_std, size=(n_samples, 2))
+    return data
+
+
+def donut_test():
+    """
+    Try to fit a synthetic donut distribution.
+    """
+    n_data_samples = 200
+    n_fake_samples = 300
+    radius = 0.5
+    noise_std = 0.1
+    n_angle_bins = 5
+
+    # Generate donut-distributed data
+    data = _generate_noisy_donut_data(n_data_samples, radius, noise_std)
+
+    # Fit the model
+    data_p, angle_bins, psi_bin_idxs, cdfs_psi_all, cdfs_r, sample_fake_data = _fit_dual_cdf_model(data, n_angle_bins)
+    max_psi = np.max(data_p[:, 1])
+    max_r = np.max(data_p[:, 0])
+
+    # Sample some fake data
+    fake_data = sample_fake_data(n_fake_samples)
+
+    # Plot the data, distribution functions and sampled data
+    fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+
+    ax = axes[0, 0]
+    ax.set_title('All data')
+    probs = cdfs_psi_all(data_p[:, 1])
+    ax.scatter(*data.T, c=probs, cmap='viridis')
+    ax.set_xlabel('$\\theta$')
+    ax.set_ylabel('$\\phi$')
+
+    ax = axes[1, 0]
+    x = np.linspace(0, max_psi * 1.01, 1000)
+    y = cdfs_psi_all(x)
+    y[np.isnan(y)] = 1
+    cmap = plt.get_cmap('viridis')
+    for i in range(len(x)):
+        ax.plot(x[i:i + 2], y[i:i + 2], c=cmap(y[i]))
+    ax.set_xticks([0, np.pi / 4, np.pi / 2])
+    ax.set_xticklabels(['0', '$\pi/4$', '$\pi/2$'])
+    ax.set_xlabel('$\psi$')
+    ax.set_ylabel('Probability')
+    ax.grid(True)
+
+    ax = axes[0, 1]
+    ax.set_title('Split by $\psi$')
+    for i in range(n_angle_bins):
+        data_i = data[psi_bin_idxs == i]
+        ax.scatter(*data_i.T)
+    ax.set_xlabel('$\\theta$')
+    ax.set_ylabel('$\\phi$')
+
+    ax = axes[1, 1]
+    x = np.linspace(0, max_r * 1.01, 1000)
+    for i, cdf in enumerate(cdfs_r):
+        y = cdf(x)
+        y[np.isnan(y)] = 1
+        ax.plot(x, y,
+                label=f'$\\psi \in \lbrace{angle_bins[i] / np.pi:.2f}\pi,{angle_bins[i + 1] / np.pi:.2f}\pi\\rbrace$')
+    ax.set_xlabel('$r$')
+    ax.set_ylabel('Probability')
+    ax.legend()
+    ax.grid(True)
+
+    ax = axes[0, 2]
+    ax.set_title('Sampled data')
+    ax.scatter(*fake_data.T)
+    ax.set_xlabel('$\\theta$')
+    ax.set_ylabel('$\\phi$')
+
+    axes[1, 2].axis('off')
+
+    fig.tight_layout()
+    plt.show()
+
+
 def model_tumbles(show_heatmap: bool = False):
     """
-    Build a bivariate probability distribution for the tumbles based on planar and non-planar angles.
+    Build a probability distribution for the tumbles based on planar and non-planar angles.
     """
+    n_fake_samples = 1000
+    n_angle_bins = 8
     save_dir, data_values = _init()
     thetas = data_values['planar_angles']
     phis = data_values['nonplanar_angles']
+    data = np.array([thetas, phis]).T
 
-    # Fit a copula to the thetas and phis
-    data = np.column_stack((thetas, phis))
-    copula = GaussianMultivariate()
-    copula.fit(data)
+    # Fit the model
+    data_p, angle_bins, psi_bin_idxs, cdfs_psi_all, cdfs_r, sample_fake_data = _fit_dual_cdf_model(data, n_angle_bins)
+    max_psi = np.max(data_p[:, 1])
+    max_r = np.max(data_p[:, 0])
 
-    # Generate synthetic samples from the joint distribution
-    synth = copula.sample(len(data))
+    # Sample some fake data
+    fake_data = sample_fake_data(n_fake_samples)
 
-    # Plot the results
-    fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+    # Plot the data, distribution functions and sampled data
+    fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+
+    def setup_angle_axes(ax_):
+        ax_.set_xticks([-np.pi, -np.pi / 2, 0, np.pi / 2, np.pi])
+        ax_.set_xticklabels(['$-\pi$', '$-\pi/2$', '0', '$\pi/2$', '$\pi$'])
+        ax_.set_yticks([-np.pi / 2, 0, np.pi / 2])
+        ax_.set_yticklabels(['$-\pi/2$', '0', '$\pi/2$'])
+        ax_.set_xlabel('$\\theta$')
+        ax_.set_ylabel('$\\phi$')
+
+    ax = axes[0, 0]
+    ax.set_title('All data')
+    probs = cdfs_psi_all(data_p[:, 1])
     if show_heatmap:
         x_min, x_max = min(thetas), max(thetas)
         y_min, y_max = min(phis), max(phis)
         Z = _make_surface(thetas, phis, x_min, x_max, y_min, y_max, 1000)
         ax.imshow(np.rot90(Z), cmap=plt.get_cmap('YlOrRd'), extent=[x_min, x_max, y_min, y_max], aspect='auto')
-    scatter_args = dict(alpha=0.5, s=20)
-    ax.scatter(thetas, phis, marker='o', label='Real', **scatter_args)
-    ax.scatter(synth[0], synth[1], marker='x', label='Synthetic', **scatter_args)
-    ax.set_xlabel('Theta')
-    ax.set_ylabel('Phi')
-    ax.legend()
+    ax.scatter(*data.T, c=probs, cmap='viridis', s=5)
+    setup_angle_axes(ax)
+
+    ax = axes[1, 0]
+    x = np.linspace(0, max_psi * 1.01, 1000)
+    y = cdfs_psi_all(x)
+    y[np.isnan(y)] = 1
+    cmap = plt.get_cmap('viridis')
+    for i in range(len(x)):
+        ax.plot(x[i:i + 2], y[i:i + 2], c=cmap(y[i]))
+    ax.set_xticks([0, np.pi / 4, np.pi / 2])
+    ax.set_xticklabels(['0', '$\pi/4$', '$\pi/2$'])
+    ax.set_xlabel('$\psi$')
+    ax.set_ylabel('cdf')
+    ax.grid(True)
+
+    ax = axes[0, 1]
+    ax.set_title('Split by $\psi$')
+    for i in range(n_angle_bins):
+        data_i = data[psi_bin_idxs == i]
+        ax.scatter(*data_i.T, s=10)
+    setup_angle_axes(ax)
+
+    ax = axes[1, 1]
+    x = np.linspace(0, max_r * 1.01, 1000)
+    for i, cdf in enumerate(cdfs_r):
+        y = cdf(x)
+        y[np.isnan(y)] = 1
+        ax.plot(x, y,
+                label=f'$\\psi \in \lbrace{angle_bins[i] / np.pi:.2f}\pi,{angle_bins[i + 1] / np.pi:.2f}\pi\\rbrace$')
+    ax.set_xlabel('$r$')
+    ax.set_ylabel('cdf')
+    ax.grid(True)
+
+    # Legend - show in empty axis
+    legend = ax.legend()
+    handles = legend.legendHandles
+    labels = [t.get_text() for t in legend.get_texts()]
+    axes[1, 2].legend(handles, labels, loc='upper left', bbox_to_anchor=(-0.15, 1),
+                      bbox_transform=axes[1, 2].transAxes)
+    axes[1, 2].axis('off')
+    legend.remove()
+
+    ax = axes[0, 2]
+    ax.set_title('Sampled data')
+    if show_heatmap:
+        fake_thetas, fake_phis = fake_data.T
+        x_min, x_max = min(fake_thetas), max(fake_thetas)
+        y_min, y_max = min(fake_phis), max(fake_phis)
+        Z = _make_surface(fake_thetas, fake_phis, x_min, x_max, y_min, y_max, 1000)
+        ax.imshow(np.rot90(Z), cmap=plt.get_cmap('YlOrRd'), extent=[x_min, x_max, y_min, y_max], aspect='auto')
+    ax.scatter(*fake_data.T, s=2)
+    setup_angle_axes(ax)
+
     fig.tight_layout()
     if save_plots:
-        plt.savefig(save_dir / 'tumbles_scatter.png')
+        plt.savefig(save_dir / 'tumbles_dual_cdf_model.svg')
+    if show_plots:
+        plt.show()
+
+
+def tumble_heatmaps():
+    """
+    Plot heatmaps from the data and the modelled pdfs.
+    """
+    save_dir, data_values = _init()
+    n_samples = 2000
+    n_angle_bins = 8
+
+    # Fit the model
+    thetas = data_values['planar_angles']
+    phis = data_values['nonplanar_angles']
+    data = np.array([thetas, phis]).T
+    data_p, angle_bins, psi_bin_idxs, cdfs_psi_all, cdfs_r, sample_fake_data = _fit_dual_cdf_model(data, n_angle_bins)
+
+    # Sample from the model
+    thetas_synth, phis_synth = sample_fake_data(n_samples).T
+
+    # Plot the results
+    fig, axes = plt.subplots(1, 2, figsize=(8, 4))
+    x_min, x_max = -np.pi, np.pi
+    y_min, y_max = -np.pi / 2, np.pi / 2
+    Z_data = _make_surface(thetas, phis, x_min, x_max, y_min, y_max, 1000)
+    Z_synth = _make_surface(thetas_synth, phis_synth, x_min, x_max, y_min, y_max, 1000)
+    for i, (Z, title) in enumerate(zip([Z_data, Z_synth], ['Data', 'Synthetic'])):
+        ax = axes[i]
+        ax.imshow(np.rot90(Z), cmap=plt.get_cmap('YlOrRd'), extent=[x_min, x_max, y_min, y_max], aspect='auto')
+        ax.set_title(title)
+        ax.set_xlabel('$\\theta$')
+        ax.set_ylabel('$\phi$')
+    fig.tight_layout()
+    if save_plots:
+        plt.savefig(save_dir / 'tumbles_heatmaps.svg')
     if show_plots:
         plt.show()
 
@@ -231,7 +495,7 @@ def plot_correlations():
 
     fig.tight_layout()
     if save_plots:
-        plt.savefig(save_dir / 'correlations.png')
+        plt.savefig(save_dir / 'correlations.svg')
     if show_plots:
         plt.show()
 
@@ -241,6 +505,8 @@ if __name__ == '__main__':
         os.makedirs(LOGS_PATH, exist_ok=True)
     if interactive_plots:
         interactive()
-    model_runs(show_heatmap=True)
-    model_tumbles(show_heatmap=True)
-    plot_correlations()
+    # model_runs(show_heatmap=True)
+    # donut_test()
+    # model_tumbles(show_heatmap=True)
+    tumble_heatmaps()
+    # plot_correlations()

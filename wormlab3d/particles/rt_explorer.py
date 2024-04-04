@@ -8,6 +8,7 @@ import numpy as np
 import torch
 from copulas.multivariate import GaussianMultivariate
 from progress.bar import Bar
+from scipy.interpolate import PchipInterpolator
 from scipy.signal import find_peaks
 from torch import nn
 
@@ -112,6 +113,7 @@ class RTExplorer(nn.Module):
             phi_factor: float = 1.,
             nonp_pause_type: Optional[str] = None,
             nonp_pause_max: float = 0.,
+            n_angle_bins: int = 10,
             quiet: bool = False,
     ):
         super().__init__()
@@ -126,6 +128,9 @@ class RTExplorer(nn.Module):
         # Should nonplanar turns induce a longer pause than planar turns
         self.nonp_pause_type = nonp_pause_type
         self.nonp_pause_max = nonp_pause_max
+
+        # Number of angle bins for the angles model
+        self.n_angle_bins = n_angle_bins
 
         self._init_particle(x0)
         self._init_state(state0)
@@ -220,12 +225,84 @@ class RTExplorer(nn.Module):
         # stats = trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles
         thetas = ds_stats[3][0]
         phis = ds_stats[4][0]
+        data = np.array([thetas, phis]).T
 
-        # Fit a copula to the durations and speeds
-        data = np.column_stack((thetas, phis))
-        copula = GaussianMultivariate()
-        copula.fit(data)
-        self.angles_model = copula
+        # Put all data in the top right quadrant
+        data = np.abs(data)
+
+        # Convert data to polar coordinates
+        r = np.linalg.norm(data, axis=1)
+        psi = np.arctan2(data[:, 1], data[:, 0])
+        assert np.all(psi >= 0) and np.all(psi <= np.pi / 2), 'psi must be between 0 and pi/2!'
+        data_p = np.array([r, psi]).T
+
+        # Split the data into wedges based on the angles
+        angle_bins = np.linspace(0, np.pi / 2, self.n_angle_bins + 1)
+        psi_bin_idxs = np.digitize(psi, angle_bins)
+        psi_bin_idxs -= 1
+        data_slices_by_psi = [data_p[psi_bin_idxs == i] for i in range(self.n_angle_bins)]
+
+        def make_cdf(vals: np.ndarray):
+            vals = np.sort(vals)
+            k = len(vals)
+            if k == 0:
+                vals = np.array([0, 1e-4])
+            elif k == 1:
+                vals = np.concatenate(([np.min(vals) * 0.9], vals))
+            k = len(vals)
+            y = np.arange(0, k) / (k - 1)
+            interp = PchipInterpolator(vals, y, extrapolate=False)
+            interp_inv = PchipInterpolator(y, vals, extrapolate=False)
+
+            def interp_func(x, inverse=False):
+                if inverse:
+                    return interp_inv(x)
+                y = interp(x)
+                y = np.where(x < vals[0], 0, np.where(x > vals[-1], 1, y))
+                return y
+
+            return interp_func
+
+        # Calculate the psi distribution for all r values
+        cdfs_psi_all = make_cdf(data_p[:, 1])
+
+        # For each of the psi data slices, make a cdf for the distribution of r values
+        cdfs_r = []
+        for i, data_slice in enumerate(data_slices_by_psi):
+            cdfs_r.append(make_cdf(data_slice[:, 0]))
+
+        def angles_model(n_samples: int):
+            # Sample some new data
+            z1 = np.random.rand(n_samples)
+            z2 = np.random.rand(n_samples)
+            psi_vals = cdfs_psi_all(z1, inverse=True)
+            r_vals_all = np.zeros((self.n_angle_bins, n_samples))
+            for i, cdf in enumerate(cdfs_r):
+                r_vals_all[i] = cdf(z2, inverse=True)
+            pbi = np.digitize(psi_vals, angle_bins) - 1
+
+            # Interpolate the r values across neighbouring bins depending on their position in the bin
+            psi_bin_positions = (psi_vals - angle_bins[pbi]) / (angle_bins[pbi + 1] - angle_bins[pbi])
+            pos_idx = np.arange(n_samples)
+            r_vals_left = r_vals_all[np.clip(pbi - 1, a_min=0, a_max=None), pos_idx]
+            r_vals_middle = r_vals_all[pbi, pos_idx]
+            r_vals_right = r_vals_all[np.clip(pbi + 1, a_min=0, a_max=self.n_angle_bins - 1), pos_idx]
+            r_vals = (r_vals_middle * (1 - np.abs(psi_bin_positions - 0.5))
+                      + r_vals_left * np.clip(0.5 - psi_bin_positions, a_min=0, a_max=None)
+                      + r_vals_right * np.clip(psi_bin_positions - 0.5, a_min=0, a_max=None))
+
+            # Turn the data back into cartesian
+            fake_data = np.array([r_vals * np.cos(psi_vals), r_vals * np.sin(psi_vals)]).T
+
+            # Randomly flip the x and y values
+            flip_x = np.random.rand(n_samples) > 0.5
+            flip_y = np.random.rand(n_samples) > 0.5
+            fake_data[:, 0] *= np.where(flip_x, -1, 1)
+            fake_data[:, 1] *= np.where(flip_y, -1, 1)
+
+            return fake_data
+
+        self.angles_model = angles_model
 
     def forward(
             self,
@@ -259,7 +336,7 @@ class RTExplorer(nn.Module):
         sample_attempts = 0
         max_attempts = 10
         while True:
-            thetas, phis = torch.from_numpy(self.angles_model.sample(self.batch_size * max_tumbles).values.T)
+            thetas, phis = torch.from_numpy(self.angles_model(self.batch_size * max_tumbles).T)
             thetas = torch.atan2(torch.sin(thetas), torch.cos(thetas))
             if (not torch.isnan(thetas).any() and not torch.isinf(thetas).any()
                     and not torch.isnan(phis).any() and not torch.isinf(phis).any()):
