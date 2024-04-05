@@ -45,7 +45,7 @@ def get_sim_state_from_args(args: Union[ParameterArgs, Namespace], no_cache: boo
     """
     Generate or load the trajectories from parameters set in an argument namespace.
     """
-    if type(args) == Namespace:
+    if isinstance(args, Namespace):
         args = ParameterArgs.from_args(args)
     params = _init_parameters(args)
     SS = SimulationState(params, read_only=False, regenerate=args.regenerate, no_cache=no_cache)
