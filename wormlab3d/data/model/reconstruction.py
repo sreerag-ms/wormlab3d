@@ -49,6 +49,10 @@ class Reconstruction(Document):
         return self.end_frame - self.start_frame
 
     @property
+    def n_frames_valid(self) -> int:
+        return self.end_frame_valid - self.start_frame_valid
+
+    @property
     def eigenworms(self) -> List[Eigenworms]:
         return Eigenworms.objects(reconstruction=self).order_by('-updated')
 
