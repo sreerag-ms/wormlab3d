@@ -31,13 +31,14 @@ def _execute_annex_cmd(cmd: str, path: str, check: bool = True) -> subprocess.Co
     return proc
 
 
-def fetch_from_annex(path: str):
+def fetch_from_annex(path: str, quiet: bool = False):
     """
     Fetch a git-annexed file. 
     If not already locally available it tries to fetch it using the command line git-annex functionality. 
     """
     proc = _execute_annex_cmd('info', path)
-    logger.debug(proc.stdout)
+    if not quiet:
+        logger.debug(proc.stdout)
 
     # Parse output
     info = proc.stdout.decode().splitlines()
@@ -48,7 +49,8 @@ def fetch_from_annex(path: str):
 
     # If the file is available, continue as usual
     if present:
-        logger.debug('Annexed file is available locally.')
+        if not quiet:
+            logger.debug('Annexed file is available locally.')
         return
     # Otherwise we need to fetch it from the annex
 
@@ -65,4 +67,5 @@ def fetch_from_annex(path: str):
 
     # Fetch the file from the annex
     _execute_annex_cmd('get', path)
-    logger.debug('File fetched from annex.')
+    if not quiet:
+        logger.debug('File fetched from annex.')

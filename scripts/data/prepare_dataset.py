@@ -49,7 +49,7 @@ def _init() -> Tuple[Path, Dataset, Eigenworms]:
     # Save the arguments
     arg_dict = to_dict(args)
     arg_dict['created'] = START_TIMESTAMP
-    arg_dict['eigenworms'] = ew.id
+    arg_dict['eigenworms'] = str(ew.id)
     with open(save_dir / 'args.yml', 'w') as f:
         yaml.dump(arg_dict, f)
 
@@ -89,7 +89,7 @@ def prepare_dataset():
         for j, video_path in enumerate(trial.videos):
             video_path = fix_path(video_path)
             if is_annexed_file(video_path):
-                fetch_from_annex(video_path)
+                fetch_from_annex(video_path, quiet=True)
             video_path = Path(video_path)
             assert video_path.exists(), f'Video not found: {video_path}.'
             shutil.copy(video_path, video_dir_trial / f'trial={trial.id:03d}_camera={j}{video_path.suffix}')
