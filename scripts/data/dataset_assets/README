@@ -1,0 +1,23 @@
+======== Leeds Wormlab ========
+
+This dataset has been generated using code from the "wormlab3d" repository. The full code is available here: https://gitlab.com/tom0/wormlab3d.git.
+
+For details on the shape reconstruction process please refer to the following paper:
+----------------------------------------------------------------------------------------------------------------
+3D shape reconstruction of semi-transparent worms.
+Ilett, T.P., Yuval, O., Ranner, T., Cohen, N. and Hogg, D.C., 2023.
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (pp. 12565-12575).
+----------------------------------------------------------------------------------------------------------------
+
+Please direct any correspondence to: t.ilett@leeds.ac.uk or n.cohen@leeds.ac.uk.
+
+Contents:
+1. dataset.csv - Details of the included trials, conditions and reconstructions.
+2. args.yml - Meta data for reproducibility.
+3. /videos - Compressed video files for all trials.
+4. /tracking - 3D position tracking information for all trials.
+5. /reconstruction_xyz/* - 3D body midline coordinates for all reconstructed trials (not all trials have been reconstructed).
+6. /reconstruction_eigenworms/eigenworms_XXXXXX.npz - Complex-PCA (CPCA) components calculated across the dataset (the "eigenworms").
+7. /reconstruction_eigenworms/* - Eigenworm coefficients for reconstructed trials.
+8. /examples/cpca.py - CPCA class for transforming shapes into eigenworm space.
+9. /examples/* - Example code for loading and visualising the data.

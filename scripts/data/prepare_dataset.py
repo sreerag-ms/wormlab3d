@@ -154,23 +154,22 @@ def prepare_dataset():
         for row in records:
             writer.writerow(row)
 
-    # Copy over the example scripts and replace placeholders
-    shutil.copytree(SCRIPT_PATH / 'dataset_examples', examples_dir, dirs_exist_ok=True)
+    # Copy over the README, cpca class and the example scripts
+    assets_dir = SCRIPT_PATH / 'dataset_assets'
+    shutil.copy(assets_dir / 'README', save_dir)
     shutil.copy(ROOT_PATH / 'wormlab3d' / 'postures' / 'cpca.py', examples_dir / 'cpca.py')
-    plot_tracking_script = examples_dir / 'plot_tracking.py'
-    plot_reconstruction_script = examples_dir / 'plot_reconstruction.py'
-    plot_eigenworms_script = examples_dir / 'plot_eigenworms.py'
     for record in records:
         if record['reconstruction'] == '-':
             continue
         break
-    for script in [plot_tracking_script, plot_reconstruction_script, plot_eigenworms_script]:
-        with open(script, 'r') as f:
+    for script_name in ['plot_tracking.py', 'plot_reconstruction.py', 'plot_eigenworms.py']:
+        script_src = assets_dir / script_name
+        with open(script_src, 'r') as f:
             content = f.read()
             content = content.replace('%%EIGENWORMS_ID%%', str(ew.id))
             content = content.replace('%%TRIAL_ID%%', f'{record["trial"]:03d}')
             content = content.replace('%%RECONSTRUCTION_ID%%', record['reconstruction'])
-        with open(script, 'w') as f:
+        with open(examples_dir / script_name, 'w') as f:
             f.write(content)
 
 
