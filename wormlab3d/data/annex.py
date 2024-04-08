@@ -13,14 +13,15 @@ def is_annexed_file(path: str) -> bool:
     return (ANNEX_PATH_PLACEHOLDER in path or str(ANNEX_PATH) in path) and os.path.islink(path)
 
 
-def _execute_annex_cmd(cmd: str, path: str, check: bool = True) -> subprocess.CompletedProcess:
+def _execute_annex_cmd(cmd: str, path: str, check: bool = True, quiet: bool = False) -> subprocess.CompletedProcess:
     """
     Executes a git annex command via a subprocess.
     Allowed cmds are "info" and "get". A path must be provided.
     """
     assert cmd in ['info', 'get']
     cmd = ['git', 'annex', cmd, path]
-    logger.debug(f'Executing: "{" ".join(cmd)}"')
+    if not quiet:
+        logger.debug(f'Executing: "{" ".join(cmd)}"')
     proc = subprocess.run(
         cmd,
         cwd=ANNEX_PATH,
@@ -36,7 +37,7 @@ def fetch_from_annex(path: str, quiet: bool = False):
     Fetch a git-annexed file. 
     If not already locally available it tries to fetch it using the command line git-annex functionality. 
     """
-    proc = _execute_annex_cmd('info', path)
+    proc = _execute_annex_cmd('info', path, quiet=quiet)
     if not quiet:
         logger.debug(proc.stdout)
 
@@ -66,6 +67,6 @@ def fetch_from_annex(path: str, quiet: bool = False):
                            f'as it would leave less than {MIN_FREE_DISK_SPACE} free disk space.')
 
     # Fetch the file from the annex
-    _execute_annex_cmd('get', path)
+    _execute_annex_cmd('get', path, quiet=quiet)
     if not quiet:
         logger.debug('File fetched from annex.')
