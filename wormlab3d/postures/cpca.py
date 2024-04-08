@@ -154,7 +154,6 @@ def load_cpca_from_file(path: Path) -> CPCA:
     """
     Load eigenworms from .cpca file.
     """
-
     n_samples = 0
     components = []
     with open(path) as f:
@@ -190,6 +189,20 @@ def load_cpca_from_file(path: Path) -> CPCA:
     cpca.explained_variance_ratio_ = np.zeros(n_components)
     cpca.singular_values_ = np.zeros(n_components)
     cpca.components_ = components
+
+    return cpca
+
+
+def load_cpca_from_components(components: np.ndarray, mean: np.ndarray) -> CPCA:
+    """
+    Load eigenworms from components and mean.
+    """
+    n_components, n_features = components.shape
+    cpca = CPCA(n_components=n_components, whiten=False)
+    cpca.n_components_ = n_components
+    cpca.n_features_ = n_features
+    cpca.components_ = components
+    cpca.mean_ = mean
 
     return cpca
 
