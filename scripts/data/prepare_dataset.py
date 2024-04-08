@@ -84,6 +84,7 @@ def prepare_dataset():
         rec = None if rec_id is None else Reconstruction.objects.get(id=rec_id)
 
         # Copy the videos
+        logger.info('Copying videos.')
         video_dir_trial = video_dir / f'trial={trial.id:03d}'
         video_dir_trial.mkdir(parents=True, exist_ok=True)
         for j, video_path in enumerate(trial.videos):
