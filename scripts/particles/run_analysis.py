@@ -61,6 +61,7 @@ def _calculate_pause_data(
 
     pause_durations = []
     pause_positions = []
+    run_ids = []
     thetas_pre = []
     thetas_post = []
     phis_pre = []
@@ -85,6 +86,7 @@ def _calculate_pause_data(
 
     # Loop over the reconstruction approximations and extract the pause statistics
     ii = 0
+    run_id = 0
     for i, trial in enumerate(ds.include_trials):
         logger.info(f'Computing parameters for trial={trial.id}.')
         tumble_idxs_i = tumble_idxs[i]
@@ -176,12 +178,17 @@ def _calculate_pause_data(
             run_durations.append(len(run_speed) * dt)
             run_pause_ratios.append(np.sum(is_paused) / len(is_paused))
 
+            # Update run ids
+            run_ids.extend([run_id] * len(pause_idxs))
+            run_id += 1
+
             v0 = v1
         ii += len(tumble_idxs_i)
 
     return {
         'pause_durations': np.array(pause_durations),
         'pause_positions': np.array(pause_positions),
+        'run_ids': np.array(run_ids),
         'thetas_pre': np.array(thetas_pre),
         'thetas_post': np.array(thetas_post),
         'phis_pre': np.array(phis_pre),
@@ -381,6 +388,81 @@ def plot_pause_durations_and_positions():
     plt.close(fig)
 
 
+def plot_pause_durations_relative_to(
+        start_or_end: str = 'start',
+        window_duration: float = 5,
+):
+    assert start_or_end in ['start', 'end']
+    save_dir, data = _init()
+    run_ids = data['run_ids']
+    run_durations = data['run_durations'][run_ids]
+    durations = data['pause_durations']
+    positions = data['pause_positions']
+    logger.info(f'Plotting pause durations within {window_duration}s of {start_or_end} of run.')
+
+    # Filter the pause durations
+    if start_or_end == 'start':
+        timings = run_durations * positions
+    else:
+        timings = run_durations * (1 - positions)
+    idxs = timings < window_duration
+    durations = durations[idxs]
+    timings = timings[idxs]
+    if start_or_end == 'end':
+        timings = -timings
+
+    # Plot the results
+    gs = GridSpec(
+        nrows=2,
+        ncols=2,
+        width_ratios=(4, 3),
+        height_ratios=(3, 4),
+        wspace=0,
+        hspace=0,
+        top=0.92,
+        bottom=0.12,
+        left=0.08,
+        right=0.96,
+    )
+    fig = plt.figure(figsize=(10, 6))
+
+    scatter_args = dict(s=10, alpha=0.6, marker='$\u25EF$')
+    hist_args = dict(bins=10, density=True, rwidth=0.9)
+
+    # Scatter plot - timings/durations
+    ax_scat = fig.add_subplot(gs[1, 0])
+    ax_scat.scatter(timings, durations, **scatter_args)
+    ax_scat.set_xlabel(f'Time from run {start_or_end} (s)')
+    ax_scat.set_ylabel('Duration (s)')
+    ax_scat.spines['top'].set_visible(False)
+    ax_scat.spines['right'].set_visible(False)
+
+    def _make_hist(ax_, vals):
+        ax_.hist(vals, **hist_args)
+        ax_.tick_params(axis='x', bottom=False, labelbottom=False)
+        ax_.spines['bottom'].set(linestyle='--', color='grey')
+
+    # Pause timings histogram
+    ax_hist_pos = fig.add_subplot(gs[0, 0], sharex=ax_scat)
+    _make_hist(ax_hist_pos, timings)
+    ax_hist_pos.set_ylabel('Density')
+    ax_hist_pos.set_title(f'Pauses within {window_duration}s of {start_or_end} of run')
+
+    # Pause duration histogram
+    ax_hist_dur = fig.add_subplot(gs[1, 1])  # , sharey=ax_scat)
+    ax_hist_dur.hist(durations, orientation='horizontal', color='green', **hist_args)
+    ax_hist_dur.tick_params(axis='y', left=False, labelleft=False)
+    ax_hist_dur.spines['left'].set(linestyle='--', color='grey')
+    ax_hist_dur.set_xlabel('Density')
+    ax_hist_dur.set_title('Pause duration')
+
+    if save_plots:
+        plt.savefig(save_dir / f'pause_timings_from_{start_or_end}_{window_duration:02d}s.{img_extension}')
+    if show_plots:
+        plt.show()
+    plt.close(fig)
+
+
 def plot_pause_durations_and_angles():
     save_dir, data = _init()
     endpoints_only = False
@@ -531,5 +613,9 @@ if __name__ == '__main__':
     if interactive_plots:
         interactive()
     # plot_pause_durations_and_positions()
+    for se in ['start', 'end']:
+        for w in [5, 10, 20]:
+            plot_pause_durations_relative_to(se, w)
+    # plot_pause_durations_relative_to('end', 5)
     # plot_pause_durations_and_angles()
-    plot_pause_proportions()
+    # plot_pause_proportions()

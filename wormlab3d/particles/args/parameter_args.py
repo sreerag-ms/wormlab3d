@@ -67,8 +67,12 @@ class ParameterArgs(BaseArgs):
         self.speeds_1_sig = speeds_1_sig
 
         self.theta_dist_type = theta_dist_type
+        if theta_dist_params is None:
+            theta_dist_params = []
         self.theta_dist_params = theta_dist_params
         self.phi_dist_type = phi_dist_type
+        if phi_dist_params is None:
+            phi_dist_params = []
         self.phi_dist_params = phi_dist_params
 
         self.phi_factor_rt = phi_factor_rt

@@ -2,14 +2,13 @@ import gc
 import time
 from datetime import timedelta
 from multiprocessing import Pool
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import numpy as np
 import torch
 from copulas.multivariate import GaussianMultivariate
 from progress.bar import Bar
 from scipy.interpolate import PchipInterpolator
-from scipy.signal import find_peaks
 from torch import nn
 
 from wormlab3d import N_WORKERS, logger
@@ -19,43 +18,6 @@ from wormlab3d.particles.particle_explorer import orthogonalise
 from wormlab3d.particles.tumble_run import generate_or_load_ds_statistics
 
 PARTICLE_PARAMETER_KEYS = ['thetas', 'phis']
-
-
-def calculate_durations(
-        cond_state: torch.Tensor,
-) -> Tuple[List[int], List[int]]:
-    """
-    Calculate the durations stayed in state.
-    """
-    run_starts = []
-    durations = []
-    centre_idxs, section_props = find_peaks(cond_state, width=1)
-    for j in range(len(centre_idxs)):
-        start = section_props['left_bases'][j]
-        w = section_props['widths'][j]
-        run_starts.append(int(start))
-        durations.append(int(w))
-    return run_starts, durations
-
-
-def calculate_durations_parallel(
-        cond_state: torch.Tensor,
-) -> Tuple[List[int], List[int]]:
-    """
-    Calculate the durations in parallel.
-    """
-    bs = len(cond_state)
-    with Pool(processes=N_WORKERS) as pool:
-        res = pool.map(
-            calculate_durations,
-            [cond_state[i] for i in range(bs)]
-        )
-    run_starts = []
-    durations = []
-    for i in range(bs):
-        run_starts.append(res[i][0])
-        durations.append(res[i][1])
-    return run_starts, durations
 
 
 def simulate_particle_trajectory(

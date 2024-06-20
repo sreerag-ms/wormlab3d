@@ -13,7 +13,7 @@ from wormlab3d.toolkit.util import normalise
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.pca import generate_or_load_pca_cache
-from wormlab3d.trajectories.util import calculate_speeds, calculate_htd, smooth_trajectory
+from wormlab3d.trajectories.util import calculate_htd, calculate_speeds, smooth_trajectory
 
 show_plots = True
 save_plots = True
@@ -278,18 +278,68 @@ def plot_dataset_metrics(metric_a: str, metric_b: str):
         plt.show()
 
 
+def plot_speed_hist():
+    args = get_args()
+
+    # Get dataset
+    assert args.dataset is not None
+    ds = Dataset.objects.get(id=args.dataset)
+
+    # Unset midline source args, trajectory point and trial
+    args.midline3d_source = None
+    args.midline3d_source_file = None
+    args.trajectory_point = None
+    args.trial = None
+
+    # Loop over reconstructions
+    res = {}
+    for r_ref in ds.reconstructions:
+        reconstruction = Reconstruction.objects.get(id=r_ref.id)
+        args.reconstruction = reconstruction.id
+        logger.info(f'Calculating data for reconstruction={reconstruction.id}.')
+        X = get_trajectory_from_args(args)
+        c = reconstruction.trial.experiment.concentration
+        if c not in res:
+            res[c] = []
+        speeds = np.abs(_get_metric_values('speed', X, args))
+        res[c].extend(speeds)
+
+    # Sort by concentration
+    res = {k: v for k, v in sorted(list(res.items()))}
+    concs = list(res.keys())
+
+    # Plot
+    fig, axes = plt.subplots(len(concs), 1, figsize=(10, 5 * len(concs)))
+
+    cmap = plt.get_cmap('jet')
+    colours = cmap(np.linspace(0, 1, len(concs)))
+    for i, (c, res_c) in enumerate(res.items()):
+        ax = axes[i]
+        ax.set_title(f'c={c:.2f}%')
+        ax.hist(res_c, bins=100, alpha=0.6, color=colours[i], density=True)
+        ax.set_xlabel('Speed')
+    fig.tight_layout()
+
+    # if save_plots:
+    #     plt.savefig(make_filename(metric_a, metric_b, args, excludes=['trial', 'frames', 'src']))
+    if show_plots:
+        plt.show()
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
     # from simple_worm.plot3d import interactive
     # interactive()
 
-    args = get_args()
-    if args.dataset is not None:
-        plot_dataset_metrics('htd', 'speed')
-        plot_dataset_metrics('nonp', 'speed')
-        plot_dataset_metrics('htd', 'nonp')
-        plot_dataset_metrics('curvature_t', 'speed')
-    else:
-        # plot_reconstruction_metrics('htd', 'speed')
-        plot_reconstruction_metrics('helicity_p', 'helicity_t')
+    # args = get_args()
+    # if args.dataset is not None:
+    #     plot_dataset_metrics('htd', 'speed')
+    #     plot_dataset_metrics('nonp', 'speed')
+    #     plot_dataset_metrics('htd', 'nonp')
+    #     plot_dataset_metrics('curvature_t', 'speed')
+    # else:
+    #     # plot_reconstruction_metrics('htd', 'speed')
+    #     plot_reconstruction_metrics('helicity_p', 'helicity_t')
+
+    plot_speed_hist()

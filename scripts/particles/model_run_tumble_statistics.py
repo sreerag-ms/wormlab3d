@@ -6,25 +6,28 @@ import yaml
 from copulas.multivariate import GaussianMultivariate
 from matplotlib import pyplot as plt
 from scipy.interpolate import PchipInterpolator
-from scipy.stats import gaussian_kde, pearsonr
+from scipy.stats import gaussian_kde, norm, pearsonr
 
 from simple_worm.plot3d import interactive
-from wormlab3d import LOGS_PATH, START_TIMESTAMP
+from wormlab3d import LOGS_PATH, START_TIMESTAMP, logger
 from wormlab3d.data.model import Dataset
+from wormlab3d.particles.cache import get_sim_state_from_args
 from wormlab3d.particles.tumble_run import generate_or_load_ds_statistics
+from wormlab3d.toolkit.plot_utils import equal_aspect_ratio
 from wormlab3d.toolkit.util import hash_data, print_args, to_dict
 from wormlab3d.trajectories.args import get_args
+from wormlab3d.trajectories.util import smooth_trajectory
 
-show_plots = True
+# show_plots = True
 # save_plots = False
-# show_plots = False
+show_plots = False
 save_plots = True
 interactive_plots = False
 
 DATA_KEYS = ['durations', 'speeds', 'planar_angles', 'nonplanar_angles', 'twist_angles', 'tumble_idxs']
 
 
-def _init(include_all_runs: bool = False):
+def _init(include_all_runs: bool = False, return_args: bool = False):
     """
     Initialise the arguments, save dir and load the dataset statistics.
     """
@@ -60,14 +63,17 @@ def _init(include_all_runs: bool = False):
     assert args.approx_noise is not None, 'Must provide an approximation noise level!'
 
     # Create output directory
-    save_dir = LOGS_PATH / f'{START_TIMESTAMP}_{hash_data(to_dict(args))}'
-    save_dir.mkdir(parents=True, exist_ok=True)
+    if save_plots:
+        save_dir = LOGS_PATH / f'{START_TIMESTAMP}_{hash_data(to_dict(args))}'
+        save_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save the arguments
-    if (LOGS_PATH / 'spec.yml').exists():
-        shutil.copy(LOGS_PATH / 'spec.yml', save_dir / 'spec.yml')
-    with open(save_dir / 'args.yml', 'w') as f:
-        yaml.dump(to_dict(args), f)
+        # Save the arguments
+        if (LOGS_PATH / 'spec.yml').exists():
+            shutil.copy(LOGS_PATH / 'spec.yml', save_dir / 'spec.yml')
+        with open(save_dir / 'args.yml', 'w') as f:
+            yaml.dump(to_dict(args), f)
+    else:
+        save_dir = None
 
     approx_args = dict(
         approx_method=args.approx_method,
@@ -94,22 +100,29 @@ def _init(include_all_runs: bool = False):
     # stats = trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles, tumble_idxs
     data_values = {k: ds_stats[i + 1][0] for i, k in enumerate(DATA_KEYS)}
 
+    if return_args:
+        return save_dir, data_values, args
     return save_dir, data_values
 
 
-def _make_surface(x, y, x_min, x_max, y_min, y_max, n_mesh_points):
+def _make_surface(x, y, x_min, x_max, y_min, y_max, n_mesh_points, bw_method=None):
     """
     Interpolate data to make a surface.
     """
     X, Y = np.mgrid[x_min:x_max:complex(n_mesh_points), y_min:y_max:complex(n_mesh_points)]
     positions = np.vstack([X.ravel(), Y.ravel()])
     values = np.vstack([x, y])
-    kernel = gaussian_kde(values)  # , bw_method=0.4)
+    kernel = gaussian_kde(values, bw_method=bw_method)
     Z = np.reshape(kernel(positions).T, X.shape)
     return Z
 
 
-def model_runs(show_heatmap: bool = False):
+def model_runs(
+        show_heatmap: bool = False,
+        show_real: bool = True,
+        show_synth: bool = True,
+        layout: str = 'default',
+):
     """
     Build a bivariate probability distribution for the runs based on speeds and durations.
     """
@@ -126,23 +139,54 @@ def model_runs(show_heatmap: bool = False):
     synth = copula.sample(len(data))
 
     # Plot the results
-    fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+    if layout == 'paper':
+        plt.rcParams.update({'font.family': 'sans-serif', 'font.sans-serif': ['Arial']})
+        plt.rc('axes', titlesize=7, titlepad=1)  # fontsize of the title
+        plt.rc('axes', labelsize=6, labelpad=0)  # fontsize of the x and y labels
+        plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+        plt.rc('legend', fontsize=6)  # fontsize of the legend
+        plt.rc('ytick.major', pad=1, size=2)
+        plt.rc('xtick.major', pad=1, size=2)
+        plt.rc('xtick.minor', size=1)
+        fig, ax = plt.subplots(1, 1, figsize=(1.39, 0.89), gridspec_kw={
+            'top': 0.98,
+            'bottom': 0.2,
+            'left': 0.2,
+            'right': 0.98,
+        })
+        x_label = 'Duration (s)'
+        y_label = 'Speed (mm/s)'
+        scatter_args = dict(alpha=0.3, s=0.1)
+        legend_args = dict(markerscale=10, handlelength=1, handletextpad=0.2,
+                           labelspacing=0, borderpad=0.3)
+
+    else:
+        fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+        scatter_args = dict(alpha=0.5, s=20)
+        x_label = 'Run duration'
+        y_label = 'Run speed'
+        legend_args = {}
+
     if show_heatmap:
         x_min, x_max = min(durations), max(durations)
         y_min, y_max = min(speeds), max(speeds)
         Z = _make_surface(durations, speeds, x_min, x_max, y_min, y_max, 1000)
         ax.imshow(np.rot90(Z), cmap=plt.get_cmap('YlOrRd'), extent=[x_min, x_max, y_min, y_max], aspect='auto')
-    scatter_args = dict(alpha=0.5, s=20)
-    ax.scatter(durations, speeds, marker='o', label='Real', **scatter_args)
-    ax.scatter(synth[0], synth[1], marker='x', label='Synthetic', **scatter_args)
+
+    if show_real:
+        ax.scatter(durations, speeds, marker='o', label='Empirical', **scatter_args)
+    if show_synth:
+        ax.scatter(synth[0], synth[1], marker='x', label='Synthetic', **scatter_args)
     # ax.set_yscale('log')
     # ax.set_xscale('log')
-    ax.set_xlabel('Run duration')
-    ax.set_ylabel('Run speed')
-    ax.legend()
-    fig.tight_layout()
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    ax.legend(**legend_args)
+    if layout == 'default':
+        fig.tight_layout()
     if save_plots:
-        plt.savefig(save_dir / 'runs_scatter.svg')
+        plt.savefig(save_dir / 'runs_scatter.svg', transparent=layout != 'default')
     if show_plots:
         plt.show()
 
@@ -411,6 +455,85 @@ def model_tumbles(show_heatmap: bool = False):
         plt.show()
 
 
+def model_tumbles_basic(
+        show_heatmap: bool = False,
+        show_real: bool = True,
+        show_synth: bool = True,
+        layout: str = 'default',
+):
+    """
+    Build a probability distribution for the tumbles based on planar and non-planar angles.
+    """
+    n_fake_samples = 2000
+    n_angle_bins = 20
+    save_dir, data_values = _init()
+    thetas = data_values['planar_angles']
+    phis = data_values['nonplanar_angles']
+    data = np.array([thetas, phis]).T
+
+    # Fit the model
+    data_p, angle_bins, psi_bin_idxs, cdfs_psi_all, cdfs_r, sample_fake_data = _fit_dual_cdf_model(data, n_angle_bins)
+
+    # Sample some fake data
+    fake_data = sample_fake_data(n_fake_samples)
+
+    # Plot the results
+    if layout == 'paper':
+        plt.rcParams.update({'font.family': 'sans-serif', 'font.sans-serif': ['Arial']})
+        plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
+        plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+        plt.rc('legend', fontsize=6)  # fontsize of the legend
+        plt.rc('ytick.major', pad=1, size=2)
+        plt.rc('xtick.major', pad=1, size=2)
+        plt.rc('xtick.minor', size=1)
+        fig, ax = plt.subplots(1, 1, figsize=(1.39, 0.89), gridspec_kw={
+            'top': 0.98,
+            'bottom': 0.18,
+            'left': 0.18,
+            'right': 0.98,
+        })
+        scatter_args = dict(alpha=0.3, s=0.1)
+        legend_args = dict(loc='upper right', markerscale=10, handlelength=1, handletextpad=0.2,
+                           labelspacing=0, borderpad=0.3)
+
+    else:
+        fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+        scatter_args = dict(alpha=0.5, s=20)
+        legend_args = {}
+
+    def setup_angle_axes(ax_):
+        ax_.set_xticks([-np.pi, -np.pi / 2, 0, np.pi / 2, np.pi])
+        ax_.set_xticklabels(['$-\pi$', '$-\pi/2$', '', '$\pi/2$', '$\pi$'])
+        ax_.set_yticks([-np.pi / 2, 0, np.pi / 2])
+        ax_.set_yticklabels(['$-\pi/2$', '', '$\pi/2$'])
+        ax_.set_xlabel('$\\theta$', labelpad=-5)
+        ax_.set_ylabel('$\\phi$', labelpad=-8)
+        ax_.set_xlim(-np.pi, np.pi)
+        ax_.set_ylim(-np.pi / 2, np.pi / 2)
+
+    if show_heatmap:
+        fake_thetas, fake_phis = fake_data.T
+        x_min, x_max = -np.pi, np.pi
+        y_min, y_max = -np.pi / 2, np.pi / 2
+        Z = _make_surface(fake_thetas, fake_phis, x_min, x_max, y_min, y_max, 1000, bw_method=0.3)
+        ax.imshow(np.rot90(Z), cmap=plt.get_cmap('YlOrRd'), extent=[x_min, x_max, y_min, y_max], aspect='auto')
+
+    if show_real:
+        ax.scatter(thetas, phis, marker='o', label='Empirical', **scatter_args)
+    if show_synth:
+        ax.scatter(*fake_data.T, marker='x', label='Synthetic', **scatter_args)
+
+    setup_angle_axes(ax)
+    ax.legend(**legend_args)
+    if layout == 'default':
+        fig.tight_layout()
+    if save_plots:
+        plt.savefig(save_dir / 'tumbles_scatter.svg', transparent=layout != 'default')
+    if show_plots:
+        plt.show()
+
+
 def tumble_heatmaps():
     """
     Plot heatmaps from the data and the modelled pdfs.
@@ -500,13 +623,152 @@ def plot_correlations():
         plt.show()
 
 
+def plot_pause_penalty(
+        layout: str = 'default',
+):
+    """
+    Plot the pause penalty relationship.
+    """
+    save_dir, data_values, args = _init(include_all_runs=True, return_args=True)
+
+    # Fit a single gaussian to the nonplanar angles
+    phis = data_values['nonplanar_angles']
+
+    mu, std = norm.fit(phis)
+    dist = norm(loc=mu, scale=std)
+
+    # Plot the results
+    if layout == 'paper':
+        plt.rcParams.update({'font.family': 'sans-serif', 'font.sans-serif': ['Arial']})
+        plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
+        plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+        plt.rc('legend', fontsize=6)  # fontsize of the legend
+        plt.rc('ytick.major', pad=1, size=2)
+        plt.rc('xtick.major', pad=1, size=2)
+        plt.rc('xtick.minor', size=1)
+        fig, ax = plt.subplots(1, 1, figsize=(1.37, 0.62), gridspec_kw={
+            'top': 0.98,
+            'bottom': 0.18,
+            'left': 0.24,
+            'right': 0.73,
+        })
+        legend_args = dict(handlelength=0.5, handletextpad=0.2,
+                           labelspacing=0, borderpad=0.3)
+
+    else:
+        fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+        legend_args = {}
+
+    N = 501
+    vals = np.zeros(N)
+    for i in range(-9, 8, 2):
+        x = np.linspace(i * np.pi, (i + 2) * np.pi, N)
+        vals += dist.pdf(x)
+
+    x = np.linspace(-np.pi, np.pi, N)
+    ax.plot(x, vals, alpha=0.9, color='#9b628dff', zorder=1, label='$\phi$')
+
+    p_samples = dist.rvs(2000).squeeze()
+    p_samples = np.arctan(np.tan(p_samples))
+    ax.hist(p_samples, bins=25, density=True, facecolor='#fbe6fbff', alpha=1.)
+
+    ax.set_xlim(left=-np.pi / 2 - 0.1, right=np.pi / 2 + 0.1)
+    ax.set_xticks([-np.pi / 2, np.pi / 2])
+    ax.set_xticklabels(['$-\pi/2$', '$\pi/2$'])
+    ax.set_yticks([0.5, ])
+    ax.legend(**legend_args, loc='center right', bbox_to_anchor=(-0.15, 0.5),
+              bbox_transform=ax.transAxes)
+
+    # Pauses
+    phis = np.linspace(-np.pi / 2, np.pi / 2, 1000)
+    if args.nonp_pause_type == 'linear':
+        pauses = (np.abs(phis) / (np.pi / 2)) * args.nonp_pause_max
+    elif args.nonp_pause_type == 'quadratic':
+        pauses = (np.abs(phis) / (np.pi / 2))**2 * args.nonp_pause_max
+    else:
+        raise RuntimeError(f'Unsupported pause type: {args.nonp_pause_type}.')
+    ax2 = ax.twinx()
+    ax2.plot(phis, pauses, label='$\delta(\phi)$', color='#e91616ff')
+    ax2.set_ylim(bottom=0, top=args.nonp_pause_max + 0.1)
+    ax2.set_yticks([args.nonp_pause_max])
+    ax2.set_yticklabels([args.nonp_pause_max])
+    ax2.legend(**legend_args, loc='center left', bbox_to_anchor=(1.05, 0.5),
+               bbox_transform=ax2.transAxes)
+
+    if layout == 'default':
+        fig.tight_layout()
+
+    if layout == 'default':
+        fig.tight_layout()
+    if save_plots:
+        plt.savefig(save_dir / 'pause_penalty.svg', transparent=layout != 'default')
+    if show_plots:
+        plt.show()
+
+
+def plot_simulated_trajectories(plot_n_examples=5):
+    """
+    Plot some simulation trajectories.
+    """
+    save_dir, data_values, args = _init(include_all_runs=True, return_args=True)
+    SS = get_sim_state_from_args(args)
+
+    # Construct colours
+    colours = np.linspace(0, 1, SS.X.shape[1])
+    cmap = plt.get_cmap('viridis_r')
+    c = [cmap(c_) for c_ in colours]
+    plot_idxs = range(min(SS.parameters.batch_size, plot_n_examples))
+    plot_idxs = [2, 16, 23, 28, 48]
+
+    if args.approx_noise is not None and args.approx_noise > 0:
+        logger.info(f'Will be adding noise to the trajectories with std={args.approx_noise}.')
+    if args.smoothing_window is not None and args.smoothing_window > 0:
+        logger.info(f'Will be smoothing the trajectories with a window of {args.smoothing_window} frames.')
+
+    for idx in plot_idxs:
+        logger.info(f'Plotting sim run {idx}.')
+        X = SS.X[idx].copy().astype(np.float64)
+
+        # Add some noise to the trajectory then smooth
+        if args.approx_noise is not None and args.approx_noise > 0:
+            X = X + np.random.normal(np.zeros_like(X), args.approx_noise)
+        if args.smoothing_window is not None and args.smoothing_window > 0:
+            X = smooth_trajectory(X, window_len=args.smoothing_window)
+
+        # Plot the trajectory
+        fig = plt.figure(figsize=(10, 10))
+        ax = fig.add_subplot(projection='3d', azim=105, elev=-80)
+        ax.scatter(*X.T, c=c, s=100, alpha=1, zorder=1)
+        equal_aspect_ratio(ax)
+        ax.grid(False)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_zticks([])
+        ax.axis('off')
+        fig.tight_layout()
+
+        if save_plots:
+            plt.savefig(save_dir / f'ss_{SS.parameters.id}_sim_{idx}.png',
+                        transparent=True)
+            np.savez(save_dir / f'ss_{SS.parameters.id}_sim_{idx}', X=X)
+
+        if show_plots:
+            plt.show()
+        plt.close(fig)
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
     if interactive_plots:
         interactive()
     # model_runs(show_heatmap=True)
+    model_runs(show_heatmap=True, show_synth=False, layout='paper')
     # donut_test()
     # model_tumbles(show_heatmap=True)
-    tumble_heatmaps()
+    # model_tumbles_basic(show_heatmap=True, show_synth=False, layout='paper')
+    # tumble_heatmaps()
     # plot_correlations()
+    # plot_pause_penalty(layout='paper')
+    plot_simulated_trajectories(plot_n_examples=50)
