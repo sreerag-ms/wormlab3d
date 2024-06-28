@@ -149,10 +149,10 @@ def model_runs(
         plt.rc('ytick.major', pad=1, size=2)
         plt.rc('xtick.major', pad=1, size=2)
         plt.rc('xtick.minor', size=1)
-        fig, ax = plt.subplots(1, 1, figsize=(1.39, 0.89), gridspec_kw={
+        fig, ax = plt.subplots(1, 1, figsize=(1.39, 0.8), gridspec_kw={
             'top': 0.98,
-            'bottom': 0.2,
-            'left': 0.2,
+            'bottom': 0.22,
+            'left': 0.18,
             'right': 0.98,
         })
         x_label = 'Duration (s)'
@@ -175,7 +175,7 @@ def model_runs(
         ax.imshow(np.rot90(Z), cmap=plt.get_cmap('YlOrRd'), extent=[x_min, x_max, y_min, y_max], aspect='auto')
 
     if show_real:
-        ax.scatter(durations, speeds, marker='o', label='Empirical', **scatter_args)
+        ax.scatter(durations, speeds, marker='o', label='Data', **scatter_args)
     if show_synth:
         ax.scatter(synth[0], synth[1], marker='x', label='Synthetic', **scatter_args)
     # ax.set_yscale('log')
@@ -480,16 +480,17 @@ def model_tumbles_basic(
     # Plot the results
     if layout == 'paper':
         plt.rcParams.update({'font.family': 'sans-serif', 'font.sans-serif': ['Arial']})
-        plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
+        plt.rc('axes', titlesize=7, titlepad=1)  # fontsize of the title
+        plt.rc('axes', labelsize=6, labelpad=0)  # fontsize of the x and y labels
         plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
         plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
         plt.rc('legend', fontsize=6)  # fontsize of the legend
         plt.rc('ytick.major', pad=1, size=2)
         plt.rc('xtick.major', pad=1, size=2)
         plt.rc('xtick.minor', size=1)
-        fig, ax = plt.subplots(1, 1, figsize=(1.39, 0.89), gridspec_kw={
+        fig, ax = plt.subplots(1, 1, figsize=(1.39, 0.8), gridspec_kw={
             'top': 0.98,
-            'bottom': 0.18,
+            'bottom': 0.22,
             'left': 0.18,
             'right': 0.98,
         })
@@ -507,8 +508,10 @@ def model_tumbles_basic(
         ax_.set_xticklabels(['$-\pi$', '$-\pi/2$', '', '$\pi/2$', '$\pi$'])
         ax_.set_yticks([-np.pi / 2, 0, np.pi / 2])
         ax_.set_yticklabels(['$-\pi/2$', '', '$\pi/2$'])
-        ax_.set_xlabel('$\\theta$', labelpad=-5)
-        ax_.set_ylabel('$\\phi$', labelpad=-8)
+        # ax_.set_xlabel('$\\theta$', labelpad=-5)
+        # ax_.set_ylabel('$\\phi$', labelpad=-8)
+        ax_.set_xlabel('In-plane angle')
+        ax_.set_ylabel('Out-of-plane angle')
         ax_.set_xlim(-np.pi, np.pi)
         ax_.set_ylim(-np.pi / 2, np.pi / 2)
 
@@ -520,7 +523,7 @@ def model_tumbles_basic(
         ax.imshow(np.rot90(Z), cmap=plt.get_cmap('YlOrRd'), extent=[x_min, x_max, y_min, y_max], aspect='auto')
 
     if show_real:
-        ax.scatter(thetas, phis, marker='o', label='Empirical', **scatter_args)
+        ax.scatter(thetas, phis, marker='o', label='Data', **scatter_args)
     if show_synth:
         ax.scatter(*fake_data.T, marker='x', label='Synthetic', **scatter_args)
 
@@ -532,6 +535,72 @@ def model_tumbles_basic(
         plt.savefig(save_dir / 'tumbles_scatter.svg', transparent=layout != 'default')
     if show_plots:
         plt.show()
+
+
+def plot_phi_factors(
+        layout: str = 'default',
+):
+    """
+    Build a probability distribution for the tumbles based on planar and non-planar angles.
+    """
+    n_fake_samples = 2000
+    n_angle_bins = 20
+    save_dir, data_values = _init()
+    thetas = data_values['planar_angles']
+    phis = data_values['nonplanar_angles']
+    data = np.array([thetas, phis]).T
+
+    # Fit the model
+    data_p, angle_bins, psi_bin_idxs, cdfs_psi_all, cdfs_r, sample_fake_data = _fit_dual_cdf_model(data, n_angle_bins)
+
+    # Sample some fake data
+    fake_data = sample_fake_data(n_fake_samples)
+
+    # Set up plot parameters
+    if layout == 'paper':
+        plt.rcParams.update({'font.family': 'sans-serif', 'font.sans-serif': ['Arial']})
+        plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+        plt.rc('ytick.major', pad=1, size=2)
+        plt.rc('xtick.major', pad=1, size=2)
+        plt.rc('xtick.minor', size=1)
+
+    def setup_angle_axes(ax_):
+        ax_.set_xticks([-np.pi, -np.pi / 2, 0, np.pi / 2, np.pi])
+        ax_.set_xticklabels(['$-\pi$', '', '', '', '$\pi$'])
+        ax_.set_yticks([-np.pi / 2, 0, np.pi / 2])
+        ax_.set_yticklabels(['$-\pi/2$', '', '$\pi/2$'])
+        ax_.set_xlim(-np.pi, np.pi)
+        ax_.set_ylim(-np.pi / 2, np.pi / 2)
+
+    fake_thetas, fake_phis = fake_data.T
+    x_min, x_max = -np.pi, np.pi
+    y_min, y_max = -np.pi / 2, np.pi / 2
+    phi_factors = [0.2, 1, 5]
+
+    for factor in phi_factors:
+        logger.info(f'Plotting phi factor: {factor}')
+        fake_phis_adj = fake_phis * factor
+        Z = _make_surface(fake_thetas, fake_phis_adj, x_min, x_max, y_min, y_max, 100, bw_method=0.3)
+
+        # Plot the results
+        if layout == 'paper':
+            fig, ax = plt.subplots(1, 1, figsize=(0.6, 0.45), gridspec_kw={
+                'top': 0.96,
+                'bottom': 0.22,
+                'left': 0.24,
+                'right': 0.95,
+            })
+        else:
+            fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+        ax.imshow(np.rot90(Z), cmap=plt.get_cmap('YlOrRd'), extent=[x_min, x_max, y_min, y_max], aspect='auto')
+        setup_angle_axes(ax)
+        if layout == 'default':
+            fig.tight_layout()
+        if save_plots:
+            plt.savefig(save_dir / f'phi_factor={factor}.svg', transparent=layout != 'default')
+        if show_plots:
+            plt.show()
 
 
 def tumble_heatmaps():
@@ -764,11 +833,12 @@ if __name__ == '__main__':
     if interactive_plots:
         interactive()
     # model_runs(show_heatmap=True)
-    model_runs(show_heatmap=True, show_synth=False, layout='paper')
+    # model_runs(show_heatmap=True, show_synth=False, layout='paper')
     # donut_test()
     # model_tumbles(show_heatmap=True)
-    # model_tumbles_basic(show_heatmap=True, show_synth=False, layout='paper')
+    model_tumbles_basic(show_heatmap=True, show_synth=False, layout='paper')
+    # plot_phi_factors(layout='paper')
     # tumble_heatmaps()
     # plot_correlations()
     # plot_pause_penalty(layout='paper')
-    plot_simulated_trajectories(plot_n_examples=50)
+    # plot_simulated_trajectories(plot_n_examples=50)

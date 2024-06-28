@@ -1,5 +1,5 @@
 import itertools
-from typing import List, Callable, Optional, Union, Tuple
+from typing import Callable, List, Optional, Tuple, Union
 
 import cv2
 import matplotlib.colors as mcolors
@@ -22,7 +22,7 @@ from sklearn.decomposition import PCA
 
 from simple_worm.controls import ControlSequenceNumpy
 from simple_worm.frame import FrameSequenceNumpy
-from simple_worm.plot3d import FrameArtist, cla, MIDLINE_CMAP_DEFAULT
+from simple_worm.plot3d import FrameArtist, MIDLINE_CMAP_DEFAULT, cla
 from wormlab3d import logger
 from wormlab3d.data.model import FrameSequence, SwRun
 
@@ -481,6 +481,37 @@ def make_box_faces_from_pca(
     return polygons
 
 
+def make_box_faces_from_dims(
+        dims: np.ndarray,
+        scale: np.ndarray = np.array([1., 1., 1.]),
+) -> List[np.ndarray]:
+    """
+    Make a list of cuboid faces as 3D polygons from given dims, centred at the origin.
+    """
+    centre = np.zeros(3)
+    v0, v1, v2 = np.eye(3) * scale * dims / 2
+    polygons = []
+    for i in range(3):
+        va = [v0, v1, v2][i]
+        vb = [v1, v2, v0][i]
+        vc = [v2, v0, v1][i]
+
+        for j in range(2):
+            if j == 1:
+                vc *= -1
+            verts = np.zeros((4, 3))
+            for k in range(3):
+                verts[:, k] = [
+                    centre[k] - va[k] - vb[k] - vc[k],
+                    centre[k] + va[k] - vb[k] - vc[k],
+                    centre[k] + va[k] + vb[k] - vc[k],
+                    centre[k] - va[k] + vb[k] - vc[k]
+                ]
+            polygons.append(verts)
+
+    return polygons
+
+
 def make_box_from_pca(X: np.ndarray, pca: PCA, colour: str, scale: Tuple[float] = (1., 1., 1.)) -> Poly3DCollection:
     """
     Make a 3D polygon centred at the centre of X with shape and orientation taken from the PCA components.
@@ -548,8 +579,61 @@ def make_box_from_pca_mlab(
     return meshes, outline
 
 
+def make_cuboid(
+        dims: np.ndarray,
+        colour: str = None,
+        opacity: float = 1.,
+        scale: Union[int, float, Tuple[float]] = 1,
+        draw_outline: bool = False,
+        outline_colour: str = None,
+        outline_opacity: float = 1.,
+        outline_tube_radius: float = 0.01,
+        fig: Scene = None,
+) -> List[Surface]:
+    """
+    Make a cuboid of given dimensions centred at the origin.
+    """
+    if isinstance(scale, int) or isinstance(scale, float):
+        scale = np.array([1., 1., 1.])
+    faces = make_box_faces_from_dims(dims=dims, scale=scale)
+    meshes = []
+    for face in faces:
+        x, y, z = face.T
+        mesh = mlab.mesh([
+            [x[0], x[3]],
+            [x[1], x[2]],
+        ], [
+            [y[0], y[3]],
+            [y[1], y[2]],
+        ], [
+            [z[0], z[3]],
+            [z[1], z[2]],
+        ],
+            opacity=opacity,
+            color=to_rgb(colour),
+            figure=fig,
+        )
+        meshes.append(mesh)
+
+    outline = []
+    if draw_outline:
+        lines = make_box_outline(dims=dims, scale=scale)
+        for l in lines:
+            line_obj = mlab.plot3d(
+                *l.T,
+                figure=fig,
+                opacity=outline_opacity,
+                color=to_rgb(outline_colour),
+                tube_radius=outline_tube_radius
+            )
+            outline.append(line_obj)
+
+    return meshes, outline
+
+
 def make_box_outline(
-        X: np.ndarray,
+        X: Optional[np.ndarray] = None,
+        dims: Optional[np.ndarray] = None,
         pca: PCA = None,
         scale: np.ndarray = np.array([1., 1., 1.]),
         use_extents: bool = False,
@@ -558,18 +642,25 @@ def make_box_outline(
     Make a cuboid outline using mayavi centred at the centre of X with orientation taken from the PCA components
     and dimensions either from the PCA singular values or the extents of the data X.
     """
-    if pca is None:
-        pca = PCA()
-        pca.fit(X)
+    if dims is None:
+        if pca is None:
+            pca = PCA()
+            pca.fit(X)
 
-    # Get the bounds relative to the PCA components
-    R = np.stack(pca.components_, axis=1)
-    Xt = np.einsum('ij,bj->bi', R.T, X)
-    dims = np.ptp(Xt, axis=0)
-    centre = Xt.min(axis=0) + dims / 2
+        # Get the bounds relative to the PCA components
+        R = np.stack(pca.components_, axis=1)
+        Xt = np.einsum('ij,bj->bi', R.T, X)
+        dims = np.ptp(Xt, axis=0)
+        centre = Xt.min(axis=0) + dims / 2
 
-    if not use_extents:
-        dims = pca.explained_variance_ratio_ * 2
+        if not use_extents:
+            dims = pca.explained_variance_ratio_ * 2
+
+    else:
+        assert X is None, 'Either X or dims should be passed, not both.'
+        centre = np.zeros(3)
+        R = np.eye(3)
+
     dims *= scale
 
     # Calculate box vertices

@@ -24,10 +24,10 @@ from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.pca import get_pca_cache_from_args
 from wormlab3d.trajectories.util import get_deltas_from_args
 
-show_plots = True
+# show_plots = True
+# save_plots = False
+show_plots = False
 save_plots = True
-# show_plots = False
-# save_plots = True
 img_extension = 'svg'
 
 
@@ -805,10 +805,11 @@ def dataset_against_three_state_histogram_comparison(
     assert args.dataset is not None
     ds = Dataset.objects.get(id=args.dataset)
     min_run_speed_duration = (0.01, 60.)
-    error_limits = np.array([0.5, 0.2, 0.1, 0.05, 0.01])
-    if args.model_type == PE_MODEL_RUNTUMBLE:
+    # error_limits = np.array([0.5, 0.2, 0.1, 0.05, 0.01])
+    error_limits = np.array([0.05,])
+    if args.model_type == PE_MODEL_RUNTUMBLE and args.approx_error_limit is None:
         args.approx_error_limit = 0.01  # Just set a default for ease of coding
-    SS = get_sim_state_from_args(args, no_cache=True)
+    SS = get_sim_state_from_args(args, no_cache=False)
 
     # Unset midline source args
     args.midline3d_source = None
@@ -1063,6 +1064,141 @@ def dataset_against_three_state_histogram_comparison(
             plt.show()
 
 
+def dataset_against_sim_runs_comparison(
+        layout: str = 'paper'
+):
+    """
+    Plot comparisons between simulation runs and the experimental data - runs only.
+    """
+    args = get_args(validate_source=False)
+    assert args.dataset is not None
+    assert args.model_type == PE_MODEL_RUNTUMBLE
+    assert args.approx_error_limit is not None, 'Must set approx_error_limit for run/tumble model.'
+    ds = Dataset.objects.get(id=args.dataset)
+    min_run_speed_duration = (0.01, 60.)
+    error_limits = np.array([args.approx_error_limit])
+    SS = get_sim_state_from_args(args, no_cache=False)
+
+    # Unset midline source args
+    args.midline3d_source = None
+    args.midline3d_source_file = None
+    args.tracking_only = True
+
+    # Set the approximation parameters
+    approx_args = dict(
+        approx_method=args.approx_method,
+        error_limits=error_limits,
+        min_run_speed_duration=min_run_speed_duration,
+        distance_first=args.approx_distance,
+        height_first=args.approx_curvature_height,
+        smooth_e0_first=args.smoothing_window_K,
+        smooth_K_first=args.smoothing_window_K,
+        use_euler_angles=args.approx_use_euler_angles
+    )
+
+    # Generate or load tumble/run values
+    trajectory_lengths, durations, speeds, planar_angles, nonplanar_angles, twist_angles, tumble_idxs = generate_or_load_ds_statistics(
+        ds=ds,
+        rebuild_cache=args.regenerate,
+        **approx_args
+    )
+
+    stats = {
+        'durations': np.concatenate(SS.intervals),
+        'speeds': np.concatenate(SS.speeds),
+    }
+
+    prop_cycle = plt.rcParams['axes.prop_cycle']
+    default_colours = prop_cycle.by_key()['color']
+    colour_real = default_colours[0]
+    colour_sim = default_colours[1]
+
+    if layout == 'paper':
+        plt.rcParams.update({'font.family': 'sans-serif', 'font.sans-serif': ['Arial']})
+        plt.rc('axes', titlesize=7, titlepad=1)  # fontsize of the title
+        plt.rc('axes', labelsize=6, labelpad=0)  # fontsize of the x and y labels
+        plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+        plt.rc('legend', fontsize=6)  # fontsize of the legend
+        plt.rc('ytick.major', pad=1, size=2)
+        plt.rc('xtick.major', pad=1, size=2)
+        plt.rc('xtick.minor', size=1)
+
+        fig, axes = plt.subplots(1, 2, figsize=(2, .64), gridspec_kw={
+            'wspace': 0.5,
+            'top': 0.88,
+            'bottom': 0.26,
+            'left': 0.15,
+            'right': 0.99,
+        })
+    else:
+        fig, axes = plt.subplots(1, 2, figsize=(8, 4))
+
+    for i, (param_name, values) in enumerate({
+                                                 'Run durations': [durations[0], stats['durations']],
+                                                 'Run speeds': [speeds[0], stats['speeds']],
+                                             }.items()):
+        ax = axes[i]
+        ax.set_title(param_name)
+        values_ds = np.array(values[0])
+        values_sim = np.array(values[1])
+
+        ax.set_yscale('log')
+        bin_range = None
+
+        if param_name == 'Speeds':
+            weights = [
+                np.array(durations),
+                stats['durations'],
+            ]
+        else:
+            weights = [
+                np.ones_like(values_ds),
+                np.ones_like(values_sim),
+            ]
+
+        ax.hist(
+            [values_ds, values_sim],
+            weights=weights,
+            color=[colour_real, colour_sim],
+            bins=11,
+            density=True,
+            alpha=0.75,
+            label=['Real', 'Simulation'],
+            range=bin_range
+        )
+        ax.set_title(param_name)
+        ax.set_ylabel('Density')
+        if i == 0:
+            ax.legend()
+
+        if param_name == 'Run durations':
+            ax.set_xticks([0, 50, 100, 150])
+            ax.set_xticklabels(['0', '50', '100', '150'])
+            ax.set_xlabel('s')
+            ax.set_yticks([1e-5, 1e-2])
+        if param_name == 'Run speeds':
+            ax.set_xticks([0, 0.1, 0.2])
+            ax.set_xticklabels(['0', '0.1', '0.2'])
+            ax.set_xlabel('mm/s')
+            ax.set_yticks([1e-1, 1e1])
+
+    if save_plots:
+        plt.savefig(
+            LOGS_PATH / f'{START_TIMESTAMP}'
+                        f'_runs_comparison_basic'
+                        f'_err={args.approx_error_limit:.2f}'
+                        f'_ds={ds.id}'
+                        f'_ss={SS.parameters.id}'
+                        f'_mrsd={min_run_speed_duration[0]:.2f},{min_run_speed_duration[1]:.1f}'
+                        f'.{img_extension}',
+            transparent=True
+        )
+
+    if show_plots:
+        plt.show()
+
+
 def dataset_histograms(
         error_limit: float = 0.05
 ):
@@ -1249,12 +1385,13 @@ if __name__ == '__main__':
     # dataset_distributions()
     # plot_dataset_angle_comparisons()
     # dataset_against_three_state_msd_comparison(resample_durations=True)
-    dataset_against_three_state_histogram_comparison(
-        use_approximation_stats=False,
-        plot_sweep=True,
-        plot_basic=False,
-        layout='thesis'
-    )
+    # dataset_against_three_state_histogram_comparison(
+    #     use_approximation_stats=False,
+    #     plot_sweep=True,
+    #     plot_basic=False,
+    #     layout='thesis'
+    # )
+    dataset_against_sim_runs_comparison(layout='paper')
 
     # dataset_histograms(error_limit=0.05)
 
