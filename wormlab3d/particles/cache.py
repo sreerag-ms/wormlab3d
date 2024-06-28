@@ -53,7 +53,12 @@ def get_sim_state_from_args(args: Union[ParameterArgs, Namespace], no_cache: boo
 
 
 def get_npas_from_args(args: Namespace) -> np.ndarray:
-    return np.exp(-np.linspace(np.log(1 / args.npas_min), np.log(1 / args.npas_max), args.npas_num))
+    log_vals = np.linspace(np.log(1 / args.npas_min), np.log(1 / args.npas_max), args.npas_num)
+    vals = np.exp(-log_vals)
+    if args.npas_fix_one:
+        adj = np.log(vals[np.argmin(np.abs(vals - 1))])
+        vals = np.exp(-log_vals - adj)
+    return vals
 
 
 def get_voxel_sizes_from_args(args: Namespace) -> np.ndarray:
