@@ -1,3 +1,4 @@
+import json
 import shutil
 from argparse import ArgumentParser, Namespace
 from csv import DictWriter
@@ -11,6 +12,7 @@ from wormlab3d import LOGS_PATH, ROOT_PATH, SCRIPT_PATH, START_TIMESTAMP, logger
 from wormlab3d.data.annex import fetch_from_annex, is_annexed_file
 from wormlab3d.data.model import Dataset, Eigenworms, Reconstruction
 from wormlab3d.data.util import fix_path
+from wormlab3d.particles.tumble_run import generate_or_load_ds_statistics
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.toolkit.util import print_args, str2bool, to_dict
 from wormlab3d.trajectories.cache import get_trajectory
@@ -24,8 +26,15 @@ def get_args() -> Namespace:
     parser.add_argument('--dataset', type=str, required=True, help='Dataset by id.')
     parser.add_argument('--eigenworms', type=str, help='Eigenworms by id.')
     parser.add_argument('--include-videos', type=str2bool, default=True, help='Include videos.')
-
     args = parser.parse_args()
+
+    # Load arguments from spec file
+    if (LOGS_PATH / 'spec.yml').exists():
+        with open(LOGS_PATH / 'spec.yml') as f:
+            spec = yaml.load(f, Loader=yaml.FullLoader)
+        for k, v in spec.items():
+            setattr(args, k, v)
+
     print_args(args)
 
     return args
@@ -73,11 +82,34 @@ def prepare_dataset():
     reconst_dir.mkdir(parents=True, exist_ok=True)
     eigenworms_dir = save_dir / 'reconstruction_eigenworms'
     eigenworms_dir.mkdir(parents=True, exist_ok=True)
+    runtumble_dir = save_dir / 'run_tumble_approximations'
+    runtumble_dir.mkdir(parents=True, exist_ok=True)
     examples_dir = save_dir / 'examples'
     examples_dir.mkdir(parents=True, exist_ok=True)
 
     # Save the eigenworms (means and components)
     shutil.copy(ew.components_path, eigenworms_dir / f'eigenworms_{ew.id}.npz')
+
+    # Get the run and tumble approximations
+    ds_stats = generate_or_load_ds_statistics(
+        ds=ds,
+        approx_method=args.approx_method,
+        error_limits=[args.approx_error_limit],
+        planarity_window=args.planarity_window_vertices,
+        distance_first=args.approx_distance,
+        height_first=args.approx_curvature_height,
+        smooth_e0_first=args.smoothing_window_K,
+        smooth_K_first=args.smoothing_window_K,
+        use_euler_angles=args.approx_use_euler_angles,
+        min_run_speed_duration=(0, 10000),
+    )
+    trajectory_lengths = ds_stats[0]
+    run_durations = ds_stats[1][0]
+    run_speeds = ds_stats[2][0]
+    planar_angles = ds_stats[3][0]
+    nonplanar_angles = ds_stats[4][0]
+    tumble_idxs = ds_stats[6][0]
+    runs_start_idx = tumbles_start_idx = 0
 
     # Prepare the data for each trial
     for i, trial in enumerate(ds.include_trials):
@@ -125,6 +157,22 @@ def prepare_dataset():
             np.savez_compressed(eigenworms_dir / f'trial={trial.id:03d}_reconstruction={rec_id}_eigenworms={ew.id}.npz',
                                 X=Xe)
 
+        # Save the run and tumble approximation
+        assert trajectory_lengths[i] == len(Xt), f'Expected {len(Xt)} frames, got {trajectory_lengths[i]}.'
+        runs_end_idx = runs_start_idx + len(tumble_idxs[i]) - 1
+        tumbles_end_idx = tumbles_start_idx + len(tumble_idxs[i])
+        approx = {
+            'tumble_idxs': tumble_idxs[i],
+            'run_durations': run_durations[runs_start_idx:runs_end_idx].tolist(),
+            'run_speeds': run_speeds[runs_start_idx:runs_end_idx].tolist(),
+            'planar_angles': planar_angles[tumbles_start_idx:tumbles_end_idx].tolist(),
+            'nonplanar_angles': nonplanar_angles[tumbles_start_idx:tumbles_end_idx].tolist(),
+        }
+        runs_start_idx = runs_end_idx
+        tumbles_start_idx = tumbles_end_idx
+        with open(runtumble_dir / f'trial={trial.id:03d}_approximation.json', 'w') as f:
+            json.dump(approx, f, indent=4)
+
         # Add record
         record = {
             'trial': trial.id,
@@ -133,11 +181,11 @@ def prepare_dataset():
             'sex': experiment.sex,
             'age': experiment.age,
             'concentration': experiment.concentration,
-            'temperature': trial.temperature,
+            # 'temperature': trial.temperature,
             'n_frames': len(Xt),
             'fps': f'{trial.fps:.2f}',
             'duration': f'{len(Xt) / trial.fps:.2f}',
-            'tracking': True,
+            # 'tracking': True,
             'reconstruction': rec_id if rec_id is not None else '-',
             'r_start_frame': rec.start_frame_valid if rec is not None else '-',
             'r_end_frame': rec.end_frame_valid if rec is not None else '-',
