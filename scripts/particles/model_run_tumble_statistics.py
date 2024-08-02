@@ -18,10 +18,10 @@ from wormlab3d.toolkit.util import hash_data, print_args, to_dict
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.util import smooth_trajectory
 
-# show_plots = True
-# save_plots = False
-show_plots = False
-save_plots = True
+show_plots = True
+save_plots = False
+# show_plots = False
+# save_plots = True
 interactive_plots = False
 
 DATA_KEYS = ['durations', 'speeds', 'planar_angles', 'nonplanar_angles', 'twist_angles', 'tumble_idxs']
@@ -126,6 +126,7 @@ def model_runs(
     """
     Build a bivariate probability distribution for the runs based on speeds and durations.
     """
+    n_fake_samples = 1000
     save_dir, data_values = _init()
     durations = data_values['durations']
     speeds = data_values['speeds']
@@ -136,7 +137,7 @@ def model_runs(
     copula.fit(data)
 
     # Generate synthetic samples from the joint distribution
-    synth = copula.sample(len(data))
+    fake_data = copula.sample(n_fake_samples)
 
     # Plot the results
     if layout == 'paper':
@@ -169,15 +170,16 @@ def model_runs(
         legend_args = {}
 
     if show_heatmap:
+        fake_durations, fake_speeds = np.array(fake_data).T
         x_min, x_max = min(durations), max(durations)
         y_min, y_max = min(speeds), max(speeds)
-        Z = _make_surface(durations, speeds, x_min, x_max, y_min, y_max, 1000)
+        Z = _make_surface(fake_durations, fake_speeds, x_min, x_max, y_min, y_max, 1000, bw_method=0.3)
         ax.imshow(np.rot90(Z), cmap=plt.get_cmap('YlOrRd'), extent=[x_min, x_max, y_min, y_max], aspect='auto')
 
     if show_real:
         ax.scatter(durations, speeds, marker='o', label='Data', **scatter_args)
     if show_synth:
-        ax.scatter(synth[0], synth[1], marker='x', label='Synthetic', **scatter_args)
+        ax.scatter(fake_data[0], fake_data[1], marker='x', label='Synthetic', **scatter_args)
     # ax.set_yscale('log')
     # ax.set_xscale('log')
     ax.set_xlabel(x_label)
@@ -776,6 +778,55 @@ def plot_pause_penalty(
         plt.show()
 
 
+def plot_pause_penalty_basic(
+        layout: str = 'default',
+):
+    """
+    Plot the pause penalty relationship. Only show the relationship curve.
+    """
+    save_dir, data_values, args = _init(include_all_runs=True, return_args=True)
+
+    # Plot the results
+    if layout == 'paper':
+        plt.rcParams.update({'font.family': 'sans-serif', 'font.sans-serif': ['Arial']})
+        plt.rc('axes', labelsize=6)  # fontsize of the x and y labels
+        plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+        plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+        plt.rc('legend', fontsize=6)  # fontsize of the legend
+        plt.rc('ytick.major', pad=1, size=2)
+        plt.rc('xtick.major', pad=1, size=2)
+        plt.rc('xtick.minor', size=1)
+        fig, ax = plt.subplots(1, 1, figsize=(0.4, 0.33), gridspec_kw={
+            'top': 0.95,
+            'bottom': 0.28,
+            'left': 0.25,
+            'right': 0.94,
+        })
+
+    else:
+        fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+
+    N = 101
+    x = np.linspace(0, 1, N)
+    y = x**2 * args.nonp_pause_max
+    ax.plot(x, y, alpha=0.9, color='#9b628dff')
+
+    ax.set_xlim(left=0, right=1.02)
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels(['0', '$\pi/2$'])
+    ax.set_yticks([0, args.nonp_pause_max])
+
+    if layout == 'default':
+        fig.tight_layout()
+
+    if layout == 'default':
+        fig.tight_layout()
+    if save_plots:
+        plt.savefig(save_dir / 'pause_penalty.svg', transparent=layout != 'default')
+    if show_plots:
+        plt.show()
+
+
 def plot_simulated_trajectories(plot_n_examples=5):
     """
     Plot some simulation trajectories.
@@ -833,12 +884,13 @@ if __name__ == '__main__':
     if interactive_plots:
         interactive()
     # model_runs(show_heatmap=True)
-    # model_runs(show_heatmap=True, show_synth=False, layout='paper')
+    model_runs(show_heatmap=True, show_synth=False, layout='default')
     # donut_test()
     # model_tumbles(show_heatmap=True)
-    model_tumbles_basic(show_heatmap=True, show_synth=False, layout='paper')
+    # model_tumbles_basic(show_heatmap=True, show_synth=False, layout='paper')
     # plot_phi_factors(layout='paper')
     # tumble_heatmaps()
     # plot_correlations()
     # plot_pause_penalty(layout='paper')
+    # plot_pause_penalty_basic(layout='paper')
     # plot_simulated_trajectories(plot_n_examples=50)
