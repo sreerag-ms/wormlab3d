@@ -581,7 +581,7 @@ def make_box_from_pca_mlab(
 
 def make_cuboid(
         dims: np.ndarray,
-        colour: str = None,
+        colour: Union[str, Tuple[int]] = None,
         opacity: float = 1.,
         scale: Union[int, float, Tuple[float]] = 1,
         draw_outline: bool = False,
@@ -589,7 +589,7 @@ def make_cuboid(
         outline_opacity: float = 1.,
         outline_tube_radius: float = 0.01,
         fig: Scene = None,
-) -> List[Surface]:
+) -> Tuple[List[Surface], List[Surface]]:
     """
     Make a cuboid of given dimensions centred at the origin.
     """
