@@ -1269,6 +1269,7 @@ def volume_metric_sweeps2(
     # Plot combined
     if plot_combined:
         if layout == 'paper':
+            plt.rcParams.update({'font.family': 'sans-serif', 'font.sans-serif': ['Arial']})
             plt.rc('axes', titlesize=7, titlepad=1)  # fontsize of the title
             plt.rc('axes', labelsize=6, labelpad=0)  # fontsize of the x and y labels
             plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
@@ -1278,12 +1279,12 @@ def volume_metric_sweeps2(
             # plt.rc('ytick.minor', size=1)
             plt.rc('xtick.major', pad=2, size=2)
             plt.rc('xtick.minor', size=1)
-            fig, axes = plt.subplots(2, figsize=(2.47, 2.6), gridspec_kw={
-                'hspace': 0.43,
-                'top': 0.95,
-                'bottom': 0.11,
-                'left': 0.125,
-                'right': 0.84,
+            fig, axes = plt.subplots(1, 2, figsize=(4.62, 1.64), gridspec_kw={
+                'wspace': 0.45,
+                'top': 0.91,
+                'bottom': 0.18,
+                'left': 0.06,
+                'right': 0.92,
             })
             model_phi_fontsize = 7
             legend_anchor = (0.99, 0.9)
@@ -1324,7 +1325,7 @@ def volume_metric_sweeps2(
         args.pauses = [fix_pause]
         # r_values = generate_or_load_r_values(args, cache_only=True, rebuild_cache=False)
         # vols = _calculate_volumes(r_values)
-        vols = generate_or_load_volumes(args, cache_only=False, rebuild_cache=False)
+        vols = generate_or_load_volumes(args, cache_only=True, rebuild_cache=False)
         optimal_sigmas_idxs = vols[..., 0].argmax(axis=0).squeeze()
         optimal_sigmas = npa_sigmas[optimal_sigmas_idxs]
         optimal_vols = []
@@ -1345,7 +1346,8 @@ def volume_metric_sweeps2(
             ax.plot(npa_sigmas, vols_j[0], label=f'{duration / 60:.0f}m', c=colours[j], marker='o', alpha=alpha,
                     markersize=markersize, linewidth=linewidth)
             if show_std:
-                ax.fill_between(npa_sigmas, vols_j[0] - vols_j[-1], vols_j[0] + vols_j[-1], color=colours[j],
+                sem = vols_j[-1]  ##/ np.sqrt(args.batch_size)
+                ax.fill_between(npa_sigmas, vols_j[0] - sem, vols_j[0] + sem, color=colours[j],
                                 alpha=0.3, linewidth=0.5, edgecolor='purple', zorder=-1)
 
             # ax.axhline(y=vols[0, optimal_sigmas_idxs[j]], color='red', zorder=-2, linewidth=2, linestyle=':', alpha=0.6)
@@ -1353,19 +1355,22 @@ def volume_metric_sweeps2(
                    edgecolors='red', linewidths=linewidths_opt_markers)
         ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=phi_linewidth, zorder=-1)
         ax.legend(loc='upper left', bbox_to_anchor=legend_anchor, bbox_transform=ax.transAxes, **legend_args)
-        ax.set_title(f'$\delta_{{max}}={fix_pause:.1f}$s')
-        ax.set_xlabel(f'$\sigma_\phi$')
+        ax.set_title(f'$\delta_{{max}}=${fix_pause} seconds')
+        ax.set_xlabel('$k$')
         ax.set_xscale('log')
         # ax.set_xticklabels([f'{npa:.1E}' for npa in args.npas])
-        ax.set_xticks([1e-3, 1e-1, 1e1])
+        # ax.set_xticks([1e-2, 1e-1, 1e1])
+        ax.set_xticks([1e-1, 1e1])
         trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
         ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=model_phi_fontsize, fontweight='bold',
                 horizontalalignment='center', verticalalignment='top', transform=trans)
         ax.set_ylabel(y_label)
         if show_std:
-            ax.set_yticks([0, 1250, 2500, 3750, 5000])
+            # ax.set_yticks([0, 1250, 2500, 3750, 5000])
+            ax.set_yticks([0, 200, 400, 600, 800])
         else:
-            ax.set_yticks([0, 1000, 2000])
+            # ax.set_yticks([0, 1000, 2000])
+            ax.set_yticks([0, 100, 200, 300, 400, 500])
         ax.grid()
 
         # Fix the duration and sweep over the pauses
@@ -1392,7 +1397,8 @@ def volume_metric_sweeps2(
             ax.plot(npa_sigmas, vols_k[0], label=f'{pause:.0f}s', c=colours[k], marker='o', alpha=0.7,
                     markersize=markersize, linewidth=linewidth)
             if show_std:
-                ax.fill_between(npa_sigmas, vols_k[0] - vols_k[-1], vols_k[0] + vols_k[-1], color=colours[k],
+                sem = vols_k[-1]  #/ np.sqrt(args.batch_size)
+                ax.fill_between(npa_sigmas, vols_k[0] - sem, vols_k[0] + sem, color=colours[k],
                                 alpha=0.3, linewidth=0.5, edgecolor='orange', zorder=-1)
 
             # ax.axhline(y=vols[0, optimal_sigmas_idxs[j]], color='red', zorder=-2, linewidth=2, linestyle=':', alpha=0.6)
@@ -1401,24 +1407,28 @@ def volume_metric_sweeps2(
                    linewidths=linewidths_opt_markers)
         ax.axvline(x=model_phi, c='orange', linestyle='--', linewidth=phi_linewidth, zorder=-1)
         ax.legend(loc='upper left', bbox_to_anchor=legend_anchor, bbox_transform=ax.transAxes, **legend_args)
-        ax.set_title(f'T={fix_duration}s')
-        ax.set_xlabel(f'$\sigma_\phi$')
+        ax.set_title(f'T = {str(round(fix_duration / 60))} minutes')
+        ax.set_xlabel('$k$')
         ax.set_xscale('log')
-        ax.set_xticks([1e-3, 1e-1, 1e1])
+        # ax.set_xticks([1e-3, 1e-1, 1e1])
+        # ax.set_xticks([1e-2, 1e-1, 1e1])
+        ax.set_xticks([1e-1, 1e1])
         trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
         ax.text(model_phi, -0.06, model_phi, color='orange', fontsize=model_phi_fontsize, fontweight='bold',
                 horizontalalignment='center', verticalalignment='top', transform=trans)
         ax.set_ylabel(y_label)
         if show_std:
-            ax.set_yticks([0, 200, 400, 600])
+            # ax.set_yticks([0, 200, 400, 600])
+            ax.set_yticks([0, 50, 100, 150, 200])
         else:
-            ax.set_yticks([0, 100, 200, 300])
+            # ax.set_yticks([0, 100, 200, 300])
+            ax.set_yticks([0, 40, 80, 120])
         ax.grid()
 
         # fig.tight_layout()
         if save_plots:
             std = '_std' if show_std else ''
-            plt.savefig(save_dir / f'volume_sweeps_combined_{std}.png', transparent=True)
+            plt.savefig(save_dir / f'volume_sweeps_combined{std}.{img_extension}', transparent=True)
         if show_plots:
             plt.show()
 
@@ -1740,6 +1750,150 @@ def volume_metric_sweeps_cuboids_voxels(
         plt.show()
 
 
+def volume_metric_sweeps_extended():
+    """
+    Plot cuboid and voxel exploration volumes with std and sem.
+    """
+    save_dir, args = _init()
+    assert args.model_type == PE_MODEL_RUNTUMBLE, 'Only run-tumble model supported'
+    empirical_k = 1.  # by definition
+
+    # Set parameter ranges
+    k_vals = get_npas_from_args(args)
+
+    n_sigmas = args.npas_num
+    args.npas = k_vals
+    sim_durations = get_durations_from_args(args)
+    n_durations = args.durations_num
+    pauses = get_pauses_from_args(args)
+    n_pauses = args.pauses_num
+    args.volume_metric = 'cuboids'
+
+    fix_duration = args.sim_duration
+    fix_pause = args.nonp_pause_max
+
+    plt.rcParams.update({'font.family': 'sans-serif', 'font.sans-serif': ['Arial']})
+    plt.rc('axes', titlesize=7, titlepad=2)  # fontsize of the title
+    plt.rc('axes', labelsize=6, labelpad=2)  # fontsize of the x and y labels
+    plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
+    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
+    plt.rc('legend', fontsize=6)  # fontsize of the legend
+    plt.rc('ytick.major', pad=2, size=2)
+    plt.rc('xtick.major', pad=2, size=2)
+    plt.rc('xtick.minor', size=1)
+    fig, axes = plt.subplots(4, 2, figsize=(7, 7), gridspec_kw={
+        'wspace': 0.3,
+        'hspace': 0.4,
+        'top': 0.97,
+        'bottom': 0.05,
+        'left': 0.05,
+        'right': 0.99,
+    })
+    empirical_k_fontsize = 7
+    legend_anchor = (1.02, 0.8)
+    linewidth = 1
+    markersize = 3
+    markersize_opt = 20
+    linewidths_opt_markers = 1
+    k_linewidth = 2
+    legend_args = dict(markerscale=1, handlelength=1.6, handletextpad=0.6,
+                       labelspacing=0.1, borderpad=0.3)
+
+    for i, metric in enumerate(['cuboids', 'voxels']):
+        args.volume_metric = metric
+
+        for j, fix in enumerate(['fix_pause', 'fix_duration']):
+
+            # Fix the pause and sweep over the durations
+            if fix == 'fix_pause':
+                plot_start = 0
+                plot_end = 6
+                args.sim_durations = sim_durations
+                args.pauses = [fix_pause]
+                series = sim_durations[plot_start:plot_end]
+                cmap = plt.get_cmap('winter')
+                title = f'$\delta_{{max}}=${fix_pause} seconds'
+
+            # Fix the duration and sweep over the pauses
+            else:
+                plot_start = 0
+                plot_end = 6
+                args.sim_durations = [fix_duration]
+                args.pauses = pauses
+                series = pauses[plot_start:plot_end]
+                cmap = plt.get_cmap('summer')
+                title = f'T = {str(round(fix_duration / 60))} minutes'
+
+            # Get the volumes
+            if metric == 'cuboids':
+                vols = generate_or_load_volumes(args, cache_only=True, rebuild_cache=False)
+            else:
+                scores = generate_or_load_voxel_scores(args, cache_only=True, rebuild_cache=False)
+                vols = scores * args.vxs
+            vols = vols.squeeze()
+
+            # Get the colours
+            colours = cmap(np.linspace(0, 1, len(series)))
+
+            # Get the optimal k values and corresponding volumes
+            optimal_k_idxs = vols[..., 0].argmax(axis=0).squeeze()
+            optimal_ks = k_vals[optimal_k_idxs]
+            optimal_ks = optimal_ks[plot_start:plot_end]
+            optimal_vols = [
+                vols[optimal_k_idxs[ii], ii, 0]
+                for ii in range(len(series))
+            ]
+
+            # Plot the mean results +/- SEM or STD
+            for k, version in enumerate(['sem', 'std']):
+                ax = axes[2 * j + k, i]
+                trans = transforms.blended_transform_factory(ax.transData, ax.transAxes)
+                ax.set_title(title + f' (mean $\pm$ {version.upper()})')
+
+                # Plot the data series
+                for ii, data_series in enumerate(series):
+                    vol_means = vols[:, ii, 0]
+                    vol_stds = vols[:, ii, -1]
+                    if fix == 'fix_pause':
+                        label = f'{data_series / 60:.0f}m'
+                    else:
+                        label = f'{data_series:.0f}s'
+                    ax.plot(k_vals, vol_means, label=label, c=colours[ii], marker='o',
+                            alpha=0.7, markersize=markersize, linewidth=linewidth)
+                    if version == 'sem':
+                        z = vol_stds / np.sqrt(args.batch_size)
+                    else:
+                        z = vol_stds
+                    ax.fill_between(k_vals, vol_means - z, vol_means + z, color=colours[ii],
+                                    alpha=0.3, linewidth=0.5, edgecolor='purple', zorder=-1)
+
+                # Highlight the optimal points
+                ax.scatter(optimal_ks, optimal_vols, marker='o', zorder=100, s=markersize_opt, facecolors='none',
+                           edgecolors='red', linewidths=linewidths_opt_markers)
+
+                # Add empirical k indicator
+                ax.axvline(x=empirical_k, c='orange', linestyle='--', linewidth=k_linewidth, zorder=-1)
+                ax.text(empirical_k, -0.06, empirical_k, color='orange', fontsize=empirical_k_fontsize,
+                        fontweight='bold', horizontalalignment='center', verticalalignment='top', transform=trans)
+
+                # Add legend
+                if i == 0:
+                    ax.legend(loc='upper left', bbox_to_anchor=legend_anchor, bbox_transform=ax.transAxes,
+                              **legend_args)
+
+                # Setup axes
+                ax.set_xlabel('Non-planarity factor, $k$')
+                ax.set_xscale('log')
+                ax.set_xticks([1e-1, 1e1])
+                ax.set_ylabel(f'Exploration volume ({metric})')
+                ax.grid()
+
+    if save_plots:
+        plt.savefig(save_dir / f'volume_sweeps_extended.{img_extension}', transparent=True)
+    if show_plots:
+        plt.show()
+
+
 def fractal_dimension_sweeps():
     """
     Simulate across a range of non-planarities and calculate fractal dimension.
@@ -1870,14 +2024,15 @@ if __name__ == '__main__':
     # crossings_nonp()
     # volume_metric()
     # volume_metric_sweeps()
-    volume_metric_sweeps2(plot_pause_sweep=False, plot_duration_sweep=False, plot_combined=True,
-                          show_std=False, layout='thesis')
-    volume_metric_sweeps2(plot_pause_sweep=False, plot_duration_sweep=False, plot_combined=True,
-                          show_std=True, layout='thesis')
-    volume_metric_sweeps2(plot_pause_sweep=True, plot_duration_sweep=False, plot_combined=False,
-                          show_std=False, layout='thesis')
-    volume_metric_sweeps2(plot_pause_sweep=False, plot_duration_sweep=True, plot_combined=False,
-                          show_std=False, layout='thesis')
-    # voxel_scores_sweeps()
-    volume_metric_sweeps_cuboids_voxels(layout='thesis')
+    # volume_metric_sweeps2(plot_pause_sweep=False, plot_duration_sweep=False, plot_combined=True,
+    #                       show_std=True, layout='thesis')
+    # volume_metric_sweeps2(plot_pause_sweep=False, plot_duration_sweep=False, plot_combined=True,
+    #                       show_std=True, layout='thesis')
+    # volume_metric_sweeps2(plot_pause_sweep=True, plot_duration_sweep=False, plot_combined=False,
+    #                       show_std=False, layout='thesis')
+    # volume_metric_sweeps2(plot_pause_sweep=False, plot_duration_sweep=True, plot_combined=False,
+    #                       show_std=False, layout='thesis')
+    # # voxel_scores_sweeps()
+    # volume_metric_sweeps_cuboids_voxels(layout='thesis')
+    volume_metric_sweeps_extended()
     # fractal_dimension_sweeps()
