@@ -145,8 +145,6 @@ def generate_trial_videos(
     reconstruction = None
     if r_id is not None:
         reconstruction = Reconstruction.objects.get(id=r_id)
-    else:
-        return
 
     update_fn, frame_nums = prepare_views(
         args=args,
