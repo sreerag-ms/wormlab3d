@@ -26,6 +26,7 @@ def get_args() -> Namespace:
     """
     parser = ArgumentParser(description='Wormlab3D script to generate the tracking videos.')
     parser.add_argument('--dataset', type=str, help='Dataset by id.', required=True)
+    parser.add_argument('--smoothing-window-postures', type=int, default=0, help='Smoothing window for the postures.')
     args = parser.parse_args()
     return args
 
@@ -144,6 +145,8 @@ def generate_trial_videos(
     reconstruction = None
     if r_id is not None:
         reconstruction = Reconstruction.objects.get(id=r_id)
+    else:
+        return
 
     update_fn, frame_nums = prepare_views(
         args=args,
@@ -160,7 +163,7 @@ def generate_trial_videos(
                 title += f' Reconstruction {r_id}.'
             size = f'{int(trial.crop_size * 3)}x{trial.crop_size}'
         else:
-            output_path = output_dir / f'trial={trial.id:03d}_cam={camera_idx}'
+            output_path = output_dir / f'trial={trial.id:03d}_camera={camera_idx}'
             title += f' Camera {camera_idx}.'
             size = f'{trial.crop_size}x{trial.crop_size}'
         output_args = {
@@ -188,10 +191,14 @@ def generate_trial_videos(
     n_frames = len(frame_nums)
     for i in range(n_frames):
         if i > 0 and i % 50 == 0:
-            logger.info(f'Rendering frame {i + 1}/{n_frames}.')
+            logger.info(f'Rendering frame {i}/{n_frames}.')
 
         # Update and write to streams
-        tracked_images, images_combined = update_fn(i)
+        try:
+            tracked_images, images_combined = update_fn(i)
+        except Exception as e:
+            logger.warning(f'Error rendering frame {i}: {e}. Stopping here')
+            break
         processes[0].stdin.write(images_combined.tobytes())
         for j, img in enumerate(tracked_images):
             processes[j + 1].stdin.write(img.tobytes())
@@ -227,7 +234,9 @@ def generate_tracking_videos():
     # Generate clips for each trial
     for i, trial in enumerate(ds.include_trials):
         logger.info(f'Generating tracking videos for trial={trial.id} ({i + 1}/{len(ds.include_trials)}).')
-        generate_trial_videos(ds, trial, args, output_dir=output_dir)
+        trial_dir = output_dir / f'trial={trial.id:03d}'
+        os.makedirs(trial_dir, exist_ok=True)
+        generate_trial_videos(ds, trial, args, output_dir=trial_dir)
 
 
 if __name__ == '__main__':
