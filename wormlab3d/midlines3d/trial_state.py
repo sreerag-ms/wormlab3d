@@ -380,13 +380,14 @@ class TrialState:
             end_frame = self.end_frame + 1
         else:
             assert start_frame <= end_frame <= self.trial.n_frames_min + 1
+        to_end = end_frame == self.end_frame + 1
 
         if k in TRANSIENTS_NAMES:
             if k == 'points_3d_base':
                 centres_3d, _ = self.trial.get_tracking_data(
                     fixed=True,
                     start_frame=start_frame,
-                    end_frame=end_frame - 1
+                    end_frame=None if to_end else end_frame
                 )
                 return centres_3d
 
@@ -394,7 +395,7 @@ class TrialState:
                 centres_2d, _ = self.trial.get_tracking_data(
                     fixed=True,
                     start_frame=start_frame,
-                    end_frame=end_frame - 1,
+                    end_frame=None if to_end else end_frame,
                     return_2d_points=True
                 )
                 return centres_2d
@@ -405,7 +406,7 @@ class TrialState:
         if k == 'cam_rotations':
             # Build camera rotation matrics
             Rs = []
-            rotation_preangles = self.get('cam_rotation_preangles', start_frame, end_frame)
+            rotation_preangles = self.get('cam_rotation_preangles', start_frame, None if to_end else end_frame)
             for i in range(3):
                 pre = rotation_preangles[:, i]
                 cos_phi, sin_phi = pre[:, 0, 0], pre[:, 0, 1]
