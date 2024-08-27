@@ -26,6 +26,8 @@ def get_args() -> Namespace:
     parser.add_argument('--dataset', type=str, required=True, help='Dataset by id.')
     parser.add_argument('--eigenworms', type=str, help='Eigenworms by id.')
     parser.add_argument('--include-videos', type=str2bool, default=True, help='Include videos.')
+    parser.add_argument('--tracking-videos-path', type=Path, help='Path to the tracking videos.')
+
     args = parser.parse_args()
 
     # Load arguments from spec file
@@ -130,6 +132,13 @@ def prepare_dataset():
                 video_path = Path(video_path)
                 assert video_path.exists(), f'Video not found: {video_path}.'
                 shutil.copy(video_path, video_dir_trial / f'trial={trial.id:03d}_camera={j}{video_path.suffix}')
+
+            # Copy the tracking videos
+            if args.tracking_videos_path is not None:
+                tracking_videos_dir = args.tracking_videos_path / f'trial={trial.id:03d}'
+                assert tracking_videos_dir.exists(), f'Tracking videos not found: {tracking_videos_dir}.'
+                for video_path in tracking_videos_dir.iterdir():
+                    shutil.copy(video_path, video_dir_trial / video_path.name.replace(f'_camera', '_tracking_camera'))
 
         # Save the tracking data
         Xt, _ = get_trajectory(trial_id=trial.id, tracking_only=True)

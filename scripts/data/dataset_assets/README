@@ -9,12 +9,19 @@ Ilett, T.P., Yuval, O., Ranner, T., Cohen, N. and Hogg, D.C., 2023.
 In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (pp. 12565-12575).
 ----------------------------------------------------------------------------------------------------------------
 
+For details on all the other methods, including the complex-PCA (CPCA) method used to generate the 3D eigenworms please refer to the thesis:
+----------------------------------------------------------------------------------------------------------------
+How worms move in 3D
+Ilett, T.P., 2023.
+PhD Thesis, University of Leeds.
+----------------------------------------------------------------------------------------------------------------
+
 Please direct any correspondence to: t.ilett@leeds.ac.uk or n.cohen@leeds.ac.uk.
 
 Contents:
 1. dataset.csv - Details of the included trials, conditions and reconstructions.
 2. args.yml - Meta data for reproducibility.
-3. /videos - Compressed video files for all trials.
+3. /videos - Compressed versions of the original video files for all trials. Zoomed-in uncompressed videos centred on the worm (tracking videos). Combined videos including overlaid midline reprojections.
 4. /tracking - 3D position tracking information for all trials.
 5. /reconstruction_xyz/* - 3D body midline coordinates for all reconstructed trials (not all trials have been reconstructed).
 6. /reconstruction_eigenworms/eigenworms_XXXXXX.npz - Complex-PCA (CPCA) components calculated across the dataset (the "eigenworms").
