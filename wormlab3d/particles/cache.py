@@ -41,14 +41,18 @@ def _init_parameters(args: ParameterArgs) -> PEParameters:
     return parameters
 
 
-def get_sim_state_from_args(args: Union[ParameterArgs, Namespace], no_cache: bool = False) -> SimulationState:
+def get_sim_state_from_args(
+        args: Union[ParameterArgs, Namespace],
+        read_only: bool=False,
+        no_cache: bool = False
+) -> SimulationState:
     """
     Generate or load the trajectories from parameters set in an argument namespace.
     """
     if isinstance(args, Namespace):
         args = ParameterArgs.from_args(args)
     params = _init_parameters(args)
-    SS = SimulationState(params, read_only=False, regenerate=args.regenerate, no_cache=no_cache)
+    SS = SimulationState(params, read_only=read_only, regenerate=args.regenerate, no_cache=no_cache)
     return SS
 
 

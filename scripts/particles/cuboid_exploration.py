@@ -101,8 +101,8 @@ def _calculate_cuboid_dimensions(Xt: np.ndarray) -> np.ndarray:
 
 
 def cuboid_volumes_plot(
-        factor_idxs: List[int],
-        n_trajectories_per_factor: int = 3,
+        k_idxs: List[int],
+        n_trajectories_per_k: int = 3,
 ):
     """
     3D plot of cuboid volumes explored by different trajectories.
@@ -113,7 +113,7 @@ def cuboid_volumes_plot(
     args.npas = get_npas_from_args(args)  # Propagate the npas (phi factors)
 
     # Select the phi factors to use
-    phi_factors = args.npas[factor_idxs]
+    k_factors = args.npas[k_idxs]
 
     # Set up the plot
     mlab.options.offscreen = save_plots
@@ -138,12 +138,12 @@ def cuboid_volumes_plot(
     dims = []
     for i in range(3):
         if i == 0:
-            args.phi_factor_rt = phi_factors[0]
+            args.phi_factor_rt = k_factors[0]
         elif i == 1:
-            args.phi_factor_rt = phi_factors[2]
+            args.phi_factor_rt = k_factors[2]
         elif i == 2:
-            args.phi_factor_rt = phi_factors[1]
-        SS = get_sim_state_from_args(args)
+            args.phi_factor_rt = k_factors[1]
+        SS = get_sim_state_from_args(args, read_only=True)
 
         # Select some exemplar trajectories
         Xt = SS.get_Xt()
@@ -151,7 +151,8 @@ def cuboid_volumes_plot(
 
         # Pick the trajectories with the largest ptp in the x and y-dimensions
         if i == 0:
-            traj_idxs = np.argsort(ptp[:, 0] * ptp[:, 1])[::-1][:5]
+            # traj_idxs = np.argsort(ptp[:, 0] * ptp[:, 1])[::-1][:5]
+            traj_idxs = np.argsort(ptp[:, 2])[:5]
 
         # Pick the trajectories with the largest ptp in the z-dimension
         elif i == 1:
@@ -216,8 +217,8 @@ def cuboid_volumes_plot(
         img = mlab.screenshot(figure=fig, mode='rgba', antialiased=True)
         img = Image.fromarray((img * 255).astype(np.uint8), 'RGBA')
         img.save(save_dir / (
-                f'factors=[' + ','.join([f'{f:.3E}' for f in phi_factors]) + f']' +
-                f'_ntpf={n_trajectories_per_factor}.png'))
+                f'factors=[' + ','.join([f'{f:.3E}' for f in k_factors]) + f']' +
+                f'_ntpk={n_trajectories_per_k}.png'))
         mlab.clf(fig)
         mlab.close()
 
@@ -229,5 +230,5 @@ if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
 
-    use_sigma_idxs = [2, 10, 19]
-    cuboid_volumes_plot(factor_idxs=use_sigma_idxs, n_trajectories_per_factor=3)
+    use_k_idxs = [0, 9, 19]
+    cuboid_volumes_plot(k_idxs=use_k_idxs, n_trajectories_per_k=3)
