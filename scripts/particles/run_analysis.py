@@ -1,3 +1,4 @@
+import csv
 import os
 import shutil
 from argparse import Namespace
@@ -62,6 +63,7 @@ def _calculate_pause_data(
     pause_durations = []
     pause_positions = []
     run_ids = []
+    endpoint_run_ids = []
     thetas_pre = []
     thetas_post = []
     phis_pre = []
@@ -173,6 +175,7 @@ def _calculate_pause_data(
                 last_phis_pre.append(phis_i[j - 1] if j > 0 else np.nan)
                 last_thetas_post.append(thetas_i[j] if j < len(tumble_idxs_i) else np.nan)
                 last_phis_post.append(phis_i[j] if j < len(tumble_idxs_i) else np.nan)
+                endpoint_run_ids.append(run_id)
 
             # Collect the percentage of the run that was spent in the pause state
             run_durations.append(len(run_speed) * dt)
@@ -205,6 +208,7 @@ def _calculate_pause_data(
         'last_thetas_post': np.array(last_thetas_post),
         'last_phis_pre': np.array(last_phis_pre),
         'last_phis_post': np.array(last_phis_post),
+        'endpoint_run_ids': np.array(endpoint_run_ids),
         'run_durations': np.array(run_durations),
         'run_pause_ratios': np.array(run_pause_ratios),
     }
@@ -257,7 +261,7 @@ def _init(include_all_runs: bool = False):
         include_pe_options=True,
         include_fractal_dim_options=False,
         include_video_options=False,
-        include_evolution_options=True,
+        include_evolution_options=False,
         validate_source=False,
     )
 
@@ -268,7 +272,7 @@ def _init(include_all_runs: bool = False):
 
     # Add new arguments
     args.pause_speed_threshold = 0.02
-    args.min_pause_duration = 0.5
+    args.min_pause_duration = 1
 
     # Load arguments from spec file
     if (LOGS_PATH / 'spec.yml').exists():
@@ -607,15 +611,91 @@ def plot_pause_proportions():
     plt.close(fig)
 
 
+def plot_correlations():
+    """
+    Check for correlations between the pauses and the angles before and after each run.
+    """
+    global save_plots
+    save_plots = True
+    save_dir, data = _init(include_all_runs=True)
+    rows = []
+    scatter_args = dict(alpha=0.5, s=20, marker='o')
+    pos_thresh = 0.25
+
+    def _do_correlate(x, y, x_lbl, y_lbl, ax):
+        res = pearsonr(x, y)
+        row = {
+            'x': x_lbl,
+            'y': y_lbl,
+            'R': res[0],
+            'p': res[1],
+        }
+        rows.append(row)
+        ax.set_title(f'R={res[0]:.2E}, p={res[1]:.2E}')
+        ax.scatter(x, y, **scatter_args)
+        ax.set_xlabel(x_lbl)
+        ax.set_ylabel(y_lbl)
+
+    # Overall % of time spent paused vs turn angles
+    pause_ratios = data['run_pause_ratios']
+    fig, axes = plt.subplots(2, 2, figsize=(8, 7))
+    for j, (y_key, y_lbl) in enumerate(zip(['first_thetas_pre', 'first_phis_pre'],
+                                           ['Theta pre-run', 'Phi pre-run'])):
+        nan_idxs = np.isnan(data[y_key])
+        run_ids = data['endpoint_run_ids'][~nan_idxs]
+        x = pause_ratios[run_ids]
+        y = np.abs(data[y_key][~nan_idxs])
+        _do_correlate(x, y, 'Ratio of run spent paused', y_lbl, axes[0, j])
+    for j, (y_key, y_lbl) in enumerate(zip(['last_thetas_post', 'last_phis_post'],
+                                           ['Theta post-run', 'Phi post-run'])):
+        nan_idxs = np.isnan(data[y_key])
+        run_ids = data['endpoint_run_ids'][~nan_idxs]
+        x = pause_ratios[run_ids]
+        y = np.abs(data[y_key][~nan_idxs])
+        _do_correlate(x, y, 'Ratio of run spent paused', y_lbl, axes[1, j])
+    fig.tight_layout()
+    if save_plots:
+        plt.savefig(save_dir / f'correlations_pause_ratio_vs_angles.{img_extension}')
+    if show_plots:
+        plt.show()
+
+    # Last pause duration vs angles after a run
+    last_pause_durations = data['last_pause_durations']
+    positions = data['last_pause_positions']
+    last_pause_durations = last_pause_durations[positions > 1 - pos_thresh]
+    thetas_post = np.abs(data['last_thetas_post'][positions > 1 - pos_thresh])
+    phis_post = np.abs(data['last_phis_post'][positions > 1 - pos_thresh])
+    nan_idxs = np.isnan(thetas_post)
+    last_pause_durations = last_pause_durations[~nan_idxs]
+    thetas_post = thetas_post[~nan_idxs]
+    phis_post = phis_post[~nan_idxs]
+    fig, axes = plt.subplots(1, 2, figsize=(8, 4))
+    for j, (y, y_lbl) in enumerate(zip([phis_post, thetas_post],
+                                       ['Phi post-run', 'Theta post-run'])):
+        _do_correlate(last_pause_durations, y, 'Last pause duration', y_lbl, axes[j])
+    fig.tight_layout()
+    if save_plots:
+        plt.savefig(save_dir / f'correlations_last_pause_duration_vs_angles.{img_extension}')
+    if show_plots:
+        plt.show()
+
+    # Save the results to a CSV file
+    with open(save_dir / 'correlations.csv', 'w') as f:
+        writer = csv.DictWriter(f, fieldnames=['x', 'y', 'R', 'p'])
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
     if interactive_plots:
         interactive()
     # plot_pause_durations_and_positions()
-    for se in ['start', 'end']:
-        for w in [5, 10, 20]:
-            plot_pause_durations_relative_to(se, w)
+    # for se in ['start', 'end']:
+    #     for w in [5, 10, 20]:
+    #         plot_pause_durations_relative_to(se, w)
     # plot_pause_durations_relative_to('end', 5)
     # plot_pause_durations_and_angles()
     # plot_pause_proportions()
+    plot_correlations()

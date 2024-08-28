@@ -1,3 +1,4 @@
+import csv
 import os
 import shutil
 
@@ -18,11 +19,12 @@ from wormlab3d.toolkit.util import hash_data, print_args, to_dict
 from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.util import smooth_trajectory
 
-show_plots = True
-save_plots = False
-# show_plots = False
-# save_plots = True
+# show_plots = True
+# save_plots = False
+show_plots = False
+save_plots = True
 interactive_plots = False
+img_extension = 'png'
 
 DATA_KEYS = ['durations', 'speeds', 'planar_angles', 'nonplanar_angles', 'twist_angles', 'tumble_idxs']
 
@@ -578,7 +580,7 @@ def plot_phi_factors(
     fake_thetas, fake_phis = fake_data.T
     x_min, x_max = -np.pi, np.pi
     y_min, y_max = -np.pi / 2, np.pi / 2
-    phi_factors = [0.2, 1, 5]
+    phi_factors = [0.1, 1, 5]
 
     for factor in phi_factors:
         logger.info(f'Plotting phi factor: {factor}')
@@ -645,53 +647,127 @@ def plot_correlations():
     """
     Check for correlations between the run durations/speeds and the angles before and after each run.
     """
+    global save_plots
+    save_plots = True
     save_dir, data_values = _init(include_all_runs=True)
+    rows = []
+    scatter_args = dict(alpha=0.5, s=20, marker='o')
+
+    # Extract the data
     durations = data_values['durations']
     speeds = data_values['speeds']
     thetas = data_values['planar_angles']
     phis = data_values['nonplanar_angles']
     tumble_idxs = data_values['tumble_idxs']
+    durations_pre = []
+    durations_post = []
+    speeds_pre = []
+    speeds_post = []
     thetas_pre = []
     thetas_post = []
     phis_pre = []
     phis_post = []
-    idx = 0
+    idx_runs = 0
+    idx_tumbles = 0
     for i in range(len(tumble_idxs)):
         n_tumbles = len(tumble_idxs[i])
         if n_tumbles == 0:
             continue
-        thetas_i = thetas[idx:idx + n_tumbles]
-        phis_i = phis[idx:idx + n_tumbles]
+        durations_i = durations[idx_runs:idx_runs + n_tumbles - 1]
+        avg_duration = np.mean(durations_i)
+        durations_i /= avg_duration
+        speeds_i = speeds[idx_runs:idx_runs + n_tumbles - 1]
+        avg_speed = np.mean(speeds_i)
+        speeds_i /= avg_speed
+        thetas_i = thetas[idx_tumbles:idx_tumbles + n_tumbles]
+        phis_i = phis[idx_tumbles:idx_tumbles + n_tumbles]
+        durations_pre.extend(durations_i[:-1])
+        durations_post.extend(durations_i[1:])
+        speeds_pre.extend(speeds_i[:-1])
+        speeds_post.extend(speeds_i[1:])
         thetas_pre.extend(thetas_i[:-1])
         thetas_post.extend(thetas_i[1:])
         phis_pre.extend(phis_i[:-1])
         phis_post.extend(phis_i[1:])
-        idx += n_tumbles
+        idx_runs += n_tumbles - 1
+        idx_tumbles += n_tumbles
+    durations_pre = np.array(durations_pre)
+    durations_post = np.array(durations_post)
+    speeds_pre = np.array(speeds_pre)
+    speeds_post = np.array(speeds_post)
     thetas_pre = np.array(thetas_pre)
     thetas_post = np.array(thetas_post)
     phis_pre = np.array(phis_pre)
     phis_post = np.array(phis_post)
 
-    # Plot the angles against the durations and speeds to check for correlations
-    scatter_args = dict(alpha=0.5, s=20, marker='o')
-    fig, axes = plt.subplots(2, 4, figsize=(14, 10))
+    def _do_correlate(x, y, x_lbl, y_lbl, ax):
+        res = pearsonr(x, y)
+        row = {
+            'x': x_lbl,
+            'y': y_lbl,
+            'R': res[0],
+            'p': res[1],
+        }
+        rows.append(row)
+        ax.set_title(f'R={res[0]:.2E}, p={res[1]:.2E}')
+        ax.scatter(x, y, **scatter_args)
+        ax.set_xlabel(x_lbl)
+        ax.set_ylabel(y_lbl)
 
-    for i, (x, x_lbl) in enumerate(zip([durations, speeds], ['Duration', 'Speed'])):
-        for j, (y, y_lbl) in enumerate(zip([phis_pre, phis_post, thetas_pre, thetas_post],
-                                           ['Phis pre-run', 'Phis post-run', 'Thetas pre-run', 'Thetas post-run'])):
-            y = np.abs(y)
-            res = pearsonr(x, y)
-            ax = axes[i, j]
-            ax.set_title(f'R={res[0]:.2E}, p={res[1]:.2E}')
-            ax.scatter(x, y, **scatter_args)
-            ax.set_xlabel(x_lbl)
-            ax.set_ylabel(y_lbl)
-
+    # Basic correlations - run speed vs duration and theta vs phi
+    fig, axes = plt.subplots(1, 2, figsize=(8, 5))
+    _do_correlate(durations, speeds, 'Run duration', 'Run speed', axes[0])
+    _do_correlate(np.abs(thetas), np.abs(phis), 'Theta', 'Phi', axes[1])
     fig.tight_layout()
     if save_plots:
-        plt.savefig(save_dir / 'correlations.svg')
+        plt.savefig(save_dir / f'correlations_basic.{img_extension}')
     if show_plots:
         plt.show()
+
+    # Correlate angles before and after a run against the duration and speed of the run
+    fig, axes = plt.subplots(2, 4, figsize=(14, 10))
+    for i, (x, x_lbl) in enumerate(zip([durations, speeds],
+                                       ['Run duration', 'Run speed'])):
+        for j, (y, y_lbl) in enumerate(zip([phis_pre, phis_post, thetas_pre, thetas_post],
+                                           ['Phi pre-run', 'Phi post-run', 'Theta pre-run', 'Theta post-run'])):
+            _do_correlate(x, np.abs(y), x_lbl, y_lbl, axes[i, j])
+    fig.tight_layout()
+    if save_plots:
+        plt.savefig(save_dir / f'correlations_angles_vs_runs.{img_extension}')
+    if show_plots:
+        plt.show()
+
+    # Correlate angles before and after a run against each other
+    fig, axes = plt.subplots(2, 2, figsize=(8, 7))
+    for i, (x, x_lbl) in enumerate(zip([phis_pre, thetas_pre],
+                                       ['Phi pre-run', 'Theta pre-run'])):
+        for j, (y, y_lbl) in enumerate(zip([phis_post, thetas_post],
+                                           ['Phi post-run', 'Theta post-run'])):
+            _do_correlate(np.abs(x), np.abs(y), x_lbl, y_lbl, axes[i, j])
+    fig.tight_layout()
+    if save_plots:
+        plt.savefig(save_dir / f'correlations_angles_vs_angles.{img_extension}')
+    if show_plots:
+        plt.show()
+
+    # Correlate run durations and speeds before and after a turn against each other
+    fig, axes = plt.subplots(2, 2, figsize=(8, 7))
+    for i, (x, x_lbl) in enumerate(zip([durations_pre, speeds_pre],
+                                       ['Run duration pre-turn', 'Run speed pre-turn'])):
+        for j, (y, y_lbl) in enumerate(zip([durations_post, speeds_post],
+                                           ['Run duration post-turn', 'Run speed post-turn'])):
+            _do_correlate(x, y, x_lbl, y_lbl, axes[i, j])
+    fig.tight_layout()
+    if save_plots:
+        plt.savefig(save_dir / f'correlations_runs_vs_runs.{img_extension}')
+    if show_plots:
+        plt.show()
+
+    # Save the results to a CSV file
+    with open(save_dir / 'correlations.csv', 'w') as f:
+        writer = csv.DictWriter(f, fieldnames=['x', 'y', 'R', 'p'])
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def plot_pause_penalty(
@@ -884,13 +960,13 @@ if __name__ == '__main__':
     if interactive_plots:
         interactive()
     # model_runs(show_heatmap=True)
-    model_runs(show_heatmap=True, show_synth=False, layout='default')
+    # model_runs(show_heatmap=True, show_synth=False, layout='default')
     # donut_test()
     # model_tumbles(show_heatmap=True)
     # model_tumbles_basic(show_heatmap=True, show_synth=False, layout='paper')
     # plot_phi_factors(layout='paper')
     # tumble_heatmaps()
-    # plot_correlations()
+    plot_correlations()
     # plot_pause_penalty(layout='paper')
     # plot_pause_penalty_basic(layout='paper')
     # plot_simulated_trajectories(plot_n_examples=50)
