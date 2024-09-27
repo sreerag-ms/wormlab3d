@@ -20,9 +20,9 @@ from wormlab3d.trajectories.args import get_args
 from wormlab3d.trajectories.cache import get_trajectory_from_args
 from wormlab3d.trajectories.util import calculate_speeds
 
-show_plots = True
+# show_plots = True
 # save_plots = False
-# show_plots = False
+show_plots = False
 save_plots = True
 interactive_plots = False
 img_extension = 'png'
@@ -272,7 +272,7 @@ def _init(include_all_runs: bool = False):
 
     # Add new arguments
     args.pause_speed_threshold = 0.02
-    args.min_pause_duration = 1
+    args.min_pause_duration = 2
 
     # Load arguments from spec file
     if (LOGS_PATH / 'spec.yml').exists():
