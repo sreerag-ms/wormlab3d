@@ -1,9 +1,0 @@
-image: continuumio/miniconda3:latest
-
-#test:forward:
-#  stage: test
-#  script:
-#    - conda env create -f environment.yml
-#    - source activate wormlab3d
-#    - pip install .[test]
-#    - pytest -v ./tests/

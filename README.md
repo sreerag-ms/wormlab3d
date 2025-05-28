@@ -40,13 +40,13 @@ Otherwise, you will need to install both Docker Engine ([https://docs.docker.com
 Once these are installed, from the project root run:
 
 ```bash
-docker-compose up [-d]
+docker compose up [-d]
 ```
 
 The `-d` flag is optional and will run the service in `daemon` mode (ie, the background). Database data is stored in `[PROJECT_ROOT]/data/db`. When you are done, you can shut the services down with:
 
 ```bash
-docker-compose down
+docker compose down
 ```
 
 (The database data will persist!)
