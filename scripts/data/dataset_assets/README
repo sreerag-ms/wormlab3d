@@ -22,9 +22,10 @@ Contents:
 1. dataset.csv - Details of the included trials, conditions and reconstructions.
 2. args.yml - Meta data for reproducibility.
 3. /videos - Compressed versions of the original video files for all trials. Zoomed-in uncompressed videos centred on the worm (tracking videos). Combined videos including overlaid midline reprojections.
-4. /tracking - 3D position tracking information for all trials.
-5. /reconstruction_xyz/* - 3D body midline coordinates for all reconstructed trials (not all trials have been reconstructed).
-6. /reconstruction_eigenworms/eigenworms_XXXXXX.npz - Complex-PCA (CPCA) components calculated across the dataset (the "eigenworms").
-7. /reconstruction_eigenworms/* - Eigenworm coefficients for reconstructed trials.
-8. /examples/cpca.py - CPCA class for transforming shapes into eigenworm space.
-9. /examples/* - Example code for loading and visualising the data.
+4. /cameras - Camera calibration files for all trials.
+5. /tracking - 3D position tracking information for all trials.
+6. /reconstruction_xyz/* - 3D body midline coordinates for all reconstructed trials (not all trials have been reconstructed).
+7. /reconstruction_eigenworms/eigenworms_XXXXXX.npz - Complex-PCA (CPCA) components calculated across the dataset (the "eigenworms").
+8. /reconstruction_eigenworms/* - Eigenworm coefficients for reconstructed trials.
+9. /examples/cpca.py - CPCA class for transforming shapes into eigenworm space.
+10. /examples/* - Example code for loading and visualising the data.
