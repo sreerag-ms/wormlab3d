@@ -3,15 +3,18 @@ import shutil
 from argparse import ArgumentParser, Namespace
 from csv import DictWriter
 from pathlib import Path
-from typing import Tuple
+from typing import Dict, Tuple
 
 import numpy as np
+import torch
 import yaml
 
 from wormlab3d import LOGS_PATH, ROOT_PATH, SCRIPT_PATH, START_TIMESTAMP, logger
 from wormlab3d.data.annex import fetch_from_annex, is_annexed_file
-from wormlab3d.data.model import Dataset, Eigenworms, Reconstruction
+from wormlab3d.data.model import Cameras, Dataset, Eigenworms, Reconstruction, Trial
 from wormlab3d.data.util import fix_path
+from wormlab3d.midlines3d.mf_methods import make_rotation_matrix
+from wormlab3d.midlines3d.trial_state import TrialState
 from wormlab3d.particles.tumble_run import generate_or_load_ds_statistics
 from wormlab3d.postures.eigenworms import generate_or_load_eigenworms
 from wormlab3d.toolkit.util import print_args, str2bool, to_dict
@@ -68,6 +71,87 @@ def _init() -> Tuple[Namespace, Path, Dataset, Eigenworms]:
     return args, save_dir, ds, ew
 
 
+def _get_camera_parameters(
+        trial: Trial,
+        rec: Reconstruction = None,
+) -> Dict[str, list]:
+    """
+    Fetch particular camera parameters from the trial state.
+    """
+    cam_params = {}
+
+    if rec is None:
+        cameras: Cameras = trial.get_cameras()
+        cam_params = {
+            'pose': np.stack(cameras.pose).tolist(),  # (3, 4, 4)
+            'matrix': np.stack(cameras.matrix).tolist(),  # (3, 3, 3)
+            'distortion': np.stack(cameras.distortion).tolist(),  # (3, 5)
+            'shifts': []
+        }
+
+    else:
+        ts = TrialState(reconstruction=rec, partial_load_ok=True)
+
+        # Build the pose matrices: (3, 4, 4)
+        pose = np.zeros((3, 4, 4))
+        pose[:, 3, 3] = 1.0  # Set the last row to [0, 0, 0, 1]
+
+        # Construct the rotation matrices from the angles
+        p = ts.get('cam_rotation_preangles')  # (T, 3, 3, 2)
+        p = p.copy()[rec.start_frame_valid:rec.end_frame_valid].astype(np.float64)
+        assert p.var(axis=0).max() < 1e-6, f'Camera rotation angles are not constant across time!'
+        p = torch.from_numpy(p[0])  # (3, 3, 2)
+        pose[:, :3, :3] = make_rotation_matrix(
+            cos_phi=p[:, 0, 0],
+            sin_phi=p[:, 0, 1],
+            cos_theta=p[:, 1, 0],
+            sin_theta=p[:, 1, 1],
+            cos_psi=p[:, 2, 0],
+            sin_psi=p[:, 2, 1],
+        ).numpy().transpose(2, 0, 1)
+
+        # Set the translation vectors
+        p = ts.get('cam_translations')  # (T, 3, 3)
+        p = p.copy()[rec.start_frame_valid:rec.end_frame_valid].astype(np.float64)
+        assert p.var(axis=0).max() < 1e-5, f'Camera rotation angles are not constant across time!'
+        pose[:, :3, 3] = p[0]  # (3, 3)
+        cam_params['pose'] = pose.tolist()
+
+        # Set the camera matrices: (3, 3, 3)
+        matrix = np.zeros((3, 3, 3))
+        intrinsics = ts.get('cam_intrinsics')  # (T, 3, 4)
+        intrinsics = intrinsics.copy()[rec.start_frame_valid:rec.end_frame_valid].astype(np.float64)
+        assert intrinsics.var(axis=0).max() < 1e-6, f'Camera intrinsics are not constant across time!'
+        intrinsics = intrinsics[0]  # (3, 4)
+        matrix[:, 0, 0] = intrinsics[:, 0]  # fx
+        matrix[:, 1, 1] = intrinsics[:, 1]  # fy
+        matrix[:, 0, 2] = intrinsics[:, 2]  # cx
+        matrix[:, 1, 2] = intrinsics[:, 3]  # cy
+        cam_params['matrix'] = matrix.tolist()
+
+        # Set the distortion coefficients
+        distortions = ts.get('cam_distortions')  # (T, 3, 5)
+        distortions = distortions.copy()[rec.start_frame_valid:rec.end_frame_valid].astype(np.float64)
+        if distortions.var(axis=0).max() > 1e-5:
+            logger.warning('Camera distortion coefficients are not constant across time! Using the median.')
+            distortions = np.median(distortions, axis=0)  # (3, 5)
+        else:
+            distortions = distortions[0]  # (3, 5)
+        cam_params['distortion'] = distortions.tolist()
+
+        # Set the shifts
+        shifts = ts.get('cam_shifts')  # (T, 3, 1)
+        shifts = shifts.copy().squeeze().astype(np.float64)
+        shifts_valid = shifts[rec.start_frame_valid:rec.end_frame_valid]
+        if rec.start_frame_valid > 0:
+            shifts[:rec.start_frame_valid] = shifts_valid[0]
+        if rec.end_frame_valid < len(shifts):
+            shifts[rec.end_frame_valid:] = shifts_valid[-1]
+        cam_params['shifts'] = shifts.tolist()
+
+    return cam_params
+
+
 def prepare_dataset():
     """
     Collate and prepare a dataset.
@@ -80,6 +164,8 @@ def prepare_dataset():
     video_dir.mkdir(parents=True, exist_ok=True)
     tracking_dir = save_dir / 'tracking'
     tracking_dir.mkdir(parents=True, exist_ok=True)
+    cameras_dir = save_dir / 'cameras'
+    cameras_dir.mkdir(parents=True, exist_ok=True)
     reconst_dir = save_dir / 'reconstruction_xyz'
     reconst_dir.mkdir(parents=True, exist_ok=True)
     eigenworms_dir = save_dir / 'reconstruction_eigenworms'
@@ -145,6 +231,11 @@ def prepare_dataset():
         if Xt.ndim == 3:
             Xt = Xt.mean(axis=1)
         np.savez_compressed(tracking_dir / f'trial={trial.id:03d}_tracking.npz', X=Xt)
+
+        # Save the camera configurations
+        cam_params = _get_camera_parameters(trial, rec)
+        with open(cameras_dir / f'trial={trial.id:03d}_camera_parameters.json', 'w') as f:
+            json.dump(cam_params, f, indent=4)
 
         # Save the reconstruction data
         if rec_id is not None:
@@ -219,7 +310,8 @@ def prepare_dataset():
         if record['reconstruction'] == '-':
             continue
         break
-    for script_name in ['plot_tracking.py', 'plot_reconstruction.py', 'plot_eigenworms.py']:
+    for script_name in ['plot_approximation.py', 'plot_eigenworms.py', 'plot_projection.py', 'plot_reconstruction.py',
+                        'plot_tracking.py']:
         script_src = assets_dir / script_name
         with open(script_src, 'r') as f:
             content = f.read()
