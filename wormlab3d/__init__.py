@@ -4,7 +4,7 @@ import sys
 import time
 from pathlib import Path
 
-import dotenv
+from dotenv import load_dotenv
 
 # Get running environment
 ENV = os.getenv('ENV', 'local')
@@ -13,7 +13,7 @@ ENV = os.getenv('ENV', 'local')
 ROOT_PATH = Path(__file__).parent.parent
 
 # Load environment variables from .env file
-dotenv.load_dotenv(ROOT_PATH / '.env')
+load_dotenv(ROOT_PATH / '.env')
 
 
 def _load_env_path(k: str, default: Path):
