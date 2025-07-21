@@ -4,9 +4,9 @@ from typing import List, Union
 import numpy as np
 from mongoengine import *
 
-from simple_worm.controls import CONTROL_KEYS
-from simple_worm.material_parameters import MaterialParameters
-from simple_worm.material_parameters_torch import MaterialParametersTorch
+# from simple_worm.controls import CONTROL_KEYS
+# from simple_worm.material_parameters import MaterialParameters
+# from simple_worm.material_parameters_torch import MaterialParametersTorch
 from wormlab3d import logger
 from wormlab3d.data.model.frame_sequence import FrameSequence
 from wormlab3d.data.numpy_field import NumpyField, COMPRESS_BLOSC_PACK
@@ -21,15 +21,15 @@ class SwMaterialParameters(EmbeddedDocument):
     C = FloatField(required=True)
     D = FloatField(required=True)
 
-    def get_material_parameters(self) -> MaterialParameters:
-        return MaterialParametersTorch(
-            K=self.K,
-            K_rot=self.K_rot,
-            A=self.A,
-            B=self.B,
-            C=self.C,
-            D=self.D
-        )
+    # def get_material_parameters(self) -> MaterialParameters:
+    #     return MaterialParametersTorch(
+    #         K=self.K,
+    #         K_rot=self.K_rot,
+    #         A=self.A,
+    #         B=self.B,
+    #         C=self.C,
+    #         D=self.D
+    #     )
 
 
 class SwFrameSequence(EmbeddedDocument):
@@ -42,8 +42,8 @@ class SwControlSequence(EmbeddedDocument):
     beta = NumpyField(required=True, dtype=np.float32, compression=COMPRESS_BLOSC_PACK)
     gamma = NumpyField(required=True, dtype=np.float32, compression=COMPRESS_BLOSC_PACK)
 
-    def to_dict(self):
-        return {abg: getattr(self, abg) for abg in CONTROL_KEYS}
+    # def to_dict(self):
+    #     return {abg: getattr(self, abg) for abg in CONTROL_KEYS}
 
 
 class SwRun(Document):

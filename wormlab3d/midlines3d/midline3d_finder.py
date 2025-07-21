@@ -17,7 +17,7 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.tensorboard import SummaryWriter
 
-from simple_worm.plot3d import MidpointNormalize
+# from simple_worm.plot3d import MidpointNormalize
 from wormlab3d import logger, LOGS_PATH, START_TIMESTAMP
 from wormlab3d.data.model import Trial, MFCheckpoint, MFParameters, Reconstruction
 from wormlab3d.data.model.mf_parameters import CURVATURE_INTEGRATION_MIDPOINT, CURVATURE_INTEGRATION_HT, \
@@ -1146,6 +1146,10 @@ class Midline3DFinder:
                 length_warmup=length_fixed,
             )
 
+            pred_pts = points_2d[0]     # shape (batch=1, N, 2)
+            head_pred = pred_pts[:,  0, :]   # (1, 2)
+            tail_pred = pred_pts[:, -1, :]   # (1, 2)
+
             # Generate targets with added residuals
             if not p.use_detection_masks:
                 detection_masks = [torch.ones_like(dmd) for dmd in detection_masks]
@@ -1290,7 +1294,7 @@ class Midline3DFinder:
             intensities_smoothed: List[torch.Tensor],
             points_smoothed: List[torch.Tensor],
             curvatures_smoothed: List[torch.Tensor],
-            stats: Dict[str, float],
+            stats: Dict[str, float], 
     ):
         """
         Update the frame states.
@@ -1674,7 +1678,7 @@ class Midline3DFinder:
                 stats[f'camera_exponents/{i}'] = camera_exponents[:, i].var()
                 stats[f'camera_intensities/{i}'] = camera_intensities[:, i].var()
 
-        # Sum the global losses with the losses generated at each depth
+    
         loss = sum(losses_depths) + loss_global
         stats['loss/total'] = loss.item()
 
@@ -2463,18 +2467,18 @@ class Midline3DFinder:
         fig, axes = plt.subplots(len(self.frame_batch), 3, figsize=(10, 4), squeeze=False)
         fig.suptitle(self._plot_title(self.master_frame_state))
 
-        for i, frame_state in enumerate(self.frame_batch):
-            filters = to_numpy(frame_state.get_state('filters'))
-            for j in range(3):
-                ax = axes[i, j]
-                if i == 0:
-                    ax.set_title(f'Camera {j}')
-                if j == 0:
-                    ax.set_ylabel(f'Frame {frame_state.frame_num}')
-                im = ax.imshow(filters[j], cmap=plt.cm.PRGn, norm=MidpointNormalize(midpoint=0))
-                ax.set_xticks([])
-                ax.set_yticks([])
-                fig.colorbar(im, ax=ax)
+        # for i, frame_state in enumerate(self.frame_batch):
+        #     filters = to_numpy(frame_state.get_state('filters'))
+        #     for j in range(3):
+        #         ax = axes[i, j]
+        #         if i == 0:
+        #             ax.set_title(f'Camera {j}')
+        #         if j == 0:
+        #             ax.set_ylabel(f'Frame {frame_state.frame_num}')
+        #         im = ax.imshow(filters[j], cmap=plt.cm.PRGn, norm=MidpointNormalize(midpoint=0))
+        #         ax.set_xticks([])
+        #         ax.set_yticks([])
+        #         fig.colorbar(im, ax=ax)
 
         fig.tight_layout()
         self._save_plot(fig, 'filters', frame_state)
