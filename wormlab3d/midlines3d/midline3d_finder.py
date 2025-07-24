@@ -732,10 +732,12 @@ class Midline3DFinder:
                 else:
                     skip = p.frame_skip if p.frame_skip is not None else 1
                     for j in range(skip):
+                        
                         if self.last_frame_state is not None:
                             plot_frame_num = self.last_frame_state.frame_num + direction * (j + 1)
                         else:
                             plot_frame_num = frame_num - 1 + direction * (j + 1)
+                        
                         if (plot_frame_num - first_frame + 1) % ra.plot_every_n_frames == 0:
                             if plot_frame_num == mfs.frame_num:
                                 fs = mfs
@@ -800,7 +802,7 @@ class Midline3DFinder:
                 ).detach()
 
                 # Abort if the new batch is too small
-                if len(self.frame_batch) < w2:
+                if len(self.frame_batch) < w2 or len(self.frame_batch) == 0:
                     logger.info(f'New batch size {len(new_batch)} < {w2}. Aborting.')
                     break
 
@@ -1243,6 +1245,8 @@ class Midline3DFinder:
                 curvatures_smoothed=curvatures_smoothed,
                 points_smoothed=points_smoothed,
                 sigmas_smoothed=sigmas_smoothed,
+                # head_pred=head_pred,
+                # tail_pred=tail_pred,
             )
 
             # Get fix-loss
@@ -1413,6 +1417,7 @@ class Midline3DFinder:
         self.master_frame_state.set_state('intensities_smoothed',
                                           [intensities_smoothed[d][self.active_idx] for d in range(D)])
         self.master_frame_state.set_stats(stats)
+        
         if p.curvature_mode:
             self.master_frame_state.set_state('points',
                                               [points_smoothed[d][self.active_idx] for d in range(D)])
@@ -1514,6 +1519,8 @@ class Midline3DFinder:
             curvatures_smoothed: List[torch.Tensor],
             points_smoothed: List[torch.Tensor],
             sigmas_smoothed: List[torch.Tensor],
+            # head_pred: torch.Tensor,
+            # tail_pred: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor, List[torch.Tensor], Dict[str, float]]:
         """
         Calculate the losses.
@@ -1680,6 +1687,26 @@ class Midline3DFinder:
 
     
         loss = sum(losses_depths) + loss_global
+
+        # frame_state = self.master_frame_state
+        # head_gt, tail_gt     = frame_state.get_state('head_gt'), frame_state.get_state('tail_gt')
+        # head_conf, tail_conf = frame_state.get_state('head_conf'), frame_state.get_state('tail_conf')
+
+        # # reprojection error per view
+        # head_pred = head_pred.expand_as(head_gt)
+        # tail_pred = tail_pred.expand_as(tail_gt)
+
+        # err_head = (head_pred - head_gt).pow(2).sum(dim=-1).sqrt()       # [3]
+        # err_tail = (tail_pred - tail_gt).pow(2).sum(dim=-1).sqrt()
+
+        # head_loss = (err_head * head_conf).mean()
+        # tail_loss = (err_tail * tail_conf).mean()
+
+        # stats['loss/head'] = head_loss.item()
+        # stats['loss/tail'] = tail_loss.item()
+
+        # loss = loss + p.loss_headtail * (head_loss + tail_loss)
+
         stats['loss/total'] = loss.item()
 
         return loss, loss_global, losses_depths, stats
