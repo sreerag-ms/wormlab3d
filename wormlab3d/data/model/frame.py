@@ -1,10 +1,11 @@
 import os
 from typing import List, Union
+from pathlib import Path
 
 import numpy as np
 from mongoengine import *
 
-from wormlab3d import logger, CAMERA_IDXS, PREPARED_IMAGES_PATH
+from wormlab3d import logger, CAMERA_IDXS
 from wormlab3d.data.model import Cameras, CameraShifts
 from wormlab3d.data.model.cameras import CAM_SOURCE_ANNEX
 from wormlab3d.data.model.experiment import Experiment
@@ -17,6 +18,8 @@ from wormlab3d.preprocessing.contour import CONT_THRESH_RATIO_DEFAULT, MIN_REQ_T
 from wormlab3d.preprocessing.cropper import crop_image
 from wormlab3d.toolkit.triangulate import triangulate
 
+# TODO: Remove this
+PREPARED_IMAGES_PATH=Path("/Users/sreeragms/Desktop/prepared_images/037")
 
 class Frame(Document):
     experiment = ReferenceField(Experiment, required=True)
@@ -66,9 +69,9 @@ class Frame(Document):
         path = PREPARED_IMAGES_PATH / f'{self.trial.id:03d}' / f'{self.frame_num:06d}.npz'
         try:
             return np.load(path)['images']
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to load images from {path}: {e}")
             return None
-
     def get_midlines2d(
             self,
             manual_only: bool = False,

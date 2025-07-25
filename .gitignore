@@ -29,3 +29,13 @@ __pycache__
 /data/trajectory_cache
 intermediate-data
 **/worm_data
+/venv
+
+data/videos
+data/reconstruction_eigenworms
+data/reconstruction_xyz
+data/tracking
+data/cameras
+data/examples
+data/run_tumble_approximations
+data/037

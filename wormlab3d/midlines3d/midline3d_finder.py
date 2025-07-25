@@ -2,9 +2,11 @@ import os
 import random
 from pathlib import Path
 from typing import Tuple, Union, Dict, List, Optional
+from datetime import datetime
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn.functional as F
 from matplotlib.figure import Figure
@@ -17,7 +19,7 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.tensorboard import SummaryWriter
 
-from simple_worm.plot3d import MidpointNormalize
+# from simple_worm.plot3d import MidpointNormalize
 from wormlab3d import logger, LOGS_PATH, START_TIMESTAMP
 from wormlab3d.data.model import Trial, MFCheckpoint, MFParameters, Reconstruction
 from wormlab3d.data.model.mf_parameters import CURVATURE_INTEGRATION_MIDPOINT, CURVATURE_INTEGRATION_HT, \
@@ -732,10 +734,12 @@ class Midline3DFinder:
                 else:
                     skip = p.frame_skip if p.frame_skip is not None else 1
                     for j in range(skip):
+                        
                         if self.last_frame_state is not None:
                             plot_frame_num = self.last_frame_state.frame_num + direction * (j + 1)
                         else:
                             plot_frame_num = frame_num - 1 + direction * (j + 1)
+                        
                         if (plot_frame_num - first_frame + 1) % ra.plot_every_n_frames == 0:
                             if plot_frame_num == mfs.frame_num:
                                 fs = mfs
@@ -800,7 +804,7 @@ class Midline3DFinder:
                 ).detach()
 
                 # Abort if the new batch is too small
-                if len(self.frame_batch) < w2:
+                if len(self.frame_batch) < w2 or len(self.frame_batch) == 0:
                     logger.info(f'New batch size {len(new_batch)} < {w2}. Aborting.')
                     break
 
@@ -894,7 +898,7 @@ class Midline3DFinder:
             stats_centre = self._centre_shift()
 
             # Calculate losses and optimise
-            loss, loss_global, losses_depths, stats = self._train_step()
+            loss, loss_global, losses_depths, stats = self._train_step(step == (final_step-1))
 
             # At the start of the initialisation stage lock batch to the first frame
             if self.checkpoint.step < self.parameters.n_steps_batch_locked:
@@ -1047,7 +1051,7 @@ class Midline3DFinder:
 
         return stats
 
-    def _train_step(self) -> Tuple[torch.Tensor, Dict[str, Union[torch.Tensor, float, int]]]:
+    def _train_step(self, last_step: bool) -> Tuple[torch.Tensor, Dict[str, Union[torch.Tensor, float, int]]]:
         """
         Train the cam coeffs and multiscale curve for a single step.
         """
@@ -1146,6 +1150,14 @@ class Midline3DFinder:
                 length_warmup=length_fixed,
             )
 
+            pred_pts = points_2d[0]     # shape (batch=1, N, 2)
+            if last_step:
+                # self.master_frame_state.set_state('predicted_points', pred_pts)
+                # Plot head and tail coordinates comparison
+                self._plot_head_tail_comparison(pred_pts)
+            head_pred = pred_pts[:,  0, :]   # (1, 2)
+            tail_pred = pred_pts[:, -1, :]   # (1, 2)
+
             # Generate targets with added residuals
             if not p.use_detection_masks:
                 detection_masks = [torch.ones_like(dmd) for dmd in detection_masks]
@@ -1239,6 +1251,8 @@ class Midline3DFinder:
                 curvatures_smoothed=curvatures_smoothed,
                 points_smoothed=points_smoothed,
                 sigmas_smoothed=sigmas_smoothed,
+                # head_pred=head_pred,
+                # tail_pred=tail_pred,
             )
 
             # Get fix-loss
@@ -1290,7 +1304,7 @@ class Midline3DFinder:
             intensities_smoothed: List[torch.Tensor],
             points_smoothed: List[torch.Tensor],
             curvatures_smoothed: List[torch.Tensor],
-            stats: Dict[str, float],
+            stats: Dict[str, float], 
     ):
         """
         Update the frame states.
@@ -1409,6 +1423,7 @@ class Midline3DFinder:
         self.master_frame_state.set_state('intensities_smoothed',
                                           [intensities_smoothed[d][self.active_idx] for d in range(D)])
         self.master_frame_state.set_stats(stats)
+        
         if p.curvature_mode:
             self.master_frame_state.set_state('points',
                                               [points_smoothed[d][self.active_idx] for d in range(D)])
@@ -1510,6 +1525,8 @@ class Midline3DFinder:
             curvatures_smoothed: List[torch.Tensor],
             points_smoothed: List[torch.Tensor],
             sigmas_smoothed: List[torch.Tensor],
+            # head_pred: torch.Tensor,
+            # tail_pred: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor, List[torch.Tensor], Dict[str, float]]:
         """
         Calculate the losses.
@@ -1674,8 +1691,28 @@ class Midline3DFinder:
                 stats[f'camera_exponents/{i}'] = camera_exponents[:, i].var()
                 stats[f'camera_intensities/{i}'] = camera_intensities[:, i].var()
 
-        # Sum the global losses with the losses generated at each depth
+    
         loss = sum(losses_depths) + loss_global
+
+        # frame_state = self.master_frame_state
+        # head_gt, tail_gt     = frame_state.get_state('head_gt'), frame_state.get_state('tail_gt')
+        # head_conf, tail_conf = frame_state.get_state('head_conf'), frame_state.get_state('tail_conf')
+
+        # # reprojection error per view
+        # head_pred = head_pred.expand_as(head_gt)
+        # tail_pred = tail_pred.expand_as(tail_gt)
+
+        # err_head = (head_pred - head_gt).pow(2).sum(dim=-1).sqrt()       # [3]
+        # err_tail = (tail_pred - tail_gt).pow(2).sum(dim=-1).sqrt()
+
+        # head_loss = (err_head * head_conf).mean()
+        # tail_loss = (err_tail * tail_conf).mean()
+
+        # stats['loss/head'] = head_loss.item()
+        # stats['loss/tail'] = tail_loss.item()
+
+        # loss = loss + p.loss_headtail * (head_loss + tail_loss)
+
         stats['loss/total'] = loss.item()
 
         return loss, loss_global, losses_depths, stats
@@ -2463,18 +2500,18 @@ class Midline3DFinder:
         fig, axes = plt.subplots(len(self.frame_batch), 3, figsize=(10, 4), squeeze=False)
         fig.suptitle(self._plot_title(self.master_frame_state))
 
-        for i, frame_state in enumerate(self.frame_batch):
-            filters = to_numpy(frame_state.get_state('filters'))
-            for j in range(3):
-                ax = axes[i, j]
-                if i == 0:
-                    ax.set_title(f'Camera {j}')
-                if j == 0:
-                    ax.set_ylabel(f'Frame {frame_state.frame_num}')
-                im = ax.imshow(filters[j], cmap=plt.cm.PRGn, norm=MidpointNormalize(midpoint=0))
-                ax.set_xticks([])
-                ax.set_yticks([])
-                fig.colorbar(im, ax=ax)
+        # for i, frame_state in enumerate(self.frame_batch):
+        #     filters = to_numpy(frame_state.get_state('filters'))
+        #     for j in range(3):
+        #         ax = axes[i, j]
+        #         if i == 0:
+        #             ax.set_title(f'Camera {j}')
+        #         if j == 0:
+        #             ax.set_ylabel(f'Frame {frame_state.frame_num}')
+        #         im = ax.imshow(filters[j], cmap=plt.cm.PRGn, norm=MidpointNormalize(midpoint=0))
+        #         ax.set_xticks([])
+        #         ax.set_yticks([])
+        #         fig.colorbar(im, ax=ax)
 
         fig.tight_layout()
         self._save_plot(fig, 'filters', frame_state)
@@ -2508,6 +2545,251 @@ class Midline3DFinder:
 
         else:
             self.tb_logger.add_figure(plot_type, fig, self.step)
-            self.tb_logger.flush()
 
-        plt.close(fig)
+    def _plot_head_tail_comparison(self, pred_pts):
+        """
+        Plot the image with actual and predicted head and tail coordinates from the dataset.
+        
+        Args:
+            pred_pts: Predicted points tensor of shape (batch, N, 2)
+        """
+
+        try:
+            # Get the current frame state and images
+            frame_state = self.frame_batch[0] if self.frame_batch else self.master_frame_state
+            images = to_numpy(frame_state.get_state('images'))
+            
+            # Create comparisons directory
+            comparisons_dir = self.logs_path / 'comparisons'
+            os.makedirs(comparisons_dir, exist_ok=True)
+            
+            # Create the plot
+            fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+            
+            # Display the concatenated images
+            image_triplet = np.concatenate(images, axis=1)
+            ax.imshow(image_triplet, cmap='gray', vmin=0, vmax=1)
+            
+            # Extract predicted head and tail coordinates
+            pred_pts_np = to_numpy(pred_pts)
+            head_pred = pred_pts_np[0, 0, :]
+            tail_pred = pred_pts_np[0, -1, :]
+            
+            current_frame_id = frame_state.frame_num
+            
+            # Plot predicted coordinates for all 3 camera views
+            camera_offsets = [0, image_triplet.shape[1]//3, 2*image_triplet.shape[1]//3]
+            for cam_idx in range(3):
+                offset_x = camera_offsets[cam_idx]
+                ax.plot(head_pred[cam_idx, 0] + offset_x, head_pred[cam_idx, 1], 'ro', markersize=2, 
+                       label=f'Predicted Head Cam{cam_idx}' if cam_idx == 0 else "")
+                ax.plot(tail_pred[cam_idx, 0] + offset_x, tail_pred[cam_idx, 1], 'bo', markersize=2,
+                       label=f'Predicted Tail Cam{cam_idx}' if cam_idx == 0 else "")
+            
+            # Load dataset coordinates if file exists
+            if os.path.exists(self.source_args.head_and_tail_coordinates):
+                try:
+                    coords_df = pd.read_csv(self.source_args.head_and_tail_coordinates)
+                    
+                    # Find matching coordinates in dataset
+                    matching_coords = coords_df[coords_df['frame_position'] == current_frame_id]
+                    
+                    if not matching_coords.empty:
+                        # Plot dataset coordinates and calculate distances for each camera view
+                        total_head_distance = 0.0
+                        total_tail_distance = 0.0
+                        
+                        for _, row in matching_coords.iterrows():
+                            cam_idx = int(row['frame_id'])  
+                            dataset_head_x, dataset_head_y = row['x_head'] * 2, row['y_head'] * 2
+                            dataset_tail_x, dataset_tail_y = row['x_tail'] * 2, row['y_tail'] * 2
+                            
+                            # Apply camera offset for display
+                            offset_x = camera_offsets[cam_idx]
+                            
+                            # Plot dataset coordinates
+                            ax.plot(dataset_head_x + offset_x, dataset_head_y, 'r^', markersize=2, 
+                                   label=f'Dataset Head Cam{cam_idx}' if cam_idx == 0 else "")
+                            ax.plot(dataset_tail_x + offset_x, dataset_tail_y, 'b^', markersize=2,
+                                   label=f'Dataset Tail Cam{cam_idx}' if cam_idx == 0 else "")
+                            
+                            # Calculate distances for this camera view
+                            head_distance = np.sqrt((head_pred[cam_idx, 0] - dataset_head_x)**2 + 
+                                                  (head_pred[cam_idx, 1] - dataset_head_y)**2)
+                            tail_distance = np.sqrt((tail_pred[cam_idx, 0] - dataset_tail_x)**2 + 
+                                                  (tail_pred[cam_idx, 1] - dataset_tail_y)**2)
+                            
+                            total_head_distance += head_distance
+                            total_tail_distance += tail_distance
+                            
+                            logger.info(f"Camera {cam_idx} - Head distance: {head_distance:.2f}px, Tail distance: {tail_distance:.2f}px")
+                        
+                        # Calculate average distances
+                        avg_head_distance = total_head_distance / len(matching_coords)
+                        avg_tail_distance = total_tail_distance / len(matching_coords)
+                        
+                        ax.text(0.02, 0.98, f'Avg Head distance: {avg_head_distance:.2f}px\nAvg Tail distance: {avg_tail_distance:.2f}px', 
+                               transform=ax.transAxes, fontsize=10, verticalalignment='top',
+                               bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+                        
+                        logger.info(f"Found dataset coordinates for frame {current_frame_id}")
+                        logger.info(f"Average Head distance: {avg_head_distance:.2f}px, Average Tail distance: {avg_tail_distance:.2f}px")
+                        
+                        # Save coordinate data to CSV
+                        csv_file = comparisons_dir / 'data.csv'
+                        csv_data = []
+                        
+                        for _, row in matching_coords.iterrows():
+                            cam_idx = int(row['frame_id'])
+                            dataset_head_x, dataset_head_y = row['x_head'] * 2, row['y_head'] * 2
+                            dataset_tail_x, dataset_tail_y = row['x_tail'] * 2, row['y_tail'] * 2
+                            
+                            csv_row = {
+                                'frame_position': current_frame_id,
+                                'frame_id': cam_idx,
+                                'pred_x_head': float(head_pred[cam_idx, 0]),
+                                'pred_y_head': float(head_pred[cam_idx, 1]),
+                                'pred_x_tail': float(tail_pred[cam_idx, 0]),
+                                'pred_y_tail': float(tail_pred[cam_idx, 1]),
+                                'real_x_head': float(dataset_head_x),
+                                'real_y_head': float(dataset_head_y),
+                                'real_x_tail': float(dataset_tail_x),
+                                'real_y_tail': float(dataset_tail_y),
+                                'head_distance': float(np.sqrt((head_pred[cam_idx, 0] - dataset_head_x)**2 + 
+                                                              (head_pred[cam_idx, 1] - dataset_head_y)**2)),
+                                'tail_distance': float(np.sqrt((tail_pred[cam_idx, 0] - dataset_tail_x)**2 + 
+                                                              (tail_pred[cam_idx, 1] - dataset_tail_y)**2))
+                            }
+                            csv_data.append(csv_row)
+                        
+                        df_new = pd.DataFrame(csv_data)
+                        
+                        # Check if CSV exists and append, otherwise create new
+                        if csv_file.exists():
+                            df_existing = pd.read_csv(csv_file)
+                            df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+                        else:
+                            df_combined = df_new
+                        
+                        df_combined.to_csv(csv_file, index=False)
+                        logger.info(f"Coordinate data saved to: {csv_file}")
+                        
+                    else:
+                        logger.warning(f"No dataset coordinates found for frame {current_frame_id}")
+                        
+                        # still save predicted coordinates even if no dataset match
+                        csv_file = comparisons_dir / 'data.csv'
+                        csv_data = []
+                        
+                        for cam_idx in range(3):
+                            csv_row = {
+                                'frame_position': current_frame_id,
+                                'frame_id': cam_idx,
+                                'pred_x_head': float(head_pred[cam_idx, 0]),
+                                'pred_y_head': float(head_pred[cam_idx, 1]),
+                                'pred_x_tail': float(tail_pred[cam_idx, 0]),
+                                'pred_y_tail': float(tail_pred[cam_idx, 1]),
+                                'real_x_head': None,
+                                'real_y_head': None,
+                                'real_x_tail': None,
+                                'real_y_tail': None,
+                                'head_distance': None,
+                                'tail_distance': None
+                            }
+                            csv_data.append(csv_row)
+                        
+                        df_new = pd.DataFrame(csv_data)
+                        
+                        if csv_file.exists():
+                            df_existing = pd.read_csv(csv_file)
+                            df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+                        else:
+                            df_combined = df_new
+                        
+                        df_combined.to_csv(csv_file, index=False)
+                        logger.info(f"Predicted coordinate data saved to: {csv_file}")
+                        
+                except Exception as e:
+                    logger.error(f"Error loading coordinates from dataset: {e}")
+                    
+                    csv_file = comparisons_dir / 'data.csv'
+                    csv_data = []
+                    
+                    for cam_idx in range(3):
+                        csv_row = {
+                            'frame_position': current_frame_id,
+                            'frame_id': cam_idx,
+                            'pred_x_head': float(head_pred[cam_idx, 0]),
+                            'pred_y_head': float(head_pred[cam_idx, 1]),
+                            'pred_x_tail': float(tail_pred[cam_idx, 0]),
+                            'pred_y_tail': float(tail_pred[cam_idx, 1]),
+                            'real_x_head': None,
+                            'real_y_head': None,
+                            'real_x_tail': None,
+                            'real_y_tail': None,
+                            'head_distance': None,
+                            'tail_distance': None
+                        }
+                        csv_data.append(csv_row)
+                    
+                    df_new = pd.DataFrame(csv_data)
+                    
+                    if csv_file.exists():
+                        df_existing = pd.read_csv(csv_file)
+                        df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+                    else:
+                        df_combined = df_new
+                    
+                    df_combined.to_csv(csv_file, index=False)
+                    logger.info(f"Predicted coordinate data saved to: {csv_file}")
+            else:
+                logger.warning(f"Head and tail coordinates file not found: {self.source_args.head_and_tail_coordinates}")
+                
+                csv_file = comparisons_dir / 'data.csv'
+                csv_data = []
+                
+                for cam_idx in range(3):
+                    csv_row = {
+                        'frame_position': current_frame_id,
+                        'frame_id': cam_idx,
+                        'pred_x_head': float(head_pred[cam_idx, 0]),
+                        'pred_y_head': float(head_pred[cam_idx, 1]),
+                        'pred_x_tail': float(tail_pred[cam_idx, 0]),
+                        'pred_y_tail': float(tail_pred[cam_idx, 1]),
+                        'real_x_head': None,
+                        'real_y_head': None,
+                        'real_x_tail': None,
+                        'real_y_tail': None,
+                        'head_distance': None,
+                        'tail_distance': None
+                    }
+                    csv_data.append(csv_row)
+                
+                df_new = pd.DataFrame(csv_data)
+                
+                if csv_file.exists():
+                    df_existing = pd.read_csv(csv_file)
+                    df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+                else:
+                    df_combined = df_new
+                
+                df_combined.to_csv(csv_file, index=False)
+                logger.info(f"Predicted coordinate data saved to: {csv_file}")
+            
+            ax.set_title(f'Head and Tail Coordinates - Trial {self.source_args.trial_id}, Frame {frame_state.frame_num}')
+            ax.legend()
+            ax.axis('off')
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            plot_filename = comparisons_dir / f'head_tail_coords_{timestamp}_trial_{self.source_args.trial_id}_frame_{frame_state.frame_num}.png'
+            plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            logger.info(f"Head and tail coordinates plot saved to: {plot_filename}")
+            
+        except Exception as e:
+            logger.error(f"Error creating head and tail coordinates plot: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+        plt.close('all') 
