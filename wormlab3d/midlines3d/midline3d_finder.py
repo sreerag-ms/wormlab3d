@@ -2,9 +2,11 @@ import os
 import random
 from pathlib import Path
 from typing import Tuple, Union, Dict, List, Optional
+from datetime import datetime
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn.functional as F
 from matplotlib.figure import Figure
@@ -896,7 +898,7 @@ class Midline3DFinder:
             stats_centre = self._centre_shift()
 
             # Calculate losses and optimise
-            loss, loss_global, losses_depths, stats = self._train_step(step == final_step)
+            loss, loss_global, losses_depths, stats = self._train_step(step == (final_step-1))
 
             # At the start of the initialisation stage lock batch to the first frame
             if self.checkpoint.step < self.parameters.n_steps_batch_locked:
@@ -1049,7 +1051,7 @@ class Midline3DFinder:
 
         return stats
 
-    def _train_step(self, final_step: bool) -> Tuple[torch.Tensor, Dict[str, Union[torch.Tensor, float, int]]]:
+    def _train_step(self, last_step: bool) -> Tuple[torch.Tensor, Dict[str, Union[torch.Tensor, float, int]]]:
         """
         Train the cam coeffs and multiscale curve for a single step.
         """
@@ -1149,8 +1151,10 @@ class Midline3DFinder:
             )
 
             pred_pts = points_2d[0]     # shape (batch=1, N, 2)
-            if final_step:
-                self.master_frame_state.set_state('predicted_points', pred_pts)
+            if last_step:
+                # self.master_frame_state.set_state('predicted_points', pred_pts)
+                # Plot head and tail coordinates comparison
+                self._plot_head_tail_comparison(pred_pts)
             head_pred = pred_pts[:,  0, :]   # (1, 2)
             tail_pred = pred_pts[:, -1, :]   # (1, 2)
 
@@ -2541,6 +2545,251 @@ class Midline3DFinder:
 
         else:
             self.tb_logger.add_figure(plot_type, fig, self.step)
-            self.tb_logger.flush()
 
-        plt.close(fig)
+    def _plot_head_tail_comparison(self, pred_pts):
+        """
+        Plot the image with actual and predicted head and tail coordinates from the dataset.
+        
+        Args:
+            pred_pts: Predicted points tensor of shape (batch, N, 2)
+        """
+
+        try:
+            # Get the current frame state and images
+            frame_state = self.frame_batch[0] if self.frame_batch else self.master_frame_state
+            images = to_numpy(frame_state.get_state('images'))
+            
+            # Create comparisons directory
+            comparisons_dir = self.logs_path / 'comparisons'
+            os.makedirs(comparisons_dir, exist_ok=True)
+            
+            # Create the plot
+            fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+            
+            # Display the concatenated images
+            image_triplet = np.concatenate(images, axis=1)
+            ax.imshow(image_triplet, cmap='gray', vmin=0, vmax=1)
+            
+            # Extract predicted head and tail coordinates
+            pred_pts_np = to_numpy(pred_pts)
+            head_pred = pred_pts_np[0, 0, :]
+            tail_pred = pred_pts_np[0, -1, :]
+            
+            current_frame_id = frame_state.frame_num
+            
+            # Plot predicted coordinates for all 3 camera views
+            camera_offsets = [0, image_triplet.shape[1]//3, 2*image_triplet.shape[1]//3]
+            for cam_idx in range(3):
+                offset_x = camera_offsets[cam_idx]
+                ax.plot(head_pred[cam_idx, 0] + offset_x, head_pred[cam_idx, 1], 'ro', markersize=2, 
+                       label=f'Predicted Head Cam{cam_idx}' if cam_idx == 0 else "")
+                ax.plot(tail_pred[cam_idx, 0] + offset_x, tail_pred[cam_idx, 1], 'bo', markersize=2,
+                       label=f'Predicted Tail Cam{cam_idx}' if cam_idx == 0 else "")
+            
+            # Load dataset coordinates if file exists
+            if os.path.exists(self.source_args.head_and_tail_coordinates):
+                try:
+                    coords_df = pd.read_csv(self.source_args.head_and_tail_coordinates)
+                    
+                    # Find matching coordinates in dataset
+                    matching_coords = coords_df[coords_df['frame_position'] == current_frame_id]
+                    
+                    if not matching_coords.empty:
+                        # Plot dataset coordinates and calculate distances for each camera view
+                        total_head_distance = 0.0
+                        total_tail_distance = 0.0
+                        
+                        for _, row in matching_coords.iterrows():
+                            cam_idx = int(row['frame_id'])  
+                            dataset_head_x, dataset_head_y = row['x_head'] * 2, row['y_head'] * 2
+                            dataset_tail_x, dataset_tail_y = row['x_tail'] * 2, row['y_tail'] * 2
+                            
+                            # Apply camera offset for display
+                            offset_x = camera_offsets[cam_idx]
+                            
+                            # Plot dataset coordinates
+                            ax.plot(dataset_head_x + offset_x, dataset_head_y, 'r^', markersize=2, 
+                                   label=f'Dataset Head Cam{cam_idx}' if cam_idx == 0 else "")
+                            ax.plot(dataset_tail_x + offset_x, dataset_tail_y, 'b^', markersize=2,
+                                   label=f'Dataset Tail Cam{cam_idx}' if cam_idx == 0 else "")
+                            
+                            # Calculate distances for this camera view
+                            head_distance = np.sqrt((head_pred[cam_idx, 0] - dataset_head_x)**2 + 
+                                                  (head_pred[cam_idx, 1] - dataset_head_y)**2)
+                            tail_distance = np.sqrt((tail_pred[cam_idx, 0] - dataset_tail_x)**2 + 
+                                                  (tail_pred[cam_idx, 1] - dataset_tail_y)**2)
+                            
+                            total_head_distance += head_distance
+                            total_tail_distance += tail_distance
+                            
+                            logger.info(f"Camera {cam_idx} - Head distance: {head_distance:.2f}px, Tail distance: {tail_distance:.2f}px")
+                        
+                        # Calculate average distances
+                        avg_head_distance = total_head_distance / len(matching_coords)
+                        avg_tail_distance = total_tail_distance / len(matching_coords)
+                        
+                        ax.text(0.02, 0.98, f'Avg Head distance: {avg_head_distance:.2f}px\nAvg Tail distance: {avg_tail_distance:.2f}px', 
+                               transform=ax.transAxes, fontsize=10, verticalalignment='top',
+                               bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+                        
+                        logger.info(f"Found dataset coordinates for frame {current_frame_id}")
+                        logger.info(f"Average Head distance: {avg_head_distance:.2f}px, Average Tail distance: {avg_tail_distance:.2f}px")
+                        
+                        # Save coordinate data to CSV
+                        csv_file = comparisons_dir / 'data.csv'
+                        csv_data = []
+                        
+                        for _, row in matching_coords.iterrows():
+                            cam_idx = int(row['frame_id'])
+                            dataset_head_x, dataset_head_y = row['x_head'] * 2, row['y_head'] * 2
+                            dataset_tail_x, dataset_tail_y = row['x_tail'] * 2, row['y_tail'] * 2
+                            
+                            csv_row = {
+                                'frame_position': current_frame_id,
+                                'frame_id': cam_idx,
+                                'pred_x_head': float(head_pred[cam_idx, 0]),
+                                'pred_y_head': float(head_pred[cam_idx, 1]),
+                                'pred_x_tail': float(tail_pred[cam_idx, 0]),
+                                'pred_y_tail': float(tail_pred[cam_idx, 1]),
+                                'real_x_head': float(dataset_head_x),
+                                'real_y_head': float(dataset_head_y),
+                                'real_x_tail': float(dataset_tail_x),
+                                'real_y_tail': float(dataset_tail_y),
+                                'head_distance': float(np.sqrt((head_pred[cam_idx, 0] - dataset_head_x)**2 + 
+                                                              (head_pred[cam_idx, 1] - dataset_head_y)**2)),
+                                'tail_distance': float(np.sqrt((tail_pred[cam_idx, 0] - dataset_tail_x)**2 + 
+                                                              (tail_pred[cam_idx, 1] - dataset_tail_y)**2))
+                            }
+                            csv_data.append(csv_row)
+                        
+                        df_new = pd.DataFrame(csv_data)
+                        
+                        # Check if CSV exists and append, otherwise create new
+                        if csv_file.exists():
+                            df_existing = pd.read_csv(csv_file)
+                            df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+                        else:
+                            df_combined = df_new
+                        
+                        df_combined.to_csv(csv_file, index=False)
+                        logger.info(f"Coordinate data saved to: {csv_file}")
+                        
+                    else:
+                        logger.warning(f"No dataset coordinates found for frame {current_frame_id}")
+                        
+                        # still save predicted coordinates even if no dataset match
+                        csv_file = comparisons_dir / 'data.csv'
+                        csv_data = []
+                        
+                        for cam_idx in range(3):
+                            csv_row = {
+                                'frame_position': current_frame_id,
+                                'frame_id': cam_idx,
+                                'pred_x_head': float(head_pred[cam_idx, 0]),
+                                'pred_y_head': float(head_pred[cam_idx, 1]),
+                                'pred_x_tail': float(tail_pred[cam_idx, 0]),
+                                'pred_y_tail': float(tail_pred[cam_idx, 1]),
+                                'real_x_head': None,
+                                'real_y_head': None,
+                                'real_x_tail': None,
+                                'real_y_tail': None,
+                                'head_distance': None,
+                                'tail_distance': None
+                            }
+                            csv_data.append(csv_row)
+                        
+                        df_new = pd.DataFrame(csv_data)
+                        
+                        if csv_file.exists():
+                            df_existing = pd.read_csv(csv_file)
+                            df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+                        else:
+                            df_combined = df_new
+                        
+                        df_combined.to_csv(csv_file, index=False)
+                        logger.info(f"Predicted coordinate data saved to: {csv_file}")
+                        
+                except Exception as e:
+                    logger.error(f"Error loading coordinates from dataset: {e}")
+                    
+                    csv_file = comparisons_dir / 'data.csv'
+                    csv_data = []
+                    
+                    for cam_idx in range(3):
+                        csv_row = {
+                            'frame_position': current_frame_id,
+                            'frame_id': cam_idx,
+                            'pred_x_head': float(head_pred[cam_idx, 0]),
+                            'pred_y_head': float(head_pred[cam_idx, 1]),
+                            'pred_x_tail': float(tail_pred[cam_idx, 0]),
+                            'pred_y_tail': float(tail_pred[cam_idx, 1]),
+                            'real_x_head': None,
+                            'real_y_head': None,
+                            'real_x_tail': None,
+                            'real_y_tail': None,
+                            'head_distance': None,
+                            'tail_distance': None
+                        }
+                        csv_data.append(csv_row)
+                    
+                    df_new = pd.DataFrame(csv_data)
+                    
+                    if csv_file.exists():
+                        df_existing = pd.read_csv(csv_file)
+                        df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+                    else:
+                        df_combined = df_new
+                    
+                    df_combined.to_csv(csv_file, index=False)
+                    logger.info(f"Predicted coordinate data saved to: {csv_file}")
+            else:
+                logger.warning(f"Head and tail coordinates file not found: {self.source_args.head_and_tail_coordinates}")
+                
+                csv_file = comparisons_dir / 'data.csv'
+                csv_data = []
+                
+                for cam_idx in range(3):
+                    csv_row = {
+                        'frame_position': current_frame_id,
+                        'frame_id': cam_idx,
+                        'pred_x_head': float(head_pred[cam_idx, 0]),
+                        'pred_y_head': float(head_pred[cam_idx, 1]),
+                        'pred_x_tail': float(tail_pred[cam_idx, 0]),
+                        'pred_y_tail': float(tail_pred[cam_idx, 1]),
+                        'real_x_head': None,
+                        'real_y_head': None,
+                        'real_x_tail': None,
+                        'real_y_tail': None,
+                        'head_distance': None,
+                        'tail_distance': None
+                    }
+                    csv_data.append(csv_row)
+                
+                df_new = pd.DataFrame(csv_data)
+                
+                if csv_file.exists():
+                    df_existing = pd.read_csv(csv_file)
+                    df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+                else:
+                    df_combined = df_new
+                
+                df_combined.to_csv(csv_file, index=False)
+                logger.info(f"Predicted coordinate data saved to: {csv_file}")
+            
+            ax.set_title(f'Head and Tail Coordinates - Trial {self.source_args.trial_id}, Frame {frame_state.frame_num}')
+            ax.legend()
+            ax.axis('off')
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            plot_filename = comparisons_dir / f'head_tail_coords_{timestamp}_trial_{self.source_args.trial_id}_frame_{frame_state.frame_num}.png'
+            plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            logger.info(f"Head and tail coordinates plot saved to: {plot_filename}")
+            
+        except Exception as e:
+            logger.error(f"Error creating head and tail coordinates plot: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+        plt.close('all') 
