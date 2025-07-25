@@ -19,13 +19,12 @@ class SourceArgs(BaseArgs):
         else:
             self.direction = -1
 
+
     @classmethod
     def add_args(cls, parser: ArgumentParser):
-        """
-        Add arguments to a command parser.
-        """
         group = parser.add_argument_group('Source Args')
-        group.add_argument('--trial-id', type=int,
-                           help='Database id for a Trial instance to use as the source.')
-        parser.add_argument('--start-frame', type=int, default=0, help='Frame number to start from.')
-        parser.add_argument('--end-frame', type=int, default=-1, help='Frame number to end at.')
+        group.add_argument('--trial-id',   type=int,   help='Database id for a Trial instance to use as the source.')
+        group.add_argument('--start-frame', type=int, default=0, help='Frame number to start from.')
+        group.add_argument('--end-frame',   type=int, default=-1, help='Frame number to end at.')
+        
+

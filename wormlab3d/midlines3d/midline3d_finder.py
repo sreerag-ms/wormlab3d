@@ -896,7 +896,7 @@ class Midline3DFinder:
             stats_centre = self._centre_shift()
 
             # Calculate losses and optimise
-            loss, loss_global, losses_depths, stats = self._train_step()
+            loss, loss_global, losses_depths, stats = self._train_step(step == final_step)
 
             # At the start of the initialisation stage lock batch to the first frame
             if self.checkpoint.step < self.parameters.n_steps_batch_locked:
@@ -1049,7 +1049,7 @@ class Midline3DFinder:
 
         return stats
 
-    def _train_step(self) -> Tuple[torch.Tensor, Dict[str, Union[torch.Tensor, float, int]]]:
+    def _train_step(self, final_step: bool) -> Tuple[torch.Tensor, Dict[str, Union[torch.Tensor, float, int]]]:
         """
         Train the cam coeffs and multiscale curve for a single step.
         """
@@ -1149,6 +1149,8 @@ class Midline3DFinder:
             )
 
             pred_pts = points_2d[0]     # shape (batch=1, N, 2)
+            if final_step:
+                self.master_frame_state.set_state('predicted_points', pred_pts)
             head_pred = pred_pts[:,  0, :]   # (1, 2)
             tail_pred = pred_pts[:, -1, :]   # (1, 2)
 
