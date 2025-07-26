@@ -898,7 +898,7 @@ class Midline3DFinder:
             stats_centre = self._centre_shift()
 
             # Calculate losses and optimise
-            loss, loss_global, losses_depths, stats = self._train_step(step == (final_step-1))
+            loss, loss_global, losses_depths, stats, points_2d = self._train_step(step == (final_step-1))
 
             # At the start of the initialisation stage lock batch to the first frame
             if self.checkpoint.step < self.parameters.n_steps_batch_locked:
@@ -952,6 +952,9 @@ class Midline3DFinder:
                     and self.convergence_detector.converged.all() \
                     and loss.item() < p.convergence_loss_target \
                     and (p.length_regrow_steps is None or self.checkpoint.step_frame > p.length_regrow_steps):
+
+                pred_pts = points_2d[0]
+                self._plot_head_tail_comparison(pred_pts)
                 break
 
         # Save the f0 state
@@ -1051,7 +1054,7 @@ class Midline3DFinder:
 
         return stats
 
-    def _train_step(self, last_step: bool) -> Tuple[torch.Tensor, Dict[str, Union[torch.Tensor, float, int]]]:
+    def _train_step(self, last_step: bool) -> Tuple[torch.Tensor, torch.Tensor, List[torch.Tensor], Dict[str, Union[torch.Tensor, float, int]], List[torch.Tensor]]:
         """
         Train the cam coeffs and multiscale curve for a single step.
         """
@@ -1291,7 +1294,7 @@ class Midline3DFinder:
         # Clamp parameters
         self._clamp_parameters(points_smoothed)
 
-        return loss, loss_global, losses_depths, stats
+        return loss, loss_global, losses_depths, stats, points_2d
 
     def _update_frame_states(
             self,
@@ -2777,7 +2780,7 @@ class Midline3DFinder:
                 logger.info(f"Predicted coordinate data saved to: {csv_file}")
             
             ax.set_title(f'Head and Tail Coordinates - Trial {self.source_args.trial_id}, Frame {frame_state.frame_num}')
-            ax.legend()
+            ax.legend(loc='lower center', bbox_to_anchor=(0.5, -0.05), ncol=2, fontsize=8)
             ax.axis('off')
             
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
