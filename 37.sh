@@ -1,6 +1,9 @@
 #!/bin/bash
 
+export PYTHONPATH=/Users/sreeragms/Documents/uol/msc-project-repos/wormlab3d:$PYTHONPATH
+
 python scripts/midlines3d/mf_trial.py \
+      --load=False \
       --no-resume \
       --resume-from=latest \
       --fix-mode=False \
@@ -51,9 +54,9 @@ python scripts/midlines3d/mf_trial.py \
       --centre-shift-threshold=0.02 \
       --centre-shift-adj=1 \
       --frame-skip=1 \
-      --n-steps-init=2000 \
+      --n-steps-init=40 \
       --n-steps-batch-locked=20 \
-      --n-steps-max=400 \
+      --n-steps-max=20 \
       --convergence-tau-fast=10 \
       --convergence-tau-slow=100 \
       --convergence-threshold=0.1 \
@@ -91,4 +94,8 @@ python scripts/midlines3d/mf_trial.py \
       --lr-decay=0.9 \
       --lr-patience=10 \
       --lr-min=1e-6 \
-      --cpu-only
+      --cpu-only \
+      --head-and-tail-coordinates=data/head_and_tail_coords_dataset_2.csv \
+      --read-head-and-tail-coordinates \
+      --loss-head-and-tail=0.1
+
