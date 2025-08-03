@@ -92,6 +92,6 @@ class SourceArgs(BaseArgs):
         group.add_argument('--start-frame', type=int, default=0, help='Frame number to start from.')
         group.add_argument('--end-frame',   type=int, default=-1, help='Frame number to end at.')
         group.add_argument('--head-and-tail-coordinates', type=str, default='data/head_and_tail_coords_dataset_2.csv', help='Path to head and tail coordinates dataset CSV file.')
-        group.add_argument('--read-head-and-tail-coordinates', action='store_true', default=True, help='Whether to read and load head and tail coordinates from CSV file.')
+        group.add_argument('--read-head-and-tail-coordinates', action='store_true', default=False, help='Whether to read and load head and tail coordinates from CSV file.')
         group.add_argument('--no-read-head-and-tail-coordinates', dest='read_head_and_tail_coordinates', action='store_false', help='Disable reading head and tail coordinates from CSV file.')
 
