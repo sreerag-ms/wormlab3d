@@ -962,9 +962,11 @@ class Midline3DFinder:
                     and self.convergence_detector.converged.all() \
                     and loss.item() < p.convergence_loss_target \
                     and (p.length_regrow_steps is None or self.checkpoint.step_frame > p.length_regrow_steps):
-                # Generate head-tail comparison plot before breaking due to early convergence
-                pred_pts = points_2d[0]  # shape (batch=1, N, 2)
-                self._plot_head_tail_comparison(pred_pts)
+                
+                if self.source_args.read_head_and_tail_coordinates:
+                    pred_pts = points_2d[0]  # shape (batch=1, N, 2)
+                    self._plot_head_tail_points_comparison(pred_pts)
+
                 break
 
         # Save the f0 state
@@ -1168,7 +1170,8 @@ class Midline3DFinder:
             if last_step:
                 # self.master_frame_state.set_state('predicted_points', pred_pts)
                 # Plot head and tail coordinates comparison
-                self._plot_head_tail_comparison(pred_pts)
+                if self.source_args.read_head_and_tail_coordinates:
+                    self._plot_head_tail_points_comparison(pred_pts)
 
             # Generate targets with added residuals
             if not p.use_detection_masks:
@@ -1597,9 +1600,14 @@ class Midline3DFinder:
 
         # Calculate head and tail loss if enabled
         head_tail_loss = torch.tensor(0.0, device=self.device)
-        if p.loss_head_and_tail > 0:
+
+        ht_w = self._head_tail_weight()
+
+        if ht_w > 0:
             head_tail_loss = self._calculate_head_and_tail_losses(points_2d)
-            stats['loss/head_and_tail'] = head_tail_loss.item()
+            stats['loss/head_and_tail'] = (ht_w * head_tail_loss).item()
+        else:
+            stats['loss/head_and_tail'] = 0.0
 
         if p.curvature_mode:
             losses = {**losses, **{
@@ -1716,8 +1724,7 @@ class Midline3DFinder:
     
         loss = sum(losses_depths) + loss_global
         # Add head and tail loss to global loss
-        if p.loss_head_and_tail > 0:
-            loss += (p.loss_head_and_tail * head_tail_loss)
+        loss += ht_w * head_tail_loss
 
         stats['loss/total'] = loss.item()
 
@@ -1733,8 +1740,9 @@ class Midline3DFinder:
         Returns:
             torch.Tensor: Combined head and tail loss
         """
-        # Check if CSV data was successfully loaded in SourceArgs
-        if not hasattr(self.source_args, 'head_and_tail_coordinates') or self.source_args.head_and_tail_coordinates is None:
+        # Check if head and tail coordinates should be used and were successfully loaded
+        if ( not hasattr(self.source_args, 'head_and_tail_coordinates') or 
+            self.source_args.head_and_tail_coordinates is None):
             return torch.tensor(0.0, device=self.device)
         
         coords_df = self.source_args.head_and_tail_coordinates
@@ -1766,30 +1774,27 @@ class Midline3DFinder:
                     gt_head_x, gt_head_y = float(row['x_head']), float(row['y_head'])
                     gt_tail_x, gt_tail_y = float(row['x_tail']), float(row['y_tail'])
                     
-                    # Convert to tensors
                     # Check if gt_head coordinates are valid (not None or NaN)
                     if pd.isna(row['x_head']) or pd.isna(row['y_head']):
-                        # Create a dummy tensor and set head_weight to 0
-                        gt_head = torch.zeros(2, device=self.device, dtype=pred_points.dtype)
                         head_weight = 0.0
+                        head_loss = torch.tensor(0.0, device=self.device)
                     else:
-                        gt_head = torch.tensor([gt_head_x, gt_head_y], device=self.device, dtype=pred_points.dtype)
                         head_weight = 1.0
+                        head_distance, _, _, _ = self._calculate_nearest_point_distances(
+                            pred_points, [gt_head_x, gt_head_y], [0, 0], frame_id
+                        )
+                        head_loss = head_distance * head_weight
 
                     # Check if gt_tail coordinates are valid (not None or NaN)
                     if pd.isna(row['x_tail']) or pd.isna(row['y_tail']):
-                        # Create a dummy tensor and set tail_weight to 0
-                        gt_tail = torch.zeros(2, device=self.device, dtype=pred_points.dtype)
                         tail_weight = 0.0
+                        tail_loss = torch.tensor(0.0, device=self.device)
                     else:
-                        gt_tail = torch.tensor([gt_tail_x, gt_tail_y], device=self.device, dtype=pred_points.dtype)
                         tail_weight = 1.0
-                    
-                    pred_head = pred_points[:, 0, frame_id, :]
-                    pred_tail = pred_points[:, -1, frame_id, :]
-
-                    head_loss = torch.norm(pred_head - (gt_head*2), p=2)
-                    tail_loss = torch.norm(pred_tail - (gt_tail*2), p=2)
+                        _, tail_distance, _, _ = self._calculate_nearest_point_distances(
+                            pred_points, [0, 0], [gt_tail_x, gt_tail_y], frame_id
+                        )
+                        tail_loss = tail_distance * tail_weight
                     
                     total_loss += head_loss + tail_loss
                     loss_count += 1
@@ -1804,6 +1809,55 @@ class Midline3DFinder:
             total_loss = total_loss / loss_count
             
         return total_loss
+
+    def _calculate_nearest_point_distances(self, pred_points_2d, gt_head, gt_tail, frame_id):
+        """
+        Calculate distances from predicted curve endpoints to ground truth head and tail coordinates.
+        Only considers the first and last points of the curve as potential head/tail matches.
+        """
+        # Convert to tensor if needed
+        if isinstance(pred_points_2d, torch.Tensor):
+            if pred_points_2d.dim() == 4:  # (batch, N, cams, 2)
+                pred_points_cam = pred_points_2d[:, :, frame_id, :].squeeze(0)
+            elif pred_points_2d.dim() == 3:  # (N, cams, 2)
+                pred_points_cam = pred_points_2d[:, frame_id, :]
+            else:  # (N, 2)
+                pred_points_cam = pred_points_2d
+        else:
+            # Convert numpy to tensor
+            if pred_points_2d.ndim == 3:  # (N, cams, 2)
+                pred_points_cam = torch.tensor(pred_points_2d[:, frame_id, :], device=self.device)
+            else:  # (N, 2)
+                pred_points_cam = torch.tensor(pred_points_2d, device=self.device)
+        
+        # Convert ground truth coordinates to tensors and scale (assuming they need 2x scaling)
+        gt_head_scaled = torch.tensor(gt_head, device=self.device, dtype=pred_points_cam.dtype) * 2
+        gt_tail_scaled = torch.tensor(gt_tail, device=self.device, dtype=pred_points_cam.dtype) * 2
+        
+        # Extract only the first and last points (curve endpoints)
+        first_point = pred_points_cam[0]
+        last_point = pred_points_cam[-1]
+        
+        dist_head_to_first = torch.norm(first_point - gt_head_scaled)
+        dist_head_to_last = torch.norm(last_point - gt_head_scaled)
+        dist_tail_to_first = torch.norm(first_point - gt_tail_scaled)
+        dist_tail_to_last = torch.norm(last_point - gt_tail_scaled)
+        
+        total_dist_1 = dist_head_to_first + dist_tail_to_last
+        total_dist_2 = dist_head_to_last + dist_tail_to_first
+        
+        if total_dist_1 <= total_dist_2:
+            head_distance = dist_head_to_first
+            tail_distance = dist_tail_to_last
+            nearest_head_idx = torch.tensor(0, device=self.device)
+            nearest_tail_idx = torch.tensor(pred_points_cam.shape[0] - 1, device=self.device)
+        else:
+            head_distance = dist_head_to_last
+            tail_distance = dist_tail_to_first
+            nearest_head_idx = torch.tensor(pred_points_cam.shape[0] - 1, device=self.device)
+            nearest_tail_idx = torch.tensor(0, device=self.device)
+        
+        return head_distance, tail_distance, nearest_head_idx, nearest_tail_idx
 
     def _calculate_fix_loss(self, loss: torch.Tensor, stats: dict) -> torch.Tensor:
         """
@@ -2634,13 +2688,18 @@ class Midline3DFinder:
         else:
             self.tb_logger.add_figure(plot_type, fig, self.step)
 
-    def _plot_head_tail_comparison(self, pred_pts):
+    def _plot_head_tail_points_comparison(self, pred_pts):
         """
         Plot the image with actual and predicted head and tail coordinates from the dataset.
         
         Args:
             pred_pts: Predicted points tensor of shape (batch, N, 2)
         """
+
+        if (not self.source_args.read_head_and_tail_coordinates or 
+            not hasattr(self.source_args, 'head_and_tail_coordinates') or 
+            self.source_args.head_and_tail_coordinates is None):
+            return
 
         try:
             # Get the current frame state and images
@@ -2658,24 +2717,15 @@ class Midline3DFinder:
             image_triplet = np.concatenate(images, axis=1)
             ax.imshow(image_triplet, cmap='gray', vmin=0, vmax=1)
             
-            # Extract predicted head and tail coordinates
+            # Extract predicted points
             pred_pts_np = to_numpy(pred_pts)
-            head_pred = pred_pts_np[0, 0, :]
-            tail_pred = pred_pts_np[0, -1, :]
             
             current_frame_id = frame_state.frame_num
             
-            # Plot predicted coordinates for all 3 camera views
+            # Camera offsets for display
             camera_offsets = [0, image_triplet.shape[1]//3, 2*image_triplet.shape[1]//3]
-            for cam_idx in range(3):
-                offset_x = camera_offsets[cam_idx]
-                ax.plot(head_pred[cam_idx, 0] + offset_x, head_pred[cam_idx, 1], 'ro', markersize=2, 
-                       label=f'Predicted Head Cam{cam_idx}' if cam_idx == 0 else "")
-                ax.plot(tail_pred[cam_idx, 0] + offset_x, tail_pred[cam_idx, 1], 'bo', markersize=2,
-                       label=f'Predicted Tail Cam{cam_idx}' if cam_idx == 0 else "")
             
-            # Load dataset coordinates if file exists
-
+            # Load dataset coordinates
             coords_df = self.source_args.head_and_tail_coordinates
             
             # Find matching coordinates in dataset
@@ -2686,23 +2736,37 @@ class Midline3DFinder:
             
             for _, row in matching_coords.iterrows():
                 cam_idx = int(row['frame_id'])  
-                dataset_head_x, dataset_head_y = row['x_head'] * 2, row['y_head'] * 2
-                dataset_tail_x, dataset_tail_y = row['x_tail'] * 2, row['y_tail'] * 2
+                dataset_head_x, dataset_head_y = row['x_head'], row['y_head']
+                dataset_tail_x, dataset_tail_y = row['x_tail'], row['y_tail']
                 
-                # Apply camera offset for display
+                head_distance, tail_distance, nearest_head_idx, nearest_tail_idx = self._calculate_nearest_point_distances(
+                    pred_pts_np[0], [dataset_head_x, dataset_head_y], [dataset_tail_x, dataset_tail_y], cam_idx
+                )
+
+                head_distance = head_distance.cpu().item()
+                tail_distance = tail_distance.cpu().item()
+                nearest_head_idx = nearest_head_idx.cpu().item()
+                nearest_tail_idx = nearest_tail_idx.cpu().item()
+                
+                dataset_head_x_display, dataset_head_y_display = dataset_head_x * 2, dataset_head_y * 2
+                dataset_tail_x_display, dataset_tail_y_display = dataset_tail_x * 2, dataset_tail_y * 2
+                
                 offset_x = camera_offsets[cam_idx]
                 
                 # Plot dataset coordinates
-                ax.plot(dataset_head_x + offset_x, dataset_head_y, 'r^', markersize=2, 
+                ax.plot(dataset_head_x_display + offset_x, dataset_head_y_display, 'r^', markersize=2, 
                         label=f'Dataset Head Cam{cam_idx}' if cam_idx == 0 else "")
-                ax.plot(dataset_tail_x + offset_x, dataset_tail_y, 'b^', markersize=2,
+                ax.plot(dataset_tail_x_display + offset_x, dataset_tail_y_display, 'b^', markersize=2,
                         label=f'Dataset Tail Cam{cam_idx}' if cam_idx == 0 else "")
                 
-                # Calculate distances for this camera view
-                head_distance = np.sqrt((head_pred[cam_idx, 0] - dataset_head_x)**2 + 
-                                        (head_pred[cam_idx, 1] - dataset_head_y)**2)
-                tail_distance = np.sqrt((tail_pred[cam_idx, 0] - dataset_tail_x)**2 + 
-                                        (tail_pred[cam_idx, 1] - dataset_tail_y)**2)
+                # Plot nearest predicted points for better visualization
+                nearest_head_point = pred_pts_np[0, nearest_head_idx, cam_idx, :]
+                nearest_tail_point = pred_pts_np[0, nearest_tail_idx, cam_idx, :]
+                
+                ax.plot(nearest_head_point[0] + offset_x, nearest_head_point[1], 'r*', markersize=4, 
+                        label=f'Nearest to Head Cam{cam_idx}' if cam_idx == 0 else "")
+                ax.plot(nearest_tail_point[0] + offset_x, nearest_tail_point[1], 'b*', markersize=4,
+                        label=f'Nearest to Tail Cam{cam_idx}' if cam_idx == 0 else "")
                 
                 total_head_distance += head_distance
                 total_tail_distance += tail_distance
@@ -2726,24 +2790,36 @@ class Midline3DFinder:
 
             for _, row in matching_coords.iterrows():
                 cam_idx = int(row['frame_id'])
-                dataset_head_x, dataset_head_y = row['x_head'] * 2, row['y_head'] * 2
-                dataset_tail_x, dataset_tail_y = row['x_tail'] * 2, row['y_tail'] * 2
+                dataset_head_x, dataset_head_y = row['x_head'], row['y_head']
+                dataset_tail_x, dataset_tail_y = row['x_tail'], row['y_tail']
+                
+                head_distance, tail_distance, nearest_head_idx, nearest_tail_idx = self._calculate_nearest_point_distances(
+                    pred_pts_np[0], [dataset_head_x, dataset_head_y], [dataset_tail_x, dataset_tail_y], cam_idx
+                )
+                
+                head_distance = head_distance.cpu().item()
+                tail_distance = tail_distance.cpu().item()
+                nearest_head_idx = nearest_head_idx.cpu().item()
+                nearest_tail_idx = nearest_tail_idx.cpu().item()
+                
+                nearest_head_point = pred_pts_np[0, nearest_head_idx, cam_idx, :]
+                nearest_tail_point = pred_pts_np[0, nearest_tail_idx, cam_idx, :]
                 
                 csv_row = {
                     'frame_position': current_frame_id,
                     'frame_id': cam_idx,
-                    'pred_x_head': float(head_pred[cam_idx, 0]),
-                    'pred_y_head': float(head_pred[cam_idx, 1]),
-                    'pred_x_tail': float(tail_pred[cam_idx, 0]),
-                    'pred_y_tail': float(tail_pred[cam_idx, 1]),
-                    'real_x_head': float(dataset_head_x),
-                    'real_y_head': float(dataset_head_y),
-                    'real_x_tail': float(dataset_tail_x),
-                    'real_y_tail': float(dataset_tail_y),
-                    'head_distance': float(np.sqrt((head_pred[cam_idx, 0] - dataset_head_x)**2 + 
-                                                    (head_pred[cam_idx, 1] - dataset_head_y)**2)),
-                    'tail_distance': float(np.sqrt((tail_pred[cam_idx, 0] - dataset_tail_x)**2 + 
-                                                    (tail_pred[cam_idx, 1] - dataset_tail_y)**2)),
+                    'pred_x_head': float(nearest_head_point[0]),
+                    'pred_y_head': float(nearest_head_point[1]),
+                    'pred_x_tail': float(nearest_tail_point[0]),
+                    'pred_y_tail': float(nearest_tail_point[1]),
+                    'real_x_head': float(dataset_head_x * 2),
+                    'real_y_head': float(dataset_head_y * 2),
+                    'real_x_tail': float(dataset_tail_x * 2),
+                    'real_y_tail': float(dataset_tail_y * 2),
+                    'head_distance': float(head_distance),
+                    'tail_distance': float(tail_distance),
+                    'nearest_head_idx': int(nearest_head_idx),
+                    'nearest_tail_idx': int(nearest_tail_idx),
                     'head_and_tail_losses': self._calculate_head_and_tail_losses([pred_pts])
                 }
                 csv_data.append(csv_row)
@@ -2778,3 +2854,21 @@ class Midline3DFinder:
             logger.error(traceback.format_exc())
 
         plt.close('all') 
+
+    def _head_tail_weight(self) -> float:
+        p = self.parameters
+
+        if (p.length_warmup_steps is not None and self.checkpoint.step < p.length_warmup_steps) or \
+        (p.length_regrow_steps is not None and self.checkpoint.step_frame < p.length_regrow_steps):
+            return 0.0
+        
+        cd = self.convergence_detector
+        if cd is not None:
+            conv = cd.converged.clone()
+            if conv.numel() >= 2:
+                conv[1] = True 
+            if not bool(conv.all()):
+                return 0.0
+
+
+        return float(p.loss_head_and_tail)
