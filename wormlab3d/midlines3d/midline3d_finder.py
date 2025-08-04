@@ -114,6 +114,7 @@ class Midline3DFinder:
         # Loop vars
         self.frame_num = 0
         self.active_idx = 0
+        self._ht_active = False  # Flag to enable/disable head-tail loss
 
     @property
     def logs_path(self) -> Path:
@@ -969,6 +970,42 @@ class Midline3DFinder:
 
                 break
 
+        # TODO: Experiment and keep either refinement steps  or the late supervision steps.
+        refine_steps = getattr(p, 'n_steps_head_tail_refine', 0)
+
+        if refine_steps > 0:
+            logger.info('----- Head and tail refinement phase -----')
+
+            self._ht_active = True
+
+            freeze_length = getattr(p, 'ht_freeze_length', True)
+            length_params = []
+            
+            # Not required.
+            if freeze_length:
+                length_params = []
+                for fs in self.frame_batch:
+                    for d in range(p.depth - p.depth_min):
+                        length_param = fs.get_state('length')[d]
+                        length_params.append((length_param, length_param.requires_grad))
+                        length_param.requires_grad_(False)
+
+            for step2 in range(refine_steps):
+                logger.info(f'----- Head and tail refinement step {step2+1}/{refine_steps} -----')
+                last_step = (step2 == refine_steps - 1)
+                loss, loss_global, losses_depths, loss_ht, stats, points_2d = self._train_step(last_step)
+
+                log_msg = f'[HT Refinement {step2+1}/{refine_steps}]\tLoss: {loss:.5E}\tHT Loss: {loss_ht:.5E}'
+                logger.info(log_msg)
+                self.tb_logger.add_scalar('refinement/loss', loss.item(), step2)
+                self.tb_logger.add_scalar('refinement/ht_loss', loss_ht.item(), step2)
+
+            if freeze_length:
+                for param, req_grad in length_params:
+                    param.requires_grad_(req_grad)
+
+            self._ht_active = False
+
         # Save the f0 state
         if first_frame and self.runtime_args.save_f0:
             self.f0_state.save()
@@ -1601,11 +1638,11 @@ class Midline3DFinder:
         # Calculate head and tail loss if enabled
         head_tail_loss = torch.tensor(0.0, device=self.device)
 
-        ht_w = self._head_tail_weight()
+        head_and_tail_weight = self._head_tail_weight()
 
-        if ht_w > 0:
+        if head_and_tail_weight > 0:
             head_tail_loss = self._calculate_head_and_tail_losses(points_2d)
-            stats['loss/head_and_tail'] = (ht_w * head_tail_loss).item()
+            stats['loss/head_and_tail'] = (head_and_tail_weight * head_tail_loss).item()
         else:
             stats['loss/head_and_tail'] = 0.0
 
@@ -1724,7 +1761,7 @@ class Midline3DFinder:
     
         loss = sum(losses_depths) + loss_global
         # Add head and tail loss to global loss
-        loss += ht_w * head_tail_loss
+        loss += head_and_tail_weight * head_tail_loss
 
         stats['loss/total'] = loss.item()
 
@@ -1733,12 +1770,6 @@ class Midline3DFinder:
     def _calculate_head_and_tail_losses(self, points_2d: List[torch.Tensor]) -> torch.Tensor:
         """
         Calculate head and tail losses using ground truth data from the CSV file.
-        
-        Args:
-            points_2d: List of 2D points tensors for each depth level, shape (batch, N, 2)
-            
-        Returns:
-            torch.Tensor: Combined head and tail loss
         """
         # Error, in case csv data is not available
         if ( not hasattr(self.source_args, 'head_and_tail_coordinates') or 
@@ -1773,24 +1804,21 @@ class Midline3DFinder:
                     
                     # convert to tensors
                     if pd.isna(row['x_head']) or pd.isna(row['y_head']):
-                        head_weight = 0.0
                         head_loss = torch.tensor(0.0, device=self.device)
                     else:
                         head_weight = 1.0
                         head_distance, _, _, _ = self._calculate_nearest_point_distances(
                             pred_points, [gt_head_x, gt_head_y], [0, 0], frame_id
                         )
-                        head_loss = head_distance * head_weight
+                        head_loss = head_distance
 
                     if pd.isna(row['x_tail']) or pd.isna(row['y_tail']):
-                        tail_weight = 0.0
                         tail_loss = torch.tensor(0.0, device=self.device)
                     else:
-                        tail_weight = 1.0
                         _, tail_distance, _, _ = self._calculate_nearest_point_distances(
                             pred_points, [0, 0], [gt_tail_x, gt_tail_y], frame_id
                         )
-                        tail_loss = tail_distance * tail_weight
+                        tail_loss = tail_distance
                     
                     total_loss += head_loss + tail_loss
                     loss_count += 1
@@ -1808,28 +1836,23 @@ class Midline3DFinder:
     def _calculate_nearest_point_distances(self, pred_points_2d, gt_head, gt_tail, frame_id):
         """
         Calculate distances from predicted curve endpoints to ground truth head and tail coordinates.
-        Only considers the first and last points of the curve as potential head/tail matches.
         """
-        # Convert to tensor if needed
         if isinstance(pred_points_2d, torch.Tensor):
-            if pred_points_2d.dim() == 4:  # (batch, N, cams, 2)
+            if pred_points_2d.dim() == 4:  
                 pred_points_cam = pred_points_2d[:, :, frame_id, :].squeeze(0)
-            elif pred_points_2d.dim() == 3:  # (N, cams, 2)
+            elif pred_points_2d.dim() == 3:  
                 pred_points_cam = pred_points_2d[:, frame_id, :]
-            else:  # (N, 2)
+            else:  
                 pred_points_cam = pred_points_2d
         else:
-            # Convert numpy to tensor
-            if pred_points_2d.ndim == 3:  # (N, cams, 2)
+            if pred_points_2d.ndim == 3:  
                 pred_points_cam = torch.tensor(pred_points_2d[:, frame_id, :], device=self.device)
-            else:  # (N, 2)
+            else:  
                 pred_points_cam = torch.tensor(pred_points_2d, device=self.device)
         
-        # Convert ground truth coordinates to tensors and scale (assuming they need 2x scaling)
         gt_head_scaled = torch.tensor(gt_head, device=self.device, dtype=pred_points_cam.dtype) * 2
         gt_tail_scaled = torch.tensor(gt_tail, device=self.device, dtype=pred_points_cam.dtype) * 2
         
-        # Extract only the first and last points (curve endpoints)
         first_point = pred_points_cam[0]
         last_point = pred_points_cam[-1]
         
@@ -2781,8 +2804,14 @@ class Midline3DFinder:
 
 
     def _head_tail_weight(self) -> float:
+        """
+        Determine the weight to apply to head and tail loss.
+        """
         p = self.parameters
 
+        if self._ht_active:
+            return float(p.loss_head_and_tail)
+            
         if (p.length_warmup_steps is not None and self.checkpoint.step < p.length_warmup_steps) or \
         (p.length_regrow_steps is not None and self.checkpoint.step_frame < p.length_regrow_steps):
             return 0.0
