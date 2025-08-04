@@ -81,6 +81,7 @@
 --lr-curvatures=1e-3
 --lr-sigmas=1e-4
 --lr-exponents=1e-4
+--ht-freeze-length=True
 --lr-intensities=1e-4
 --lr-filters=1e-3
 --lr-decay=0.9
@@ -92,4 +93,5 @@
 --plot-every-n-steps=200
 --plot-every-n-init-steps=500
 --head-and-tail-coordinates=data/head_and_tail_coords_dataset_3.csv
+--n-steps-head-tail-refine=50
 --read-head-and-tail-coordinates
