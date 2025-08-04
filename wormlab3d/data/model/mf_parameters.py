@@ -134,6 +134,8 @@ class MFParameters(Document):
     lr_decay = FloatField()
     lr_min = FloatField()
     lr_patience = IntField()
+    n_steps_head_tail_refine = IntField()
+    ht_freeze_length = BooleanField()
 
     meta = {
         'collection': 'mf_parameters',
