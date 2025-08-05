@@ -433,6 +433,13 @@ class MFParametersView(DocumentView):
                 },
             ),
             (
+                self.prefix + 'loss_head_and_tail', {
+                    'title': 'Loss head and tail',
+                    'type': 'scientific',
+                    'precision': 1,
+                },
+            ),
+            (
                 self.prefix + 'algorithm', {
                     'title': 'Algorithm',
                     'type': 'string',

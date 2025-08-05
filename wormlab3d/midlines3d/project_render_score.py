@@ -582,6 +582,9 @@ class ProjectRenderScoreModel(nn.Module):
             scores_d_untapered = scores_d.clone()
             if N > 2:
                 scores_d = _taper_parameter(scores_d)
+                # scores_d[:, 0]  = scores_d_untapered[:, 0]
+                # scores_d[:, -1] = scores_d_untapered[:, -1]
+
             max_score = scores_d.amax(dim=1, keepdim=True)
 
             # Parent points can only score the minimum of their child points

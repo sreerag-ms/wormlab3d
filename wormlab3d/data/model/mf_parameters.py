@@ -113,6 +113,7 @@ class MFParameters(Document):
     loss_intersections = FloatField()
     loss_alignment = FloatField()
     loss_consistency = FloatField()
+    loss_head_and_tail = FloatField()
 
     # --- Deprecated
     loss_sigmas = FloatField()
@@ -133,6 +134,8 @@ class MFParameters(Document):
     lr_decay = FloatField()
     lr_min = FloatField()
     lr_patience = IntField()
+    n_steps_head_tail_refine = IntField()
+    ht_freeze_length = BooleanField()
 
     meta = {
         'collection': 'mf_parameters',
