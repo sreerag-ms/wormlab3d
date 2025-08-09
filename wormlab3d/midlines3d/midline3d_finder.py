@@ -5,6 +5,7 @@ from typing import Tuple, Union, Dict, List, Optional
 from datetime import datetime
 
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
 import torch
@@ -21,11 +22,11 @@ from torch.utils.tensorboard import SummaryWriter
 
 # from simple_worm.plot3d import MidpointNormalize
 from wormlab3d import logger, LOGS_PATH, START_TIMESTAMP
-from wormlab3d.data.model import Trial, MFCheckpoint, MFParameters, Reconstruction
+from wormlab3d.data.model import Trial, MFCheckpoint, MFParameters, Reconstruction, HTParameters
 from wormlab3d.data.model.mf_parameters import CURVATURE_INTEGRATION_MIDPOINT, CURVATURE_INTEGRATION_HT, \
     CURVATURE_INTEGRATION_RAND
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
-from wormlab3d.midlines3d.args_finder import ParameterArgs, RuntimeArgs, SourceArgs
+from wormlab3d.midlines3d.args_finder import ParameterArgs, RuntimeArgs, SourceArgs, HeadAndTailOptimizationArgs
 from wormlab3d.midlines3d.f0_state import F0State
 from wormlab3d.midlines3d.frame_state import FrameState, BUFFER_NAMES, PARAMETER_NAMES, CAM_PARAMETER_NAMES, \
     TRANSIENTS_NAMES, CURVATURE_PARAMETER_NAMES
@@ -74,17 +75,21 @@ class Midline3DFinder:
             runtime_args: RuntimeArgs,
             source_args: SourceArgs,
             parameter_args: ParameterArgs,
+            head_and_tail_args: HeadAndTailOptimizationArgs,
     ):
         # Argument groups
         self.runtime_args = runtime_args
         self.source_args = source_args
         self.parameter_args = parameter_args
+        self.head_and_tail_args = head_and_tail_args
 
         # Set random seed
         self._set_seed()
 
         # Initialise the parameters
         self.parameters: MFParameters = self._init_parameters()
+        
+        self.ht_parameters: HTParameters = self._init_ht_parameters()
 
         # Initialise convergence detector
         self.convergence_detector = self._init_convergence_detector()
@@ -118,11 +123,14 @@ class Midline3DFinder:
 
     @property
     def logs_path(self) -> Path:
-        return self.get_logs_path(self.checkpoint)
+        return self.get_logs_path(self.checkpoint, self.ht_parameters)
 
     @staticmethod
-    def get_logs_path(checkpoint: MFCheckpoint) -> Path:
-        return LOGS_PATH / f'trial_{checkpoint.trial.id:03d}' / f'{checkpoint.parameters.created:%Y%m%d_%H:%M}_{checkpoint.parameters.id}'
+    def get_logs_path(checkpoint: MFCheckpoint, ht_parameters: HTParameters = None) -> Path:
+        base_path = LOGS_PATH / f'trial_{checkpoint.trial.id:03d}' / f'{checkpoint.parameters.created:%Y%m%d_%H:%M}_{checkpoint.parameters.id}'
+        if ht_parameters:
+            return base_path / f'_ht_{ht_parameters.id}'
+        return base_path
 
     @property
     def step(self):
@@ -190,6 +198,44 @@ class Midline3DFinder:
 
         return parameters
 
+    def _init_ht_parameters(self) -> HTParameters:
+        """
+        Build the HT parameters model.
+        """
+        logger.info(f'Initialising HT parameters.')
+        ht_parameters = None
+        hta = self.head_and_tail_args
+        params = hta.get_db_params()
+
+        # Try to load an existing model
+        if hta.load_ht_params:
+            # If we have a model id then load this from the database
+            if hta.ht_parameters_id is not None:
+                try:
+                    ht_parameters = HTParameters.objects.get(id=hta.ht_parameters_id)
+                    logger.info(f'Loaded HT parameters by id={hta.ht_parameters_id}.')
+                except DoesNotExist:
+                    logger.info(f'HT parameters with id={hta.ht_parameters_id} not found in database.')
+            else:
+                # Load based on matching parameters
+                params_matching = HTParameters.objects(**params)
+                if params_matching.count() > 0:
+                    ht_parameters = params_matching[0]
+                    logger.info(
+                        f'Found {len(params_matching)} suitable HT parameter records in database, using most recent.')
+                else:
+                    logger.info(f'No suitable HT parameter records found in database.')
+            if ht_parameters is not None:
+                logger.info(f'Loaded HT parameters (id={ht_parameters.id}, created={ht_parameters.created}).')
+
+        # Not loaded model, so create one
+        if ht_parameters is None:
+            ht_parameters = HTParameters(**params)
+            ht_parameters.save()
+            logger.info(f'Saved HT parameters to database (id={ht_parameters.id})')
+
+        return ht_parameters
+
     def _init_convergence_detector(self) -> ConvergenceDetector:
         """
         Initialise the convergence detector.
@@ -232,6 +278,7 @@ class Midline3DFinder:
         else:
             if cpu_or_gpu == 'gpu':
                 raise RuntimeError('GPU requested but not available. Aborting.')
+            
             logger.info('Using CPU.')
 
         return device
@@ -244,7 +291,8 @@ class Midline3DFinder:
         params = {
             'trial': int(self.source_args.trial_id),
             'source': M3D_SOURCE_MF,
-            'mf_parameters': self.parameters
+            'mf_parameters': self.parameters,
+            'ht_parameters': self.ht_parameters
         }
         start_frame = self.source_args.start_frame
 
@@ -259,8 +307,14 @@ class Midline3DFinder:
                 if reconstruction.source != params['source']:
                     raise RuntimeError('Cannot resume from a different midline source!')
                 if reconstruction.mf_parameters.id != params['mf_parameters'].id:
-                    logger.warning('Parameters have changed! This may cause problems!')
+                    logger.warning('MF Parameters have changed! This may cause problems!')
                     reconstruction.mf_parameters = self.parameters
+                if reconstruction.ht_parameters and reconstruction.ht_parameters.id != params['ht_parameters'].id:
+                    logger.warning('HT Parameters have changed! This may cause problems!')
+                    reconstruction.ht_parameters = self.ht_parameters
+                elif not reconstruction.ht_parameters:
+                    logger.info('Adding HT parameters to existing reconstruction.')
+                    reconstruction.ht_parameters = self.ht_parameters
             else:
                 reconstruction = Reconstruction.objects.get(**params)
             if self.runtime_args.copy_state is not None:
@@ -971,14 +1025,14 @@ class Midline3DFinder:
                 break
 
         # TODO: Experiment and keep either refinement steps  or the late supervision steps.
-        refine_steps = getattr(p, 'n_steps_head_tail_refine', 0)
+        refine_steps = getattr(self.head_and_tail_args, 'n_steps_head_tail_refine', 0)
 
         if refine_steps > 0:
             logger.info('----- Head and tail refinement phase -----')
 
             self._ht_active = True
 
-            freeze_length = getattr(p, 'ht_freeze_length', True)
+            freeze_length = getattr(self.head_and_tail_args, 'ht_freeze_length', True)
             length_params = []
             
             # Not required.
@@ -1765,18 +1819,18 @@ class Midline3DFinder:
 
         stats['loss/total'] = loss.item()
 
-        return loss, loss_global, losses_depths, p.loss_head_and_tail * head_tail_loss, stats
+        return loss, loss_global, losses_depths, self.head_and_tail_args.loss_head_and_tail * head_tail_loss, stats
 
     def _calculate_head_and_tail_losses(self, points_2d: List[torch.Tensor]) -> torch.Tensor:
         """
         Calculate head and tail losses using ground truth data from the CSV file.
         """
         # Error, in case csv data is not available
-        if ( not hasattr(self.source_args, 'head_and_tail_coordinates') or 
-            self.source_args.head_and_tail_coordinates is None):
+        if ( not hasattr(self.head_and_tail_args, 'head_and_tail_coordinates') or 
+            self.head_and_tail_args.head_and_tail_coordinates is None):
             return torch.tensor(0.0, device=self.device)
         
-        coords_df = self.source_args.head_and_tail_coordinates
+        coords_df = self.head_and_tail_args.head_and_tail_coordinates
         total_loss = torch.tensor(0.0, device=self.device)
         loss_count = 0
         
@@ -2745,12 +2799,12 @@ class Midline3DFinder:
 
     def _plot_head_tail_points_comparison(self, pred_pts):
         if not getattr(self.source_args, 'read_head_and_tail_coordinates', False) or \
-           getattr(self.source_args, 'head_and_tail_coordinates', None) is None:
+           getattr(self.head_and_tail_args, 'head_and_tail_coordinates', None) is None:
             return
 
         frame_state = self.frame_batch[0] if self.frame_batch else self.master_frame_state
         current_frame_id = frame_state.frame_num
-        coords_df = self.source_args.head_and_tail_coordinates
+        coords_df = self.head_and_tail_args.head_and_tail_coordinates
         matching = coords_df[coords_df['frame_position'] == current_frame_id]
         
         if matching.empty:
@@ -2764,6 +2818,20 @@ class Midline3DFinder:
         comparisons_dir.mkdir(parents=True, exist_ok=True)
 
         fig, ax = plt.subplots(figsize=(10, 8))
+
+        legend_handles = [
+            Line2D([], [], marker='^', color='r', linestyle='None',
+                markersize=3, label='Actual Head'),
+            Line2D([], [], marker='^', color='b', linestyle='None',
+                markersize=3, label='Actual Tail'),
+            Line2D([], [], marker='*', color='r', linestyle='None',
+                markersize=3, label='Pred Head'),
+            Line2D([], [], marker='*', color='b', linestyle='None',
+                markersize=3, label='Pred Tail'),
+        ]
+        
+        fig, ax = plt.subplots(figsize=(10, 8))
+
         ax.imshow(image_triplet, cmap='gray', vmin=0, vmax=1)
         offsets = [0, image_triplet.shape[1] // 3, 2 * image_triplet.shape[1] // 3]
         total_head, total_tail = 0.0, 0.0
@@ -2780,10 +2848,10 @@ class Midline3DFinder:
             pred_head = pred_pts_np[0, h_idx, cam_idx] + [offsets[cam_idx], 0]
             pred_tail = pred_pts_np[0, t_idx, cam_idx] + [offsets[cam_idx], 0]
 
-            ax.plot(*disp_head, 'r^')
-            ax.plot(*disp_tail, 'b^')
-            ax.plot(*pred_head, 'r*')
-            ax.plot(*pred_tail, 'b*')
+            ax.plot(*disp_head, 'r^', markersize=3)
+            ax.plot(*disp_tail, 'b^', markersize=3)
+            ax.plot(*pred_head, 'r*', markersize=3)
+            ax.plot(*pred_tail, 'b*', markersize=3)
 
             total_head += head_d
             total_tail += tail_d
@@ -2792,6 +2860,20 @@ class Midline3DFinder:
         ax.text(0.02, 0.98,
                 f'Avg Head: {total_head/n:.2f}px\nAvg Tail: {total_tail/n:.2f}px',
                 transform=ax.transAxes, va='top', bbox=dict(facecolor='white', alpha=0.8))
+
+        fig.subplots_adjust(bottom=0.15)
+        ax.legend(
+            handles=legend_handles,
+            loc='lower center',
+            ncol=4,
+            fontsize='small',
+            frameon=True,
+            facecolor='whitesmoke',
+            edgecolor='lightgray',
+            framealpha=0.8,
+            bbox_to_anchor=(0.5, -0.05)
+        )
+
         ax.axis('off')
         ax.set_title(f'Head/Tail Comparison - Trial {self.source_args.trial_id}, Frame {current_frame_id}')
 
@@ -2810,10 +2892,9 @@ class Midline3DFinder:
         p = self.parameters
 
         if self._ht_active:
-            return float(p.loss_head_and_tail)
+            return float(self.head_and_tail_args.loss_head_and_tail)
             
-        if (p.length_warmup_steps is not None and self.checkpoint.step < p.length_warmup_steps) or \
-        (p.length_regrow_steps is not None and self.checkpoint.step_frame < p.length_regrow_steps):
+        if (p.length_warmup_steps is not None and self.checkpoint.step < p.length_warmup_steps) or (p.length_regrow_steps is not None and self.checkpoint.step_frame < p.length_regrow_steps):
             return 0.0
         
         cd = self.convergence_detector
@@ -2824,4 +2905,4 @@ class Midline3DFinder:
             if not bool(conv.all()):
                 return 0.0
 
-        return float(p.loss_head_and_tail)
+        return float(self.head_and_tail_args.loss_head_and_tail)
