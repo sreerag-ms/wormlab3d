@@ -22,7 +22,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 # from simple_worm.plot3d import MidpointNormalize
 from wormlab3d import logger, LOGS_PATH, START_TIMESTAMP
-from wormlab3d.data.model import Trial, MFCheckpoint, MFParameters, Reconstruction, HTParameters
+from wormlab3d.data.model import Trial, MFCheckpoint, MFParameters, Reconstruction, HTParameters, MFRuntimeLog
 from wormlab3d.data.model.mf_parameters import CURVATURE_INTEGRATION_MIDPOINT, CURVATURE_INTEGRATION_HT, \
     CURVATURE_INTEGRATION_RAND
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF
@@ -61,6 +61,8 @@ PRINT_KEYS = [
     'loss/intersections',
     'loss/alignment',
     'loss/consistency',
+    'loss/head_and_tail',
+    'head_tail_weight',
     'shifts',
     'lr'
 ]
@@ -120,6 +122,7 @@ class Midline3DFinder:
         self.frame_num = 0
         self.active_idx = 0
         self._ht_active = False  # Flag to enable/disable head-tail loss
+        self._convergence_achieved = False
 
     @property
     def logs_path(self) -> Path:
@@ -247,7 +250,9 @@ class Midline3DFinder:
             tau_fast=p.convergence_tau_fast,
             tau_slow=p.convergence_tau_slow,
             threshold=p.convergence_threshold,
-            patience=p.convergence_patience
+            patience=p.convergence_patience,
+            eps=0.0,
+            late_start_indices=[-1]
         )
         cd = torch.jit.script(cd)
         return cd
@@ -737,6 +742,8 @@ class Midline3DFinder:
 
             # Reset convergence detection
             self.convergence_detector.reset_counters()
+            # Reset persistent convergence flag for each new frame
+            self._convergence_achieved = False
 
             # Reset frame step counter and train the batch
             self.checkpoint.step_frame = 0
@@ -1012,13 +1019,19 @@ class Midline3DFinder:
             )
             self.convergence_detector.forward(losses, first_val=False)
 
+            if not self._convergence_achieved and self.convergence_detector.converged.all():
+                self._convergence_achieved = True
+                current_weight = self._head_tail_weight()
+                logger.info(f"Convergence achieved at step {self.checkpoint.step}. Head-tail loss is now active with weight {current_weight}.")
+
             # When all of the losses have converged and loss has reached target, break
             if not first_frame \
                     and self.convergence_detector.converged.all() \
                     and loss.item() < p.convergence_loss_target \
-                    and (p.length_regrow_steps is None or self.checkpoint.step_frame > p.length_regrow_steps):
+                    and (p.length_regrow_steps is None or self.checkpoint.step_frame > p.length_regrow_steps) \
+                    and self.convergence_detector.initialized.all():
                 
-                if self.source_args.read_head_and_tail_coordinates:
+                if self.head_and_tail_args.read_head_and_tail_coordinates:
                     pred_pts = points_2d[0]  # shape (batch=1, N, 2)
                     self._plot_head_tail_points_comparison(pred_pts)
 
@@ -1261,7 +1274,7 @@ class Midline3DFinder:
             if last_step:
                 # self.master_frame_state.set_state('predicted_points', pred_pts)
                 # Plot head and tail coordinates comparison
-                if self.source_args.read_head_and_tail_coordinates:
+                if self.head_and_tail_args.read_head_and_tail_coordinates:
                     self._plot_head_tail_points_comparison(pred_pts)
 
             # Generate targets with added residuals
@@ -1636,7 +1649,7 @@ class Midline3DFinder:
             points_2d: List[torch.Tensor],
             # head_pred: torch.Tensor,
             # tail_pred: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor, List[torch.Tensor], Dict[str, float]]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, List[torch.Tensor], torch.Tensor, Dict[str, float]]:
         """
         Calculate the losses.
         """
@@ -1690,15 +1703,13 @@ class Midline3DFinder:
         }
 
         # Calculate head and tail loss if enabled
-        head_tail_loss = torch.tensor(0.0, device=self.device)
-
-        head_and_tail_weight = self._head_tail_weight()
-
-        if head_and_tail_weight > 0:
-            head_tail_loss = self._calculate_head_and_tail_losses(points_2d)
-            stats['loss/head_and_tail'] = (head_and_tail_weight * head_tail_loss).item()
-        else:
-            stats['loss/head_and_tail'] = 0.0
+        head_tail_loss = self._calculate_head_and_tail_losses(points_2d)
+        stats['loss/head_and_tail'] = head_tail_loss.item()
+        
+        # Track head-tail weight for debugging
+        ht_weight = self._head_tail_weight()
+        stats['head_tail_weight'] = ht_weight
+        stats['convergence_achieved'] = float(self._convergence_achieved)
 
         if p.curvature_mode:
             losses = {**losses, **{
@@ -1815,16 +1826,24 @@ class Midline3DFinder:
     
         loss = sum(losses_depths) + loss_global
         # Add head and tail loss to global loss
-        loss += head_and_tail_weight * head_tail_loss
+        loss += head_tail_loss
 
         stats['loss/total'] = loss.item()
 
-        return loss, loss_global, losses_depths, self.head_and_tail_args.loss_head_and_tail * head_tail_loss, stats
+        return loss, loss_global, losses_depths, head_tail_loss, stats
 
     def _calculate_head_and_tail_losses(self, points_2d: List[torch.Tensor]) -> torch.Tensor:
         """
         Calculate head and tail losses using ground truth data from the CSV file.
+        Applies the appropriate weight based on current training state.
         """
+        # Get the weight for head and tail loss
+        head_and_tail_weight = self._head_tail_weight()
+        
+        # If weight is zero, return zero loss early
+        if head_and_tail_weight <= 0:
+            return torch.tensor(0.0, device=self.device)
+        
         # Error, in case csv data is not available
         if ( not hasattr(self.head_and_tail_args, 'head_and_tail_coordinates') or 
             self.head_and_tail_args.head_and_tail_coordinates is None):
@@ -1884,8 +1903,11 @@ class Midline3DFinder:
         # Average the loss if we found matching data
         if loss_count > 0:
             total_loss = total_loss / loss_count
-            
-        return total_loss
+        
+        # Apply the weight to the final loss
+        weighted_loss = head_and_tail_weight * total_loss
+        
+        return weighted_loss
 
     def _calculate_nearest_point_distances(self, pred_points_2d, gt_head, gt_tail, frame_id):
         """
@@ -2144,6 +2166,70 @@ class Midline3DFinder:
             filters = self.master_frame_state.get_state('filters')
             filters.data = filters / filters.norm(dim=(1, 2), keepdim=True)
 
+    def _save_runtime_log_to_mongodb(self, loss: float, stats: dict):
+        """
+        Save the current training step's logs to MongoDB.
+        """
+        try:
+            loss_data = {}
+            
+            # Core losses
+            loss_keys = [
+                'loss/masks', 'loss/scores', 'loss/parents', 'loss/smoothness',
+                'loss/intersections', 'loss/alignment', 'loss/consistency',
+                'loss/curvature', 'loss/temporal', 'loss/temporal_points',
+                'loss/global', 'loss/head_and_tail'
+            ]
+            
+            for key in loss_keys:
+                if key in stats:
+                    field_name = key.replace('/', '_')
+                    loss_data[field_name] = float(stats[key])
+            
+            depth_losses = []
+            D = self.parameters.depth - self.parameters.depth_min
+            for d in range(self.parameters.depth_min, self.parameters.depth):
+                depth_key = f'loss/depth/{d}'
+                if depth_key in stats:
+                    depth_losses.append(float(stats[depth_key]))
+            
+            learning_rate = stats.get('lr', 0.0)
+            shifts = stats.get('shifts', 0)
+            
+            additional_metrics = {}
+            excluded_keys = set(loss_keys + ['lr', 'shifts'] + [f'loss/depth/{d}' for d in range(self.parameters.depth_min, self.parameters.depth)])
+            
+            for key, value in stats.items():
+                if key not in excluded_keys:
+                    if hasattr(value, 'item'):
+                        additional_metrics[key] = float(value.item())
+                    else:
+                        additional_metrics[key] = float(value)
+            
+            runtime_log = MFRuntimeLog(
+                trial=self.trial,
+                mf_parameters=self.parameters,
+                ht_parameters=self.ht_parameters,
+                global_step=self.checkpoint.step,
+                frame_step=self.checkpoint.step_frame,
+                frame_num=self.frame_num,
+                total_loss=float(loss),
+                learning_rate=float(learning_rate),
+                shifts=int(shifts),
+                loss_depth=depth_losses,
+                additional_metrics=additional_metrics,
+                **loss_data
+            )
+            
+            # Save to MongoDB
+            runtime_log.save()
+            
+            if self.checkpoint.step % 100 == 0:
+                logger.debug(f"Saved runtime log to MongoDB for step {self.checkpoint.step}")
+                
+        except Exception as e:
+            logger.warning(f"Failed to save runtime log to MongoDB: {e}")
+
     def _log_progress(self, step: int, final_step: int, loss: float, stats: dict):
         """
         Log the loss and stats to the tensorboard logger and command line.
@@ -2155,6 +2241,9 @@ class Midline3DFinder:
             if key in PRINT_KEYS:
                 log_msg += f'\t{key}: {val:.3E}'
         logger.info(log_msg)
+
+        # Save logs to MongoDB
+        self._save_runtime_log_to_mongodb(loss, stats)
 
         # Log camera coefficients
         if self.runtime_args.log_level > 0:
@@ -2728,7 +2817,7 @@ class Midline3DFinder:
         #         fig.colorbar(im, ax=ax)
 
         fig.tight_layout()
-        self._save_plot(fig, 'filters', frame_state)
+        self._save_plot(fig, 'filters', self.master_frame_state)
 
     def _plot_title(self, frame_state: FrameState, skipped: bool = False) -> str:
         """
@@ -2798,7 +2887,7 @@ class Midline3DFinder:
         df.to_csv(csv_file, index=False)
 
     def _plot_head_tail_points_comparison(self, pred_pts):
-        if not getattr(self.source_args, 'read_head_and_tail_coordinates', False) or \
+        if not getattr(self.head_and_tail_args, 'read_head_and_tail_coordinates', False) or \
            getattr(self.head_and_tail_args, 'head_and_tail_coordinates', None) is None:
             return
 
@@ -2888,21 +2977,19 @@ class Midline3DFinder:
     def _head_tail_weight(self) -> float:
         """
         Determine the weight to apply to head and tail loss.
+        Uses a persistent convergence flag that remains true once convergence is achieved.
         """
-        p = self.parameters
 
         if self._ht_active:
-            return float(self.head_and_tail_args.loss_head_and_tail)
+            return float(self.head_and_tail_args.initial_head_and_tail_loss_weight)
             
-        if (p.length_warmup_steps is not None and self.checkpoint.step < p.length_warmup_steps) or (p.length_regrow_steps is not None and self.checkpoint.step_frame < p.length_regrow_steps):
+   
+        if not self._convergence_achieved:
             return 0.0
-        
-        cd = self.convergence_detector
-        if cd is not None:
-            conv = cd.converged.clone()
-            if conv.numel() >= 2:
-                conv[1] = True 
-            if not bool(conv.all()):
-                return 0.0
 
-        return float(self.head_and_tail_args.loss_head_and_tail)
+        weight = float(self.head_and_tail_args.initial_head_and_tail_loss_weight)
+        
+        if self.checkpoint.step_frame == 1:
+            logger.debug(f"Head-tail loss is active for frame {self.frame_num} with weight {weight}")
+            
+        return weight

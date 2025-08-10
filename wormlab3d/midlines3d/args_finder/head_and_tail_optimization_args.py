@@ -11,7 +11,7 @@ class HeadAndTailOptimizationArgs(BaseArgs):
             read_head_and_tail_coordinates: bool = True,
             head_and_tail_coordinates: str = 'data/head_and_tail_coords_dataset_2.csv',
             
-            loss_head_and_tail: float = 0.,
+            initial_head_and_tail_loss_weight: float = 0.,
             n_steps_head_tail_refine: int = 100,
             ht_freeze_length: bool = True,
             
@@ -31,7 +31,7 @@ class HeadAndTailOptimizationArgs(BaseArgs):
         else:
             self.head_and_tail_coordinates = None
             
-        self.loss_head_and_tail = loss_head_and_tail
+        self.initial_head_and_tail_loss_weight = initial_head_and_tail_loss_weight
         self.n_steps_head_tail_refine = n_steps_head_tail_refine
         self.ht_freeze_length = ht_freeze_length
         self.load_ht_params = load_ht_params
@@ -50,7 +50,7 @@ class HeadAndTailOptimizationArgs(BaseArgs):
                           action='store_false', 
                           help='Disable reading head and tail coordinates from CSV file.')
         
-        group.add_argument('--loss-head-and-tail', type=float, default=0.,
+        group.add_argument('--initial-head-and-tail-loss-weight', type=float, default=0.,
                           help='Weight for head and tail coordinate loss from ground truth data.')
         group.add_argument('--n-steps-head-tail-refine', type=int, default=100,
                           help='Number of refinement steps for head and tail.')
