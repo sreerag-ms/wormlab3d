@@ -1879,11 +1879,11 @@ class Midline3DFinder:
                     if pd.isna(row['x_head']) or pd.isna(row['y_head']):
                         head_loss = torch.tensor(0.0, device=self.device)
                     else:
-                        head_weight = 1.0
                         head_distance, _, _, _ = self._calculate_nearest_point_distances(
                             pred_points, [gt_head_x, gt_head_y], [0, 0], frame_id
                         )
-                        head_loss = head_distance
+                        # Apply penalty function
+                        head_loss = self._apply_penalty_function(head_distance)
 
                     if pd.isna(row['x_tail']) or pd.isna(row['y_tail']):
                         tail_loss = torch.tensor(0.0, device=self.device)
@@ -1891,7 +1891,7 @@ class Midline3DFinder:
                         _, tail_distance, _, _ = self._calculate_nearest_point_distances(
                             pred_points, [0, 0], [gt_tail_x, gt_tail_y], frame_id
                         )
-                        tail_loss = tail_distance
+                        tail_loss = self._apply_penalty_function(tail_distance)
                     
                     total_loss += head_loss + tail_loss
                     loss_count += 1
@@ -1952,6 +1952,23 @@ class Midline3DFinder:
             nearest_tail_idx = torch.tensor(0, device=self.device)
         
         return head_distance, tail_distance, nearest_head_idx, nearest_tail_idx
+
+    def _apply_penalty_function(self, distance: torch.Tensor) -> torch.Tensor:
+        """
+        stronger, smooth penalty functions (L2, Huber, or Charbonnier) to distance values.
+        """
+        norm_type = getattr(self.head_and_tail_args, "loss_ht_norm", "l2")
+        
+        if norm_type == "l2":
+            return distance ** 2
+        elif norm_type == "huber":
+            delta = getattr(self.head_and_tail_args, "loss_ht_delta", 3.0)
+            return torch.where(distance <= delta, 0.5 * distance**2, delta * (distance - 0.5 * delta))
+        elif norm_type == "charbonnier":
+            eps = getattr(self.head_and_tail_args, "loss_ht_eps", 1.0)
+            return torch.sqrt(distance**2 + eps**2) - eps
+        else:
+            return distance
 
     def _calculate_fix_loss(self, loss: torch.Tensor, stats: dict) -> torch.Tensor:
         """
@@ -2837,17 +2854,19 @@ class Midline3DFinder:
         """
         Either log the figure to the tensorboard logger or save it to disk.
         """
-        if self.runtime_args.save_plots:
-            save_dir = self.logs_path / 'plots' / plot_type
-            os.makedirs(save_dir, exist_ok=True)
-            fn = f'{frame_state.frame_num:05d}_{self.step:06d}.{img_extension}'
-            if self.runtime_args.prefix_seed_to_plot_names:
-                fn = f'{self.runtime_args.seed:02d}_' + fn
-            path = save_dir / fn
-            plt.savefig(path, bbox_inches='tight')
-
-        else:
-            self.tb_logger.add_figure(plot_type, fig, self.step)
+        try:
+            if self.runtime_args.save_plots:
+                save_dir = self.logs_path / 'plots' / plot_type
+                os.makedirs(save_dir, exist_ok=True)
+                fn = f'{frame_state.frame_num:05d}_{self.step:06d}.{img_extension}'
+                if self.runtime_args.prefix_seed_to_plot_names:
+                    fn = f'{self.runtime_args.seed:02d}_' + fn
+                path = save_dir / fn
+                plt.savefig(path, bbox_inches='tight')
+            else:
+                self.tb_logger.add_figure(plot_type, fig, self.step)
+        finally:
+            plt.close(fig)
 
     def _save_head_tail_csv(self, matching_coords, pred_pts_np, comparisons_dir, current_frame_id):
         """
@@ -2909,14 +2928,10 @@ class Midline3DFinder:
         fig, ax = plt.subplots(figsize=(10, 8))
 
         legend_handles = [
-            Line2D([], [], marker='^', color='r', linestyle='None',
-                markersize=3, label='Actual Head'),
-            Line2D([], [], marker='^', color='b', linestyle='None',
-                markersize=3, label='Actual Tail'),
-            Line2D([], [], marker='*', color='r', linestyle='None',
-                markersize=3, label='Pred Head'),
-            Line2D([], [], marker='*', color='b', linestyle='None',
-                markersize=3, label='Pred Tail'),
+            Line2D([], [], marker='^', color='r', linestyle='None', markersize=3, label='Actual Head'),
+            Line2D([], [], marker='^', color='b', linestyle='None', markersize=3, label='Actual Tail'),
+            Line2D([], [], marker='*', color='r', linestyle='None', markersize=3, label='Pred Head'),
+            Line2D([], [], marker='*', color='b', linestyle='None', markersize=3, label='Pred Tail'),
         ]
         
         fig, ax = plt.subplots(figsize=(10, 8))

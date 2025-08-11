@@ -18,6 +18,10 @@ class HeadAndTailOptimizationArgs(BaseArgs):
             load_ht_params: bool = False,
             ht_parameters_id: str = None,
             
+            loss_ht_norm: str = "l2",
+            loss_ht_delta: float = 3.0,
+            loss_ht_eps: float = 1.0,
+            
             start_frame: int = 0,
             end_frame: int = -1,
             **kwargs
@@ -36,6 +40,11 @@ class HeadAndTailOptimizationArgs(BaseArgs):
         self.ht_freeze_length = ht_freeze_length
         self.load_ht_params = load_ht_params
         self.ht_parameters_id = ht_parameters_id
+        
+        # Loss penalty configuration
+        self.loss_ht_norm = loss_ht_norm
+        self.loss_ht_delta = loss_ht_delta
+        self.loss_ht_eps = loss_ht_eps
 
     @classmethod
     def add_args(cls, parser: ArgumentParser):
@@ -61,6 +70,13 @@ class HeadAndTailOptimizationArgs(BaseArgs):
                           help='Load existing HT parameters from database.')
         group.add_argument('--ht-parameters-id', type=str, default=None,
                           help='ID of the HT parameters record to load from database.')
+                          
+        group.add_argument('--loss-ht-norm', type=str, default='l2', choices=['l2', 'huber', 'charbonnier', 'normal'],
+                          help='Type of penalty function for head/tail distance loss. Options: l2, huber, charbonnier.')
+        group.add_argument('--loss-ht-delta', type=float, default=3.0,
+                          help='Delta parameter for Huber loss (threshold between quadratic and linear regions).')
+        group.add_argument('--loss-ht-eps', type=float, default=1.0,
+                          help='Epsilon parameter for Charbonnier loss (smoothing parameter).')
 
     def get_db_params(self) -> dict:
         from wormlab3d.data.model.ht_parameters import HTParameters
