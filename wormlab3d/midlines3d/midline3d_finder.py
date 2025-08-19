@@ -123,6 +123,14 @@ class Midline3DFinder:
         self.active_idx = 0
         self._ht_active = False  # Flag to enable/disable head-tail loss
         self._convergence_achieved = False
+       
+        self._freeze_central_count = getattr(self.parameter_args, 'freeze_central_count', 118)
+        self._freeze_depths = getattr(self.parameter_args, 'freeze_depths', 'finest')
+        self._freeze_after_convergence = getattr(self.head_and_tail_args, 'central_freeze_applied', True)
+
+        self._central_freeze_hook_handles = []
+        self._central_freeze_applied = False
+
 
     @property
     def logs_path(self) -> Path:
@@ -745,6 +753,9 @@ class Midline3DFinder:
             # Reset persistent convergence flag for each new frame
             self._convergence_achieved = False
 
+            self._clear_central_freeze_hooks()
+            self._central_freeze_applied = False
+
             # Reset frame step counter and train the batch
             self.checkpoint.step_frame = 0
             self.checkpoint.frame_num = frame_num
@@ -1023,6 +1034,8 @@ class Midline3DFinder:
                 self._convergence_achieved = True
                 current_weight = self._head_tail_weight()
                 logger.info(f"Convergence achieved at step {self.checkpoint.step}. Head-tail loss is now active with weight {current_weight}.")
+
+                self._apply_central_freeze()
 
             # When all of the losses have converged and loss has reached target, break
             if not first_frame \
@@ -1926,8 +1939,8 @@ class Midline3DFinder:
             else:  
                 pred_points_cam = torch.tensor(pred_points_2d, device=self.device)
         
-        gt_head_scaled = torch.tensor(gt_head, device=self.device, dtype=pred_points_cam.dtype) * 2
-        gt_tail_scaled = torch.tensor(gt_tail, device=self.device, dtype=pred_points_cam.dtype) * 2
+        gt_head_scaled = torch.tensor(gt_head, device=self.device, dtype=pred_points_cam.dtype)
+        gt_tail_scaled = torch.tensor(gt_tail, device=self.device, dtype=pred_points_cam.dtype)
         
         first_point = pred_points_cam[0]
         last_point = pred_points_cam[-1]
@@ -2891,10 +2904,10 @@ class Midline3DFinder:
                 'pred_y_head': float(nearest_head[1]),
                 'pred_x_tail': float(nearest_tail[0]),
                 'pred_y_tail': float(nearest_tail[1]),
-                'real_x_head': float(gt_head[0] * 2),
-                'real_y_head': float(gt_head[1] * 2),
-                'real_x_tail': float(gt_tail[0] * 2),
-                'real_y_tail': float(gt_tail[1] * 2),
+                'real_x_head': float(gt_head[0]),
+                'real_y_head': float(gt_head[1]),
+                'real_x_tail': float(gt_tail[0]),
+                'real_y_tail': float(gt_tail[1]),
                 'head_distance': float(head_distance),
                 'tail_distance': float(tail_distance),
                 'nearest_head_idx': int(nearest_head_idx),
@@ -2947,8 +2960,8 @@ class Midline3DFinder:
             head_d, tail_d, h_idx, t_idx = \
                 self._calculate_nearest_point_distances(pred_pts_np[0], gt_head, gt_tail, cam_idx)
 
-            disp_head = [gt_head[0] * 2 + offsets[cam_idx], gt_head[1] * 2]
-            disp_tail = [gt_tail[0] * 2 + offsets[cam_idx], gt_tail[1] * 2]
+            disp_head = [gt_head[0] + offsets[cam_idx], gt_head[1]]
+            disp_tail = [gt_tail[0] + offsets[cam_idx], gt_tail[1]]
             pred_head = pred_pts_np[0, h_idx, cam_idx] + [offsets[cam_idx], 0]
             pred_tail = pred_pts_np[0, t_idx, cam_idx] + [offsets[cam_idx], 0]
 
@@ -3008,3 +3021,58 @@ class Midline3DFinder:
             logger.debug(f"Head-tail loss is active for frame {self.frame_num} with weight {weight}")
             
         return weight
+
+    def _clear_central_freeze_hooks(self):
+        """Remove any gradient hooks used to freeze central indices."""
+        for h in self._central_freeze_hook_handles:
+            try:
+                h.remove()
+            except Exception:
+                pass
+        self._central_freeze_hook_handles = []
+
+    def _apply_central_freeze(self):
+        """Register gradient hooks that zero the grads for central indices along the curve."""
+        if self._central_freeze_applied or not self._freeze_after_convergence:
+            return
+
+        p = self.parameters
+        D_total = p.depth
+        D_min = p.depth_min
+        depths = [D_total - 1] if self._freeze_depths == 'finest' else list(range(D_min, D_total))
+
+        def _register_mask_hook(param_tensor):
+            # param_tensor shape: [N, C]  (curvatures: C=2; points: C=3)
+            N = param_tensor.shape[0]
+            if N <= 0:
+                return
+            central = min(self._freeze_central_count, N)
+            start = max(0, (N - central) // 2)
+            end = min(N, start + central)
+
+            # 1 keeps gradient, 0 zeros it
+            mask = torch.ones_like(param_tensor)
+            mask[start:end, :] = 0
+
+            handle = param_tensor.register_hook(lambda g, m=mask: g * m)
+            self._central_freeze_hook_handles.append(handle)
+
+        # We’ll freeze the trainable tensors *at chosen depths* for all frames in the current batch
+        for fs in self.frame_batch:
+            if p.curvature_mode:
+                # Freeze the curvature control points (these define the 3D curve after integration)
+                curv_list = fs.get_state('curvatures')  # list per depth, each [N, 2]
+                for local_idx, d in enumerate(range(D_min, D_total)):
+                    if d in depths:
+                        _register_mask_hook(curv_list[local_idx])
+            else:
+                # Non-curvature mode: freeze the explicit 3D points
+                pts_list = fs.get_state('points')  # list per depth, each [N, 3]
+                for local_idx, d in enumerate(range(D_min, D_total)):
+                    if d in depths:
+                        _register_mask_hook(pts_list[local_idx])
+
+        self._central_freeze_applied = True
+        logger.info(
+            f"Central freeze hooks applied (count={self._freeze_central_count}, depths={self._freeze_depths})."
+        )
