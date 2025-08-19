@@ -22,6 +22,8 @@ class HeadAndTailOptimizationArgs(BaseArgs):
             loss_ht_delta: float = 3.0,
             loss_ht_eps: float = 1.0,
             
+            central_freeze_applied: bool = True,
+            
             start_frame: int = 0,
             end_frame: int = -1,
             **kwargs
@@ -45,6 +47,9 @@ class HeadAndTailOptimizationArgs(BaseArgs):
         self.loss_ht_norm = loss_ht_norm
         self.loss_ht_delta = loss_ht_delta
         self.loss_ht_eps = loss_ht_eps
+        
+        # Central freeze configuration
+        self.central_freeze_applied = central_freeze_applied
 
     @classmethod
     def add_args(cls, parser: ArgumentParser):
@@ -77,6 +82,12 @@ class HeadAndTailOptimizationArgs(BaseArgs):
                           help='Delta parameter for Huber loss (threshold between quadratic and linear regions).')
         group.add_argument('--loss-ht-eps', type=float, default=1.0,
                           help='Epsilon parameter for Charbonnier loss (smoothing parameter).')
+        
+        group.add_argument('--central-freeze-applied', type=str2bool, default=True,
+                          help='Whether to apply central freeze after convergence to stabilize midline sections. Default=True.')
+        group.add_argument('--no-central-freeze-applied', dest='central_freeze_applied', 
+                          action='store_false', 
+                          help='Disable central freeze after convergence.')
 
     def get_db_params(self) -> dict:
         from wormlab3d.data.model.ht_parameters import HTParameters
