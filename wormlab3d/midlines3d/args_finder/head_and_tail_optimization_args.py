@@ -9,7 +9,7 @@ class HeadAndTailOptimizationArgs(BaseArgs):
     def __init__(
             self,
             read_head_and_tail_coordinates: bool = True,
-            head_and_tail_coordinates: str = 'data/head_and_tail_coords_dataset_2.csv',
+            head_and_tail_coordinates: str = 'data/head_and_tail_coords_dataset_3_scaled.csv',
             
             initial_head_and_tail_loss_weight: float = 0.,
             n_steps_head_tail_refine: int = 100,
@@ -23,6 +23,11 @@ class HeadAndTailOptimizationArgs(BaseArgs):
             loss_ht_eps: float = 1.0,
             
             central_freeze_applied: bool = True,
+            
+            # Head/tail scheduling parameters
+            ht_weight_max: float = 1.0,
+            ht_start_delay: int = 0,
+            ht_ramp_steps: int = 500,
             
             start_frame: int = 0,
             end_frame: int = -1,
@@ -50,6 +55,11 @@ class HeadAndTailOptimizationArgs(BaseArgs):
         
         # Central freeze configuration
         self.central_freeze_applied = central_freeze_applied
+        
+        # Head/tail scheduling parameters (simplified monotonic ramp)
+        self.ht_weight_max = ht_weight_max
+        self.ht_start_delay = ht_start_delay
+        self.ht_ramp_steps = ht_ramp_steps
 
     @classmethod
     def add_args(cls, parser: ArgumentParser):
@@ -88,6 +98,14 @@ class HeadAndTailOptimizationArgs(BaseArgs):
         group.add_argument('--no-central-freeze-applied', dest='central_freeze_applied', 
                           action='store_false', 
                           help='Disable central freeze after convergence.')
+        
+        # Head/tail scheduling arguments (monotonic approach)
+        group.add_argument('--ht-weight-max', type=float, default=1.0,
+                          help='Maximum multiplier for head/tail loss once convergence achieved.')
+        group.add_argument('--ht-start-delay', type=int, default=0,
+                          help='Optional delay steps after convergence before starting HT weight ramp.')
+        group.add_argument('--ht-ramp-steps', type=int, default=500,
+                          help='Number of steps to ramp HT weight from 0 to max (monotonic increase).')
 
     def get_db_params(self) -> dict:
         from wormlab3d.data.model.ht_parameters import HTParameters

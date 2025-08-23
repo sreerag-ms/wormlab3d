@@ -11,6 +11,11 @@ class HTParameters(Document):
     n_steps_head_tail_refine = IntField(default=100)
     ht_freeze_length = BooleanField(default=True)
     central_freeze_applied = BooleanField(default=True)
+    
+    # Monotonic head/tail scheduling parameters
+    ht_weight_max = FloatField(default=1.0)
+    ht_start_delay = IntField(default=0)
+    ht_ramp_steps = IntField(default=500)
 
     meta = {
         'collection': 'ht_parameters',

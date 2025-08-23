@@ -56,7 +56,7 @@ PRINT_KEYS = [
     'loss/smoothness',
     'loss/temporal',
     'loss/temporal_points',
-    # 'loss/global',
+    'loss/global',
     'loss/scores',
     'loss/intersections',
     'loss/alignment',
@@ -126,6 +126,9 @@ class Midline3DFinder:
        
         self._freeze_central_count = getattr(self.parameter_args, 'freeze_central_count', 118)
         self._freeze_depths = getattr(self.parameter_args, 'freeze_depths', 'finest')
+        
+        self._ht_weight = 0.0
+        self._ht_t0 = None
         self._freeze_after_convergence = getattr(self.head_and_tail_args, 'central_freeze_applied', True)
 
         self._central_freeze_hook_handles = []
@@ -753,6 +756,10 @@ class Midline3DFinder:
             # Reset persistent convergence flag for each new frame
             self._convergence_achieved = False
 
+            # Reset head/tail scheduling state for new frame
+            self._ht_weight = 0.0
+            self._ht_t0 = None
+
             self._clear_central_freeze_hooks()
             self._central_freeze_applied = False
 
@@ -1032,8 +1039,14 @@ class Midline3DFinder:
 
             if not self._convergence_achieved and self.convergence_detector.converged.all():
                 self._convergence_achieved = True
-                current_weight = self._head_tail_weight()
-                logger.info(f"Convergence achieved at step {self.checkpoint.step}. Head-tail loss is now active with weight {current_weight}.")
+                
+                # Schedule HT ramp start after optional delay
+                hta = self.head_and_tail_args
+                delay_steps = getattr(hta, "ht_start_delay", 0)
+                self._ht_t0 = self.checkpoint.step_frame + delay_steps
+                
+                current_weight = self._compute_head_tail_weight()
+                logger.info(f"Convergence achieved at step {self.checkpoint.step}. Head-tail ramp will start at step {self._ht_t0} (current weight: {current_weight}).")
 
                 self._apply_central_freeze()
 
@@ -1717,12 +1730,6 @@ class Midline3DFinder:
 
         # Calculate head and tail loss if enabled
         head_tail_loss = self._calculate_head_and_tail_losses(points_2d)
-        stats['loss/head_and_tail'] = head_tail_loss.item()
-        
-        # Track head-tail weight for debugging
-        ht_weight = self._head_tail_weight()
-        stats['head_tail_weight'] = ht_weight
-        stats['convergence_achieved'] = float(self._convergence_achieved)
 
         if p.curvature_mode:
             losses = {**losses, **{
@@ -1836,27 +1843,31 @@ class Midline3DFinder:
                 stats[f'camera_exponents/{i}'] = camera_exponents[:, i].var()
                 stats[f'camera_intensities/{i}'] = camera_intensities[:, i].var()
 
+        # Apply scheduled weight to head_tail_loss
+        ht_w = self._compute_head_tail_weight()
+
+        weighted_head_tail_loss = ht_w * head_tail_loss
+        stats['loss/head_and_tail'] = weighted_head_tail_loss.item()
+        
+        # Update scheduled weight stats
+        stats['head_tail_weight'] = ht_w
+        if self._ht_t0 is not None:
+            stats['ht_ramp_start_step'] = self._ht_t0
+            stats['ht_steps_since_start'] = max(0, self.checkpoint.step_frame - self._ht_t0)
     
         loss = sum(losses_depths) + loss_global
-        # Add head and tail loss to global loss
-        loss += head_tail_loss
+        # Add weighted head and tail loss to total loss
+        loss += weighted_head_tail_loss
 
         stats['loss/total'] = loss.item()
 
-        return loss, loss_global, losses_depths, head_tail_loss, stats
+        return loss, loss_global, losses_depths, weighted_head_tail_loss, stats
 
     def _calculate_head_and_tail_losses(self, points_2d: List[torch.Tensor]) -> torch.Tensor:
         """
         Calculate head and tail losses using ground truth data from the CSV file.
-        Applies the appropriate weight based on current training state.
+        Applies the appropriate weight based on scheduled approach.
         """
-        # Get the weight for head and tail loss
-        head_and_tail_weight = self._head_tail_weight()
-        
-        # If weight is zero, return zero loss early
-        if head_and_tail_weight <= 0:
-            return torch.tensor(0.0, device=self.device)
-        
         # Error, in case csv data is not available
         if ( not hasattr(self.head_and_tail_args, 'head_and_tail_coordinates') or 
             self.head_and_tail_args.head_and_tail_coordinates is None):
@@ -1917,10 +1928,8 @@ class Midline3DFinder:
         if loss_count > 0:
             total_loss = total_loss / loss_count
         
-        # Apply the weight to the final loss
-        weighted_loss = head_and_tail_weight * total_loss
-        
-        return weighted_loss
+        # Return the unweighted loss - weighting will be applied in _calculate_losses
+        return total_loss
 
     def _calculate_nearest_point_distances(self, pred_points_2d, gt_head, gt_tail, frame_id):
         """
@@ -3020,6 +3029,31 @@ class Midline3DFinder:
         if self.checkpoint.step_frame == 1:
             logger.debug(f"Head-tail loss is active for frame {self.frame_num} with weight {weight}")
             
+        return weight
+
+    def _compute_head_tail_weight(self) -> float:
+        """Return the scheduled HT weight in [0, ht_weight_max] using monotonic time-based ramp."""
+        hta = self.head_and_tail_args
+
+        if getattr(self, "_ht_active", False):
+            return float(getattr(hta, "ht_weight_max", 1.0))
+
+        if self._ht_t0 is None:
+            return 0.0
+            
+        current_step = self.checkpoint.step_frame
+        if current_step < self._ht_t0:
+            return 0.0
+
+        ramp_steps = max(1, getattr(hta, "ht_ramp_steps", 100))
+        progress = min(1.0, (current_step - self._ht_t0) / ramp_steps)
+        
+        smooth_progress = progress * progress * (3.0 - 2.0 * progress)
+        
+        max_weight = float(getattr(hta, "ht_weight_max", 1.0))
+        weight = max_weight * smooth_progress
+        
+        self._ht_weight = weight
         return weight
 
     def _clear_central_freeze_hooks(self):
