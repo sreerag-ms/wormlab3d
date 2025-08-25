@@ -5,6 +5,7 @@ __pycache__
 *.egg-info
 .eggs
 .snakemake
+.tmp*/
 
 # Local environment
 .env

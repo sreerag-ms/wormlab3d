@@ -4,8 +4,9 @@
   // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
   "version": "0.2.0",
   "configurations": [
+    
     {
-      "name": "Python Debugger: Current File with Arguments",
+      "name": "Python Debugger: mf_trial",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/scripts/midlines3d/mf_trial.py",
@@ -17,13 +18,53 @@
       }
     },
     {
-      "name": "Python Debugger: Sreerag Plot Script",
+      "name": "Python Debugger: Plot MF 2D Validation",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/midlines3d/plot_mf_2d_validation.py",
+      "args": [
+      "--reconstruction=688f40835273814a3dfc013d",
+      "--frame-num=4779",
+      "--user=YO"
+      ],
+      "env": {
+        "PYTHONPATH": "/Users/sreeragms/Documents/uol/msc-project-repos/wormlab3d:${env:PYTHONPATH}"
+      },
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Python Debugger: Explore manual annotations",
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/scripts/midlines3d/sreerag_plot_script.py",
-      "args": [],
+      "args": [
+      "--frame-num=4779",
+      "--user=YO"
+      ],
       "env": {
-          "PYTHONPATH": "/Users/sreeragms/Documents/uol/msc-project-repos/wormlab3d:${env:PYTHONPATH}"
+        "PYTHONPATH": "/Users/sreeragms/Documents/uol/msc-project-repos/wormlab3d:${env:PYTHONPATH}"
+      },
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Python Debugger: Plot MF Comparisons",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/midlines3d/plot_mf_comparisons.py",
+      "args": [
+        "--reconstruction=689dc6e2b44b084649624ca7",
+        "--reconstruction2=689dc6e2b44b084649624ca7",
+        "--batch-size=20",
+        "--gpu-id=-1",
+        "--lr=1e-2",
+        "--max-train-steps=400",
+        "--conv-tol=0.1",
+        "--conv-patience=20",
+        "--stats-window=7",
+        "--x-label=frame"
+      ],
+      "env": {
+        "PYTHONPATH": "/Users/sreeragms/Documents/uol/msc-project-repos/wormlab3d:${env:PYTHONPATH}"
       },
       "console": "integratedTerminal"
     }

@@ -1,7 +1,7 @@
 from argparse import ArgumentParser, _ArgumentGroup
 
 from wormlab3d.data.model.mf_parameters import MFParameters, RENDER_MODE_GAUSSIANS, RENDER_MODES, \
-    CURVATURE_INTEGRATION_MIDPOINT, CURVATURE_INTEGRATION_OPTIONS, CURVATURE_INTEGRATION_ALGORITHM_EULER, CURVATURE_INTEGRATION_ALGORITHM_RK4, \
+    CURVATURE_INTEGRATION_MIDPOINT, CURVATURE_INTEGRATION_OPTIONS, CURVATURE_INTEGRATION_ALGORITHM_EULER, CURVATURE_INTEGRATION_ALGORITHM_MIDPOINT, \
     CURVATURE_INTEGRATION_ALGORITHM_OPTIONS
 from wormlab3d.nn.args.base_args import BaseArgs
 from wormlab3d.nn.args.optimiser_args import OPTIMISER_ALGORITHMS, LOSS_MSE, OPTIMISER_ADAM, LOSSES
@@ -330,7 +330,7 @@ class ParameterArgs(BaseArgs):
                            default=CURVATURE_INTEGRATION_MIDPOINT, choices=CURVATURE_INTEGRATION_OPTIONS,
                            help='Integrate using a single midpoint-out ("mp", default) or from both ends ("ht").')
         group.add_argument('--curvature-integration-algorithm', type=str,
-                           default=CURVATURE_INTEGRATION_ALGORITHM_RK4,
+                           default=CURVATURE_INTEGRATION_ALGORITHM_MIDPOINT,
                            choices=CURVATURE_INTEGRATION_ALGORITHM_OPTIONS,
                            help='Numerical method for integrating the curve; euler (default), midpoint or rk4.')
         group.add_argument('--length-min', type=float,

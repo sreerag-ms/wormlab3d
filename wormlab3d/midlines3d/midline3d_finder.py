@@ -91,10 +91,13 @@ class Midline3DFinder:
         # Initialise the parameters
         self.parameters: MFParameters = self._init_parameters()
         
-        self.ht_parameters: HTParameters = self._init_ht_parameters()
+        if self.head_and_tail_args.use_head_and_tail_optimisations:
+            self.ht_parameters: HTParameters = self._init_ht_parameters()
+        else:
+            self.ht_parameters: HTParameters = None
 
         # Initialise convergence detector
-        self.convergence_detector = self._init_convergence_detector()
+        self.convergence_detector = self._init_convergence_detector(self.head_and_tail_args.use_head_and_tail_optimisations)
 
         # Check the devices
         self.device = self._init_devices()
@@ -126,7 +129,8 @@ class Midline3DFinder:
        
         self._freeze_central_count = getattr(self.parameter_args, 'freeze_central_count', 118)
         self._freeze_depths = getattr(self.parameter_args, 'freeze_depths', 'finest')
-        self._freeze_after_convergence = getattr(self.head_and_tail_args, 'central_freeze_applied', True)
+        self._freeze_after_convergence = (getattr(self.head_and_tail_args, 'central_freeze_applied', True) 
+                                         and self.head_and_tail_args.use_head_and_tail_optimisations)
 
         self._central_freeze_hook_handles = []
         self._central_freeze_applied = False
@@ -247,14 +251,15 @@ class Midline3DFinder:
 
         return ht_parameters
 
-    def _init_convergence_detector(self) -> ConvergenceDetector:
+    def _init_convergence_detector(self, use_head_and_tail_optimisations: bool = False) -> ConvergenceDetector:
         """
         Initialise the convergence detector.
         """
         logger.info(f'Initialising convergence detector.')
         p = self.parameters
+        shape = (2 + p.depth - p.depth_min,) if use_head_and_tail_optimisations else (1 + p.depth - p.depth_min,)
         cd = ConvergenceDetector(
-            shape=(2 + p.depth - p.depth_min,),
+            shape=shape,
             tau_fast=p.convergence_tau_fast,
             tau_slow=p.convergence_tau_slow,
             threshold=p.convergence_threshold,
@@ -1024,10 +1029,16 @@ class Midline3DFinder:
             self._make_plots(first_frame=first_frame)
 
             # Update convergence detector
-            losses = torch.tensor(
-                [loss_global, *losses_depths, loss_head_and_tail],
-                device=self.device
-            )
+            if self.head_and_tail_args.use_head_and_tail_optimisations:
+                losses = torch.tensor(
+                    [loss_global, *losses_depths, loss_head_and_tail],
+                    device=self.device
+                )
+            else:
+                losses = torch.tensor(
+                    [loss_global, *losses_depths],
+                    device=self.device
+                )
             self.convergence_detector.forward(losses, first_val=False)
 
             if not self._convergence_achieved and self.convergence_detector.converged.all():
@@ -1044,7 +1055,7 @@ class Midline3DFinder:
                     and (p.length_regrow_steps is None or self.checkpoint.step_frame > p.length_regrow_steps) \
                     and self.convergence_detector.initialized.all():
                 
-                if self.head_and_tail_args.read_head_and_tail_coordinates:
+                if self.head_and_tail_args.use_head_and_tail_optimisations:
                     pred_pts = points_2d[0]  # shape (batch=1, N, 2)
                     self._plot_head_tail_points_comparison(pred_pts)
 
@@ -1053,7 +1064,7 @@ class Midline3DFinder:
         # TODO: Experiment and keep either refinement steps  or the late supervision steps.
         refine_steps = getattr(self.head_and_tail_args, 'n_steps_head_tail_refine', 0)
 
-        if refine_steps > 0:
+        if refine_steps > 0 and self.head_and_tail_args.use_head_and_tail_optimisations:
             logger.info('----- Head and tail refinement phase -----')
 
             self._ht_active = True
@@ -1287,7 +1298,7 @@ class Midline3DFinder:
             if last_step:
                 # self.master_frame_state.set_state('predicted_points', pred_pts)
                 # Plot head and tail coordinates comparison
-                if self.head_and_tail_args.read_head_and_tail_coordinates:
+                if self.head_and_tail_args.use_head_and_tail_optimisations:
                     self._plot_head_tail_points_comparison(pred_pts)
 
             # Generate targets with added residuals
@@ -1850,6 +1861,9 @@ class Midline3DFinder:
         Calculate head and tail losses using ground truth data from the CSV file.
         Applies the appropriate weight based on current training state.
         """
+        if not self.head_and_tail_args.use_head_and_tail_optimisations:
+            return torch.tensor(0.0, device=self.device)
+        
         # Get the weight for head and tail loss
         head_and_tail_weight = self._head_tail_weight()
         
@@ -2269,6 +2283,8 @@ class Midline3DFinder:
         for key, val in stats.items():
             self.tb_logger.add_scalar(key, val, step)
             if key in PRINT_KEYS:
+                if key in ['loss/head_and_tail', 'head_tail_weight'] and not self.head_and_tail_args.use_head_and_tail_optimisations:
+                    continue
                 log_msg += f'\t{key}: {val:.3E}'
         logger.info(log_msg)
 
@@ -2884,7 +2900,12 @@ class Midline3DFinder:
     def _save_head_tail_csv(self, matching_coords, pred_pts_np, comparisons_dir, current_frame_id):
         """
         Save head and tail coordinate comparisons to a CSV file.
+        Returns early if head and tail optimization is disabled.
         """
+        # Return early if head and tail optimization is disabled
+        if not self.head_and_tail_args.use_head_and_tail_optimisations:
+            return
+            
         csv_file = comparisons_dir / 'data.csv'
         rows = []
         for _, row in matching_coords.iterrows():
@@ -2919,7 +2940,7 @@ class Midline3DFinder:
         df.to_csv(csv_file, index=False)
 
     def _plot_head_tail_points_comparison(self, pred_pts):
-        if not getattr(self.head_and_tail_args, 'read_head_and_tail_coordinates', False) or \
+        if not self.head_and_tail_args.use_head_and_tail_optimisations or \
            getattr(self.head_and_tail_args, 'head_and_tail_coordinates', None) is None:
             return
 
@@ -3007,6 +3028,8 @@ class Midline3DFinder:
         Determine the weight to apply to head and tail loss.
         Uses a persistent convergence flag that remains true once convergence is achieved.
         """
+        if not self.head_and_tail_args.use_head_and_tail_optimisations:
+            return 0.0
 
         if self._ht_active:
             return float(self.head_and_tail_args.initial_head_and_tail_loss_weight)
@@ -3033,7 +3056,8 @@ class Midline3DFinder:
 
     def _apply_central_freeze(self):
         """Register gradient hooks that zero the grads for central indices along the curve."""
-        if self._central_freeze_applied or not self._freeze_after_convergence:
+        if (self._central_freeze_applied or not self._freeze_after_convergence or 
+            not self.head_and_tail_args.use_head_and_tail_optimisations):
             return
 
         p = self.parameters
@@ -3050,24 +3074,20 @@ class Midline3DFinder:
             start = max(0, (N - central) // 2)
             end = min(N, start + central)
 
-            # 1 keeps gradient, 0 zeros it
             mask = torch.ones_like(param_tensor)
             mask[start:end, :] = 0
 
             handle = param_tensor.register_hook(lambda g, m=mask: g * m)
             self._central_freeze_hook_handles.append(handle)
 
-        # We’ll freeze the trainable tensors *at chosen depths* for all frames in the current batch
         for fs in self.frame_batch:
             if p.curvature_mode:
-                # Freeze the curvature control points (these define the 3D curve after integration)
                 curv_list = fs.get_state('curvatures')  # list per depth, each [N, 2]
                 for local_idx, d in enumerate(range(D_min, D_total)):
                     if d in depths:
                         _register_mask_hook(curv_list[local_idx])
             else:
-                # Non-curvature mode: freeze the explicit 3D points
-                pts_list = fs.get_state('points')  # list per depth, each [N, 3]
+                pts_list = fs.get_state('points')
                 for local_idx, d in enumerate(range(D_min, D_total)):
                     if d in depths:
                         _register_mask_hook(pts_list[local_idx])

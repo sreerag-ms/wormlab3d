@@ -8,7 +8,7 @@ from .util import load_head_tail_coordinates
 class HeadAndTailOptimizationArgs(BaseArgs):
     def __init__(
             self,
-            read_head_and_tail_coordinates: bool = True,
+            use_head_and_tail_optimisations: bool = False,
             head_and_tail_coordinates: str = 'data/head_and_tail_coords_dataset_2.csv',
             
             initial_head_and_tail_loss_weight: float = 0.,
@@ -28,20 +28,21 @@ class HeadAndTailOptimizationArgs(BaseArgs):
             end_frame: int = -1,
             **kwargs
     ):
-        self.read_head_and_tail_coordinates = read_head_and_tail_coordinates
+        self.use_head_and_tail_optimisations = use_head_and_tail_optimisations
         
-        if read_head_and_tail_coordinates:
+        # Load head and tail coordinates if the optimization is enabled
+        if use_head_and_tail_optimisations:
             self.head_and_tail_coordinates = load_head_tail_coordinates(
                 head_and_tail_coordinates, start_frame, end_frame
             )
         else:
             self.head_and_tail_coordinates = None
             
-        self.initial_head_and_tail_loss_weight = initial_head_and_tail_loss_weight
-        self.n_steps_head_tail_refine = n_steps_head_tail_refine
-        self.ht_freeze_length = ht_freeze_length
-        self.load_ht_params = load_ht_params
-        self.ht_parameters_id = ht_parameters_id
+        self.initial_head_and_tail_loss_weight = initial_head_and_tail_loss_weight if use_head_and_tail_optimisations else 0.
+        self.n_steps_head_tail_refine = n_steps_head_tail_refine if use_head_and_tail_optimisations else 0
+        self.ht_freeze_length = ht_freeze_length and use_head_and_tail_optimisations
+        self.load_ht_params = load_ht_params and use_head_and_tail_optimisations
+        self.ht_parameters_id = ht_parameters_id if use_head_and_tail_optimisations else None
         
         # Loss penalty configuration
         self.loss_ht_norm = loss_ht_norm
@@ -49,20 +50,21 @@ class HeadAndTailOptimizationArgs(BaseArgs):
         self.loss_ht_eps = loss_ht_eps
         
         # Central freeze configuration
-        self.central_freeze_applied = central_freeze_applied
+        self.central_freeze_applied = central_freeze_applied and use_head_and_tail_optimisations
 
     @classmethod
     def add_args(cls, parser: ArgumentParser):
         group = parser.add_argument_group('Head and Tail Optimization Args')
         
+        group.add_argument('--use-head-and-tail-optimisations', action='store_true', default=False,
+                          help='Enable head and tail optimization features. This is a master switch that controls all head and tail related functionality.')
+        group.add_argument('--no-use-head-and-tail-optimisations', dest='use_head_and_tail_optimisations',
+                          action='store_false',
+                          help='Disable all head and tail optimization features.')
+        
         group.add_argument('--head-and-tail-coordinates', type=str, 
                           default='data/head_and_tail_coords_dataset_2.csv', 
                           help='Path to head and tail coordinates dataset CSV file.')
-        group.add_argument('--read-head-and-tail-coordinates', action='store_true', default=False, 
-                          help='Whether to read and load head and tail coordinates from CSV file.')
-        group.add_argument('--no-read-head-and-tail-coordinates', dest='read_head_and_tail_coordinates', 
-                          action='store_false', 
-                          help='Disable reading head and tail coordinates from CSV file.')
         
         group.add_argument('--initial-head-and-tail-loss-weight', type=float, default=0.,
                           help='Weight for head and tail coordinate loss from ground truth data.')
