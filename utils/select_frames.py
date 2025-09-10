@@ -2,14 +2,8 @@ import cv2
 import os
 
 def select_specific_frame(video_path, output_dir, frame_number=2000):
-
     """
     Selects a specific frame from a video and saves it as an image.
-    
-    Args:
-        video_path (str): Path to the input video file
-        output_dir (str): Directory to save the output image
-        frame_number (int): Specific frame number to extract
     """
     os.makedirs(output_dir, exist_ok=True)
     
