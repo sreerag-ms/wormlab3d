@@ -85,11 +85,9 @@ class HeadAndTailOptimizationArgs(BaseArgs):
         group.add_argument('--loss-ht-eps', type=float, default=1.0,
                           help='Epsilon parameter for Charbonnier loss (smoothing parameter).')
         
-        group.add_argument('--central-freeze-applied', type=str2bool, default=True,
-                          help='Whether to apply central freeze after convergence to stabilize midline sections. Default=True.')
-        group.add_argument('--no-central-freeze-applied', dest='central_freeze_applied', 
-                          action='store_false', 
-                          help='Disable central freeze after convergence.')
+        group.add_argument('--central-freeze-applied', type=str2bool, default=False,
+                          help='Whether to apply central freeze after convergence to stabilize midline sections. Default=True.'
+                          )
 
     def get_db_params(self) -> dict:
         from wormlab3d.data.model.ht_parameters import HTParameters
