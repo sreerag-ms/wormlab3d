@@ -8,7 +8,7 @@ from skimage.morphology import skeletonize
 
 
 def create_conical_kernel(length=61, width=31, blur=5, flat_profile=False):
-    kernel = np.zeros((length, width), dtype=np.float32)
+    kernel = np.ones((length, width), dtype=np.float32)
     width_center = width / 2.0
     for length_idx in range(length):
         normalized_position = length_idx / (length - 1)          
@@ -17,9 +17,9 @@ def create_conical_kernel(length=61, width=31, blur=5, flat_profile=False):
             distance_from_center = abs(width_idx - width_center)
             if current_half_width > 0 and distance_from_center <= current_half_width:
                 if flat_profile:
-                    kernel[length_idx, width_idx] = 1.0  # Flat profile with uniform values
+                    kernel[length_idx, width_idx] = 0.0
                 else:
-                    kernel[length_idx, width_idx] = 1 - (distance_from_center / current_half_width)  # Tent profile
+                    kernel[length_idx, width_idx] = distance_from_center / current_half_width
   
     kernel = cv2.GaussianBlur(kernel, (blur, blur), 0)
   
@@ -188,44 +188,35 @@ def visualize_kernel_at_endpoints(img_med, tips, kernel, angles, out_dir):
         # Create a colored version of the kernel for visualization
         k_vis = cv2.normalize(best_k_rot, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         k_color = np.zeros((k_vis.shape[0], k_vis.shape[1], 3), dtype=np.uint8)
-        k_color[:,:,2] = k_vis  # Red channel
+        k_color[:,:,2] = k_vis 
         
-        # Calculate position to place kernel centered on endpoint
         kh, kw = kernel.shape
         x0 = int(x - kw/2)
         y0 = int(y - kh/2)
-        
-        # Create copy of image for this visualization
+    
         endpoint_img = img_color.copy()
         
-        # Calculate valid regions for overlay
         y1, y2 = max(0, y0), min(img_color.shape[0], y0 + kh)
         x1, x2 = max(0, x0), min(img_color.shape[1], x0 + kw)
         ky1, ky2 = max(0, -y0), min(kh, img_color.shape[0] - y0)
         kx1, kx2 = max(0, -x0), min(kw, img_color.shape[1] - x0)
         
-        # Only blend where kernel values are significant
         overlay = endpoint_img[y1:y2, x1:x2].copy()
         kernel_region = k_color[ky1:ky2, kx1:kx2]
         mask = (kernel_region[:,:,2] > 20)  # Where kernel is non-trivial
         
-        # Alpha blend the kernel with the image
         alpha = 0.6  # Kernel visibility (60%)
         overlay[mask] = overlay[mask] * (1-alpha) + kernel_region[mask] * alpha
         endpoint_img[y1:y2, x1:x2] = overlay
         
-        # Mark the exact endpoint position
         cv2.circle(endpoint_img, (x, y), 3, (0, 0, 255), -1)
         
-        # Add text showing the angle
         cv2.putText(endpoint_img, f"Endpoint {i+1}, Angle: {best_angle}°", 
                    (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
         
-        # Save the visualization
         cv2.imwrite(os.path.join(out_dir, f'endpoint_{i+1}_kernel_overlap.png'), endpoint_img)
 
 def main(args):
-    # Create timestamped output directory
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
     out_dir = os.path.join(args.output_base, ts)
     os.makedirs(out_dir, exist_ok=True)
@@ -256,10 +247,10 @@ def main(args):
     # Annotate and save results
     orig = cv2.imread(args.input, cv2.IMREAD_GRAYSCALE)
     out_img = cv2.cvtColor(orig, cv2.COLOR_GRAY2BGR)
-    # rough tips: red & blue
+    # rough tips
     cv2.circle(out_img, tips[0], 1, (0,0,255), 1)
     cv2.circle(out_img, tips[1], 1, (0,0,255), 1)
-    # refined tips: green
+    # refined tips: gree
     for pt in refined:
         cv2.circle(out_img, pt, 1, (0,255,0), 1)
     cv2.imwrite(os.path.join(out_dir, os.path.basename(args.input)), out_img)
@@ -271,8 +262,8 @@ if __name__=='__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--input', default='data/images/frame_4186.jpg')
     parser.add_argument('--output_base', default='1_convolution_method/outputs/image')
-    parser.add_argument('--length', type=int, default=61)
-    parser.add_argument('--width', type=int, default=21)
+    parser.add_argument('--length', type=int, default=41)
+    parser.add_argument('--width', type=int, default=15)
     parser.add_argument('--blur',   type=int, default=1,)
     parser.add_argument('--suppress_r', type=int, default=5)
     parser.add_argument('--angle_step', type=int, default=1)
