@@ -47,7 +47,7 @@
 --frame-skip=1
 --n-steps-init=2000
 --n-steps-batch-locked=20
---n-steps-max=400
+--n-steps-max=600
 --convergence-tau-fast=10
 --convergence-tau-slow=100
 --convergence-threshold=0.1
@@ -90,11 +90,13 @@
 --plot-every-n-init-steps=500
 --start-frame=1000
 --end-frame=1690
---head-and-tail-coordinates=/tmp/wt3d_endpoints_1000_1690.csv
---initial-head-and-tail-loss-weight=.5
+--head-and-tail-coordinates=data/wt_3d_endpoints.csv
+--initial-head-and-tail-loss-weight=.2
 --n-steps-head-tail-refine=0
 --ht-freeze-length=False
---load-ht-params=True
+--load-ht-params=False
 --use-head-and-tail-optimisations=True
+--central-freeze-applied=False
+--loss-ht-norm=normal
 
 

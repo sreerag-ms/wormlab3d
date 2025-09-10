@@ -84,7 +84,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Export WT3D 2D endpoints (head/tail) to CSV for a Reconstruction id.")
     parser.add_argument("--reconstruction", required=True, default="68ab201e69cf388a16fb5379")
-    parser.add_argument("--out", type=str, default="/tmp/wt3d_endpoints.csv")
+    parser.add_argument("--out", type=str, default="data/wt_3d_endpoints.csv")
     parser.add_argument("--source-file", type=str, default=None)
     parser.add_argument("--regenerate-2d", action="store_true")
 
