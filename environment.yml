@@ -1,0 +1,24 @@
+name: worm_head_tail_detection
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.12.11
+  
+  # Core scientific computing
+  - numpy=2.2.6
+  - scipy=1.16.0
+  - pandas=2.3.1
+  
+  # Image processing and computer vision
+  - opencv-python=4.12.0.88
+  - scikit-image=0.25.2
+  - pillow=11.3.0
+  
+  # Plotting and visualization
+  - matplotlib=3.10.6
+  
+  # Additional utilities
+  - tqdm=4.67.1
+  - pyyaml=6.0.2
