@@ -52,16 +52,16 @@
       "request": "launch",
       "program": "${workspaceFolder}/scripts/midlines3d/plot_mf_comparisons.py",
       "args": [
-        "--reconstruction=689dc6e2b44b084649624ca7",
-        "--reconstruction2=689dc6e2b44b084649624ca7",
-        "--batch-size=20",
-        "--gpu-id=-1",
-        "--lr=1e-2",
-        "--max-train-steps=400",
+        "--reconstruction=68ac6e0d3f6acb769c26536f",
+        "--reconstruction-b=68abab8db4c3e768132c4340",
+        "--batch-size=10",
+        "--lr=1e-4",
+        "--max-train-steps=10",
         "--conv-tol=0.1",
         "--conv-patience=20",
         "--stats-window=7",
-        "--x-label=frame"
+        "--x-label=frame",
+        "--max-train-steps=100"
       ],
       "env": {
         "PYTHONPATH": "/Users/sreeragms/Documents/uol/msc-project-repos/wormlab3d:${env:PYTHONPATH}"
