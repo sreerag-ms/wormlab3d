@@ -3,6 +3,8 @@ import os
 import cv2
 import numpy as np
 import argparse
+import csv
+import glob
 from datetime import datetime
 from skimage.morphology import skeletonize
 from scipy.ndimage import convolve
@@ -50,34 +52,35 @@ def rotate_kernel_without_clipping(kernel, angle):
     return k_rot
 
 
-# ---------- preprocessing ----------
-def preprocess_image(img_path, out_dir):
+def preprocess_image(img_path, out_dir=None):
     img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise FileNotFoundError(f"Cannot open image: {img_path}")
 
-    inv = 255 - img
-    cv2.imwrite(os.path.join(out_dir, 'inverted.png'), inv)
+    inv = img
+    if out_dir:
+        cv2.imwrite(os.path.join(out_dir, 'inverted.png'), inv)
 
     inv = cv2.medianBlur(inv, 3)
 
     # CLAHE boosts faint tips without over-amplifying noise
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     inv_boost = clahe.apply(inv)
-    cv2.imwrite(os.path.join(out_dir, 'preprocessed.png'), inv_boost)
+    if out_dir:
+        cv2.imwrite(os.path.join(out_dir, 'preprocessed.png'), inv_boost)
 
-    _, th = cv2.threshold(inv_boost, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    _, th = cv2.threshold(inv, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
     mask = cv2.morphologyEx(th, cv2.MORPH_CLOSE, k)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k)
 
-    # small dilate/erode pair to smooth while keeping ends
     ks = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
     mask = cv2.dilate(mask, ks)
     mask = cv2.erode(mask, ks)
 
     mask_bool = mask.astype(bool)
-    cv2.imwrite(os.path.join(out_dir, 'mask.png'), (mask_bool * 255).astype(np.uint8))
+    if out_dir:
+        cv2.imwrite(os.path.join(out_dir, 'mask.png'), (mask_bool * 255).astype(np.uint8))
     return inv_boost, mask_bool
 
 
@@ -121,11 +124,11 @@ def tip_from_seed(img, kernel, seed_xy, angles, win=45):
     return best[1], best[2], best[3], best[0]
 
 
-# ---------- full detection ----------
-def detect_tips(img_med, mask_bool, kernel, angles, out_dir):
+def detect_tips(img_med, mask_bool, kernel, angles, out_dir=None):
     # seeds from skeleton
     seeds, skel = skeleton_endpoints(mask_bool)
-    cv2.imwrite(os.path.join(out_dir, 'skeleton.png'), (skel * 255).astype(np.uint8))
+    if out_dir:
+        cv2.imwrite(os.path.join(out_dir, 'skeleton.png'), (skel * 255).astype(np.uint8))
 
     if len(seeds) < 2:
         angles_coarse = angles[::max(1, len(angles)//36)]
@@ -157,13 +160,36 @@ def detect_tips(img_med, mask_bool, kernel, angles, out_dir):
     for sx, sy in seeds[:2]:
         x, y, ang, score = tip_from_seed(img_med, kernel, (sx, sy), angles, win=45)
         tips.append((x, y, ang))
-    return tips
+    
+    # Return both tips and seeds for visualization
+    return tips, seeds[:2]
 
 
-# ---------- visualization ----------
-def visualize_results(img_path, img_med, tips, kernel, out_dir):
+def visualize_results(img_path, img_med, tips, kernel, out_dir, seeds=None, search_win=45):
     orig = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
     out_img = cv2.cvtColor(orig, cv2.COLOR_GRAY2BGR)
+
+    # Visualize search windows if seeds are provided
+    if seeds:
+        search_img = out_img.copy()
+        for i, (sx, sy) in enumerate(seeds):
+            color = (0, 255, 255)
+            # Draw the seed point
+            cv2.circle(search_img, (sx, sy), 4, color, -1)
+            
+            # draw the search window around the seed
+            x1 = max(0, sx - search_win)
+            y1 = max(0, sy - search_win)
+            x2 = min(orig.shape[1], sx + search_win)
+            y2 = min(orig.shape[0], sy + search_win)
+            cv2.rectangle(search_img, (x1, y1), (x2, y2), color, 2)
+            
+            # Label the seed
+            cv2.putText(search_img, f"Seed {i+1}", (sx + 5, sy - 10), 
+                      cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        
+        # save the visualization
+        cv2.imwrite(os.path.join(out_dir, 'search_windows.png'), search_img)
 
     for i, (x, y, angle) in enumerate(tips):
         color = (0, 0, 255) if i == 0 else (255, 0, 0)
@@ -185,7 +211,12 @@ def visualize_results(img_path, img_med, tips, kernel, out_dir):
         overlay_img = img_color.copy()
 
         kh, kw = k_vis.shape
-        x0, y0 = int(x - kw/2), int(y - kh/2)
+        
+        tip_offset = kh // 2
+        rad_angle = np.deg2rad(angle)
+        x0 = int(x - tip_offset * np.sin(rad_angle) - kw/2)
+        y0 = int(y - tip_offset * np.cos(rad_angle) - kh/2)
+        
         y1, y2 = max(0, y0), min(img_color.shape[0], y0 + kh)
         x1, x2 = max(0, x0), min(img_color.shape[1], x0 + kw)
         ky1, ky2 = max(0, -y0), min(kh, img_color.shape[0] - y0)
@@ -205,35 +236,76 @@ def visualize_results(img_path, img_med, tips, kernel, out_dir):
         cv2.imwrite(os.path.join(out_dir, f'tip_{i+1}_kernel_overlay.png'), overlay_img)
 
 
-# ---------- main ----------
-def main(args):
-    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-    out_dir = os.path.join(args.output_base, ts)
-    os.makedirs(out_dir, exist_ok=True)
-
-    print(f"Processing {args.input}...")
-    img_med, mask_bool = preprocess_image(args.input, out_dir)
-
+def process_folder(input_folder, args):
+    image_files = sorted(glob.glob(os.path.join(input_folder, "*.png")))
+    
     kernel = create_tip_kernel(args.length, args.width, neg_cap=args.neg_cap, blur=args.blur, flat_profile=True)
-    cv2.imwrite(os.path.join(out_dir, 'kernel.png'),
-                cv2.normalize(kernel, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8))
-
     angles = list(range(0, 360, args.angle_step))
-    tips = detect_tips(img_med, mask_bool, kernel, angles, out_dir)
+    
+    csv_path = os.path.join(args.output_base, 'detection_results.csv')
+    os.makedirs(args.output_base, exist_ok=True)
+    
+    with open(csv_path, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['frame_position', 'frame_id', 'view', 'x_end1', 'y_end1', 'x_end2', 'y_end2'])
+        
+        for img_path in image_files:
+            filename = os.path.splitext(os.path.basename(img_path))[0]
+            frame_position, view = filename.split('_')
+            frame_position = int(frame_position)
+            view = int(view)
+            
+            try:
+                img_med, mask_bool = preprocess_image(img_path)
+                tips, _ = detect_tips(img_med, mask_bool, kernel, angles)
+                
+                if len(tips) >= 2:
+                    x1, y1, _ = tips[0]
+                    x2, y2, _ = tips[1]
+                else:
+                    x1 = y1 = x2 = y2 = -1
+                
+                writer.writerow([frame_position, frame_position, view, x1, y1, x2, y2])
+                print(f"Processed {filename}: tips at ({x1},{y1}) and ({x2},{y2})")
+                
+            except Exception as e:
+                writer.writerow([frame_position, frame_position, view, -1, -1, -1, -1])
+                print(f"Error processing {filename}: {e}")
+    
+    print(f"Results saved to: {csv_path}")
 
-    visualize_results(args.input, img_med, tips, kernel, out_dir)
-    print(f"Results saved to: {out_dir}")
-    print(f"Detected tips at: {tips}")
+def main(args):
+    if args.folder:
+        process_folder(args.folder, args)
+    else:
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        out_dir = os.path.join(args.output_base, ts)
+        os.makedirs(out_dir, exist_ok=True)
+
+        print(f"Processing {args.input}...")
+        img_med, mask_bool = preprocess_image(args.input, out_dir)
+
+        kernel = create_tip_kernel(args.length, args.width, neg_cap=args.neg_cap, blur=args.blur, flat_profile=True)
+        cv2.imwrite(os.path.join(out_dir, 'kernel.png'),
+                    cv2.normalize(kernel, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8))
+
+        angles = list(range(0, 360, args.angle_step))
+        tips, seeds = detect_tips(img_med, mask_bool, kernel, angles, out_dir)
+
+        visualize_results(args.input, img_med, tips, kernel, out_dir, seeds=seeds, search_win=45)
+        print(f"Results saved to: {out_dir}")
+        print(f"Detected tips at: {tips}")
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Directional template matching for worm tip detection')
-    parser.add_argument('--input', default='data/images/frame_4186.jpg')
+    parser.add_argument('--input', default='output/images/frames_001000_001600/001547_0.png')
+    parser.add_argument('--folder', help='Process all PNG images in this folder')
     parser.add_argument('--output_base', default='1_convolution_method/outputs/kernel_only')
-    parser.add_argument('--length', type=int, default=36)
-    parser.add_argument('--width', type=int, default=16)
+    parser.add_argument('--length', type=int, default=26)
+    parser.add_argument('--width', type=int, default=18)
     parser.add_argument('--blur', type=int, default=3)
     parser.add_argument('--neg_cap', type=float, default=0.4, help='strength of negative cap ahead of tip (0..1)')
-    parser.add_argument('--angle_step', type=int, default=3)
+    parser.add_argument('--angle_step', type=int, default=1)
     args = parser.parse_args()
     main(args)
