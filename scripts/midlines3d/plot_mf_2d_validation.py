@@ -1,10 +1,12 @@
 import os
+import csv
 from argparse import Namespace, ArgumentParser
 from pathlib import Path
 from typing import Tuple, Optional, Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from matplotlib.axes import Axes
 from mongoengine import DoesNotExist
 from scipy import interpolate
@@ -129,7 +131,11 @@ def plot_simple_frame_comparison():
     rec: Reconstruction = Reconstruction.objects.get(id=args.reconstruction)
     assert rec.source == M3D_SOURCE_MF, 'A MF reconstruction is required!'
     assert args.frame_num is not None, 'This script requires setting --frame-num.'
-    assert rec.start_frame_valid <= args.frame_num <= rec.end_frame_valid, 'This frame number is not valid for the reconstruction!'
+    
+    valid_start = 0 if rec.start_frame_valid is None else rec.start_frame_valid
+    valid_end = float('inf') if rec.end_frame_valid is None else rec.end_frame_valid
+    assert valid_start <= args.frame_num <= valid_end, 'This frame number is not valid for the reconstruction!'
+    
     frame: Frame = rec.trial.get_frame(args.frame_num)
 
     # Get 2D midline
@@ -140,7 +146,7 @@ def plot_simple_frame_comparison():
         filters['camera'] = args.camera
     m2ds = Midline2D.objects(**filters)
     if m2ds.count() == 0:
-        raise NothingToCompare('No 2D midlines found to compare!')
+        raise NothingToCompare('No 2D midlines found to compare!, frame: {}'.format(frame.id))
     if m2ds.count() > 1:
         raise NothingToCompare(f'Multiple ({m2ds.count()}) 2D midlines found to compare!')
     m2d = m2ds[0]
@@ -148,9 +154,11 @@ def plot_simple_frame_comparison():
     # Load the reconstruction data
     ts = TrialState(rec)
     p2d = ts.get('points_2d')
-
-    # Get the image points
-    p2d_rec = p2d[frame.frame_num, :, m2d.camera]
+    
+    local_frame_idx = frame.frame_num - rec.start_frame
+    
+    # Get the image points using the local index
+    p2d_rec = p2d[local_frame_idx, :, m2d.camera]
     p2d_man = m2d.get_prepared_coordinates()
     if len(p2d_man) == 0:
         raise NothingToCompare('Prepared coordinates empty!')
@@ -220,6 +228,228 @@ def plot_simple_frame_comparison():
         plt.show()
 
 
+def plot_simple_frame_comparison_2():
+    """
+    Plot a single frame comparison with distances along the worm body.
+    """
+    args = get_args()
+    assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
+    rec: Reconstruction = Reconstruction.objects.get(id=args.reconstruction)
+    assert rec.source == M3D_SOURCE_MF, 'A MF reconstruction is required!'
+    assert args.frame_num is not None, 'This script requires setting --frame-num.'
+    
+    # Check if frame_num is valid, handling None values
+    valid_start = 0 if rec.start_frame_valid is None else rec.start_frame_valid
+    valid_end = float('inf') if rec.end_frame_valid is None else rec.end_frame_valid
+    assert valid_start <= args.frame_num <= valid_end, 'This frame number is not valid for the reconstruction!'
+    
+    frame: Frame = rec.trial.get_frame(args.frame_num)
+
+    # Fetch midlines for all cameras (without camera filter)
+    filters = {'frame': frame}
+    if args.user is not None:
+        filters['user'] = None if args.user == '-' else args.user
+    
+    # Group midlines by camera
+    m2ds = Midline2D.objects(**filters)
+    if m2ds.count() == 0:
+        raise NothingToCompare('No 2D midlines found to compare!, frame: {}'.format(frame.id))
+    
+    # Group by camera
+    m2ds_by_camera = {}
+    for m2d in m2ds:
+        m2ds_by_camera[m2d.camera] = m2d
+    
+    if len(m2ds_by_camera) == 0:
+        raise NothingToCompare('No valid 2D midlines found to compare!')
+    
+    logger.info(f"Found midlines for {len(m2ds_by_camera)} cameras: {list(m2ds_by_camera.keys())}")
+    
+    # Load the reconstruction data
+    ts = TrialState(rec)
+    p2d = ts.get('points_2d')
+    
+    local_frame_idx = frame.frame_num - rec.start_frame
+    
+    all_dists_rec = []
+    all_dists_man = []
+    
+    csv_data_manual_to_rec = []
+    csv_data_rec_to_manual = []
+    
+    for camera_idx, m2d in m2ds_by_camera.items():
+        p2d_rec = p2d[local_frame_idx, :, camera_idx]
+        p2d_man = m2d.get_prepared_coordinates()
+        
+        if len(p2d_man) == 0:
+            logger.warning(f"Empty prepared coordinates for camera {camera_idx}, skipping")
+            continue
+        
+        # Calculate distances
+        dists = cdist(p2d_man, p2d_rec)
+        dists_rec = dists.min(axis=0)
+        dists_man = dists.min(axis=1)
+        
+        # Save manual to reconstruction distances
+        for point_idx, distance in enumerate(dists_man):
+            csv_data_manual_to_rec.append({
+                'frame_number': frame.frame_num,
+                'cam_index': camera_idx,
+                'annotation_point_index': point_idx,
+                'distance': distance
+            })
+        
+        for point_idx, distance in enumerate(dists_rec):
+            csv_data_rec_to_manual.append({
+                'frame_number': frame.frame_num,
+                'cam_index': camera_idx,
+                'reconstruction_point_index': point_idx,
+                'distance': distance
+            })
+        
+        n_points_rec = len(p2d_rec)
+        if len(p2d_man) != n_points_rec:
+            x_man = np.linspace(0, 1, len(dists_man))
+            x_rec = np.linspace(0, 1, n_points_rec)
+            f = interpolate.interp1d(x_man, dists_man, kind='linear', bounds_error=False, fill_value="extrapolate")
+            dists_man = f(x_rec)
+        
+        all_dists_rec.append(dists_rec)
+        all_dists_man.append(dists_man)
+    
+    if not all_dists_rec or not all_dists_man:
+        raise NothingToCompare('No valid distances calculated')
+    
+    avg_dists_rec = np.mean(all_dists_rec, axis=0)
+    avg_dists_man = np.mean(all_dists_man, axis=0)
+
+    mean_rec = np.mean(avg_dists_rec)
+    mean_man = np.mean(avg_dists_man)
+    logger.info(f"Mean distance - Reconstruction to Manual: {mean_rec:.2f} pixels")
+    logger.info(f"Mean distance - Manual to Reconstruction: {mean_man:.2f} pixels")
+    
+    if csv_data_manual_to_rec:
+        csv_path_manual_to_rec = Path('logs/scripts/midlines3d/mf_trial/selected/manual_to_reconstruction_distances.csv')
+        
+        existing_data = []
+        if csv_path_manual_to_rec.exists():
+            try:
+                existing_df = pd.read_csv(csv_path_manual_to_rec)
+                existing_data = existing_df.to_dict('records')
+                logger.info(f"Loaded {len(existing_data)} existing records from manual-to-reconstruction CSV")
+            except Exception as e:
+                logger.warning(f"Could not load existing manual-to-reconstruction CSV file: {e}")
+        
+        existing_keys = set()
+        for record in existing_data:
+            key = (record['frame_number'], record['cam_index'], record['annotation_point_index'])
+            existing_keys.add(key)
+        
+        updated_data = []
+        
+        for record in existing_data:
+            key = (record['frame_number'], record['cam_index'], record['annotation_point_index'])
+            will_be_overwritten = False
+            for new_record in csv_data_manual_to_rec:
+                new_key = (new_record['frame_number'], new_record['cam_index'], new_record['annotation_point_index'])
+                if key == new_key:
+                    will_be_overwritten = True
+                    break
+            
+            if not will_be_overwritten:
+                updated_data.append(record)
+        
+        updated_data.extend(csv_data_manual_to_rec)
+        
+        updated_data.sort(key=lambda x: (x['frame_number'], x['cam_index'], x['annotation_point_index']))
+        
+        df = pd.DataFrame(updated_data)
+        df.to_csv(csv_path_manual_to_rec, index=False)
+        logger.info(f"Saved {len(updated_data)} records to {csv_path_manual_to_rec}")
+        logger.info(f"Added/updated {len(csv_data_manual_to_rec)} new manual-to-reconstruction records")
+    
+    if csv_data_rec_to_manual:
+        csv_path_rec_to_manual = Path('logs/scripts/midlines3d/mf_trial/selected/reconstruction_to_manual_distances.csv')
+        
+        existing_data = []
+        if csv_path_rec_to_manual.exists():
+            try:
+                existing_df = pd.read_csv(csv_path_rec_to_manual)
+                existing_data = existing_df.to_dict('records')
+                logger.info(f"Loaded {len(existing_data)} existing records from reconstruction-to-manual CSV")
+            except Exception as e:
+                logger.warning(f"Could not load existing reconstruction-to-manual CSV file: {e}")
+        
+        existing_keys = set()
+        for record in existing_data:
+            key = (record['frame_number'], record['cam_index'], record['reconstruction_point_index'])
+            existing_keys.add(key)
+        
+        updated_data = []
+        
+        for record in existing_data:
+            key = (record['frame_number'], record['cam_index'], record['reconstruction_point_index'])
+            will_be_overwritten = False
+            for new_record in csv_data_rec_to_manual:
+                new_key = (new_record['frame_number'], new_record['cam_index'], new_record['reconstruction_point_index'])
+                if key == new_key:
+                    will_be_overwritten = True
+                    break
+            
+            if not will_be_overwritten:
+                updated_data.append(record)
+        
+        updated_data.extend(csv_data_rec_to_manual)
+        
+        updated_data.sort(key=lambda x: (x['frame_number'], x['cam_index'], x['reconstruction_point_index']))
+        
+        df = pd.DataFrame(updated_data)
+        df.to_csv(csv_path_rec_to_manual, index=False)
+        logger.info(f"Saved {len(updated_data)} records to {csv_path_rec_to_manual}")
+        logger.info(f"Added/updated {len(csv_data_rec_to_manual)} new reconstruction-to-manual records")
+    
+    plt.rc('axes', labelsize=8)
+    plt.rc('xtick', labelsize=7)
+    plt.rc('ytick', labelsize=7)
+    
+    fig, ax = plt.subplots(1, 1, figsize=(5, 3))
+    
+    n_points = len(avg_dists_rec)
+    x = np.linspace(0, 1, n_points)
+    
+    ax.plot(x, avg_dists_rec, 'b-', label='Reconstruction to Manual', linewidth=2)
+    ax.plot(x, avg_dists_man, 'r-', label='Manual to Reconstruction', linewidth=2)
+    
+    ax.set_xlabel('Position along worm (head to tail)')
+    ax.set_ylabel('Average pixel distance across cameras')
+    ax.set_xlim(0, 1)
+    ax.set_ylim(bottom=0)
+    
+    # Add labels for head and tail
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels(['Head', 'Tail'])
+    
+    ax.legend()
+    ax.grid(True, linestyle='--', alpha=0.7)
+    
+    cameras_used = ', '.join(map(str, m2ds_by_camera.keys()))
+    fig.suptitle(f'Trial {rec.trial.id}, Frame {frame.frame_num}, Cameras [{cameras_used}]')
+    fig.tight_layout()
+    
+    if save_plots:
+        path = LOGS_PATH / (f'{START_TIMESTAMP}'
+                          f'_trial={rec.trial.id:03d}'
+                          f'_rec={rec.id}'
+                          f'_frame={frame.frame_num:05d}'
+                          f'_cameras={cameras_used}'
+                          f'_avg_distance_plot'
+                          + f'.{img_extension}')
+        logger.info(f'Saving plot to {path}.')
+        plt.savefig(path, transparent=True)
+    if show_plots:
+        plt.show()
+
+
 def validate_reconstruction(
         args: Optional[Namespace] = None,
         save_dir: Optional[Path] = None
@@ -272,9 +502,19 @@ def validate_reconstruction(
     if rec.source == M3D_SOURCE_MF:
         ts = TrialState(rec)
         points_2d = ts.get('points_2d')
+        valid_start = 0 if rec.start_frame_valid is None else rec.start_frame_valid
+        valid_end = float('inf') if rec.end_frame_valid is None else rec.end_frame_valid
+        
+        logger.info(f"Reconstruction frames: start={rec.start_frame}, valid_start={valid_start}, valid_end={valid_end}")
+        logger.info(f"points_2d array shape: {points_2d.shape}")
+        
         for n in frame_nums:
-            if rec.start_frame_valid <= n <= rec.end_frame_valid:
-                p2d[n] = points_2d[n]
+            if valid_start <= n <= valid_end:
+                local_idx = n - rec.start_frame
+                if 0 <= local_idx < points_2d.shape[0]:
+                    p2d[n] = points_2d[local_idx]
+                else:
+                    logger.warning(f"Frame {n} maps to invalid index {local_idx} (out of bounds for array size {points_2d.shape[0]})")
 
     else:
         for i, frame_id in enumerate(frame_ids):
@@ -731,7 +971,8 @@ if __name__ == '__main__':
     # interactive()
 
     # plot_simple_frame_comparison()
+    plot_simple_frame_comparison_2()  # Use the new function
     # validate_reconstruction()
-    # validate_all_in_dataset(plot_all=False)
-    validation_comparisons()
+    # validate_all_in_dataset(plot_all=True)
+    # validation_comparisons()
     # duration_comparisons()
