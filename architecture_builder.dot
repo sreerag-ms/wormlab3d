@@ -8,39 +8,38 @@ digraph WormReconstruction {
         style="filled";
         fillcolor="whitesmoke";
         rank="source";
-        LegendNew [label="New H&T Components", style="filled", fillcolor="lightgreen", shape="box"];
-        LegendModified [label="Modified Components", style="filled", fillcolor="lightblue", shape="box"];
-        LegendOptional [label="Optional (H&T disabled)", style="dashed", shape="box"];
+        LegendNew [label="New Head and Tail (HT)\n Components", style="filled", fillcolor="#D4F1D4", shape="box"];
+        LegendModified [label="Modified Components", style="filled", fillcolor="#CCE7FF", shape="box"];
+        LegendOptional [label="Optional (HT disabled)", style="dashed", shape="box"];
         LegendNew -> LegendModified -> LegendOptional [style="invis"];
     }
     
     // Input Configuration
-    Args [label="Configuration\n(RuntimeArgs, ParameterArgs, SourceArgs,\nHeadAndTailOptimizationArgs)",style="filled,rounded", fillcolor="lightblue"];
+    Args [label="Configuration\n(RuntimeArgs, ParameterArgs, SourceArgs,\nHeadAndTailOptimizationArgs)",style="filled,rounded", fillcolor="#CCE7FF"];
     Trial [label="Trial\n(Multi-camera videos)"];
-    HTCoordinates [label="Head & Tail Coordinates\n(Ground truth CSV dataset)", style="filled,rounded", fillcolor="lightblue"];
+    HTCoordinates [label="Head & Tail Coordinates\n(Ground truth CSV dataset)", style="filled,rounded", fillcolor="#CCE7FF"];
     
     // Core Processing
-    Midline3DFinder [label="Midline3DFinder\n(Main optimisation engine\nwith H&T integration)"];
+    Midline3DFinder [label="Midline3DFinder\n(Main optimisation engine\nwith HT integration)",  style="filled,rounded", fillcolor="#CCE7FF"];
     ProjectRenderScoreModel [label="ProjectRenderScoreModel\n(3D→2D projection & scoring)"];
     
     // Head & Tail Components
-    HTLossCalculator [label="Head & Tail Loss Calculator\n(Distance-based penalties:\nL2, Huber, Charbonnier)", style="filled,rounded", fillcolor="lightgreen"];
-    ConvergenceDetector [label="Convergence Detector\n(Triggers H&T optimisation)", style="filled,rounded", fillcolor="lightgreen"];
-    CentralFreezeManager [label="Central Freeze Manager\n(Post-convergence stabilization)", style="filled,rounded", fillcolor="lightgreen"];
+    HTLossCalculator [label="Head & Tail Loss Calculator\n(Distance-based penalties:\nL1, L2)", style="filled,rounded", fillcolor="#D4F1D4"];
+    ConvergenceDetector [label="Convergence Detector\n(Triggers HT optimisation)", style="filled,rounded", fillcolor="#CCE7FF"];
     
     // State Management
     TrialState [label="TrialState\n(Cross-frame coordination)"];
-    FrameState [label="FrameState\n(Per-frame parameters +\nH&T endpoint tracking)"];
+    FrameState [label="FrameState\n(Per-frame parameters)"];
     
     // Database Models
     MFParameters [label="MFParameters\n(Optimisation config)"];
-    HTParameters [label="HTParameters\n(H&T specific config)", style="filled,rounded", fillcolor="lightblue"];
+    HTParameters [label="HTParameters\n(HT specific config)", style="filled,rounded", fillcolor="#D4F1D4"];
     
     // Output
-    Reconstruction [label="Reconstruction\n(3D midline results +\nH&T validation plots)"];
+    Reconstruction [label="Reconstruction\n(3D midline results +\nHT validation plots)", style="filled,rounded", fillcolor="#CCE7FF"];
     MFCheckpoint [label="MFCheckpoint\n(Training progress)"];
     MongoDB [label="MongoDB\n(Database storage)"];
-    DiskStorage [label="Disk Storage\n(Large reconstruction data +\nH&T comparison plots)"];
+    DiskStorage [label="Disk Storage\n(Large reconstruction data +\nHT comparison plots)", style="filled,rounded", fillcolor="#CCE7FF"];
     
     // Main flow connections
     Args -> Midline3DFinder;
@@ -55,15 +54,13 @@ digraph WormReconstruction {
     
     // Head & Tail integration
     HTCoordinates -> HTLossCalculator [style="dashed"];
-    HTLossCalculator -> Midline3DFinder [label="H&T loss"];
+    HTLossCalculator -> Midline3DFinder [label="HT loss"];
     Midline3DFinder -> ConvergenceDetector [label="loss metrics"];
-    ConvergenceDetector -> Midline3DFinder [label="convergence signal", color="green"];
-    ConvergenceDetector -> CentralFreezeManager [label="activate freeze", color="green"];
-    CentralFreezeManager -> Midline3DFinder [label="gradient hooks", color="green"];
+    ConvergenceDetector -> Midline3DFinder [label="convergence signal"];
     
     // Parameter configuration
     Args -> MFParameters [label="creates"];
-    Args -> HTParameters [label="creates if H&T enabled", style="dashed"];
+    Args -> HTParameters [label="creates if HT enabled", style="dashed"];
     MFParameters -> Midline3DFinder;
     HTParameters -> Midline3DFinder [style="dashed"];
     
@@ -73,5 +70,5 @@ digraph WormReconstruction {
     Reconstruction -> MongoDB;
     MFCheckpoint -> MongoDB;
     HTParameters -> MongoDB [style="dashed"];
-    Reconstruction -> DiskStorage [label="large data"];
+    Reconstruction -> DiskStorage [label=" large data"];
 }
