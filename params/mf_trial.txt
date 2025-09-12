@@ -88,9 +88,9 @@
 --cpu-only
 --plot-every-n-steps=200
 --plot-every-n-init-steps=500
---start-frame=1000
---end-frame=1690
---head-and-tail-coordinates=data/wt_3d_endpoints.csv
+--start-frame=669
+--end-frame=675
+--head-and-tail-coordinates=logs/scripts/midlines3d/generate_dataset_from_midline_3d/20250911_1359_wt3d_endpoints_trial=37_frames=0-1000.csv
 --initial-head-and-tail-loss-weight=.2
 --n-steps-head-tail-refine=0
 --ht-freeze-length=False
