@@ -91,10 +91,7 @@ class Midline3DFinder:
         # Initialise the parameters
         self.parameters: MFParameters = self._init_parameters()
         
-        if self.head_and_tail_args.use_head_and_tail_optimisations:
-            self.ht_parameters: HTParameters = self._init_ht_parameters()
-        else:
-            self.ht_parameters: HTParameters = None
+        self.ht_parameters: HTParameters = self._init_ht_parameters()
 
         # Initialise convergence detector
         self.convergence_detector = self._init_convergence_detector(self.head_and_tail_args.use_head_and_tail_optimisations)
@@ -257,7 +254,7 @@ class Midline3DFinder:
         """
         logger.info(f'Initialising convergence detector.')
         p = self.parameters
-        shape = (2 + p.depth - p.depth_min,) if use_head_and_tail_optimisations else (1 + p.depth - p.depth_min,)
+        shape = (2 + p.depth - p.depth_min,)
         cd = ConvergenceDetector(
             shape=shape,
             tau_fast=p.convergence_tau_fast,
@@ -1029,16 +1026,11 @@ class Midline3DFinder:
             self._make_plots(first_frame=first_frame)
 
             # Update convergence detector
-            if self.head_and_tail_args.use_head_and_tail_optimisations:
-                losses = torch.tensor(
-                    [loss_global, *losses_depths, loss_head_and_tail],
-                    device=self.device
-                )
-            else:
-                losses = torch.tensor(
-                    [loss_global, *losses_depths],
-                    device=self.device
-                )
+            losses = torch.tensor(
+                [loss_global, *losses_depths, loss_head_and_tail],
+                device=self.device
+            )
+      
             self.convergence_detector.forward(losses, first_val=False)
 
             if not self._convergence_achieved and self.convergence_detector.converged.all():
@@ -1048,7 +1040,6 @@ class Midline3DFinder:
 
                 self._apply_central_freeze()
 
-            # When all of the losses have converged and loss has reached target, break
             if not first_frame \
                     and self.convergence_detector.converged.all() \
                     and loss.item() < p.convergence_loss_target \
@@ -2372,6 +2363,7 @@ class Midline3DFinder:
                 self._plot_filters()
             self._plot_point_stats(frame_state, skipped)
 
+
     def _plot_3d(self, frame_state: FrameState, skipped: bool = False):
         """
         Make a multiscale curve 3D scatter plot.
@@ -2519,6 +2511,51 @@ class Midline3DFinder:
 
         fig.tight_layout()
         self._save_plot(fig, '2D', frame_state)
+
+        self._save_individual_worm_images(frame_state, points_2d, images, scatter_sizes, D, D_min)
+
+    def _save_individual_worm_images(self, frame_state: FrameState, points_2d, images, scatter_sizes, D, D_min):
+        """
+        Save individual camera images with red midline points overlaid at 800x800 resolution.
+        """
+        if not self.runtime_args.save_plots:
+            return
+            
+        save_dir = self.logs_path / 'plots' / '2D_individual'
+        os.makedirs(save_dir, exist_ok=True)
+        
+        camera_names = ['cam0', 'cam1', 'cam2']
+        
+        for d in range(D - D_min):
+            p2d = to_numpy(points_2d[d]).transpose(1, 0, 2)
+            
+            for k in range(3): 
+                fig, ax = plt.subplots(1, 1, figsize=(8, 8), dpi=100)
+                
+                fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+                
+                ax.imshow(images[k], cmap='gray', vmin=0, vmax=1)
+                ax.set_xlim((0, images[k].shape[1]))
+                ax.set_ylim((images[k].shape[0], 0))
+                
+                p = p2d[k]
+                midline_color = '#F44336'
+                if len(p) > 1:
+                    ax.plot(p[:, 0], p[:, 1], color=midline_color, linewidth=2.5, alpha=0.9, zorder=4)
+
+                ax.scatter(p[:, 0], p[:, 1], c=midline_color, s=20, alpha=0.8, zorder=5)
+                
+                ax.axis('off')
+                ax.set_xticks([])
+                ax.set_yticks([])
+                
+                fn = f'{frame_state.frame_num:05d}_{self.step:06d}_{camera_names[k]}_d{d + D_min}.{img_extension}'
+                if self.runtime_args.prefix_seed_to_plot_names:
+                    fn = f'{self.runtime_args.seed:02d}_' + fn
+                path = save_dir / fn
+                plt.savefig(path, bbox_inches=None, pad_inches=0, dpi=100, 
+                           facecolor='black', edgecolor='none')
+                plt.close(fig)
 
     def _plot_2d_batch(self):
         """
@@ -2958,8 +2995,6 @@ class Midline3DFinder:
 
         comparisons_dir = self.logs_path / 'comparisons'
         comparisons_dir.mkdir(parents=True, exist_ok=True)
-
-        fig, ax = plt.subplots(figsize=(10, 8))
 
         legend_handles = [
             Line2D([], [], marker='^', color='r', linestyle='None', markersize=3, label='Actual Head'),
