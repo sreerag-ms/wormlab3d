@@ -22,6 +22,7 @@ class Reconstruction(Document):
     source = StringField(choices=M3D_SOURCES, required=True)
     source_file = StringField()
     mf_parameters = ReferenceField('MFParameters')
+    ht_parameters = ReferenceField('HTParameters')
     copied_from = ReferenceField('Reconstruction')
 
     meta = {
@@ -30,8 +31,9 @@ class Reconstruction(Document):
             'source',
             'source_file',
             'mf_parameters',
+            'ht_parameters',
             {
-                'fields': ['trial', 'source', 'source_file', 'mf_parameters'],
+                'fields': ['trial', 'source', 'source_file', 'mf_parameters', 'ht_parameters'],
                 'unique': True
             },
         ]

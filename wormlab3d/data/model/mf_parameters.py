@@ -113,7 +113,7 @@ class MFParameters(Document):
     loss_intersections = FloatField()
     loss_alignment = FloatField()
     loss_consistency = FloatField()
-    loss_head_and_tail = FloatField()
+    initial_head_and_tail_loss_weight = FloatField()
 
     # --- Deprecated
     loss_sigmas = FloatField()

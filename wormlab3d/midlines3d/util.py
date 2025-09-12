@@ -2,7 +2,7 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 
-from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT
+# from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT
 
 
 def generate_annotated_images(
@@ -13,7 +13,7 @@ def generate_annotated_images(
     Prepare images with overlaid midlines as connecting lines between vertices.
     """
     images = []
-    cmap_midline = plt.get_cmap(MIDLINE_CMAP_DEFAULT)
+    cmap_midline = plt.get_cmap('plasma')
     colours = np.array([cmap_midline(i) for i in np.linspace(0, 1, points_2d.shape[0])])
     colours = np.round(colours * 255).astype(np.uint8)
     for i, img_array in enumerate(image_triplet):

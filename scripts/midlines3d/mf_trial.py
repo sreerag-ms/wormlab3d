@@ -1,6 +1,6 @@
 import sys
 import argparse
-from wormlab3d.midlines3d.args_finder.parse import parse_arguments, RuntimeArgs, SourceArgs, ParameterArgs
+from wormlab3d.midlines3d.args_finder.parse import parse_arguments, RuntimeArgs, SourceArgs, ParameterArgs, HeadAndTailOptimizationArgs
 from wormlab3d.midlines3d.midline3d_finder import Midline3DFinder
 
 def _load_args_file():
@@ -25,6 +25,7 @@ def _process_args_file(lines: list):
     RuntimeArgs.add_args(proto)
     SourceArgs.add_args(proto)
     ParameterArgs.add_args(proto)
+    HeadAndTailOptimizationArgs.add_args(proto)
 
     flag_only = set(
         action.dest.replace('_', '-')
@@ -52,13 +53,14 @@ def train():
     if lines is not None:
         _process_args_file(lines)
 
-    runtime_args, source_args, parameter_args = parse_arguments()
+    runtime_args, source_args, parameter_args, head_and_tail_args = parse_arguments()
 
     # Construct finder
     manager = Midline3DFinder(
         runtime_args=runtime_args,
         source_args=source_args,
-        parameter_args=parameter_args
+        parameter_args=parameter_args,
+        head_and_tail_args=head_and_tail_args
     )
 
     # Process the trial

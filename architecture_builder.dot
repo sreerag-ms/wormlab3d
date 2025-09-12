@@ -1,0 +1,77 @@
+digraph WormReconstruction {
+    rankdir=TB;
+    node [shape=box, style=rounded, fontsize=12, fontname="Arial", height=0.8, width=2.5];
+    edge [fontsize=11, fontname="Arial"];
+    
+    subgraph cluster_legend {
+        label="Legend";
+        style="filled";
+        fillcolor="whitesmoke";
+        rank="source";
+        LegendNew [label="New H&T Components", style="filled", fillcolor="lightgreen", shape="box"];
+        LegendModified [label="Modified Components", style="filled", fillcolor="lightblue", shape="box"];
+        LegendOptional [label="Optional (H&T disabled)", style="dashed", shape="box"];
+        LegendNew -> LegendModified -> LegendOptional [style="invis"];
+    }
+    
+    // Input Configuration
+    Args [label="Configuration\n(RuntimeArgs, ParameterArgs, SourceArgs,\nHeadAndTailOptimizationArgs)",style="filled,rounded", fillcolor="lightblue"];
+    Trial [label="Trial\n(Multi-camera videos)"];
+    HTCoordinates [label="Head & Tail Coordinates\n(Ground truth CSV dataset)", style="filled,rounded", fillcolor="lightblue"];
+    
+    // Core Processing
+    Midline3DFinder [label="Midline3DFinder\n(Main optimisation engine\nwith H&T integration)"];
+    ProjectRenderScoreModel [label="ProjectRenderScoreModel\n(3D→2D projection & scoring)"];
+    
+    // Head & Tail Components
+    HTLossCalculator [label="Head & Tail Loss Calculator\n(Distance-based penalties:\nL2, Huber, Charbonnier)", style="filled,rounded", fillcolor="lightgreen"];
+    ConvergenceDetector [label="Convergence Detector\n(Triggers H&T optimisation)", style="filled,rounded", fillcolor="lightgreen"];
+    CentralFreezeManager [label="Central Freeze Manager\n(Post-convergence stabilization)", style="filled,rounded", fillcolor="lightgreen"];
+    
+    // State Management
+    TrialState [label="TrialState\n(Cross-frame coordination)"];
+    FrameState [label="FrameState\n(Per-frame parameters +\nH&T endpoint tracking)"];
+    
+    // Database Models
+    MFParameters [label="MFParameters\n(Optimisation config)"];
+    HTParameters [label="HTParameters\n(H&T specific config)", style="filled,rounded", fillcolor="lightblue"];
+    
+    // Output
+    Reconstruction [label="Reconstruction\n(3D midline results +\nH&T validation plots)"];
+    MFCheckpoint [label="MFCheckpoint\n(Training progress)"];
+    MongoDB [label="MongoDB\n(Database storage)"];
+    DiskStorage [label="Disk Storage\n(Large reconstruction data +\nH&T comparison plots)"];
+    
+    // Main flow connections
+    Args -> Midline3DFinder;
+    HTCoordinates -> Args [label="loaded if enabled"];
+    Trial -> TrialState;
+    TrialState -> FrameState;
+    FrameState -> Midline3DFinder;
+    
+    // Core optimisation loop
+    Midline3DFinder -> ProjectRenderScoreModel;
+    ProjectRenderScoreModel -> Midline3DFinder [label="optimisation loop"];
+    
+    // Head & Tail integration
+    HTCoordinates -> HTLossCalculator [style="dashed"];
+    HTLossCalculator -> Midline3DFinder [label="H&T loss"];
+    Midline3DFinder -> ConvergenceDetector [label="loss metrics"];
+    ConvergenceDetector -> Midline3DFinder [label="convergence signal", color="green"];
+    ConvergenceDetector -> CentralFreezeManager [label="activate freeze", color="green"];
+    CentralFreezeManager -> Midline3DFinder [label="gradient hooks", color="green"];
+    
+    // Parameter configuration
+    Args -> MFParameters [label="creates"];
+    Args -> HTParameters [label="creates if H&T enabled", style="dashed"];
+    MFParameters -> Midline3DFinder;
+    HTParameters -> Midline3DFinder [style="dashed"];
+    
+    // Output connections
+    Midline3DFinder -> Reconstruction;
+    Midline3DFinder -> MFCheckpoint;
+    Reconstruction -> MongoDB;
+    MFCheckpoint -> MongoDB;
+    HTParameters -> MongoDB [style="dashed"];
+    Reconstruction -> DiskStorage [label="large data"];
+}

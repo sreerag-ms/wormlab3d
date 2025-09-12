@@ -1,7 +1,7 @@
 from argparse import ArgumentParser, _ArgumentGroup
 
 from wormlab3d.data.model.mf_parameters import MFParameters, RENDER_MODE_GAUSSIANS, RENDER_MODES, \
-    CURVATURE_INTEGRATION_MIDPOINT, CURVATURE_INTEGRATION_OPTIONS, CURVATURE_INTEGRATION_ALGORITHM_EULER, CURVATURE_INTEGRATION_ALGORITHM_RK4, \
+    CURVATURE_INTEGRATION_MIDPOINT, CURVATURE_INTEGRATION_OPTIONS, CURVATURE_INTEGRATION_ALGORITHM_EULER, CURVATURE_INTEGRATION_ALGORITHM_MIDPOINT, \
     CURVATURE_INTEGRATION_ALGORITHM_OPTIONS
 from wormlab3d.nn.args.base_args import BaseArgs
 from wormlab3d.nn.args.optimiser_args import OPTIMISER_ALGORITHMS, LOSS_MSE, OPTIMISER_ADAM, LOSSES
@@ -92,7 +92,6 @@ class ParameterArgs(BaseArgs):
             loss_intersections: float = 0.,
             loss_alignment: float = 0.,
             loss_consistency: float = 0.,
-            loss_head_and_tail: float = 0.,
             algorithm: str = OPTIMISER_ADAM,
 
             lr_cam_coeffs: float = 1e-5,
@@ -106,8 +105,6 @@ class ParameterArgs(BaseArgs):
             lr_decay: float = None,
             lr_min: float = 1e-6,
             lr_patience: int = 10,
-            n_steps_head_tail_refine: int = 100,
-            ht_freeze_length: bool = True,
             **kwargs
     ):
         self.load = load
@@ -254,8 +251,6 @@ class ParameterArgs(BaseArgs):
         self.loss_intersections = loss_intersections
         self.loss_alignment = loss_alignment
         self.loss_consistency = loss_consistency
-        self.loss_head_and_tail = loss_head_and_tail
-        self.n_steps_head_tail_refine = n_steps_head_tail_refine
 
         assert algorithm in OPTIMISER_ALGORITHMS
         self.algorithm = algorithm
@@ -273,7 +268,6 @@ class ParameterArgs(BaseArgs):
         self.lr_decay = lr_decay
         self.lr_min = lr_min
         self.lr_patience = lr_patience
-        self.ht_freeze_length = ht_freeze_length
 
     @classmethod
     def add_args(cls, parser: ArgumentParser) -> _ArgumentGroup:
@@ -336,7 +330,7 @@ class ParameterArgs(BaseArgs):
                            default=CURVATURE_INTEGRATION_MIDPOINT, choices=CURVATURE_INTEGRATION_OPTIONS,
                            help='Integrate using a single midpoint-out ("mp", default) or from both ends ("ht").')
         group.add_argument('--curvature-integration-algorithm', type=str,
-                           default=CURVATURE_INTEGRATION_ALGORITHM_RK4,
+                           default=CURVATURE_INTEGRATION_ALGORITHM_MIDPOINT,
                            choices=CURVATURE_INTEGRATION_ALGORITHM_OPTIONS,
                            help='Numerical method for integrating the curve; euler (default), midpoint or rk4.')
         group.add_argument('--length-min', type=float,
@@ -436,8 +430,6 @@ class ParameterArgs(BaseArgs):
                            help='Shape-space alignment loss.')
         group.add_argument('--loss-consistency', type=float, default=0.,
                            help='Loss to control difference between head and tail integrations.')
-        group.add_argument('--loss-head-and-tail', type=float, default=0.,
-                           help='Weight for head and tail coordinate loss from ground truth data.')
 
         group.add_argument('--algorithm', type=str, choices=OPTIMISER_ALGORITHMS, default=OPTIMISER_ADAM,
                            help='Optimisation algorithm.')
@@ -463,10 +455,6 @@ class ParameterArgs(BaseArgs):
                            help='Learning rate for the filters.')
         group.add_argument('--lr-patience', type=float, default=1e-3,
                            help='Learning rate for the filters.')
-        group.add_argument('--n-steps-head-tail-refine', type=int, default=100,
-                           help='Number of refinement steps for head and tail.')
-        group.add_argument('--ht-freeze-length', type=str2bool, default=True,
-                           help='Freeze length for a few steps so endpoints can slide along the curve. Default=True.')
         return group
 
     def get_db_params(self) -> dict:

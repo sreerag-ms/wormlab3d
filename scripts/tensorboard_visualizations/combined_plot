@@ -1,0 +1,274 @@
+#!/usr/bin/env python3
+"""
+TensorBoard scalar plotter
+"""
+
+import argparse
+import csv
+import os
+import sys
+import glob
+from dataclasses import dataclass
+from typing import List, Dict, Tuple
+
+import matplotlib
+matplotlib.use("Agg") 
+import matplotlib.pyplot as plt
+import numpy as np
+
+try:
+    from tensorboard.backend.event_processing import event_accumulator as ea
+except Exception as e:
+    sys.stderr.write(
+        "Error: Could not import TensorBoard's event_accumulator.\n"
+        "Install it with: pip install tensorboard\n"
+        f"Details: {e}\n"
+    )
+    sys.exit(1)
+
+
+@dataclass
+class Series:
+    wall_time: List[float]
+    step: List[int]
+    value: List[float]
+    run: str        # run label (usually the file or parent dir)
+    tag: str        # scalar tag
+
+
+def find_event_files(path: str) -> List[str]:
+    """Return a list of event files. Accepts a file or directory."""
+    if os.path.isfile(path):
+        return [path]
+    if os.path.isdir(path):
+        # search recursively
+        pattern = os.path.join(path, "**", "events.out.tfevents.*")
+        files = glob.glob(pattern, recursive=True)
+        return sorted(files)
+    raise FileNotFoundError(f"Path not found: {path}")
+
+
+def load_scalars(event_file: str, wanted_tags: List[str] = None) -> Dict[str, Series]:
+    """Load scalar tags from a single event file."""
+    acc = ea.EventAccumulator(
+        event_file,
+        size_guidance={
+            ea.SCALARS: 0, 
+            ea.IMAGES: 0,
+            ea.COMPRESSED_HISTOGRAMS: 0,
+            ea.HISTOGRAMS: 0,
+        },
+    )
+    acc.Reload()
+
+    available = set(acc.Tags().get("scalars", []))
+    if not available:
+        return {}
+
+    tags_to_read = wanted_tags if wanted_tags else sorted(available)
+    missing = [t for t in tags_to_read if t not in available]
+    if missing:
+        sys.stderr.write(
+            f"[WARN] Missing tags in {os.path.basename(event_file)}: {missing}\n"
+        )
+
+    data: Dict[str, Series] = {}
+    run_label = os.path.basename(os.path.dirname(event_file)) or os.path.basename(event_file)
+    for tag in tags_to_read:
+        if tag not in available:
+            continue
+        events = acc.Scalars(tag)
+        series = Series(
+            wall_time=[e.wall_time for e in events],
+            step=[e.step for e in events],
+            value=[e.value for e in events],
+            run=run_label,
+            tag=tag,
+        )
+        data[tag] = series
+    return data
+
+
+def moving_average(values: List[float], window: int) -> List[float]:
+    if window <= 1 or window > len(values):
+        return values
+    out = []
+    cumsum = 0.0
+    q = []
+    for v in values:
+        q.append(v)
+        cumsum += v
+        if len(q) > window:
+            cumsum -= q.pop(0)
+        out.append(cumsum / len(q))
+    return out
+
+
+def plot_tag(all_series: List[Series], outdir: str, smooth: int = 1,
+             start_frame: int = None, end_frame: int = None,
+             title: str = None, xlabel: str = None, ylabel: str = None) -> str:
+    assert all(s.tag == all_series[0].tag for s in all_series)
+    tag = all_series[0].tag
+
+    plt.figure(figsize=(8, 5))
+    for s in all_series:
+        x = np.array(s.step)
+        y = np.array(s.value)
+        if start_frame is not None or end_frame is not None:
+            mask = (x >= (start_frame if start_frame is not None else x.min())) & \
+                   (x <= (end_frame if end_frame is not None else x.max()))
+            x, y = x[mask], y[mask]
+        y = moving_average(y.tolist(), smooth) if smooth and smooth > 1 else y
+        plt.plot(x, y, label=s.run, linewidth=1.5, color='#F44336')
+
+    plt.title(title if title is not None else tag)
+    plt.xlabel(xlabel if xlabel is not None else "Step")
+    plt.ylabel(ylabel if ylabel is not None else tag.split("/")[-1])
+    plt.grid(True, linestyle="--", alpha=0.4)
+    if len(all_series) > 1:
+        plt.legend(loc="best", frameon=False)
+
+    if start_frame is not None or end_frame is not None:
+        plt.xlim(left=start_frame if start_frame is not None else None,
+                 right=end_frame if end_frame is not None else None)
+
+    os.makedirs(outdir, exist_ok=True)
+    safe_tag = tag.replace("/", "_")
+    outpath = os.path.join(outdir, f"{safe_tag}.png")
+    plt.tight_layout()
+    plt.savefig(outpath, dpi=160)
+    plt.close()
+    return outpath
+
+
+def plot_combined_tags(by_tag: Dict[str, List[Series]], outdir: str, smooth: int = 1,
+                      start_frame: int = None, end_frame: int = None,
+                      title: str = None, xlabel: str = None) -> str:
+    """Plot three specific tags in a combined stacked subplot layout."""
+    required_tags = ['head_tail_weight', 'loss/head_and_tail', 'loss/total']
+    
+    # Check if all required tags are available
+    available_tags = [tag for tag in required_tags if tag in by_tag]
+    if len(available_tags) != 3:
+        missing = [tag for tag in required_tags if tag not in by_tag]
+        sys.stderr.write(f"[WARN] Missing required tags for combined plot: {missing}\n")
+        return None
+    
+    fig, axes = plt.subplots(3, 1, figsize=(10, 12), sharex=True)
+    fig.suptitle(title if title is not None else "Combined Loss Analysis", fontsize=16)
+    
+    colors = ['#F44336', '#F44336', '#F44336']
+    
+    ylabels = [r'$w_{HT}$', r'$L_{HT}$', r'$L_{total}$']
+
+    for i, (tag, color, ylabel) in enumerate(zip(required_tags, colors, ylabels)):
+        ax = axes[i]
+        series_list = by_tag[tag]
+        
+        for s in series_list:
+            x = np.array(s.step)
+            y = np.array(s.value)
+            if start_frame is not None or end_frame is not None:
+                mask = (x >= (start_frame if start_frame is not None else x.min())) & \
+                       (x <= (end_frame if end_frame is not None else x.max()))
+                x, y = x[mask], y[mask]
+            y = moving_average(y.tolist(), smooth) if smooth and smooth > 1 else y
+            ax.plot(x, y, label=s.run, linewidth=1.5, color=color)
+        
+        ax.set_ylabel(ylabel, fontsize=12)
+        ax.grid(True, linestyle="--", alpha=0.4)
+        if len(series_list) > 1:
+            ax.legend(loc="best", frameon=False, fontsize=10)
+        
+        # ax.set_title(title, fontsize=11, pad=10)
+
+        if start_frame is not None or end_frame is not None:
+            ax.set_xlim(left=start_frame if start_frame is not None else None,
+                       right=end_frame if end_frame is not None else None)
+    
+    axes[-1].set_xlabel(xlabel if xlabel is not None else "Steps", fontsize=12)
+    
+    os.makedirs(outdir, exist_ok=True)
+    outpath = os.path.join(outdir, "combined_loss_analysis.png")
+    plt.tight_layout()
+    plt.savefig(outpath, dpi=160, bbox_inches='tight')
+    plt.close()
+    return outpath
+
+
+
+def export_csv(all_series: List[Series], outdir: str) -> str:
+    """Export a single tag across runs to CSV with columns: run,step,value,wall_time."""
+    tag = all_series[0].tag
+    os.makedirs(outdir, exist_ok=True)
+    safe_tag = tag.replace("/", "_")
+    outpath = os.path.join(outdir, f"{safe_tag}.csv")
+    with open(outpath, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["run", "step", "value", "wall_time"])
+        for s in all_series:
+            for st, val, wt in zip(s.step, s.value, s.wall_time):
+                writer.writerow([s.run, st, val, wt])
+    return outpath
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Plot TensorBoard scalars with matplotlib.")
+    ap.add_argument("--path", required=True)
+    ap.add_argument("--tag", action="append", default=None)
+    ap.add_argument("--outdir", default="data/tb_plots")
+    ap.add_argument("--smooth", type=int, default=1)
+    ap.add_argument("--csv", action="store_true")
+    ap.add_argument("--start-frame", type=int, default=None)
+    ap.add_argument("--end-frame", type=int, default=None)
+    ap.add_argument("--title", type=str, default=None)
+    ap.add_argument("--xlabel", type=str, default="Steps")
+    ap.add_argument("--ylabel", type=str, default="Head and Tail Loss")
+    ap.add_argument("--combined", action="store_true")
+
+    args = ap.parse_args()
+
+    event_files = find_event_files(args.path)
+    if not event_files:
+        sys.stderr.write("No event files found.\n")
+        sys.exit(1)
+
+    by_tag: Dict[str, List[Series]] = {}
+    for ef in event_files:
+        tag_to_series = load_scalars(ef, args.tag)
+        if not tag_to_series:
+            continue
+        for tag, series in tag_to_series.items():
+            by_tag.setdefault(tag, []).append(series)
+
+    if not by_tag:
+        sys.stderr.write("No scalar data found for the requested tags.\n")
+        sys.exit(1)
+
+    if args.combined:
+        print("Creating combined plot...")
+        combined_img = plot_combined_tags(by_tag, args.outdir, smooth=args.smooth,
+                                        start_frame=args.start_frame, end_frame=args.end_frame,
+                                        title=args.title, xlabel=args.xlabel)
+        if combined_img:
+            print(f"[COMBINED] Combined plot -> {combined_img}")
+        else:
+            sys.stderr.write("Could not create combined plot. Make sure head_tail_weight, loss/head_and_tail, and loss/total tags are available.\n")
+
+    if not args.combined:
+        print(f"Found {len(by_tag)} tag(s). Saving to: {args.outdir}")
+        for tag, series_list in sorted(by_tag.items()):
+            img = plot_tag(series_list, args.outdir, smooth=args.smooth,
+                           start_frame=args.start_frame, end_frame=args.end_frame,
+                           title=args.title, xlabel=args.xlabel, ylabel=args.ylabel)
+
+            print(f"[PLOT] {tag} -> {img}")
+            if args.csv:
+                csv_path = export_csv(series_list, args.outdir)
+                print(f"[CSV ] {tag} -> {csv_path}")
+
+
+if __name__ == "__main__":
+    main()
+
+

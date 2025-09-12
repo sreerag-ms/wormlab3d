@@ -433,8 +433,8 @@ class MFParametersView(DocumentView):
                 },
             ),
             (
-                self.prefix + 'loss_head_and_tail', {
-                    'title': 'Loss head and tail',
+                self.prefix + 'initial_head_and_tail_loss_weight', {
+                    'title': 'Initial head and tail loss weight',
                     'type': 'scientific',
                     'precision': 1,
                 },

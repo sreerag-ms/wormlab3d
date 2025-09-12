@@ -5,6 +5,7 @@ __pycache__
 *.egg-info
 .eggs
 .snakemake
+.tmp*/
 
 # Local environment
 .env
@@ -12,6 +13,7 @@ __pycache__
 /logs
 
 # Data directories
+
 /data/approx_cache
 /data/backgrounds
 /data/db
@@ -30,6 +32,8 @@ __pycache__
 intermediate-data
 **/worm_data
 /venv
+/data/results
+
 
 data/videos
 data/reconstruction_eigenworms
@@ -39,3 +43,4 @@ data/cameras
 data/examples
 data/run_tumble_approximations
 data/037
+data/tb_plots

@@ -17,10 +17,8 @@ from scipy import interpolate
 from torch import nn
 from torch.backends import cudnn
 
-from simple_worm.plot3d import MIDLINE_CMAP_DEFAULT
 from wormlab3d import logger, LOGS_PATH, PREPARED_IMAGES_PATH, START_TIMESTAMP
 from wormlab3d.data.model import Reconstruction, Trial, Dataset
-from wormlab3d.data.model.dataset import DatasetMidline3D
 from wormlab3d.data.model.midline3d import M3D_SOURCE_MF, Midline3D, M3D_SOURCE_WT3D, M3D_SOURCE_RECONST
 from wormlab3d.midlines3d.project_render_score import render_points
 from wormlab3d.midlines3d.trial_state import TrialState
@@ -38,10 +36,10 @@ colours = {k: default_colours[i] for i, k in enumerate([
     M3D_SOURCE_WT3D
 ])}
 colours = {
-    M3D_SOURCE_MF: 'blue',
+    M3D_SOURCE_MF: '#2196F3',
     M3D_SOURCE_RECONST: 'orange',
-    M3D_SOURCE_WT3D: 'forestgreen',
-    'highlight': 'darkviolet'
+    M3D_SOURCE_WT3D: '#4CAF50',
+    'highlight': '#F44336'
 }
 colours_opt = {
     M3D_SOURCE_RECONST: 'red',
@@ -69,7 +67,7 @@ def get_args() -> Namespace:
     parser.add_argument('--reconstruction', type=str, help='Reconstruction by id.')
 
     # Processing args
-    parser.add_argument('--batch-size', type=int, default=10, help='Batch size.')
+    parser.add_argument('--batch-size', type=int, default=5, help='Batch size.')
     parser.add_argument('--gpu-id', type=int, default=-1, help='GPU id to use if using GPUs.')
     parser.add_argument('--rebuild-cache', type=str2bool, default=False, help='Rebuild caches.')
     parser.add_argument('--cache-only', type=str2bool, default=False, help='Use cache only.')
@@ -87,6 +85,8 @@ def get_args() -> Namespace:
     parser.add_argument('--plot-n-examples', type=int, default=3, help='Number of examples to plot.')
     parser.add_argument('--plot-example-frames', type=lambda s: [int(item) for item in s.split(',')], default=[],
                         help='Plot these frame numbers.')
+    parser.add_argument('--max-frames', type=int, default=None, help='Maximum number of frames to process.')
+    parser.add_argument('--reconstruction-b', type=str, help='Second MF reconstruction by id.')
 
     args = parser.parse_args()
     print_args(args)
@@ -120,6 +120,8 @@ def _get_recs_to_compare(trial: Trial) -> Dict[str, Reconstruction]:
             if sfB.isnumeric() and (not sfA.isnumeric() or (sfA.isnumeric() and int(sfA) < int(sfB))):
                 recs_to_compare[rec.source] = rec
 
+    # Only keep the M3D_SOURCE_WT3D key if present
+    # recs_to_compare = {k: v for k, v in recs_to_compare.items() if k == M3D_SOURCE_WT3D}
     return recs_to_compare
 
 
@@ -165,51 +167,6 @@ def _resample(X: np.ndarray, N: int) -> np.ndarray:
         X = X_new
 
     return X
-
-
-def _overlay_images(
-        images: np.ndarray,
-        points_2d: np.ndarray,
-        midline_width: int = 3,
-        invert: bool = False
-) -> List[np.ndarray]:
-    """
-    Make triplet of images with overlaid midlines for debug.
-    """
-    if points_2d.shape[1] == 3:
-        points_2d = points_2d.transpose(1, 0, 2)
-    points_2d = points_2d.astype(np.int32)
-    cmap = plt.get_cmap(MIDLINE_CMAP_DEFAULT)
-    colours = cmap(np.linspace(0, 1, points_2d.shape[1]))
-    colours = np.round(colours * 255).astype(np.uint8)
-
-    views = []
-    for c, img_array in enumerate(images):
-        if invert:
-            img_array = 1 - img_array
-        z = (img_array * 255).astype(np.uint8)
-        z = cv2.cvtColor(z, cv2.COLOR_GRAY2BGRA)
-        p2d = points_2d[c]
-
-        for j, p in enumerate(p2d):
-            col = colours[j].tolist()
-
-            # Draw markers and connecting lines
-            z = cv2.drawMarker(
-                z,
-                p,
-                color=col,
-                markerType=cv2.MARKER_CROSS,
-                markerSize=2,
-                thickness=1,
-                line_type=cv2.LINE_AA
-            )
-            if j > 0:
-                cv2.line(z, p2d[j - 1], p2d[j], color=col, thickness=midline_width, lineType=cv2.LINE_AA)
-
-        views.append(z)
-
-    return views
 
 
 def _calculate_2d_data(
@@ -289,17 +246,17 @@ def _fetch_2d_data(
     N = rec_mf.mf_parameters.n_points_total
 
     # Fetch the MF data directly
-    ts = TrialState(rec_mf, start_frame=rec_mf.start_frame_valid,
-                    end_frame=rec_mf.end_frame_valid)
+    ts = TrialState(rec_mf, start_frame=rec_mf.start_frame,
+                    end_frame=rec_mf.end_frame)
     Xs = [ts.get('points_2d'), ]
 
     # Load cached data for the comparisons
     for i, (src, rec) in enumerate(recs_to_compare.items()):
         X = _generate_or_load_2d_data(rec, N, rebuild_cache, cache_only)
-        if rec.start_frame < rec_mf.start_frame_valid:
-            X = X[rec_mf.start_frame_valid - rec.start_frame:]
-        if rec.end_frame > rec_mf.end_frame_valid:
-            X = X[:rec_mf.end_frame_valid - rec.end_frame]
+        if rec.start_frame < rec_mf.start_frame:
+            X = X[rec_mf.start_frame - rec.start_frame:]
+        if rec.end_frame > rec_mf.end_frame:
+            X = X[:rec_mf.end_frame - rec.end_frame]
         Xs.append(X)
 
     return Xs
@@ -399,7 +356,10 @@ def _optimise_parameters(
     if max_train_steps == 0:
         return params
 
-    optimiser = torch.optim.AdamW(params=list(params.values()), lr=lr, weight_decay=0)
+
+    actual_lr = lr
+    
+    optimiser = torch.optim.AdamW(params=list(params.values()), lr=actual_lr, weight_decay=0)
 
     def _train_loop():
         optimiser.zero_grad()
@@ -418,25 +378,36 @@ def _optimise_parameters(
         loss = ((renders - images)**2).mean()
         loss.backward()
         if is_bad(loss):
-            raise RuntimeError('Bad loss!')
+            logger.warning(f"Encountered bad loss value: {loss.item()}")
+            # Return the previous loss instead
+            return float('inf')
+        
         optimiser.step()
         return loss.item()
 
     l_prev = np.inf
     conv_count = 0
     for i in range(max_train_steps):
-        l = _train_loop()
-        if i % 5 == 0:
-            logger.info(f'Optimisation step {i + 1}/{max_train_steps}: Loss = {l:.5E} \t (cc={conv_count})')
-        is_converged = abs(l - l_prev) / l_prev < conv_tol
-        if is_converged:
-            conv_count += 1
-            if conv_count > conv_patience:
-                logger.info(f'Converged after {i + 1} steps. Loss = {l:.5E}')
-                break
-        else:
-            conv_count = 0
-        l_prev = l
+        try:
+            l = _train_loop()
+            if l == float('inf'):
+                logger.warning(f"Skipping step {i+1} due to bad loss")
+                continue
+                
+            if i % 1 == 0:
+                logger.info(f'Optimisation step {i + 1}/{max_train_steps}: Loss = {l:.5E} \t (cc={conv_count})')
+            is_converged = abs(l - l_prev) / l_prev < conv_tol
+            if is_converged:
+                conv_count += 1
+                if conv_count > conv_patience:
+                    logger.info(f'Converged after {i + 1} steps. Loss = {l:.5E}')
+                    break
+            else:
+                conv_count = 0
+            l_prev = l
+        except Exception as e:
+            logger.warning(f"Error during optimization step {i+1}: {str(e)}")
+            break
 
     params = {k: v.clone().detach() for k, v in params.items()}
     gc.collect()
@@ -465,8 +436,8 @@ def _calculate_errors(
     # Rendering parameters come from the MF reconstruction
     ts = TrialState(
         rec_mf,
-        start_frame=max(rec.start_frame, rec_mf.start_frame_valid),
-        end_frame=min(rec.end_frame, rec_mf.end_frame_valid)
+        start_frame=max(rec.start_frame, rec_mf.start_frame),
+        end_frame=min(rec.end_frame, rec_mf.end_frame)
     )
     sigmas = ts.get('sigmas')
     intensities = ts.get('intensities')
@@ -478,8 +449,8 @@ def _calculate_errors(
     for i in range(n_batches):
         logger.info(f'Calculating errors for batch {i + 1}/{n_batches}.')
         start_idx = i * batch_size
-        end_idx = min(n_frames + 1, (i + 1) * batch_size)
-        if end_idx == start_idx:
+        end_idx = min(n_frames, (i + 1) * batch_size)
+        if end_idx <= start_idx:
             continue
         p2d_batch = torch.from_numpy(points_2d[start_idx:end_idx]).to(device)
 
@@ -639,150 +610,6 @@ def _fetch_errors(
     return errors
 
 
-def _calculate_smoothness_old(
-        rec_mf: Reconstruction,
-        rec: Reconstruction,
-) -> np.ndarray:
-    """
-    Compute smoothness from the 3D points.
-    """
-    X, _ = get_trajectory(
-        reconstruction_id=rec.id,
-        start_frame=max(rec.start_frame, rec_mf.start_frame_valid),
-        end_frame=min(rec.end_frame, rec_mf.end_frame_valid)
-    )
-
-    # Centre trajectory
-    X = X - X.mean(axis=0)
-
-    # Calculate angles between segments
-    v1 = X[:, 1:-1] - X[:, :-2]
-    v2 = X[:, 2:] - X[:, 1:-1]
-    abs_val = np.linalg.norm(v1, axis=-1) * np.linalg.norm(v2, axis=-1)
-    dot = np.einsum('bij,bij->bi', v1, v2)
-    cos = dot / abs_val
-    angles = np.arccos(cos)
-
-    # Calculate gradient of the angles along the body
-    angles_grad = np.gradient(np.unwrap(angles), axis=1)
-
-    # Take the loss as the sum of the absolute gradients
-    loss = np.abs(angles_grad).sum(axis=1)
-
-    return loss
-
-
-def _calculate_smoothness(
-        rec_mf: Reconstruction,
-        rec: Reconstruction,
-) -> np.ndarray:
-    """
-    Compute smoothness from the 3D points.
-    """
-    from numpy.linalg import norm
-    X, _ = get_trajectory(
-        reconstruction_id=rec.id,
-        start_frame=max(rec.start_frame, rec_mf.start_frame_valid),
-        end_frame=min(rec.end_frame, rec_mf.end_frame_valid)
-    )
-
-    # Centre trajectory
-    X = X - X.mean(axis=0)
-
-    # Distance between vertices
-    q = norm(X[:, 1:] - X[:, :-1], axis=-1)
-    q = np.c_[q[:, 0], q, q[:, -1]]
-
-    # Average distances over both neighbours
-    spacing = (q[:, :-1] + q[:, 1:]) / 2
-    locs = np.cumsum(spacing, axis=1)
-
-    # Tangent is normalised gradient of curve
-    T = np.zeros_like(X)
-    for i, Xi in enumerate(X):
-        T[i] = np.gradient(Xi, locs[i], axis=0, edge_order=1)
-    T_norm = norm(T, axis=-1, keepdims=True)
-    T = T / T_norm
-
-    # Curvature is gradient of tangent
-    K = np.gradient(T, 1 / (X.shape[1] - 1), axis=1, edge_order=1)
-    K = K / T_norm
-
-    # Take the loss as the squared distance in neighbouring curvatures
-    loss = ((K[:, 1:] - K[:, :-1])**2).sum(axis=(1, 2))
-
-    return loss
-
-
-def _generate_or_load_smoothness(
-        rec_mf: Reconstruction,
-        rec: Reconstruction,
-        N: int,
-        rebuild_cache: bool = False,
-        cache_only: bool = False
-) -> np.ndarray:
-    """
-    Generate or load the smoothness losses.
-    """
-    cache_path = POINTS_CACHE_PATH / f'rec_{rec.id}_N={N}_smoothness'
-    cache_fn = cache_path.with_suffix(cache_path.suffix + '.npz')
-    data = None
-    if not rebuild_cache and cache_fn.exists():
-        try:
-            data = np.load(cache_fn)
-            data = data['data']
-            logger.info(f'Loaded smoothness losses from cache: {cache_fn}')
-        except Exception as e:
-            data = None
-            logger.warning(f'Could not load cache: {e}')
-
-    if data is None:
-        if cache_only:
-            raise RuntimeError(f'Cache "{cache_fn}" could not be loaded!')
-        logger.info('Calculating smoothness losses.')
-        data = _calculate_smoothness(
-            rec_mf=rec_mf,
-            rec=rec,
-        )
-        save_arrs = {'data': data}
-        logger.info(f'Saving smoothness losses to {cache_path}.')
-        np.savez(cache_path, **save_arrs)
-
-    return data
-
-
-def _fetch_smoothness(
-        rec_mf: Reconstruction,
-        recs_to_compare: Dict[str, Reconstruction],
-        rebuild_cache: bool = False,
-        cache_only: bool = False
-) -> List[np.ndarray]:
-    """
-    Generate or load the smoothness losses.
-    """
-    N = rec_mf.mf_parameters.n_points_total
-
-    # Generate or load smoothness losses
-    losses = []
-    for i in range(1 + len(recs_to_compare)):
-        if i == 0:
-            rec = rec_mf
-            logger.info(f'Calculating smoothness for MF reconstruction.')
-        else:
-            src = list(recs_to_compare.keys())[i - 1]
-            rec = recs_to_compare[src]
-            logger.info(f'Calculating smoothness for rec={rec.id}: {src}.')
-
-        l = _generate_or_load_smoothness(
-            rec_mf=rec_mf,
-            rec=rec,
-            N=N,
-            rebuild_cache=rebuild_cache,
-            cache_only=cache_only,
-        )
-        losses.append(l)
-
-    return losses
 
 
 def _rolling_stats(errors: List[np.ndarray], window_size: int) -> Tuple[np.ndarray, np.ndarray]:
@@ -802,482 +629,168 @@ def _rolling_stats(errors: List[np.ndarray], window_size: int) -> Tuple[np.ndarr
 
     return means, stds
 
-
-def plot_mf_comparisons(
-        args: Optional[Namespace] = None,
-        save_dir: Optional[Path] = None
-):
+def plot_pixel_losses_mf_pair():
     """
-    Plot the loss comparison between a MF reconstruction and any other available types.
-    """
-    if args is None:
-        args = get_args()
-    assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
-    rec_mf: Reconstruction = Reconstruction.objects.get(id=args.reconstruction)
-    assert rec_mf.source == M3D_SOURCE_MF, 'A MF reconstruction is required!'
-    trial: Trial = rec_mf.trial
-    start_frame = rec_mf.start_frame_valid
-    end_frame = rec_mf.end_frame_valid
-    frame_nums = np.arange(start_frame, end_frame + 1)
-    device = _init_devices(args)
-    recs_to_compare = _get_recs_to_compare(trial)
-
-    # Generate or load the errors
-    errors = _fetch_errors(
-        rec_mf=rec_mf,
-        recs_to_compare=recs_to_compare,
-        batch_size=args.batch_size,
-        device=device,
-        lr=args.lr,
-        max_train_steps=args.max_train_steps,
-        conv_tol=args.conv_tol,
-        conv_patience=args.conv_patience,
-        rebuild_cache=args.rebuild_cache,
-        cache_only=args.cache_only,
-    )
-
-    # Get moving averages
-    means, stds = _rolling_stats(errors, args.stats_window)
-
-    # Make plot
-    fig, axes = plt.subplots(1, figsize=(10, 7))
-    ax = axes
-    ax.set_title(f'Pixel Losses\nTrial {trial.id}. Smoothing window: {args.stats_window} frames.')
-    ax.set_ylabel('MSE')
-    if args.x_label == 'time':
-        ax.set_xlabel('Time (s)')
-    else:
-        ax.set_xlabel('Frame #')
-
-    for i in range(1 + len(recs_to_compare)):
-        if i == 0:
-            src = M3D_SOURCE_MF
-            x = frame_nums
-        else:
-            src = list(recs_to_compare.keys())[i - 1]
-            rec = recs_to_compare[src]
-            x = np.arange(
-                max(rec.start_frame, rec_mf.start_frame_valid),
-                min(rec.end_frame, rec_mf.end_frame_valid) + 1
-            )
-
-        if args.x_label == 'time':
-            x = x / trial.fps
-
-        ax.plot(x, means[i], label=src, color=colours[src])
-        ax.fill_between(x, means[i] - 2 * stds[i], means[i] + 2 * stds[i], color=colours[src],
-                        alpha=0.2, linewidth=0)
-
-    ax.set_xlim(left=start_frame, right=end_frame)
-    ax.set_yscale('log')
-    ax.legend()
-    ax.grid()
-    fig.tight_layout()
-
-    if save_plots:
-        fn = f'trial={trial.id:03d}' \
-             f'_mf={rec_mf.id}' \
-             f'_comp={",".join([str(rec.id) for rec in recs_to_compare.values()])}' \
-             f'_sw={args.stats_window}'
-        if args.max_train_steps > 0:
-            fn += f'_lr={args.lr:.2E}_mts={args.max_train_steps}_ctol={args.conv_tol:.3f}_cpat={args.conv_patience}'
-        if save_dir is None:
-            path = LOGS_PATH / f'{START_TIMESTAMP}_losses_{fn}.{img_extension}'
-        else:
-            path = save_dir / f'{fn}.{img_extension}'
-        logger.info(f'Saving plot to {path}.')
-        plt.savefig(path, transparent=True)
-    if show_plots:
-        plt.show()
-
-
-def plot_examples(
-        args: Optional[Namespace] = None,
-        save_dir: Optional[Path] = None,
-        save_singles: bool = False,
-        crop_size: int = -1,
-        invert: bool = False
-):
-    """
-    Plot some examples from the different reconstructions.
-    """
-    if args is None:
-        args = get_args()
-    assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
-    rec_mf: Reconstruction = Reconstruction.objects.get(id=args.reconstruction)
-    assert rec_mf.source == M3D_SOURCE_MF, 'A MF reconstruction is required!'
-    trial: Trial = rec_mf.trial
-    start_frame = rec_mf.start_frame_valid
-    end_frame = rec_mf.end_frame_valid
-    frame_nums = np.arange(start_frame, end_frame)
-    recs_to_compare = _get_recs_to_compare(trial)
-    n_recs = 1 + len(recs_to_compare)
-
-    if save_dir is None:
-        trial_dir = LOGS_PATH / f'{START_TIMESTAMP}_examples' \
-                                f'_trial={trial.id:03d}' \
-                                f'_mf={rec_mf.id}'
-        os.makedirs(trial_dir, exist_ok=True)
-    else:
-        trial_dir = save_dir
-
-    if args.plot_example_frames is None:
-        # Find the frame numbers in common
-        frame_nums_in_common = frame_nums
-        for src, rec in recs_to_compare.items():
-            frame_nums_rec = np.arange(rec.start_frame, rec.end_frame + 1)
-            frame_nums_in_common = np.intersect1d(frame_nums_in_common, frame_nums_rec)
-
-        # Select frames at random
-        frame_nums_to_plot = sorted(np.random.choice(frame_nums_in_common, args.plot_n_examples, replace=False))
-    else:
-        frame_nums_to_plot = sorted(np.array(args.plot_example_frames))
-
-    # Generate or load the 2D data
-    points_2d = _fetch_2d_data(
-        rec_mf=rec_mf,
-        recs_to_compare=recs_to_compare,
-        rebuild_cache=args.rebuild_cache,
-        cache_only=args.cache_only,
-    )
-
-    # Plot the comparisons for each frame
-    for frame_num in frame_nums_to_plot:
-        frame = trial.get_frame(frame_num)
-        fig, axes = plt.subplots(n_recs, figsize=(8, 3 * n_recs), gridspec_kw={
-            'left': 0.05,
-            'right': 0.95,
-            'bottom': 0.05,
-            'hspace': 0.1
-        })
-        fig.suptitle(f'Trial {trial.id}. Frame {frame_num}.')
-
-        for i in range(n_recs):
-            if i == 0:
-                src = M3D_SOURCE_MF
-                rec = rec_mf
-            else:
-                src = list(recs_to_compare.keys())[i - 1]
-                rec = recs_to_compare[src]
-
-            # Get the images with midline overlays
-            idx = frame_num - (rec.start_frame_valid if rec.start_frame_valid is not None else rec.start_frame)
-            if idx > len(points_2d[i]):
-                continue
-            imgs_i = _overlay_images(
-                images=frame.images,
-                points_2d=points_2d[i][idx],
-                midline_width=3,
-                invert=invert
-            )
-
-            # Save singles
-            if save_plots and save_singles:
-                for c, img in enumerate(imgs_i):
-                    img2 = Image.fromarray(img, 'RGBA')
-                    if -1 < crop_size < img2.size[0]:
-                        m = int(img2.size[0] - crop_size) / 2  # margin to remove
-                        img2 = img2.crop(box=(m, m, img2.size[0] - m, img2.size[1] - m))
-                    path = trial_dir / f'frame={frame_num:05d}_{src}_c{c}.png'
-                    img2.save(path)
-
-            # Plot
-            ax = axes[i]
-            ax.set_title(f'Source: {src} ({rec.id})')
-            ax.imshow(np.concatenate(imgs_i, axis=1), aspect='equal')
-            ax.axis('off')
-
-        fig.tight_layout()
-
-        if save_plots:
-            if save_dir is None:
-                path = trial_dir / f'frame={frame_num:05d}.{img_extension}'
-            else:
-                path = trial_dir / f'trial={trial.id:03d}' \
-                                   f'_mf={rec_mf.id}' \
-                                   f'_frame={frame_num:05d}.{img_extension}'
-            logger.info(f'Saving plot to {path}.')
-            plt.savefig(path, transparent=True)
-        if show_plots:
-            plt.show()
-        plt.close(fig)
-
-
-def plot_smoothness_comparisons(
-        args: Optional[Namespace] = None,
-        save_dir: Optional[Path] = None
-):
-    """
-    Plot the smoothness comparison between a MF reconstruction and any other available types.
-    """
-    if args is None:
-        args = get_args()
-    assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
-    rec_mf: Reconstruction = Reconstruction.objects.get(id=args.reconstruction)
-    assert rec_mf.source == M3D_SOURCE_MF, 'A MF reconstruction is required!'
-    trial: Trial = rec_mf.trial
-    start_frame = rec_mf.start_frame_valid
-    end_frame = rec_mf.end_frame_valid
-    frame_nums = np.arange(start_frame, end_frame + 1)
-    recs_to_compare = _get_recs_to_compare(trial)
-
-    # Generate or load the errors
-    losses = _fetch_smoothness(
-        rec_mf=rec_mf,
-        recs_to_compare=recs_to_compare,
-        rebuild_cache=args.rebuild_cache,
-        cache_only=args.cache_only,
-    )
-
-    # Get moving averages
-    means, stds = _rolling_stats(losses, args.stats_window)
-
-    # Make plot
-    fig, axes = plt.subplots(1, figsize=(10, 7))
-    ax = axes
-    ax.set_title(f'Smoothness\nTrial {trial.id}. Smoothing window: {args.stats_window} frames.')
-    ax.set_ylabel('Smoothness loss')
-    if args.x_label == 'time':
-        ax.set_xlabel('Time (s)')
-    else:
-        ax.set_xlabel('Frame #')
-
-    for i in range(1 + len(recs_to_compare)):
-        if i == 0:
-            src = M3D_SOURCE_MF
-            x = frame_nums
-        else:
-            src = list(recs_to_compare.keys())[i - 1]
-            rec = recs_to_compare[src]
-            x = np.arange(
-                max(rec.start_frame, rec_mf.start_frame_valid),
-                min(rec.end_frame, rec_mf.end_frame_valid) + 1
-            )
-
-        if args.x_label == 'time':
-            x = x / trial.fps
-
-        ax.plot(x, means[i], label=src, color=colours[src])
-        ax.fill_between(x, means[i] - 2 * stds[i], means[i] + 2 * stds[i], color=colours[src],
-                        alpha=0.2, linewidth=0)
-
-    ax.set_xlim(left=start_frame, right=end_frame)
-    ax.set_yscale('log')
-    ax.legend()
-    ax.grid()
-    fig.tight_layout()
-
-    if save_plots:
-        if save_dir is None:
-            path = LOGS_PATH / f'{START_TIMESTAMP}_smoothness' \
-                               f'_trial={trial.id:03d}' \
-                               f'_mf={rec_mf.id}' \
-                               f'_comp={",".join([str(rec.id) for rec in recs_to_compare.values()])}' \
-                               f'_sw={args.stats_window}' \
-                               f'.{img_extension}'
-        else:
-            path = save_dir / f'trial={trial.id:03d}' \
-                              f'_mf={rec_mf.id}' \
-                              f'_comp={",".join([str(rec.id) for rec in recs_to_compare.values()])}' \
-                              f'_smoothness' \
-                              f'.{img_extension}'
-        logger.info(f'Saving plot to {path}.')
-        plt.savefig(path, transparent=True)
-    if show_plots:
-        plt.show()
-
-
-def plot_losses_combined(
-        args: Optional[Namespace] = None,
-        save_dir: Optional[Path] = None
-):
-    """
-    Plot the pixel and smoothness losses across reconstructions.
-    """
-    if args is None:
-        args = get_args()
-    assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
-    rec_mf: Reconstruction = Reconstruction.objects.get(id=args.reconstruction)
-    assert rec_mf.source == M3D_SOURCE_MF, 'A MF reconstruction is required!'
-    device = _init_devices(args)
-    trial: Trial = rec_mf.trial
-    start_frame = rec_mf.start_frame_valid
-    end_frame = rec_mf.end_frame_valid
-    frame_nums = np.arange(start_frame, end_frame + 1)
-    recs_to_compare = _get_recs_to_compare(trial)
-    # _tex_mode()
-
-    # Generate or load the errors
-    l_pixel = _fetch_errors(
-        rec_mf=rec_mf,
-        recs_to_compare=recs_to_compare,
-        batch_size=args.batch_size,
-        device=device,
-        lr=args.lr,
-        max_train_steps=args.max_train_steps,
-        conv_tol=args.conv_tol,
-        conv_patience=args.conv_patience,
-        rebuild_cache=args.rebuild_cache,
-        cache_only=args.cache_only,
-    )
-    l_smooth = _fetch_smoothness(
-        rec_mf=rec_mf,
-        recs_to_compare=recs_to_compare,
-        rebuild_cache=args.rebuild_cache,
-        cache_only=args.cache_only,
-    )
-
-    # Get moving averages
-    lp_means, lp_stds = _rolling_stats(l_pixel, args.stats_window)
-    ls_means, ls_stds = _rolling_stats(l_smooth, args.stats_window)
-
-    # Make plots
-    plt.rc('axes', labelsize=6)  # fontsize of the X label
-    plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
-    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
-    plt.rc('legend', fontsize=6)  # fontsize of the legend
-    plt.rc('xtick.major', pad=2)
-    plt.rc('ytick.major', pad=2, size=2)
-
-    fig, axes = plt.subplots(2, figsize=(3.6, 2.4), sharex=True, gridspec_kw={
-        'left': 0.09,
-        'right': 0.97,
-        'top': 0.9,
-        'bottom': 0.12,
-        'hspace': 0.12,
-    })
-
-    def _make_plot(ax_: Axes, means: np.ndarray, stds: np.ndarray):
-        markers = []
-        for i in range(1 + len(recs_to_compare)):
-            if i == 0:
-                src = M3D_SOURCE_MF
-                lbl = src + ' (ours)'
-                rec = rec_mf
-                x = frame_nums
-            else:
-                src = list(recs_to_compare.keys())[i - 1]
-                lbl = src
-                rec = recs_to_compare[src]
-                x = np.arange(
-                    max(rec.start_frame, rec_mf.start_frame_valid),
-                    min(rec.end_frame, rec_mf.end_frame_valid) + 1
-                )
-            if args.x_label == 'time':
-                x = x / trial.fps
-
-            ax_.plot(x, means[i], label=lbl, color=colours[src], linewidth=0.5)
-            lb = np.clip(means[i] - 2 * stds[i], a_min=1e-4, a_max=np.inf)
-            ub = means[i] + 2 * stds[i]
-            ax_.fill_between(x, lb, ub, color=colours[src], alpha=0.3, linewidth=0)
-
-            for frame_num in args.plot_example_frames:
-                if frame_num < x[0] or frame_num > x[-1]:
-                    continue
-                markers.append((frame_num, means[i][frame_num - rec.start_frame]))
-        ax_.set_xlim(left=start_frame, right=end_frame)
-        ax_.set_xticks([0, 5000, 10000, 15000, 20000])
-        ax_.set_yscale('log')
-        ax_.grid()
-
-        # Add highlighted-frames markers
-        for frame_num in args.plot_example_frames:
-            ax_.vlines(x=frame_num, ymin=1e-4, ymax=1e2, linestyle='-', linewidth=1,
-                       alpha=0.6, color=colours['highlight'], zorder=3)
-        if len(markers) > 0:
-            markers = np.array(markers)
-            ax_.scatter(x=markers[:, 0], y=markers[:, 1], marker='o', s=50, alpha=0.6,
-                        facecolors='none', edgecolors=colours['highlight'], linewidth=1, zorder=4)
-
-    # Pixel losses
-    ax = axes[0]
-    _make_plot(ax, lp_means, lp_stds)
-    # ax.set_ylabel('$\mathcal{L}_\\text{pixel}$')
-    ax.set_ylabel('$\mathcal{L}_{px}$', labelpad=-1)
-    ax.set_ylim(bottom=1e-3, top=1e-2)
-    ax.set_yticks([1e-3, 1e-2])
-    ax.yaxis.set_minor_formatter(NullFormatter())
-    legend = ax.legend(loc='lower center', mode=None, ncol=3, bbox_to_anchor=(0.5, 1), bbox_transform=ax.transAxes)
-    for line in legend.get_lines():
-        line.set_linewidth(2)
-
-    # Smoothness losses
-    ax = axes[1]
-    _make_plot(ax, ls_means, ls_stds)
-    # ax.set_ylabel('$\mathcal{L}_\\text{smooth}$')
-    ax.set_ylabel('$\mathcal{L}_{sm}$', labelpad=-1)
-    ax.set_ylim(bottom=5, top=5e3)
-    if args.x_label == 'time':
-        ax.set_xlabel('Time (s)')
-    else:
-        ax.set_xlabel('Frame #')
-
-    if save_plots:
-        fn = f'trial={trial.id:03d}' \
-             f'_mf={rec_mf.id}' \
-             f'_comp={",".join([str(rec.id) for rec in recs_to_compare.values()])}' \
-             f'_sw={args.stats_window}'
-        if args.max_train_steps > 0:
-            fn += f'_lr={args.lr:.2E}_mts={args.max_train_steps}_ctol={args.conv_tol:.3f}_cpat={args.conv_patience}'
-        if save_dir is None:
-            path = LOGS_PATH / f'{START_TIMESTAMP}_losses_combined_{fn}.{img_extension}'
-        else:
-            path = save_dir / f'{fn}_losses_combined.{img_extension}'
-        logger.info(f'Saving plot to {path}.')
-        plt.savefig(path, transparent=True)
-    if show_plots:
-        plt.show()
-
-
-def plot_all_comparisons_in_dataset():
-    """
-    Generate comparison plots and examples for all reconstructions in a dataset.
+    Plot the pixel losses for TWO MF reconstructions on the same trial.
     """
     args = get_args()
-    assert args.dataset is not None, 'This script requires setting --dataset=id.'
-    ds = Dataset.objects.get(id=args.dataset)
-    assert type(ds) == DatasetMidline3D, 'Only DatasetMidline3D datasets work here!'
-    args.plot_example_frames = None
+    assert args.reconstruction is not None, 'Set --reconstruction=<id> for the first MF reconstruction.'
+    assert args.reconstruction_b is not None, 'Set --reconstruction-b=<id> for the second MF reconstruction.'
 
-    # Make save dir and save spec
-    save_dir = LOGS_PATH / f'{START_TIMESTAMP}_ds={ds.id}'
+    rec_a: Reconstruction = Reconstruction.objects.get(id=args.reconstruction)
+    rec_b: Reconstruction = Reconstruction.objects.get(id=args.reconstruction_b)
+
+    # sanity checks
+    assert rec_a.source == M3D_SOURCE_MF, 'First reconstruction must be MF.'
+    assert rec_b.source == M3D_SOURCE_MF, 'Second reconstruction must be MF.'
+    assert rec_a.trial.id == rec_b.trial.id, 'Both reconstructions must belong to the same trial.'
+
+    device = _init_devices(args)
+    trial: Trial = rec_a.trial
+
+    # Fetch raw pixel errors for each MF reconstruction independently
+    common_fetch = dict(
+        batch_size=args.batch_size,
+        device=device,
+        rebuild_cache=args.rebuild_cache,
+        cache_only=args.cache_only,
+    )
+
+    # MF A
+    lp_a_list = _fetch_errors(
+        rec_mf=rec_a,
+        recs_to_compare={},
+        lr=0,
+        max_train_steps=0,
+        conv_tol=0,
+        conv_patience=0,
+        **common_fetch,
+    )
+    lp_a = lp_a_list[0] 
+
+    # MF B
+    lp_b_list = _fetch_errors(
+        rec_mf=rec_b,
+        recs_to_compare={},
+        lr=0,
+        max_train_steps=0,
+        conv_tol=0,
+        conv_patience=0,
+        **common_fetch,
+    )
+    lp_b = lp_b_list[0]
+
+    (means, stds) = _rolling_stats([lp_a, lp_b], args.stats_window)
+    mean_a, mean_b = means[0], means[1]
+
+    if args.max_frames is not None:
+        fa = np.arange(rec_a.start_frame, min(rec_a.start_frame + args.max_frames, rec_a.end_frame + 1))
+        fb = np.arange(rec_b.start_frame, min(rec_b.start_frame + args.max_frames, rec_b.end_frame + 1))
+    else:
+        fa = np.arange(rec_a.start_frame, rec_a.end_frame + 1)
+        fb = np.arange(rec_b.start_frame, rec_b.end_frame + 1)
+
+    mean_a = mean_a[:len(fa)]
+    mean_b = mean_b[:len(fb)]
+    if args.x_label == 'time':
+        xa = fa / trial.fps
+        xb = fb / trial.fps
+        x_label = 'Time (s)'
+    else:
+        xa = fa
+        xb = fb
+        x_label = 'Frame #'
+
+    plt.figure(figsize=(12, 8))
+    
+    plt.gca().spines['top'].set_visible(True)
+    plt.gca().spines['right'].set_visible(True)
+    plt.gca().spines['bottom'].set_visible(True)
+    plt.gca().spines['left'].set_visible(True)
+    for spine in plt.gca().spines.values():
+        spine.set_linewidth(1.5)
+
+    col_a = colours[M3D_SOURCE_MF]
+    col_b = colours['highlight']
+
+    plt.plot(xa, mean_a, label="MF (With HT)", color=col_a, linewidth=3, alpha=0.9)
+    plt.plot(xb, mean_b, label="MF (Without HT)", color=col_b, linewidth=3, alpha=0.9)
+
+    plt.xlabel(x_label, fontsize=14)
+    plt.ylabel(r'Pixel Loss ($L_{px}$)', fontsize=14)
+    plt.title('Pixel Loss Comparison: MF Methods\n(With vs Without Head-Tail Constraints)', 
+              fontsize=16, pad=20)
+
+    plt.yscale('log')
+    plt.grid(True, alpha=0.3, linestyle='--')
+
+    plt.ylim(bottom=1e-4, top=1e-1)
+    plt.yticks([1e-4, 1e-3, 1e-2, 1e-1], fontsize=12)
+
+    if args.x_label == 'time':
+        xmin = min(xa[0], xb[0])
+        xmax = max(xa[-1], xb[-1])
+    else:
+        xmin = min(fa[0], fb[0])
+        xmax = max(fa[-1], fb[-1])
+    plt.xlim(left=xmin, right=xmax)
+
+    # X-ticks formatting
+    if args.x_label != 'time':
+        start = xmin
+        end = xmax
+        # choose a tick step that makes ~10 ticks
+        n_ticks = 10
+        step = max(1, int(np.ceil((end - start) / n_ticks)))
+        plt.xticks(np.arange(start, end + 1, step), fontsize=12)
+    else:
+        plt.xticks(fontsize=12)
+
+    plt.legend(fontsize=12, framealpha=0.9, loc='upper right')
+    
+    plt.tight_layout()
+
     if save_plots:
-        os.makedirs(save_dir, exist_ok=True)
-
-        spec = dict(
-            dataset=str(ds.id),
-            batch_size=args.batch_size,
-            x_label=args.x_label,
-            stats_window=args.stats_window,
+        fn = (
+            f'trial={trial.id:03d}'
+            f'_mfA={rec_a.id}'
+            f'_mfB={rec_b.id}'
+            f'_sw={args.stats_window}'
         )
-        with open(save_dir / 'spec.yml', 'w') as f:
-            yaml.dump(spec, f)
-
-    for i, rec in enumerate(ds.reconstructions):
-        logger.info(f'Reconstruction {i + 1}/{len(ds.reconstructions)}.')
-        args.reconstruction = rec.id
-        try:
-            plot_mf_comparisons(args, save_dir)
-            plot_examples(args, save_dir)
-            plot_smoothness_comparisons(args, save_dir)
-        except NothingToCompare as e:
-            logger.info(e)
-            continue
+        path = LOGS_PATH / f'{START_TIMESTAMP}_losses_mf_pair_{fn}.{img_extension}'
+        logger.info(f'Saving plot to {path}.')
+        plt.savefig(path, dpi=300, bbox_inches='tight', transparent=True)
+    if show_plots:
+        plt.show()
 
 
 def plot_pixel_losses_opt_comparison():
     """
     Plot the pixel losses with and without optimisations
+    Can also plot a second MF reconstruction if reconstruction_b is provided
     """
     args = get_args()
     assert args.reconstruction is not None, 'This script requires setting --reconstruction=id.'
-    assert args.max_train_steps > 0, '--max-train-steps must be > 0 to find a comparison.'
+    
+    if args.reconstruction_b is None:
+        assert args.max_train_steps > 0, '--max-train-steps must be > 0 to find a comparison when not using reconstruction_b.'
+    
     rec_mf: Reconstruction = Reconstruction.objects.get(id=args.reconstruction)
     assert rec_mf.source == M3D_SOURCE_MF, 'A MF reconstruction is required!'
+    
+    rec_mf_b = None
+    if args.reconstruction_b is not None:
+        rec_mf_b = Reconstruction.objects.get(id=args.reconstruction_b)
+        assert rec_mf_b.source == M3D_SOURCE_MF, 'Second reconstruction must be MF.'
+        assert rec_mf.trial.id == rec_mf_b.trial.id, 'Both reconstructions must belong to the same trial.'
+    
     device = _init_devices(args)
     trial: Trial = rec_mf.trial
-    start_frame = rec_mf.start_frame_valid
-    end_frame = rec_mf.end_frame_valid
+    start_frame = rec_mf.start_frame
+    if args.max_frames is not None:
+        end_frame = min(rec_mf.start_frame + args.max_frames, rec_mf.end_frame)
+    else:
+        end_frame = rec_mf.end_frame
     frame_nums = np.arange(start_frame, end_frame + 1)
     recs_to_compare = _get_recs_to_compare(trial)
 
@@ -1291,94 +804,125 @@ def plot_pixel_losses_opt_comparison():
         cache_only=args.cache_only,
     )
     lp_raw = _fetch_errors(
-        **common_args,
+         **common_args,
         lr=0,
         max_train_steps=0,
         conv_tol=0,
         conv_patience=0,
     )
-    lp_opt = _fetch_errors(
-        **common_args,
-        lr=args.lr,
-        max_train_steps=args.max_train_steps,
-        conv_tol=args.conv_tol,
-        conv_patience=args.conv_patience,
-    )
+    
+    lp_raw_b = None
+    if rec_mf_b is not None:
+        common_args_b = dict(
+            rec_mf=rec_mf_b,
+            recs_to_compare={},
+            batch_size=args.batch_size,
+            device=device,
+            rebuild_cache=args.rebuild_cache,
+            cache_only=args.cache_only,
+        )
+        lp_raw_b = _fetch_errors(
+            **common_args_b,
+            lr=0,
+            max_train_steps=0,
+            conv_tol=0,
+            conv_patience=0,
+        )
+    
+    # lp_opt = _fetch_errors(
+    #     **common_args,
+    #     lr=args.lr,
+    #     max_train_steps=args.max_train_steps,
+    #     conv_tol=args.conv_tol,
+    #     conv_patience=args.conv_patience,
+    # )
 
-    # Get moving averages
     lpr_means, lpr_stds = _rolling_stats(lp_raw, args.stats_window)
-    lpo_means, lpo_stds = _rolling_stats(lp_opt, args.stats_window)
+    
+    lpr_means_b = None
+    if lp_raw_b is not None:
+        lpr_means_b, lpr_stds_b = _rolling_stats(lp_raw_b, args.stats_window)
 
-    # Make plots
-    plt.rc('axes', labelsize=6)  # fontsize of the X label
-    plt.rc('xtick', labelsize=5)  # fontsize of the x tick labels
-    plt.rc('ytick', labelsize=5)  # fontsize of the y tick labels
-    plt.rc('legend', fontsize=6)  # fontsize of the legend
-    plt.rc('xtick.major', pad=2)
-    plt.rc('ytick.major', pad=2, size=2)
+    plt.figure(figsize=(12, 8))
+    
+    plt.gca().spines['top'].set_visible(True)
+    plt.gca().spines['right'].set_visible(True)
+    plt.gca().spines['bottom'].set_visible(True)
+    plt.gca().spines['left'].set_visible(True)
+    for spine in plt.gca().spines.values():
+        spine.set_linewidth(1.5)
 
-    fig, ax = plt.subplots(1, figsize=(3.12, 1.8), sharex=True, gridspec_kw={
-        'left': 0.11,
-        'right': 0.97,
-        'top': 0.8,
-        'bottom': 0.16,
-    })
-
-    def _make_plot(
-            ax_: Axes,
-            means_raw: np.ndarray,
-            means_opt: np.ndarray,
-    ):
+    def _make_plot(means_raw: np.ndarray, means_opt: np.ndarray):
+        # Plot primary MF reconstruction and comparison sources
         for i in range(1 + len(recs_to_compare)):
             if i == 0:
                 src = M3D_SOURCE_MF
-                lbl = src + ' (ours)'
+                lbl = src
                 x = frame_nums
+                data_raw = means_raw[i][:len(frame_nums)]
             else:
                 src = list(recs_to_compare.keys())[i - 1]
                 lbl = src
                 rec = recs_to_compare[src]
                 x = np.arange(
-                    max(rec.start_frame, rec_mf.start_frame_valid),
-                    min(rec.end_frame, rec_mf.end_frame_valid) + 1
+                    max(rec.start_frame, start_frame),
+                    min(rec.end_frame, end_frame) + 1
                 )
+                data_raw = means_raw[i][:len(x)]
             if args.x_label == 'time':
                 x = x / trial.fps
 
-            if i == 0:
-                ax_.plot(x, means_raw[i], label=lbl, color=colours[src], linewidth=0.5)
+            plt.plot(x, data_raw, label=lbl, color=colours[src], linewidth=3, alpha=0.9)
+        
+        if rec_mf_b is not None and lpr_means_b is not None:
+            start_frame_b = rec_mf_b.start_frame
+            if args.max_frames is not None:
+                end_frame_b = min(rec_mf_b.start_frame + args.max_frames, rec_mf_b.end_frame)
             else:
-                ax_.plot(x, means_raw[i], label=lbl, color=colours[src], linewidth=0.5)
-                ax_.plot(x, means_opt[i], label=lbl + ' opt', color=colours_opt[src], linewidth=0.6, linestyle='--')
-        ax_.set_xlim(left=start_frame, right=end_frame)
-        ax_.set_xticks([0, 5000, 10000, 15000, 20000])
-        ax_.set_yscale('log')
-        ax_.grid()
+                end_frame_b = rec_mf_b.end_frame
+            frame_nums_b = np.arange(start_frame_b, end_frame_b + 1)
+            x_b = frame_nums_b
+            if args.x_label == 'time':
+                x_b = x_b / trial.fps
+            
+            data_raw_b = lpr_means_b[0][:len(frame_nums_b)]
+            plt.plot(x_b, data_raw_b, label='MFHT', color=colours['highlight'], linewidth=3, alpha=0.9)
 
-    # Pixel losses
-    _make_plot(ax, lpr_means, lpo_means)
-    ax.set_ylabel('$\mathcal{L}_{px}$', labelpad=-1)
-    ax.set_ylim(bottom=1e-3, top=1e-2)
-    ax.set_yticks([1e-3, 1e-2])
-    ax.yaxis.set_minor_formatter(NullFormatter())
-    legend = ax.legend(loc='lower center', mode=None, ncol=3, bbox_to_anchor=(0.5, 1), bbox_transform=ax.transAxes)
-    for line in legend.get_lines():
-        line.set_linewidth(2)
+    _make_plot(lpr_means, lpr_means)
+    
     if args.x_label == 'time':
-        ax.set_xlabel('Time (s)')
+        x_label = 'Time (s)'
     else:
-        ax.set_xlabel('Frame #')
+        x_label = 'Frame Number'
+    
+    plt.xlabel(x_label, fontsize=14)
+    plt.ylabel(r'Pixel Loss ($\mathcal{L}_{px}$)', fontsize=14)
+    plt.title('Pixel Loss Comparison: MFHT vs State of the Art Methods', 
+              fontsize=16, pad=20)
+    
+    plt.xlim(left=start_frame, right=end_frame)
+    plt.xticks(np.linspace(start_frame, end_frame, min(8, end_frame - start_frame + 1), dtype=int), fontsize=12)
+    plt.yscale('log')
+    plt.grid(True, alpha=0.3, linestyle='--')
+    plt.ylim(bottom=1e-3, top=1e-1)
+    plt.yticks([1e-3, 1e-2, 1e-1], fontsize=12)
+    
+    plt.legend(fontsize=12, framealpha=0.9, loc='upper right')
+    
+    plt.tight_layout()
 
     if save_plots:
         fn = f'trial={trial.id:03d}' \
-             f'_mf={rec_mf.id}' \
-             f'_comp={",".join([str(rec.id) for rec in recs_to_compare.values()])}' \
+             f'_mf={rec_mf.id}'
+        if rec_mf_b is not None:
+            fn += f'_mfB={rec_mf_b.id}'
+        fn += f'_comp={",".join([str(rec.id) for rec in recs_to_compare.values()])}' \
              f'_sw={args.stats_window}'
         if args.max_train_steps > 0:
             fn += f'_lr={args.lr:.2E}_mts={args.max_train_steps}_ctol={args.conv_tol:.3f}_cpat={args.conv_patience}'
         path = LOGS_PATH / f'{START_TIMESTAMP}_losses_opt_comparison_{fn}.{img_extension}'
         logger.info(f'Saving plot to {path}.')
-        plt.savefig(path, transparent=True)
+        plt.savefig(path, dpi=300, bbox_inches='tight', transparent=True)
     if show_plots:
         plt.show()
 
@@ -1386,11 +930,6 @@ def plot_pixel_losses_opt_comparison():
 if __name__ == '__main__':
     if save_plots:
         os.makedirs(LOGS_PATH, exist_ok=True)
-    # from simple_worm.plot3d import interactive
-    # interactive()
-    # plot_mf_comparisons()
-    # plot_examples(save_singles=False, crop_size=150, invert=True)
-    # plot_smoothness_comparisons()
-    # plot_losses_combined()
-    # plot_all_comparisons_in_dataset()
+
     plot_pixel_losses_opt_comparison()
+    # plot_pixel_losses_mf_pair()

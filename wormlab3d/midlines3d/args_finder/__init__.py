@@ -1,3 +1,4 @@
 from wormlab3d.midlines3d.args_finder.parameter_args import ParameterArgs
 from wormlab3d.midlines3d.args_finder.runtime_args import RuntimeArgs
 from wormlab3d.midlines3d.args_finder.source_args import SourceArgs
+from wormlab3d.midlines3d.args_finder.head_and_tail_optimization_args import HeadAndTailOptimizationArgs
